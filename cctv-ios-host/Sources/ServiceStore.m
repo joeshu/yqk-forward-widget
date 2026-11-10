@@ -68,13 +68,15 @@ static NSString *ServiceCodeWithoutComments(NSString *source){
                 if(range.location!=NSNotFound)relative=[stored substringFromIndex:NSMaxRange(range)];
             }
         }
-        if(ServiceRelativePath(relative)){resolved[relativeKey]=relative;resolved[key]=[base stringByAppendingPathComponent:relative];}
+        if(relative.length&&ServiceRelativePath(relative)){resolved[relativeKey]=relative;resolved[key]=[base stringByAppendingPathComponent:relative];}
     }
     return resolved;
 }
 + (NSArray<NSDictionary *> *)services {
-    NSMutableArray *rows =
-        [[NSUserDefaults.standardUserDefaults arrayForKey:@"pythonServices"] ?: @[] mutableCopy];
+    @synchronized(self){
+    NSArray *stored=[NSUserDefaults.standardUserDefaults arrayForKey:@"pythonServices"]?:@[];
+    NSMutableArray *rows=[NSMutableArray array];
+    for(id row in stored)if([row isKindOfClass:NSDictionary.class]&&ServiceRelativePath(row[@"id"])&&[row[@"id"] pathComponents].count==1)[rows addObject:row];
     BOOL pathsChanged=NO;
     NSMutableSet *usedPorts=[NSMutableSet setWithObjects:@8767,@18770,nil];
     for(NSInteger index=(NSInteger)rows.count-1;index>=0;index--){
@@ -128,6 +130,8 @@ static NSString *ServiceCodeWithoutComments(NSString *source){
     for(NSDictionary *s in rows)if([s[@"id"] isEqual:@"builtin-yangshipin-js"])jsFound=YES;
     if(!jsFound)[rows insertObject:@{@"id":@"builtin-yangshipin-js",@"name":@"央视频 JS",@"port":@18770,@"builtin":@YES,@"engine":@"javascript",@"arguments":@"",@"lan":@NO} atIndex:MIN((NSUInteger)1,rows.count)];
     return rows;
+
+    }
 }
 + (NSString *)scriptPath:(NSDictionary *)service {
     if([self isMediaService:service])return [NSBundle.mainBundle pathForResource:@"media-service" ofType:@"py"];
@@ -426,6 +430,8 @@ static NSString *ServiceCodeWithoutComments(NSString *source){
     return nil;
 }
 + (void)save:(NSDictionary *)service {
+    @synchronized(self){
+    if(![service isKindOfClass:NSDictionary.class]||!ServiceRelativePath(service[@"id"])||[service[@"id"] pathComponents].count!=1)return;
     NSMutableDictionary *mutableService=[[self resolvedService:service] mutableCopy];
     NSMutableArray *rows = [[self services] mutableCopy];
     NSIndexSet *matches =
@@ -444,16 +450,22 @@ static NSString *ServiceCodeWithoutComments(NSString *source){
     }
     [rows addObject:mutableService.copy];
     [NSUserDefaults.standardUserDefaults setObject:rows forKey:@"pythonServices"];
+
+    }
 }
 + (NSDictionary *)healthSnapshotForServiceIdentifier:(NSString *)identifier {
     if(!identifier.length)return @{};for(NSDictionary *service in [self services])if([service[@"id"] isEqual:identifier]){NSDictionary *snapshot=service[@"healthSnapshot"];return [snapshot isKindOfClass:NSDictionary.class]?snapshot:@{};}return @{};
 }
 + (void)recordHealthSnapshot:(NSDictionary *)snapshot forServiceIdentifier:(NSString *)identifier {
+    @synchronized(self){
     if(!identifier.length||![snapshot isKindOfClass:NSDictionary.class])return;NSMutableArray *rows=[[self services] mutableCopy];BOOL found=NO;
     for(NSUInteger i=0;i<rows.count;i++){NSDictionary *service=rows[i];if(![service[@"id"] isEqual:identifier])continue;NSMutableDictionary *updated=[service mutableCopy];NSMutableDictionary *clean=[NSMutableDictionary dictionary];for(NSString *key in @[@"status",@"result",@"httpStatus",@"channelCount",@"checkedAt",@"path"]){id value=snapshot[key];if(([value isKindOfClass:NSString.class]&&[value length]<=1024)||[value isKindOfClass:NSNumber.class])clean[key]=value;}updated[@"healthSnapshot"]=clean;rows[i]=updated;found=YES;break;}
     if(found)[NSUserDefaults.standardUserDefaults setObject:rows forKey:@"pythonServices"];
+
+    }
 }
 + (NSDictionary *)replaceImportedService:(NSDictionary *)existing withService:(NSDictionary *)incoming error:(NSError **)error {
+    @synchronized(self){
     NSString *identifier=existing[@"id"],*incomingID=incoming[@"id"];
     if(!ServiceRelativePath(identifier)||identifier.pathComponents.count!=1||!ServiceRelativePath(incomingID)||incomingID.pathComponents.count!=1||[identifier isEqual:incomingID]||[existing[@"builtin"] boolValue]||![incoming[@"manifest"] isKindOfClass:NSDictionary.class]){
         if(error)*error=[NSError errorWithDomain:@"CCTVHostImport" code:2 userInfo:@{NSLocalizedDescriptionKey:@"资源更新目标无效"}];return nil;}
@@ -480,8 +492,11 @@ static NSString *ServiceCodeWithoutComments(NSString *source){
     updated[@"archivePath"]=@"";[updated removeObjectForKey:@"archiveRelativePath"];
     if([archive hasPrefix:[source stringByAppendingString:@"/"]]){updated[@"archiveRelativePath"]=[relative stringByAppendingPathComponent:[archive substringFromIndex:source.length+1]];updated[@"archivePath"]=[base stringByAppendingPathComponent:updated[@"archiveRelativePath"]];}
     updated[@"status"]=@"已更新 · 待重新启动验证";[self save:updated];return [self resolvedService:updated];
+
+    }
 }
 + (NSDictionary *)rollbackImportedService:(NSDictionary *)service error:(NSError **)error {
+    @synchronized(self){
     NSDictionary *previous=service[@"previousImport"];
     if(![previous isKindOfClass:NSDictionary.class]||![previous[@"id"] isEqual:service[@"id"]]||![NSFileManager.defaultManager fileExistsAtPath:[self codePath:previous]]){if(error)*error=[NSError errorWithDomain:@"CCTVHostImport" code:4 userInfo:@{NSLocalizedDescriptionKey:@"没有可恢复的旧版代码，当前版本已保留"}];return nil;}
     NSMutableDictionary *restored=[[self resolvedService:previous] mutableCopy],*current=[service mutableCopy];[current removeObjectForKey:@"previousImport"];
@@ -493,8 +508,11 @@ static NSString *ServiceCodeWithoutComments(NSString *source){
     if([service[@"epgPath"] isKindOfClass:NSString.class]&&[service[@"epgPath"] length]&&![service[@"epgPathSource"] isEqual:@"inferred"]&&![service[@"epgPathSource"] isEqual:@"detected"]){restored[@"epgPath"]=service[@"epgPath"];restored[@"epgPathSource"]=service[@"epgPathSource"]?:@"manual";}
     if(service[@"manifest"][@"options"]){NSMutableDictionary *manifest=[restored[@"manifest"] mutableCopy];manifest[@"options"]=service[@"manifest"][@"options"];restored[@"manifest"]=manifest;}
     restored[@"previousImport"]=current;restored[@"status"]=@"已切回上一版 · 待启动验证";[self save:restored];return restored;
+
+    }
 }
 + (void)remove:(NSString *)identifier {
+    @synchronized(self){
     // identifier 直接拼路径删文件/目录：非单组件标识（如含 ../）会越界删除，
     // 先用 ServiceRelativePath + 单组件校验拦截。
     if(!ServiceRelativePath(identifier)||identifier.pathComponents.count!=1)return;
@@ -512,6 +530,8 @@ static NSString *ServiceCodeWithoutComments(NSString *source){
                    error:NULL];
     [NSFileManager.defaultManager removeItemAtPath:[[self directory] stringByAppendingPathComponent:identifier] error:NULL];
     [NSUserDefaults.standardUserDefaults removeObjectForKey:[@"CCTVJSStorage:" stringByAppendingString:identifier]];
+
+    }
 }
 + (NSString *)dataDirectoryForService:(NSDictionary *)service error:(NSError **)error {
     NSString *identifier=service[@"id"];

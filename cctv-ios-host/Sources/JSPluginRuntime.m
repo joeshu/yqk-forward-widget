@@ -151,13 +151,7 @@ static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
     }
     [self fetchFinished:key error:error.localizedDescription];
 }
-- (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didReceiveChallenge:(NSURLAuthenticationChallenge *)challenge completionHandler:(void (^)(NSURLSessionAuthChallengeDisposition, NSURLCredential *))completionHandler {
-    if(self.genericMode && [challenge.protectionSpace.authenticationMethod isEqualToString:NSURLAuthenticationMethodServerTrust] && challenge.protectionSpace.serverTrust){
-        completionHandler(NSURLSessionAuthChallengeUseCredential, [NSURLCredential credentialForTrust:challenge.protectionSpace.serverTrust]);
-        return;
-    }
-    completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, nil);
-}
+
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLRequest *)request completionHandler:(void (^)(NSURLRequest *))completion {
     BOOL allowed=[self allowedURL:request.URL] && task.countOfBytesReceived<JSMaxBody;
     NSMutableURLRequest *redirect=[request mutableCopy];

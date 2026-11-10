@@ -145,6 +145,8 @@ static id MediaMetadataPersistentSafeValue(id value, NSString *key, NSUInteger d
         @"api":[source[@"api"] isKindOfClass:NSString.class]?source[@"api"]:@"",
         @"header":source[@"header"]?:@{},@"playUrl":[source[@"playUrl"] isKindOfClass:NSString.class]?source[@"playUrl"]:@"",
         @"options":source[@"options"]?:@"",@"tvboxType":source[@"tvboxType"]?:@0,
+        @"jar":[source[@"jar"] isKindOfClass:NSDictionary.class]?source[@"jar"]:@{},
+        @"subscriptionURL":[source[@"subscriptionURL"] isKindOfClass:NSString.class]?source[@"subscriptionURL"]:@"",
         @"operation":operation?:@"", @"arguments":arguments?:@{} };
     NSData *data=[NSJSONSerialization dataWithJSONObject:identity options:NSJSONWritingSortedKeys error:NULL];
     if(!data.length)return nil;

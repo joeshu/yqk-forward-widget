@@ -13,6 +13,7 @@ Implements:
 import base64
 import io
 import json
+import hashlib
 import os
 import re
 import struct

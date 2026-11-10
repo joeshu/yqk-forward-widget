@@ -348,16 +348,7 @@ static NSUInteger const ImageQueueLimit = 160;
     if(record.data.length+data.length>[self maximumBodyLengthForRequest:record]){record.failureStage=@"response_too_large";[self.failures setObject:[NSDate dateWithTimeIntervalSinceNow:HostImageFailureBackoff(record.httpStatus)] forKey:record.cacheKey];[task cancel];return;}
     [record.data appendData:data];
 }
-- (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didReceiveChallenge:(NSURLAuthenticationChallenge *)challenge completionHandler:(void (^)(NSURLSessionAuthChallengeDisposition, NSURLCredential * _Nullable))completionHandler {
-    if([challenge.protectionSpace.authenticationMethod isEqualToString:NSURLAuthenticationMethodServerTrust]&&challenge.protectionSpace.serverTrust){
-        NSString *h=challenge.protectionSpace.host.lowercaseString?:@"";
-        if(h.length&&![h isEqualToString:@"127.0.0.1"]&&![h isEqualToString:@"localhost"]&&![h hasSuffix:@".test"]&&![h hasSuffix:@".example"]){
-            completionHandler(NSURLSessionAuthChallengeUseCredential,[NSURLCredential credentialForTrust:challenge.protectionSpace.serverTrust]);
-            return;
-        }
-    }
-    completionHandler(NSURLSessionAuthChallengePerformDefaultHandling,nil);
-}
+
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error { [self finish:task error:error]; }
 - (void)cancelPending {
     NSAssert(NSThread.isMainThread, @"Cancel on main thread");self.generation++;

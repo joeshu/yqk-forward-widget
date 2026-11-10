@@ -61,6 +61,7 @@ static NSString *MediaPlaybackDecodeResultFormat(NSDictionary *result) {
 
 BOOL MediaPlaybackResultSupportsCicadaPlayer(NSDictionary *result) {
     if (![result isKindOfClass:NSDictionary.class]) return NO;
+    if ([result[@"dashRemuxed"] boolValue]) return NO;
     if ([result[@"cicadaPlayable"] respondsToSelector:@selector(boolValue)] && [result[@"cicadaPlayable"] boolValue]) return YES;
     NSString *format = MediaPlaybackDecodeResultFormat(result);
     NSString *mime = MediaPlaybackDecodeResultMIME(result);
@@ -127,4 +128,17 @@ MediaPlaybackDecodeRoute MediaPlaybackDecodeRouteNextForResult(NSDictionary *res
         if ((attemptedRoutes & bit) == 0) return route;
     }
     return MediaPlaybackDecodeRouteNone;
+}
+
+BOOL MediaPlaybackCicadaErrorAllowsSoftwareRetry(NSError *error) {
+    // The SDK code families are defined in CicadaErrorCode.h. Only the
+    // 0x2004xxxx codec family can benefit from rebuilding the decoder.
+    // 0x2003xxxx demux and 0x2005xxxx network errors must advance the route.
+    if (!error || error.code < 0) return NO;
+    if (((NSUInteger)error.code & 0xFFFF0000) == 0x20040000) return YES;
+    if (((NSUInteger)error.code & 0xFFFF0000) == 0x20030000 ||
+        ((NSUInteger)error.code & 0xFFFF0000) == 0x20050000) return NO;
+    NSString *message = error.localizedDescription.lowercaseString ?: @"";
+    return [message containsString:@"decoder"] || [message containsString:@"avcodec"] ||
+        [message containsString:@"hardware decode"] || [message containsString:@"解码器"];
 }

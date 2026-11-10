@@ -15,8 +15,7 @@
 //   不可解：AVI、WMV/ASF、RM/RMVB（无 demuxer）；VP8 / VP9 / AV1 / H.263
 //         （无解码器）。WebM 容器可解，但常见 VP8/VP9/Opus 内容实际不可播。
 //   控制：播放/暂停、seek（seekToTime:seekMode:）、倍速（setRate:）、
-//         时长/进度（duration / currentPosition）、首帧（onFirstFrameShow +
-//         位置轮询兜底）、错误（onError:errorModel:）、完成（onCompletion +
+//         时长/进度（duration / currentPosition）、首帧（onPlayerEvent / onVideoRendered / onFirstFrameShow）、错误（onError:errorModel:）、完成（onCompletion +
 //         位置轮询兜底）。
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
@@ -66,6 +65,8 @@ typedef NS_ENUM(NSInteger, MediaPlaybackCicadaAdapterState) {
 @property (nonatomic, readonly) MediaPlaybackCicadaAdapterState state;
 @property (nonatomic, readonly) NSTimeInterval currentPosition;
 @property (nonatomic, readonly) NSTimeInterval duration;
+@property (nonatomic, readonly) NSTimeInterval bufferedPosition;
+@property (nonatomic, readonly) BOOL loading;
 @property (nonatomic, readonly) BOOL hasVideoTrack;
 // 当前倍速（最近一次 setRate: 的值，未调用时为 1.0；供进度采样校验用）。
 @property (nonatomic, readonly) float rate;

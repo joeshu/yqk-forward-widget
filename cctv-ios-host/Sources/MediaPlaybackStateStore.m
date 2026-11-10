@@ -56,6 +56,7 @@ static NSDictionary *MediaPlaybackComponents(NSDictionary *context, NSInteger li
 
 @implementation MediaPlaybackStateStore
 + (NSArray<NSDictionary *> *)watchHistory {
+    @synchronized(self){
     id rows = [NSUserDefaults.standardUserDefaults objectForKey:MediaWatchHistoryDefaultsKey];
     if (![rows isKindOfClass:NSArray.class]) return @[];
     NSMutableArray *valid = [NSMutableArray array];BOOL migrated=NO;
@@ -77,6 +78,8 @@ static NSDictionary *MediaPlaybackComponents(NSDictionary *context, NSInteger li
         NSDate *right = [b[@"updatedAt"] isKindOfClass:NSDate.class] ? b[@"updatedAt"] : NSDate.distantPast;
         return [right compare:left];
     }];
+
+    }
 }
 + (NSDictionary *)historyEntryForContext:(NSDictionary *)context lineIndex:(NSInteger)lineIndex episodeIndex:(NSInteger)episodeIndex {
     NSString *key = MediaPlaybackComponents(context ?: @{}, lineIndex, episodeIndex)[@"key"];
@@ -90,6 +93,7 @@ static NSDictionary *MediaPlaybackComponents(NSDictionary *context, NSInteger li
     return nil;
 }
 + (void)recordContext:(NSDictionary *)context lineIndex:(NSInteger)lineIndex episodeIndex:(NSInteger)episodeIndex position:(NSTimeInterval)position duration:(NSTimeInterval)duration completed:(BOOL)completed {
+    @synchronized(self){
     NSDictionary *parts = MediaPlaybackComponents(context ?: @{}, lineIndex, episodeIndex);
     if (![parts[@"sourceID"] length] || ![parts[@"itemID"] length] || ![parts[@"key"] length]) return;
     if (!isfinite(position) || position < 0) return;
@@ -106,15 +110,23 @@ static NSDictionary *MediaPlaybackComponents(NSDictionary *context, NSInteger li
     [rows insertObject:entry atIndex:0];
     if (rows.count > MediaWatchHistoryLimit) [rows removeObjectsInRange:NSMakeRange(MediaWatchHistoryLimit, rows.count - MediaWatchHistoryLimit)];
     [NSUserDefaults.standardUserDefaults setObject:rows forKey:MediaWatchHistoryDefaultsKey];
+
+    }
 }
 + (void)removeHistoryEntryWithKey:(NSString *)key {
+    @synchronized(self){
     if (!key.length) return;
     NSMutableArray *rows = [self.watchHistory mutableCopy];
     NSIndexSet *matches = [rows indexesOfObjectsPassingTest:^BOOL(NSDictionary *entry, NSUInteger index, BOOL *stop) { return [entry[@"key"] isEqual:key]; }];
     [rows removeObjectsAtIndexes:matches];
     [NSUserDefaults.standardUserDefaults setObject:rows forKey:MediaWatchHistoryDefaultsKey];
+
+    }
 }
-+ (void)clearWatchHistory { [NSUserDefaults.standardUserDefaults removeObjectForKey:MediaWatchHistoryDefaultsKey]; }
++ (void)clearWatchHistory {
+    @synchronized(self){ [NSUserDefaults.standardUserDefaults removeObjectForKey:MediaWatchHistoryDefaultsKey];
+    }
+}
 + (NSDictionary *)skipPointsForContext:(NSDictionary *)context {
     NSDictionary *parts = MediaPlaybackComponents(context ?: @{}, 0, 0);
     return [NSUserDefaults.standardUserDefaults dictionaryForKey:MediaSkipPointsDefaultsKey][parts[@"seriesKey"]] ?: @{};
@@ -122,6 +134,7 @@ static NSDictionary *MediaPlaybackComponents(NSDictionary *context, NSInteger li
 + (NSTimeInterval)introEndForContext:(NSDictionary *)context { id value=[self skipPointsForContext:context][@"introEnd"];return [value respondsToSelector:@selector(doubleValue)]?[value doubleValue]:0; }
 + (NSTimeInterval)outroSkipForContext:(NSDictionary *)context { id value=[self skipPointsForContext:context][@"outroSkip"];return [value respondsToSelector:@selector(doubleValue)]?[value doubleValue]:0; }
 + (void)setSkipValue:(NSTimeInterval)value key:(NSString *)key context:(NSDictionary *)context {
+    @synchronized(self){
     NSDictionary *parts = MediaPlaybackComponents(context ?: @{}, 0, 0);
     NSString *seriesKey = parts[@"seriesKey"];
     if (![parts[@"sourceID"] length] || ![parts[@"itemID"] length] || !seriesKey.length) return;
@@ -130,13 +143,18 @@ static NSDictionary *MediaPlaybackComponents(NSDictionary *context, NSInteger li
     if (value > 0) entry[key] = @(MIN(value, 3600.0)); else [entry removeObjectForKey:key];
     if (entry.count) all[seriesKey] = entry; else [all removeObjectForKey:seriesKey];
     [NSUserDefaults.standardUserDefaults setObject:all forKey:MediaSkipPointsDefaultsKey];
+
+    }
 }
 + (void)setIntroEnd:(NSTimeInterval)seconds forContext:(NSDictionary *)context { [self setSkipValue:seconds key:@"introEnd" context:context]; }
 + (void)setOutroSkip:(NSTimeInterval)seconds forContext:(NSDictionary *)context { [self setSkipValue:seconds key:@"outroSkip" context:context]; }
 + (void)clearSkipPointsForContext:(NSDictionary *)context {
+    @synchronized(self){
     NSDictionary *parts = MediaPlaybackComponents(context ?: @{}, 0, 0);
     NSMutableDictionary *all = [[NSUserDefaults.standardUserDefaults dictionaryForKey:MediaSkipPointsDefaultsKey] mutableCopy] ?: [NSMutableDictionary dictionary];
     [all removeObjectForKey:parts[@"seriesKey"]];
     [NSUserDefaults.standardUserDefaults setObject:all forKey:MediaSkipPointsDefaultsKey];
+
+    }
 }
 @end

@@ -22,8 +22,8 @@
 //      其余 6 个（onPrepared:、onFirstFrameShow:、onCompletion:、
 //      onLoadingStart:、onLoadingEnd:、onSeekEnd:）只在 C++ 层
 //      （CicadaOCHelper）中确认，ObjC selector 拼写未在二进制中直接确认，
-//      故实现为 best-effort，并用位置轮询兜底：位置推进即视为首帧已出，
-//      位置到达时长末尾即视为播放完成。回调缺失时绝不静默黑屏。
+//      故实现为 best-effort。首帧只接受真实渲染事件；位置轮询仅补充
+//      进度与到达末尾的完成判定，避免音频进度被误认成视频画面。
 //      onCurrentDownLoadSpeed:progress: 按 CicadaSDK.h 的声明实现
 //      （float speed，单位 bit/s），二进制中未直接确认，属 best-effort；
 //      onVideoSizeChanged 的宽高/旋转按头文件声明的 int 读取。
@@ -39,6 +39,7 @@
 //   6) CNPlayer 的 startPlayerSDK 已在 App 启动时调用（RootViewController
 //      1617 行附近），Cicada 内核随之初始化；本适配器不再重复初始化。
 #import "MediaPlaybackCicadaAdapter.h"
+#import "MediaPlaybackBufferPolicy.h"
 #import <AVFoundation/AVFoundation.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
@@ -47,7 +48,6 @@ NSString * const MediaPlaybackCicadaAdapterErrorDomain = @"MediaPlaybackCicadaAd
 
 static const NSTimeInterval MediaPlaybackCicadaFirstFrameTimeout = 20.0;
 static const NSTimeInterval MediaPlaybackCicadaPositionPollInterval = 0.4;
-static const NSTimeInterval MediaPlaybackCicadaPreparedFallbackDelay = 0.25;
 static const NSTimeInterval MediaPlaybackCicadaSeekCallbackTimeout = 3.0;
 
 // ---------- 运行时调用小工具（全部先 respondsToSelector，再 @try） ----------
@@ -208,14 +208,17 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
 @property (nonatomic, strong, nullable) id config;
 @property (nonatomic, strong, nullable) NSTimer *pollTimer;
 @property (nonatomic, strong, nullable) NSTimer *firstFrameWatchdog;
-@property (nonatomic, strong, nullable) NSTimer *preparedFallbackTimer;
 @property (nonatomic, strong, nullable) NSTimer *seekTimeoutTimer;
 @property (nonatomic) NSUInteger generation;
 @property (nonatomic) BOOL preparedReported;
-@property (nonatomic) BOOL firstFrameReported;
+@property (atomic) BOOL firstFrameReported;
 @property (nonatomic) BOOL completedReported;
 @property (nonatomic) BOOL startRequested;
-@property (nonatomic) BOOL loading;
+@property (nonatomic, readwrite) BOOL loading;
+@property (nonatomic) NSUInteger stallCount;
+@property (nonatomic) NSTimeInterval bufferedTime;
+@property (nonatomic) CFTimeInterval lastPositionEmission;
+@property (nonatomic) BOOL playbackRequested;
 @property (nonatomic) float pendingRate;
 @property (nonatomic) BOOL hasPendingRate;
 @property (nonatomic, copy, nullable) void (^pendingSeekCompletion)(BOOL finished);
@@ -284,9 +287,7 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
     if (config) {
         CicadaCallVoidInt(config, NSSelectorFromString(@"setNetworkTimeout:"), (int)llround(self.networkTimeout * 1000.0));
         CicadaCallVoidInt(config, NSSelectorFromString(@"setNetworkRetryCount:"), 2);
-        CicadaCallVoidInt(config, NSSelectorFromString(@"setStartBufferDuration:"), 200);
-        CicadaCallVoidInt(config, NSSelectorFromString(@"setHighBufferDuration:"), 1200);
-        CicadaCallVoidInt(config, NSSelectorFromString(@"setMaxBufferDuration:"), 25000);
+        [self updateBufferConfiguration];
         if (self.headers.count) {
             NSMutableArray<NSString *> *headerLines = [NSMutableArray arrayWithCapacity:self.headers.count];
             for (NSString *key in self.headers) {
@@ -330,29 +331,34 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
     CicadaCallVoidObject(player, NSSelectorFromString(@"setDelegate:"), self);
     CicadaCallVoid(player, NSSelectorFromString(@"prepare"));
 
-    // 首帧看门狗：20 秒内无首帧即报错，交给路由走下一路（WebView）。
-    __weak typeof(self) weakSelf = self;
-    NSUInteger generation = self.generation;
-    self.firstFrameWatchdog = [NSTimer scheduledTimerWithTimeInterval:MediaPlaybackCicadaFirstFrameTimeout repeats:NO block:^(NSTimer *timer) {
-        MediaPlaybackCicadaAdapter *owner = weakSelf;
-        if (!owner || generation != owner.generation || owner.destroyed) return;
-        if (owner.firstFrameReported || owner.state == MediaPlaybackCicadaAdapterStateFailed || owner.state == MediaPlaybackCicadaAdapterStateCompleted) return;
-        [owner reportErrorWithCode:-1001 message:@"CicadaPlayer 20 秒内未显示首帧"];
-    }];
-    // onPrepared 回调的 selector 拼写未在二进制中直接确认：0.25 秒后无论是否收到
-    // 回调都按已准备处理，保证起播不会因回调缺失而卡住。
-    self.preparedFallbackTimer = [NSTimer scheduledTimerWithTimeInterval:MediaPlaybackCicadaPreparedFallbackDelay repeats:NO block:^(NSTimer *timer) {
-        MediaPlaybackCicadaAdapter *owner = weakSelf;
-        if (!owner || generation != owner.generation || owner.destroyed) return;
-        [owner handlePrepared];
-    }];
     [self startPollTimer];
 }
 
+- (void)armFirstFrameWatchdog {
+    if(self.firstFrameWatchdog||self.firstFrameReported||self.destroyed)return;
+    __weak typeof(self) weakSelf=self;NSUInteger generation=self.generation;
+    self.firstFrameWatchdog=[NSTimer scheduledTimerWithTimeInterval:MediaPlaybackCicadaFirstFrameTimeout repeats:NO block:^(NSTimer *timer){
+        MediaPlaybackCicadaAdapter *owner=weakSelf;if(!owner||generation!=owner.generation||owner.destroyed)return;
+        owner.firstFrameWatchdog=nil;
+        if(owner.playbackRequested&&!owner.firstFrameReported&&owner.state!=MediaPlaybackCicadaAdapterStateFailed&&owner.state!=MediaPlaybackCicadaAdapterStateCompleted)[owner reportErrorWithCode:-1001 message:@"CicadaPlayer 20 秒内未显示首帧"];
+    }];
+}
+- (void)updateBufferConfiguration {
+    if(!self.config||!self.player)return;
+    BOOL constrained=NSProcessInfo.processInfo.lowPowerModeEnabled;
+    double steady=MediaPlaybackForwardBuffer(YES,YES,self.pendingRate,self.stallCount,constrained);
+    int high=constrained?2500:(self.firstFrameReported?4000:2500);
+    if(self.stallCount)high=MIN(8000,high+(int)MIN(self.stallCount,(NSUInteger)3)*1000);
+    CicadaCallVoidInt(self.config,NSSelectorFromString(@"setStartBufferDuration:"),300);
+    CicadaCallVoidInt(self.config,NSSelectorFromString(@"setHighBufferDuration:"),high);
+    CicadaCallVoidInt(self.config,NSSelectorFromString(@"setMaxBufferDuration:"),MAX(high*2,(int)llround(steady*1000)));
+    CicadaCallVoidObject(self.player,NSSelectorFromString(@"setConfig:"),self.config);
+}
 - (void)start {
-    if (self.destroyed || !self.player) return;
+    if (self.destroyed || !self.player || self.state==MediaPlaybackCicadaAdapterStateFailed) return;
+    self.playbackRequested=YES;[self armFirstFrameWatchdog];
     if (!self.preparedReported) {
-        // 尚未准备好：先记下，准备就绪（回调或 0.5 秒兜底）后自动起播。
+        // 尚未准备好：先记下，准备就绪（回调或 SDK 准备回调）后自动起播。
         self.startRequested = YES;
         return;
     }
@@ -366,13 +372,14 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
 
 - (void)pause {
     if (self.destroyed || !self.player) return;
+    self.startRequested=NO;self.playbackRequested=NO;[self.firstFrameWatchdog invalidate];self.firstFrameWatchdog=nil;
     CicadaCallVoid(self.player, NSSelectorFromString(@"pause"));
-    if (self.state == MediaPlaybackCicadaAdapterStatePlaying) self.state = MediaPlaybackCicadaAdapterStatePaused;
+    if (self.state != MediaPlaybackCicadaAdapterStateFailed) self.state = MediaPlaybackCicadaAdapterStatePaused;
 }
 
 - (void)stop {
     if (self.destroyed || !self.player) return;
-    self.startRequested = NO;
+    self.startRequested = NO;self.playbackRequested=NO;
     CicadaCallVoid(self.player, NSSelectorFromString(@"stop"));
     if (self.state != MediaPlaybackCicadaAdapterStateFailed) self.state = MediaPlaybackCicadaAdapterStateIdle;
 }
@@ -383,7 +390,6 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
     self.generation++;
     [self.pollTimer invalidate]; self.pollTimer = nil;
     [self.firstFrameWatchdog invalidate]; self.firstFrameWatchdog = nil;
-    [self.preparedFallbackTimer invalidate]; self.preparedFallbackTimer = nil;
     [self.seekTimeoutTimer invalidate]; self.seekTimeoutTimer = nil;
     self.pendingSeekCompletion = nil;
     id player = self.player;
@@ -405,6 +411,7 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
         if (completion) completion(NO);
         return;
     }
+    [self finishPendingSeekWithFinished:NO];
     self.pendingSeekCompletion = completion;
     // CICADA_SEEKMODE_ACCURATE（0x01，见 CicadaSDK.h）：直连路径同值。
     CicadaCallVoidDoubleLong(self.player, NSSelectorFromString(@"seekToTime:seekMode:"), MAX(0, time), 0x01);
@@ -425,7 +432,7 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
     // 旧钳制 2.0 会把它静默截断；设置菜单的持久倍速仍由调用方钳制在 2.0。
     self.pendingRate = MIN(3.0f, MAX(0.5f, rate));
     self.hasPendingRate = YES;
-    [self applyPendingRate];
+    [self applyPendingRate];[self updateBufferConfiguration];
 }
 
 - (float)rate {
@@ -456,6 +463,8 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
     return MediaPlaybackCicadaNormalizeTimeValue(@(position));
 }
 
+- (NSTimeInterval)bufferedPosition {return MAX(self.bufferedTime,CicadaCallDouble(self.player,NSSelectorFromString(@"bufferedPosition")));}
+
 - (NSTimeInterval)duration {
     if (!self.player) return 0;
     NSTimeInterval duration = CicadaCallDouble(self.player, NSSelectorFromString(@"duration"));
@@ -463,6 +472,12 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
     return MediaPlaybackCicadaNormalizeTimeValue(@(duration));
 }
 
+- (void)reportPosition:(NSTimeInterval)position duration:(NSTimeInterval)duration {
+    CFTimeInterval now=CFAbsoluteTimeGetCurrent();
+    if(now-self.lastPositionEmission<0.35)return;
+    self.lastPositionEmission=now;
+    if([self.delegate respondsToSelector:@selector(cicadaAdapter:didUpdatePosition:duration:)])[self.delegate cicadaAdapter:self didUpdatePosition:position duration:duration];
+}
 - (void)startPollTimer {
     [self.pollTimer invalidate];
     __weak typeof(self) weakSelf = self;
@@ -473,20 +488,17 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
         NSTimeInterval position = owner.currentPosition;
         NSTimeInterval duration = owner.duration;
         owner.lastPolledPosition = position;
-        if ([owner.delegate respondsToSelector:@selector(cicadaAdapter:didUpdatePosition:duration:)]) {
-            [owner.delegate cicadaAdapter:owner didUpdatePosition:position duration:duration];
-        }
-        // 首帧兜底：位置推进即视为画面已出（onFirstFrameShow 未到时也生效）。
-        if (!owner.firstFrameReported && position > 0.5) [owner handleFirstFrame];
+        [owner reportPosition:position duration:duration];
+        // Position advancement can be audio-only. Only render callbacks prove a video frame.
         // 完成兜底：位置到达时长末尾即视为播完（onCompletion 未到时也生效）。
-        if (!owner.completedReported && duration > 0 && position >= duration - 1.0) [owner handleCompletion];
+        if (!owner.completedReported && owner.playbackRequested && owner.state==MediaPlaybackCicadaAdapterStatePlaying && duration > 0 && position >= duration - 0.1) [owner handleCompletion];
     }];
 }
 
 // ---------- 内部状态机（主线程） ----------
 
 - (void)handlePrepared {
-    if (self.preparedReported || self.destroyed) return;
+    if (self.preparedReported || self.destroyed || self.state==MediaPlaybackCicadaAdapterStateFailed) return;
     self.preparedReported = YES;
     if ([self.delegate respondsToSelector:@selector(cicadaAdapterDidPrepare:)]) {
         [self.delegate cicadaAdapterDidPrepare:self];
@@ -496,7 +508,7 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
 
 - (void)handleFirstFrame {
     if (self.firstFrameReported || self.destroyed) return;
-    self.firstFrameReported = YES;
+    self.firstFrameReported = YES;[self updateBufferConfiguration];
     [self.firstFrameWatchdog invalidate]; self.firstFrameWatchdog = nil;
     if ([self.delegate respondsToSelector:@selector(cicadaAdapterDidShowFirstFrame:)]) {
         [self.delegate cicadaAdapterDidShowFirstFrame:self];
@@ -524,6 +536,7 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
 
 - (void)reportErrorWithCode:(NSInteger)code message:(NSString *)message {
     if (self.destroyed || self.state == MediaPlaybackCicadaAdapterStateFailed) return;
+    self.startRequested=NO;self.playbackRequested=NO;
     self.state = MediaPlaybackCicadaAdapterStateFailed;
     [self.firstFrameWatchdog invalidate]; self.firstFrameWatchdog = nil;
     NSError *error = [NSError errorWithDomain:MediaPlaybackCicadaAdapterErrorDomain
@@ -543,7 +556,7 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
 
 - (void)onPlayerEvent:(id)player eventType:(NSUInteger)eventType {
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (self.destroyed) return;
+        if (self.destroyed || player!=self.player) return;
         switch (eventType) {
             case 0: // CicadaEventPrepareDone
                 [self handlePrepared];
@@ -555,6 +568,7 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
                 [self handleCompletion];
                 break;
             case 4: // CicadaEventLoadingStart
+                if(!self.loading&&self.firstFrameReported){self.stallCount++;[self updateBufferConfiguration];}
                 self.loading = YES;
                 if ([self.delegate respondsToSelector:@selector(cicadaAdapter:didUpdateLoading:progress:)]) {
                     [self.delegate cicadaAdapter:self didUpdateLoading:YES progress:0];
@@ -577,7 +591,7 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
 
 - (void)onError:(id)player errorModel:(id)errorModel {
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (self.destroyed) return;
+        if (self.destroyed || player!=self.player) return;
         NSInteger code = MediaPlaybackCicadaCodeFromModel(errorModel);
         NSString *message = MediaPlaybackCicadaStringFromModel(errorModel, @[@"errorMsg", @"message", @"localizedDescription"]);
         [self reportErrorWithCode:code message:message ?: @"CicadaPlayer 播放失败"];
@@ -588,27 +602,26 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
     // position 在二进制中为 int64_t 毫秒，必须声明为非对象标量 int64_t，
     // 否则 ARC 会在函数序言/尾声对原始整数调用 objc_retain/objc_release 导致 SIGSEGV 崩溃。
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (self.destroyed) return;
-        NSTimeInterval seconds = self.currentPosition;
+        if (self.destroyed || player!=self.player) return;
+        NSTimeInterval seconds = MAX(0,(double)position/1000.0);
         self.lastPolledPosition = seconds;
-        if (!self.firstFrameReported && seconds > 0.5) [self handleFirstFrame];
-        if ([self.delegate respondsToSelector:@selector(cicadaAdapter:didUpdatePosition:duration:)]) {
-            [self.delegate cicadaAdapter:self didUpdatePosition:seconds duration:self.duration];
-        }
+        [self reportPosition:seconds duration:self.duration];
     });
 }
 
 - (void)onBufferedPositionUpdate:(id)player position:(int64_t)position {
     // position 在二进制中为 int64_t 毫秒（非对象标量）。
+    dispatch_async(dispatch_get_main_queue(),^{if(!self.destroyed&&player==self.player)self.bufferedTime=MAX(0,(double)position/1000.0);});
 }
 
 - (void)onLoadingProgress:(id)player progress:(float)progress {
     // progress 在二进制中由浮点寄存器 S0 传入（float），绝不可声明为 id。
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (self.destroyed) return;
+        if (self.destroyed || player!=self.player) return;
         if ([self.delegate respondsToSelector:@selector(cicadaAdapter:didUpdateLoading:progress:)]) {
             float clamped = isfinite(progress) ? MAX(0.0f, MIN(1.0f, progress / 100.0f)) : 0.0f;
-            [self.delegate cicadaAdapter:self didUpdateLoading:YES progress:clamped];
+            self.loading=clamped<1.0f;
+            [self.delegate cicadaAdapter:self didUpdateLoading:self.loading progress:clamped];
         }
     });
 }
@@ -616,6 +629,12 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
 - (void)onPlayerStatusChanged:(id)player oldStatus:(NSInteger)oldStatus newStatus:(NSInteger)newStatus {
     // oldStatus/newStatus 在二进制中由 X3/X4 传入 CicadaStatus 整数（如 1=Initialized），
     // 声明为 id 会触发 ARC objc_storeStrong(0x1) 导致 SIGSEGV (offset 48888) 崩溃。
+    dispatch_async(dispatch_get_main_queue(),^{
+        if(self.destroyed||player!=self.player)return;
+        if(newStatus==2)[self handlePrepared];
+        else if(newStatus==4)self.state=MediaPlaybackCicadaAdapterStatePaused;
+        else if(newStatus==6)[self handleCompletion];
+    });
 }
 
 - (void)onCurrentDownLoadSpeed:(id)player progress:(float)speed {
@@ -624,7 +643,7 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
     // 适配器此前未实现它——SDK 若无 respondsToSelector 守卫就调用，
     // 会因 unrecognized selector 崩溃；现在实现并转发给调用方更新测速。
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (self.destroyed) return;
+        if (self.destroyed || player!=self.player) return;
         if ([self.delegate respondsToSelector:@selector(cicadaAdapter:didUpdateDownloadSpeed:)]) {
             [self.delegate cicadaAdapter:self didUpdateDownloadSpeed:MAX(0, (double)speed)];
         }
@@ -635,37 +654,42 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
     // 宽高/旋转按 CicadaSDK.h 声明的 int 读取（此前声明为 id 且不读参数，
     // 调用方拿不到尺寸，无法更新画面比例）；SDK 上报尺寸变化本身即证明有视频轨。
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (self.destroyed) return;
-        _hasVideoTrack = YES;
-        if (!self.firstFrameReported) [self handleFirstFrame];
+        if (self.destroyed || player!=self.player) return;
+        _hasVideoTrack = width>0&&height>0;
+        // Dimensions prove a video track exists, not that a frame was rendered.
         if (width > 0 && height > 0 && [self.delegate respondsToSelector:@selector(cicadaAdapter:didUpdateVideoSize:rotation:)]) {
             [self.delegate cicadaAdapter:self didUpdateVideoSize:CGSizeMake(width, height) rotation:rotation];
         }
     });
 }
 
+- (void)onVideoRendered:(id)player timeMs:(int64_t)timeMs pts:(int64_t)pts {
+    if(self.firstFrameReported)return; // Avoid a main-queue block for every rendered frame.
+    dispatch_async(dispatch_get_main_queue(),^{if(!self.destroyed&&player==self.player){_hasVideoTrack=YES;[self handleFirstFrame];}});
+}
+
 // Best-effort 回调（selector 拼写未在二进制中直接确认，见文件头注释）。
 - (void)onPrepared:(id)player {
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (!self.destroyed) [self handlePrepared];
+        if (!self.destroyed && player==self.player) [self handlePrepared];
     });
 }
 
 - (void)onFirstFrameShow:(id)player {
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (!self.destroyed) [self handleFirstFrame];
+        if (!self.destroyed && player==self.player) [self handleFirstFrame];
     });
 }
 
 - (void)onCompletion:(id)player {
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (!self.destroyed) [self handleCompletion];
+        if (!self.destroyed && player==self.player) [self handleCompletion];
     });
 }
 
 - (void)onLoadingStart:(id)player {
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (self.destroyed) return;
+        if (self.destroyed || player!=self.player) return;
         self.loading = YES;
         if ([self.delegate respondsToSelector:@selector(cicadaAdapter:didUpdateLoading:progress:)]) {
             [self.delegate cicadaAdapter:self didUpdateLoading:YES progress:0];
@@ -675,7 +699,7 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
 
 - (void)onLoadingEnd:(id)player {
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (self.destroyed) return;
+        if (self.destroyed || player!=self.player) return;
         self.loading = NO;
         if ([self.delegate respondsToSelector:@selector(cicadaAdapter:didUpdateLoading:progress:)]) {
             [self.delegate cicadaAdapter:self didUpdateLoading:NO progress:1.0f];
@@ -685,7 +709,7 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
 
 - (void)onSeekEnd:(id)player {
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (!self.destroyed) [self finishPendingSeekWithFinished:YES];
+        if (!self.destroyed && player==self.player) [self finishPendingSeekWithFinished:YES];
     });
 }
 

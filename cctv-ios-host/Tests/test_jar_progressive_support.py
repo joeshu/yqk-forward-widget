@@ -27,6 +27,23 @@ from csp_adapter import (
 
 
 class AndroidJARProgressiveSupportTests(unittest.TestCase):
+    def test_yqk_signed_request_reaches_transport_and_preserves_parameters(self):
+        from unittest.mock import Mock, patch
+        import hashlib
+        engine = AppVideoEngine('YQK', {})
+        response = Mock()
+        response.json.return_value = {'data': {'list': []}}
+        engine.session.post = Mock(return_value=response)
+        with patch('uuid.uuid4', return_value='fixture-device'):
+            self.assertEqual(engine._yqk_post('/fixture', {'page': 2}), {'list': []})
+        args, kwargs = engine.session.post.call_args
+        body = kwargs['json']
+        self.assertEqual(body['page'], 2)
+        parts = [f"{key}={body[key]}" for key in sorted(body) if key != 'sign' and body[key] not in (None, '')]
+        signature = hashlib.md5(('&'.join(parts) + '&key=6142612b179040c292488e027a12264d').encode()).hexdigest()
+        self.assertEqual(body['sign'], signature)
+        self.assertEqual(engine.session.post.call_count, 1)
+
     def test_l1_sibling_script_association_contract(self):
         """Verifies that MediaBrowserViewController includes fallback sibling mapping."""
         mb = (SOURCES / 'MediaBrowserViewController.m').read_text(encoding='utf-8')
@@ -227,7 +244,7 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
         self.assertIn('apiKindJARBridge', store_code)
         self.assertIn('csp_xbpq', store_code)
         self.assertIn('csp_appdrama', store_code)
-        self.assertIn('Android/JAR 适配引擎 · iOS 原生执行', store_code)
+        self.assertIn('站点接口适配 · 待读取验证', store_code)
         self.assertIn('apiKindDouban=[siteType isEqual:@"3"]&&[api.lowercaseString isEqual:@"csp_doudou"]', store_code)
 
     def test_media_api_client_jar_bridge_and_non_recursive_delegation(self):
@@ -753,7 +770,8 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
 
         mp_m = (SOURCES / 'MediaPlaybackViewController.m').read_text(encoding='utf-8')
         self.assertIn('observed>=2)[owner prefetchNextEpisodeIfNeeded];', mp_m)
-        self.assertIn('[warmReq setValue:@"bytes=0-1023" forHTTPHeaderField:@"Range"];', mp_m)
+        self.assertIn('[owner.prefetchedAsset loadValuesAsynchronouslyForKeys:@[@"playable"]', mp_m)
+        self.assertNotIn('[warmReq setValue:@"bytes=0-1023"', mp_m)
         self.assertIn('@[@0.2,@0.45,@1.1,@2.0,@3.0]', mp_m)
 
         api_m = (SOURCES / 'MediaAPIClient.m').read_text(encoding='utf-8')
@@ -795,7 +813,8 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
         self.assertNotIn('if([from.scheme.lowercaseString isEqual:@"https"]&&[to.scheme.lowercaseString isEqual:@"http"])valid=NO;', api_m)
 
         root_m = (SOURCES / 'RootViewController.m').read_text(encoding='utf-8')
-        self.assertIn('return @"95f9cbf6";', root_m)
+        self.assertNotIn('return @"95f9cbf6";', root_m)
+        self.assertIn('MediaLytvsSubscriptionToken(stored)', root_m)
 
         dl_m = (SOURCES / 'MediaPackageDownloader.m').read_text(encoding='utf-8')
         self.assertIn('PackageFallbackScriptForFailedURL', dl_m)

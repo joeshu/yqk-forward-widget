@@ -253,7 +253,8 @@ static BOOL PackageSameCredentialScope(NSURL *origin,NSURL *target) {
     self.session=[NSURLSession sessionWithConfiguration:configuration delegate:self delegateQueue:queue];[self begin:url];
 }
 - (void)begin:(NSURL *)url {
-    if(self.finished)return;self.body=[NSMutableData data];self.responseStatus=0;self.redirects=0;self.expectedBytes=-1;self.lastProgressTime=0;self.lastProgressStage=nil;
+    if(self.finished)return;
+    if(!url){[self finish:nil error:[self error:@"资源下载地址无效"]];return;}self.body=[NSMutableData data];self.responseStatus=0;self.redirects=0;self.expectedBytes=-1;self.lastProgressTime=0;self.lastProgressStage=nil;
     NSTimeInterval reqTimeout=[url.host.lowercaseString isEqualToString:@"sub.lytvs.top"]?8:20;NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:reqTimeout];BOOL canSendCredentials=PackageSameCredentialScope(self.credentialOrigin,url);for(NSString *name in self.requestHeaders){if(PackageHeaderIsSensitive(name)&&!canSendCredentials)continue;[request setValue:self.requestHeaders[name] forHTTPHeaderField:name];}
     if(![request valueForHTTPHeaderField:@"User-Agent"])[request setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
     self.task=[self.session dataTaskWithRequest:request];[self progress:self.stage];[self.task resume];
@@ -284,7 +285,7 @@ static BOOL PackageSameCredentialScope(NSURL *origin,NSURL *target) {
             NSData *bundledWeBox=PackageFallbackScriptForFailedURL(self.targetURL?:self.originalURL);
             if(bundledWeBox.length){self.scriptData=bundledWeBox;[self install:@{}];return;}
         }
-        NSString *statusHint=(self.responseStatus==403||self.responseStatus==401)?@"（源站拒绝访问或订阅鉴权已失效）":(self.responseStatus==404?@"（远端脚本文件不存在）":@"，或响应超过大小上限");[self finish:nil error:[self error:[NSString stringWithFormat:@"%@失败：HTTP %ld%@",self.stage,(long)self.responseStatus,statusHint]]];
+        NSString *statusHint=self.responseStatus==403?@"（源站拒绝此请求，请确认来源允许当前客户端访问）":(self.responseStatus==401?@"（源站要求有效登录或订阅凭据）":(self.responseStatus==404?@"（远端脚本文件不存在）":@"，或响应超过大小上限"));[self finish:nil error:[self error:[NSString stringWithFormat:@"%@失败：HTTP %ld%@",self.stage,(long)self.responseStatus,statusHint]]];
     }
 }
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task didReceiveData:(NSData *)data {

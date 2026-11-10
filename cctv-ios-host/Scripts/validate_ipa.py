@@ -83,7 +83,7 @@ def validate(path):
             assert any('JavaScriptCore.framework/' in name for name in result['binaries'][binary]['dependencies']), 'missing JavaScriptCore link'
             result['binaries']['NodeMobile'] = macho_info(z.read(root + 'Frameworks/NodeMobile.framework/NodeMobile'))
             assert not any('NodeMobile.framework/' in name for name in result['binaries'][binary]['dependencies']), 'Node must load on demand'
-            for member in ('media-service.py', 'host_media_runtime.py', 'host_media_relay.py', 'csp_adapter.py', 'example-encrypted-media.py', 'node-plugin-host.cjs', 'node-fetch.bundle.cjs', 'node-fetch-THIRD-PARTY-NOTICES.txt', 'base/spider.py', 'lxml/__init__.py', 'lxml/etree.py', 'lxml/html.py', 'pyquery.py', 'NodeMobile-LICENSE.txt', 'drpy-LICENSE.txt'):
+            for member in ('media-service.py', 'host_media_runtime.py', 'host_media_relay.py', 'host_media_url.py', 'host_dash.py', 'csp_adapter.py', 'example-encrypted-media.py', 'node-plugin-host.cjs', 'node-fetch.bundle.cjs', 'node-fetch-THIRD-PARTY-NOTICES.txt', 'base/spider.py', 'lxml/__init__.py', 'lxml/etree.py', 'lxml/html.py', 'pyquery.py', 'NodeMobile-LICENSE.txt', 'drpy-LICENSE.txt'):
                 assert root + member in z.namelist(), 'missing media component: ' + member
             assert len(z.read(root + 'js-runtime.bundle.js')) > 100000, 'missing generic JS and drpy engine'
             for package in ('requests', 'bs4', 'html5lib', 'urllib3', 'elementpath'):
@@ -100,6 +100,19 @@ def validate(path):
             assert root + 'python/lib/python3.13/site-packages/Cryptodome/__init__.py' in z.namelist(), 'missing Cryptodome namespace alias'
             result['python_crypto_compat'] = ['ARC4', 'AES ECB/CBC/CFB/OFB/CTR/GCM/EAX', 'RSA public-key PKCS#1 v1.5/OAEP', 'MD5/Hash/HMAC/CMAC', 'PBKDF2/HKDF', 'Padding/Counter/number/strxor']
             result['local_media_runtimes'] = ['Python Spider', 'JavaScriptCore', 'drpy', 'Node.js Mobile']
+        if variant == 'full':
+            # A JavaHost resource alone is insufficient: require the statically linked JNI bridge too.
+            executable = z.read(root + binary)
+            assert b'TVAppleRuntimeRequest' in executable and b'JNI_CreateJavaVM' in executable, 'missing linked JVM/bridge'
+            for member in ('JavaHost/host.jar', 'JavaHost/apple-bindings.jar', 'lib/lib/modules', 'lib/lib/security/cacerts', 'jar-runtime.json', 'JARLicenses/COPYING'):
+                assert root + member in z.namelist(), 'missing JAR runtime resource: ' + member
+            assert int(info.get('MinimumOSVersion', '0').split('.')[0]) >= 17, 'JAR runtime requires iOS 17+'
+            result['jar_runtime'] = json.loads(z.read(root + 'jar-runtime.json'))
+            for name in z.namelist():
+                if name.startswith(root + 'JavaHost/') and name.endswith('.jar'):
+                    import io
+                    with zipfile.ZipFile(io.BytesIO(z.read(name))) as jar:
+                        assert not any(n.startswith('natives/') or n.endswith(('.dylib', '.jnilib', '.dll')) or (n.endswith('.so') and not n.startswith('android/')) for n in jar.namelist()), 'desktop native code in JAR: ' + name
         channels = json.loads(z.read(root + 'channels.json'))
         assert isinstance(channels, list) and channels, 'empty channel catalog'
         result['channel_count'] = len(channels)

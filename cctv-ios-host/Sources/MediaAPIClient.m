@@ -1,4 +1,8 @@
 #import "MediaAPIClient.h"
+#import "MediaSP360Adapter.h"
+#import "MediaApp3QAdapter.h"
+#import "MediaJARSource.h"
+#import "MediaJARRuntime.h"
 #import "MediaPlaybackHeaders.h"
 #import "RuntimeDiagnostics.h"
 #import "TVBoxCatalogStore.h"
@@ -493,6 +497,7 @@ static NSDictionary *MediaParserCleanHeaders(id value,NSURL *mediaURL,NSURL *par
 @property(nonatomic, copy) NSString *activeCorrelationID;
 @property(nonatomic, copy) NSString *activeOperation;
 @property(nonatomic, copy) NSDictionary *tvboxSource;
+@property(nonatomic,strong) MediaJARRequest *jarRequest;
 @property(nonatomic,copy) NSString *parserCatalogID;
 @property(nonatomic,copy) NSDictionary *parserFallbackResult;
 @property(nonatomic,copy) NSDictionary *parserWebFallbackResult;
@@ -580,6 +585,7 @@ static NSDictionary *MediaParserCleanHeaders(id value,NSURL *mediaURL,NSURL *par
         if(self.activeCorrelationID.length)fields[@"correlation_id"]=self.activeCorrelationID;
         [RuntimeDiagnostics.shared recordEvent:@"media_api_cancelled" category:@"media_api" fields:fields];
     }
+    [self.jarRequest cancel];self.jarRequest=nil;
     self.generation++;
     self.parserCompletion=nil;self.parserFallbackResult=nil;self.parserWebFallbackResult=nil;self.parserAPIEntries=nil;self.parserCorrelationID=nil;self.selectedParserID=nil;
     if(self.task){[self.contextLock lock];[self.requestContexts removeObjectForKey:@(self.task.taskIdentifier)];[self.contextLock unlock];}
@@ -591,6 +597,7 @@ static NSDictionary *MediaParserCleanHeaders(id value,NSURL *mediaURL,NSURL *par
 }
 - (void)cancel { [self cancelWithReason:@"caller_cancelled"]; }
 - (void)dealloc {
+    [self.jarRequest cancel];
     [self.task cancel];
     [self.session invalidateAndCancel];
     [self.playSession invalidateAndCancel];
@@ -940,9 +947,11 @@ static NSURLRequest *MediaJARBridgeRequest(NSDictionary *source,NSString *operat
     NSString *api=MediaTVBoxString(source[@"api"]);
     NSString *siteName=MediaTVBoxString(source[@"name"]).length?MediaTVBoxString(source[@"name"]):api;
     NSString *lowAPI=api.lowercaseString;
+    if([lowAPI isEqual:@"csp_sp360"])return MediaSP360Request(operation,arguments,error);
     id rawOptions=source[@"options"];
     NSDictionary *cfg=MediaJARBridgeJSONDictionary(rawOptions);
     NSArray<NSString *> *candidates=MediaJARBridgeCandidatesForSource(source);
+    if([lowAPI isEqual:@"csp_app3q"])return MediaApp3QRequest(cfg,operation,arguments,error);
     NSUInteger siteIdx=[arguments[@"_jar_site_index"] respondsToSelector:@selector(unsignedIntegerValue)]?[arguments[@"_jar_site_index"] unsignedIntegerValue]:0;
     NSString *base=candidates.count?candidates[MIN(siteIdx,candidates.count-1)]:@"";
     if([arguments[@"_jar_fallback"] boolValue]){
@@ -1075,11 +1084,30 @@ static NSDictionary *MediaJARBridgeBuildPlayResult(NSString *url,NSDictionary *s
     return res.copy;
 }
 static id MediaJARBridgeNormalize(NSString *operation,NSDictionary *arguments,NSDictionary *source,id raw) {
-    if([operation isEqual:@"capabilities"])return @{@"engine":@"Android/JAR 适配引擎 · iOS 原生执行",@"protocol":@"jar-bridge",@"capabilities":@[@"home",@"category",@"search",@"detail",@"play"]};
+    if([operation isEqual:@"capabilities"])return @{@"engine":@"站点接口适配 · 待读取验证",@"protocol":@"jar-bridge",@"capabilities":@[@"home",@"category",@"search",@"detail",@"play"]};
     if([operation isEqual:@"providers"])return @[@{@"id":@"",@"name":source[@"name"]?:@"JAR 站点"}];
     NSString *api=MediaTVBoxString(source[@"api"]).lowercaseString;
+    if([api isEqual:@"csp_sp360"])return MediaSP360Normalize(operation,arguments,raw);
     id rawOptions=source[@"options"];
     NSDictionary *cfg=MediaJARBridgeJSONDictionary(rawOptions);
+    if([api isEqual:@"csp_app3q"]){
+        NSDictionary *root=MediaTVBoxObject(raw);id data=root[@"data"];NSInteger code=[root[@"code"] integerValue];
+        if([operation isEqual:@"play"]){
+            NSString *direct=MediaTVBoxString(arguments[@"id"]);
+            if(MediaPlaybackResultIsDirectMedia(@{@"url":direct}))return MediaJARBridgeBuildPlayResult(direct,source,nil);
+            NSString *url=MediaTVBoxString(data);if(!url.length&&[data isKindOfClass:NSDictionary.class])url=MediaTVBoxFirstString(data,@[@"url",@"playUrl"]);
+            if((code==1||code==200)&&[@[@"http",@"https"] containsObject:[NSURL URLWithString:url].scheme.lowercaseString])return MediaJARBridgeBuildPlayResult(url,source,nil);
+            return @{@"error":[root[@"challenge"] isKindOfClass:NSString.class]?@"来源要求额外验证，请通过来源支持的方式完成验证后重试":(MediaTVBoxFirstString(root,@[@"msg",@"message"]).length?MediaTVBoxFirstString(root,@[@"msg",@"message"]):@"三秋未返回可播放地址")};
+        }
+        if(code!=200&&code!=1)return @{@"error":MediaTVBoxFirstString(root,@[@"msg",@"message"]).length?MediaTVBoxFirstString(root,@[@"msg",@"message"]):@"三秋接口未返回有效结果"};
+        NSMutableDictionary *mapped=[NSMutableDictionary dictionary];
+        if([operation isEqual:@"home"]){NSDictionary *home=MediaTVBoxObject(data);NSMutableArray *categories=[NSMutableArray array];for(id row in MediaTVBoxArray(home[@"categories"])){NSString *name=MediaTVBoxString(MediaTVBoxObject(row)[@"type_name"]);if(name.length)[categories addObject:@{@"type_id":name,@"type_name":name}];}mapped[@"class"]=categories;mapped[@"list"]=MediaTVBoxArray(home[@"recommend"]);}
+        else mapped[@"list"]=MediaTVBoxArray(data);
+        NSMutableDictionary *delegate=[source mutableCopy];delegate[@"protocol"]=@"tvbox-api";delegate[@"_jarBridge"]=@YES;
+        id normalized=MediaTVBoxNormalize(operation,arguments,delegate,mapped);
+        if(([@[@"category",@"search"] containsObject:operation])&&[normalized isKindOfClass:NSDictionary.class]){NSMutableDictionary *list=[normalized mutableCopy];list[@"hasMore"]=@([list[@"items"] count]>0);return list;}
+        return normalized;
+    }
     if([api containsString:@"bili"]){
         NSDictionary *root=MediaTVBoxObject(raw);
         NSDictionary *dataObj=MediaTVBoxObject(root[@"data"]);
@@ -1318,9 +1346,27 @@ static id MediaJARBridgeNormalize(NSString *operation,NSDictionary *arguments,NS
     [RuntimeDiagnostics.shared recordEvent:@"media_api_started" category:@"media_api" fields:startFields];
     }
 
+    if(MediaJARUsesRuntime(self.tvboxSource)&&![@[@"capabilities",@"providers"] containsObject:operation]){
+        NSDictionary *source=self.tvboxSource;
+        __weak typeof(self) weakSelf=self;
+        self.jarRequest=[MediaJARRuntime requestSource:source operation:operation arguments:arguments?:@{} completion:^(id raw,NSError *failure){
+            MediaAPIClient *client=weakSelf;if(!client||client.generation!=generation)return;
+            client.jarRequest=nil;
+            NSMutableDictionary *delegate=[source mutableCopy];delegate[@"protocol"]=@"tvbox-api";delegate[@"tvboxType"]=@3;
+            // Only explicit playback headers returned by the spider go to its media CDN.
+            delegate[@"header"]=@{};
+            id result=failure?nil:MediaTVBoxNormalize(operation,arguments?:@{},delegate,raw);
+            if(!failure&&[result isKindOfClass:NSDictionary.class]&&[result[@"error"] isKindOfClass:NSString.class])failure=[NSError errorWithDomain:@"CCTVHostJARRuntime" code:11 userInfo:@{NSLocalizedDescriptionKey:@"JAR 爬虫返回的数据无法用于此操作"}];
+            if(diagnosticsEnabled){NSMutableDictionary *fields=[@{@"request_id":requestID,@"operation":operation?:@"unknown",@"port":@0,@"elapsed_ms":@((NSInteger)((CACurrentMediaTime()-startedAt)*1000)),@"protocol":@"jar-runtime",@"failure_stage":failure?@"jar_execution":@"none",@"error_domain":failure.domain?:@"",@"error_code":@(failure.code)} mutableCopy];if(correlationID.length)fields[@"correlation_id"]=correlationID;[RuntimeDiagnostics.shared recordEvent:failure?@"media_api_failed":@"media_api_succeeded" category:@"media_api" fields:fields];}
+            client.activeRequestID=nil;client.activeCorrelationID=nil;client.activeOperation=nil;
+            [client completeResult:result error:failure operation:operation generation:generation correlationID:correlationID completion:completion];
+        }];
+        return;
+    }
+
     BOOL macCMS=[self.tvboxSource[@"protocol"] isEqual:@"maccms-api"],doubanIndex=[self.tvboxSource[@"protocol"] isEqual:@"douban-index"],jarBridge=[self.tvboxSource[@"protocol"] isEqual:@"jar-bridge"];
     NSString *playArgID=MediaTVBoxString(arguments[@"id"]);
-    BOOL jarDirectPlay=jarBridge&&([[self.tvboxSource[@"api"] lowercaseString] containsString:@"bili"]||MediaPlaybackResultIsDirectMedia(@{@"url":playArgID})||MediaTVBoxURLHasSignedQuery(playArgID));
+    BOOL jarDirectPlay=jarBridge&&([[self.tvboxSource[@"api"] lowercaseString] containsString:@"bili"]||[[self.tvboxSource[@"api"] lowercaseString] isEqual:@"csp_sp360"]||MediaPlaybackResultIsDirectMedia(@{@"url":playArgID})||MediaTVBoxURLHasSignedQuery(playArgID));
     BOOL localBiliDetail=jarBridge&&[operation isEqual:@"detail"]&&[[self.tvboxSource[@"api"] lowercaseString] containsString:@"bili"];
     BOOL localDirectPlay=[operation isEqual:@"play"]&&(macCMS||doubanIndex||jarDirectPlay||[self.tvboxSource[@"tvboxType"] integerValue]==1||(self.tvboxSource[@"tvboxType"]!=nil&&[self.tvboxSource[@"tvboxType"] integerValue]==0));
     BOOL localTVBoxOperation=self.tvboxSource&&([operation isEqual:@"capabilities"]||[operation isEqual:@"providers"]||localDirectPlay||localBiliDetail||(doubanIndex&&[operation isEqual:@"detail"]));
@@ -1506,7 +1552,7 @@ static id MediaJARBridgeNormalize(NSString *operation,NSDictionary *arguments,NS
             if([tvboxSource[@"protocol"] isEqual:@"jar-bridge"]&&!jarResultMissing&&jarBase.length){
                 MediaJARBridgeSaveWorkingBase(tvboxSource,jarBase);
             }
-            BOOL jarEmptyResult=[tvboxSource[@"protocol"] isEqual:@"jar-bridge"]&&jarBase.length>0&&![jarBase.lowercaseString hasSuffix:@".php"]&&![arguments[@"_jar_fallback"] boolValue]&&![operation isEqual:@"play"]&&jarResultMissing;
+            BOOL jarEmptyResult=[tvboxSource[@"protocol"] isEqual:@"jar-bridge"]&&![[tvboxSource[@"api"] lowercaseString] isEqual:@"csp_app3q"]&&jarBase.length>0&&![jarBase.lowercaseString hasSuffix:@".php"]&&![arguments[@"_jar_fallback"] boolValue]&&![operation isEqual:@"play"]&&jarResultMissing;
             if(jarEmptyResult){
                 NSMutableDictionary *fbArgs=[arguments mutableCopy]?:[NSMutableDictionary dictionary];
                 fbArgs[@"_jar_fallback"]=@YES;

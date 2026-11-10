@@ -1,4 +1,5 @@
 #import "TVBoxCatalogStore.h"
+#import "MediaJARSource.h"
 #import <zlib.h>
 
 static NSError *TVBoxError(NSString *message) {
@@ -163,7 +164,7 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
             if(inferred.length)name=inferred;
         }
         if(!name.length)name=[NSString stringWithFormat:@"未命名站点 %lu",(unsigned long)siteIndex];
-        if(api.length&&!TVBoxWebURL(api)&&TVBoxWebURL(sourceURL)){
+        if(api.length&&!MediaJARClass(api).length&&!TVBoxWebURL(api)&&TVBoxWebURL(sourceURL)){
             NSURL *base=[NSURL URLWithString:sourceURL];
             NSURL *resolved=[NSURL URLWithString:api relativeToURL:base].absoluteURL;
             if(!resolved){
@@ -193,7 +194,7 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
         apiParts=TVBoxURLComponents(api?:@"");
         NSString *path=apiParts.path.lowercaseString;
         if ([path hasSuffix:@".md5"]) path=[path stringByDeletingPathExtension];
-        NSString *siteType=TVBoxString(value[@"type"],32)?:@"";BOOL scriptFile=[@[@"js",@"hjs",@"mjs",@"cjs",@"py",@"zip"] containsObject:path.pathExtension.lowercaseString];BOOL jarFile=[path.pathExtension.lowercaseString isEqual:@"jar"];BOOL jarSpiderClass=[api.lowercaseString hasPrefix:@"csp_"];BOOL apiKindDouban=[siteType isEqual:@"3"]&&[api.lowercaseString isEqual:@"csp_doudou"];BOOL apiKindJARBridge=[siteType isEqual:@"3"]&&TVBoxSupportedJARClass(api);
+        NSString *siteType=TVBoxString(value[@"type"],32)?:@"";BOOL scriptFile=[@[@"js",@"hjs",@"mjs",@"cjs",@"py",@"zip"] containsObject:path.pathExtension.lowercaseString];BOOL jarFile=[path.pathExtension.lowercaseString isEqual:@"jar"];BOOL jarSpiderClass=MediaJARClass(api).length>0;BOOL apiKindDouban=[siteType isEqual:@"3"]&&[api.lowercaseString isEqual:@"csp_doudou"];BOOL apiKindJARBridge=[siteType isEqual:@"3"]&&(TVBoxSupportedJARClass(api)||[MediaJARClass(api) hasPrefix:@"com.github.catvod.spider."]);
         BOOL apiKindMacCMS=!scriptFile&&!jarFile&&TVBoxWebURL(api)&&[siteType isEqual:@"0"];
         BOOL apiKindTVBox=!scriptFile&&!jarFile&&TVBoxWebURL(api)&&([siteType isEqual:@"1"]||[siteType isEqual:@"4"]);
         BOOL direct=TVBoxWebURL(api)&&scriptFile;
@@ -203,12 +204,13 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
         else if(apiKindMacCMS)reason=@"TVBox type 0 · MacCMS JSON/XML API · 选中后请求";
         else if(apiKindTVBox)reason=[NSString stringWithFormat:@"TVBox type %@ JSON API · 选中后请求，尚未验证",siteType];
         else if(direct)reason=@"可导入 · 将由现有脚本适配器检查";
-        else if(apiKindJARBridge)reason=@"Android/JAR 适配引擎 · iOS 原生执行";
+        else if(apiKindJARBridge)reason=@"站点接口适配 · 待读取验证";
         else if([siteType isEqual:@"0"])reason=@"TVBox type 0 为 JS 爬虫，需脚本文件地址；iOS 不支持此地址形式";
         else if([siteType isEqual:@"3"])reason=(jarFile||jarSpiderClass)?@"需要 Android/JAR 运行时；iOS 不支持":@"脚本地址无法识别；保留在合集中";
         else if([apiParts.scheme.lowercaseString isEqual:@"http"]||[apiParts.scheme.lowercaseString isEqual:@"https"])reason=@"此脚本类型需 Android/JAR 运行时；iOS 不支持";
         NSString *apiKind=apiKindDouban?@"douban-index":(apiKindMacCMS?@"maccms-api":(apiKindTVBox?@"tvbox-api":(direct?@"script":(apiKindJARBridge?@"jar-bridge":@"unsupported"))));
         NSMutableDictionary *site=[@{@"key":key,@"name":name,@"api":api?:@"",@"ext":ext?:@"",@"type":siteType,@"supported":@(supported),@"status":reason,@"apiKind":apiKind,@"sourceIndex":@(siteIndex-1)} mutableCopy];
+        if([value[@"jar"] isKindOfClass:NSString.class]&&[value[@"jar"] length]<=8192)site[@"jar"]=value[@"jar"];
         if(safeHeaders.count)site[@"header"]=safeHeaders;
         if([value[@"playUrl"] isKindOfClass:NSString.class]&&[value[@"playUrl"] length]<=4096)site[@"playUrl"]=value[@"playUrl"];
         [cleanSites addObject:site];
@@ -246,6 +248,7 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
 // 不经 +catalogs，避免递归。直链 m3u8 走 AVPlayer；share 播放页由 MacCMS
 // play 路径判为网页走 WebView（WebView 会提取 video 地址回原生播放）。
 + (void)ensureBuiltInMacCMSCatalogs {
+    @synchronized(self){
     NSArray *specs=@[
         @{@"id":@"builtin-maccms-lziapi",@"name":@"量子采集",@"api":@"https://cj.lziapi.com/api.php/provide/vod/",@"siteKey":@"maccms-builtin-lziapi"},
         @{@"id":@"builtin-maccms-dytt",@"name":@"电影天堂采集",@"api":@"https://caiji.dyttzyapi.com/api.php/provide/vod/",@"siteKey":@"maccms-builtin-dytt"},
@@ -253,10 +256,11 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
         @{@"id":@"builtin-maccms-ffzy",@"name":@"非凡采集",@"api":@"https://api.ffzyapi.com/api.php/provide/vod/",@"siteKey":@"maccms-builtin-ffzy"},
     ];
     NSArray *rows=[NSUserDefaults.standardUserDefaults arrayForKey:@"tvboxCatalogs"];
-    NSMutableArray *mutable=[rows isKindOfClass:NSArray.class]?[rows mutableCopy]:[NSMutableArray array];
+    NSMutableArray *mutable=[NSMutableArray array];
+    for(id row in [rows isKindOfClass:NSArray.class]?rows:@[])if([row isKindOfClass:NSDictionary.class]&&[row[@"id"] isKindOfClass:NSString.class]&&[row[@"id"] length])[mutable addObject:row];
     NSMutableSet *ids=[NSMutableSet set];
     for(NSDictionary *row in mutable) if([row[@"id"] isKindOfClass:NSString.class]) [ids addObject:row[@"id"]];
-    BOOL changed=NO;
+    BOOL changed=mutable.count!=rows.count;
     for(NSDictionary *spec in specs) {
         if([ids containsObject:spec[@"id"]]) continue;
         NSDictionary *site=@{@"key":spec[@"siteKey"],@"name":spec[@"name"],@"api":spec[@"api"],@"type":@"maccms",@"apiKind":@"maccms-api",@"supported":@YES,@"status":@"内置 · 选中后读取",@"maccmsFormat":@"auto"};
@@ -264,15 +268,18 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
         changed=YES;
     }
     if(changed) [NSUserDefaults.standardUserDefaults setObject:mutable forKey:@"tvboxCatalogs"];
+
+    }
 }
 + (NSArray<NSDictionary *> *)catalogs {
+    @synchronized(self){
     [self ensureBuiltInMacCMSCatalogs];
     NSArray *rows=[NSUserDefaults.standardUserDefaults arrayForKey:@"tvboxCatalogs"];
     if(![rows isKindOfClass:NSArray.class])return @[];
     BOOL upgraded=NO;
     NSMutableArray *updatedCatalogs=[NSMutableArray arrayWithCapacity:rows.count];
     for(id rawCat in rows){
-        if(![rawCat isKindOfClass:NSDictionary.class]){continue;}
+        if(![rawCat isKindOfClass:NSDictionary.class]||![rawCat[@"id"] isKindOfClass:NSString.class]||![rawCat[@"id"] length]){continue;}
         NSDictionary *cat=(NSDictionary *)rawCat;
         NSArray *sites=[cat[@"sites"] isKindOfClass:NSArray.class]?cat[@"sites"]:nil;
         if(!sites.count){[updatedCatalogs addObject:cat];continue;}
@@ -283,15 +290,18 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
             NSDictionary *site=(NSDictionary *)rawSite;
             NSString *siteType=[site[@"type"] description]?:@"";
             NSString *api=[site[@"api"] isKindOfClass:NSString.class]?site[@"api"]:@"";
+            if([siteType isEqual:@"3"]&&!MediaJARClass(api).length&&MediaJARClass([NSURL URLWithString:api].lastPathComponent).length){
+                NSMutableDictionary *restored=[site mutableCopy];api=[NSURL URLWithString:api].lastPathComponent;restored[@"api"]=api;site=restored;catChanged=YES;upgraded=YES;
+            }
             NSURLComponents *siteParts=TVBoxURLComponents(api);
             NSString *sitePath=siteParts.path.lowercaseString?:@"";
             if([sitePath hasSuffix:@".md5"])sitePath=[sitePath stringByDeletingPathExtension];
             BOOL isScriptURL=TVBoxWebURL(api)&&[@[@"js",@"hjs",@"mjs",@"cjs",@"py",@"zip"] containsObject:sitePath.pathExtension.lowercaseString];
-            if([siteType isEqual:@"3"]&&TVBoxSupportedJARClass(api)&&(![site[@"supported"] boolValue]||![site[@"apiKind"] isEqual:@"jar-bridge"])){
+            if([siteType isEqual:@"3"]&&TVBoxSupportedJARClass(api)&&(![site[@"supported"] boolValue]||![site[@"apiKind"] isEqual:@"jar-bridge"]||[site[@"status"] isEqual:@"Android/JAR 适配引擎 · iOS 原生执行"])){
                 NSMutableDictionary *mSite=[site mutableCopy];
                 mSite[@"supported"]=@YES;
                 mSite[@"apiKind"]=@"jar-bridge";
-                mSite[@"status"]=@"Android/JAR 适配引擎 · iOS 原生执行";
+                mSite[@"status"]=@"站点接口适配 · 待读取验证";
                 [updatedSites addObject:mSite.copy];
                 catChanged=YES;upgraded=YES;
             }else if(isScriptURL&&(![site[@"supported"] boolValue]||![site[@"apiKind"] isEqual:@"script"])){
@@ -315,6 +325,8 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
     }
     if(upgraded)[NSUserDefaults.standardUserDefaults setObject:updatedCatalogs forKey:@"tvboxCatalogs"];
     return updatedCatalogs.copy;
+
+    }
 }
 + (NSArray<NSDictionary *> *)playbackParsers {
     return [self playbackParsersForCatalogID:nil];
@@ -364,6 +376,8 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
     return result.copy;
 }
 + (void)saveCatalog:(NSDictionary *)catalog {
+    @synchronized(self){
+    if(![catalog isKindOfClass:NSDictionary.class]||![catalog[@"id"] isKindOfClass:NSString.class]||![catalog[@"id"] length])return;
     NSString *identifier=[catalog[@"id"] isKindOfClass:NSString.class]?catalog[@"id"]:@"";
     NSData *sourceData=[catalog[@"_sourceConfigData"] isKindOfClass:NSData.class]?catalog[@"_sourceConfigData"]:nil;
     NSMutableDictionary *storedCatalog=[catalog mutableCopy];
@@ -375,9 +389,14 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
     // 有界：最多保留 64 个目录，按 updatedAt 丢弃最旧（无时间戳的视为最旧）。
     while(rows.count>64){NSUInteger oldest=0;for(NSUInteger i=1;i<rows.count;i++)if([rows[i][@"updatedAt"] doubleValue]<[rows[oldest][@"updatedAt"] doubleValue])oldest=i;[rows removeObjectAtIndex:oldest];}
     [NSUserDefaults.standardUserDefaults setObject:rows forKey:@"tvboxCatalogs"];
+
+    }
 }
 + (NSDictionary *)catalogForID:(NSString *)identifier { for(NSDictionary *row in [self catalogs])if([row[@"id"] isEqual:identifier])return row; return nil; }
-+ (void)removeCatalog:(NSString *)identifier { NSMutableArray *rows=[[self catalogs] mutableCopy]; NSIndexSet *remove=[rows indexesOfObjectsPassingTest:^BOOL(NSDictionary *row,NSUInteger idx,BOOL *stop){return [row[@"id"] isEqual:identifier];}]; [rows removeObjectsAtIndexes:remove]; [NSUserDefaults.standardUserDefaults setObject:rows forKey:@"tvboxCatalogs"];if(TVBoxSafeCatalogID(identifier)){NSString *path=[TVBoxCatalogStorageDirectory() stringByAppendingPathComponent:[identifier stringByAppendingPathExtension:@"json"]];[NSFileManager.defaultManager removeItemAtPath:path error:NULL];} }
++ (void)removeCatalog:(NSString *)identifier {
+    @synchronized(self){ NSMutableArray *rows=[[self catalogs] mutableCopy]; NSIndexSet *remove=[rows indexesOfObjectsPassingTest:^BOOL(NSDictionary *row,NSUInteger idx,BOOL *stop){return [row[@"id"] isEqual:identifier];}]; [rows removeObjectsAtIndexes:remove]; [NSUserDefaults.standardUserDefaults setObject:rows forKey:@"tvboxCatalogs"];if(TVBoxSafeCatalogID(identifier)){NSString *path=[TVBoxCatalogStorageDirectory() stringByAppendingPathComponent:[identifier stringByAppendingPathExtension:@"json"]];[NSFileManager.defaultManager removeItemAtPath:path error:NULL];}
+    }
+}
 + (NSArray<NSDictionary *> *)liveSourcesInCatalog:(NSDictionary *)catalog { return [catalog[@"lives"] isKindOfClass:NSArray.class]?catalog[@"lives"]:@[]; }
 + (NSDictionary *)reconstructedConfigForCatalog:(NSDictionary *)catalog {
     NSMutableDictionary *config=[NSMutableDictionary dictionary];NSString *name=[catalog[@"name"] isKindOfClass:NSString.class]?catalog[@"name"]:@"资源合集";config[@"name"]=name;

@@ -61,7 +61,7 @@ PY
 [ -s "$APP/Assets.car" ] || { echo "::error::AppIcon asset catalog did not produce Assets.car"; exit 1; }
 if [ -z "${PY_DISABLE:-}" ]; then cp Plugins/ysp-live.py "$APP/ysp-live.py"; cp Scripts/host_service_runtime.py "$APP/host_service_runtime.py"; cp Plugins/yangshipin-js.py "$APP/yangshipin-js.py"; cp GeneratedJS/* "$APP/"; mkdir -p "$APP/JSPlugins"; cp -R JSPlugins/yangshipin JSPlugins/compat "$APP/JSPlugins/"; cp JSPlugins/package.json JSPlugins/package-lock.json JSPlugins/build.mjs "$APP/JSPlugins/"; fi
 if [ -z "${PY_DISABLE:-}" ]; then
-  cp Plugins/media-service.py Plugins/host_media_runtime.py Plugins/host_media_relay.py Plugins/csp_adapter.py Plugins/example-encrypted-media.py Plugins/node-plugin-host.cjs "$APP/"
+  cp Plugins/media-service.py Plugins/host_media_runtime.py Plugins/host_media_relay.py Plugins/host_media_url.py Plugins/host_dash.py Plugins/csp_adapter.py Plugins/example-encrypted-media.py Plugins/node-plugin-host.cjs "$APP/"
   cp -R Plugins/base "$APP/base"
   cp -R Plugins/lxml "$APP/lxml"
   cp Plugins/pyquery.py "$APP/pyquery.py"
@@ -133,10 +133,18 @@ done
 
 SOURCES=$(find Sources -maxdepth 1 -name '*.m' -print | sort | tr '\n' ' ')
 
+# The release app always embeds the real JAR runtime. A missing runtime fails the build.
+JAR_ROOT="${CCTV_JAR_CACHE:-$PWD/.jar-runtime}/iphoneos"
+if [ ! -s "$JAR_ROOT/lib/libTVAppleRuntime.a" ]; then bash Scripts/prepare_jar_runtime.sh ios; fi
+cp -R "$JAR_ROOT/Resources/" "$APP/"
+JAR_FLAGS=(-DCCTV_JAR_ENABLED=1 -I "$JAR_ROOT/include" "$JAR_ROOT/AppleRuntime.m" -Wl,-force_load,"$JAR_ROOT/lib/libTVAppleRuntime.a" -Wl,-export_dynamic)
+/usr/libexec/PlistBuddy -c 'Set :MinimumOSVersion 17.0' "$APP/Info.plist" 2>/dev/null || \
+  /usr/libexec/PlistBuddy -c 'Add :MinimumOSVersion string 17.0' "$APP/Info.plist"
+
 set -x
 clang -arch arm64 \
   -isysroot "$SDK" \
-  -miphoneos-version-min=15.0 \
+  -miphoneos-version-min=17.0 \
   -fobjc-arc \
   -I Sources/Include \
   -F Frameworks \
@@ -147,7 +155,7 @@ clang -arch arm64 \
   -Wl,-rpath,@executable_path/Frameworks \
   -Wl,-undefined,dynamic_lookup \
   -ObjC -lresolv \
-  $SOURCES \
+  $SOURCES "${JAR_FLAGS[@]}" \
   -o "$APP/CCTVHost"
 set +x
 

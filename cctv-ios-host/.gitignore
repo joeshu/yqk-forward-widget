@@ -1,0 +1,6 @@
+
+# Reproducible embedded JVM build products (never source plugins or credentials).
+.jar-runtime/
+source-audit.json
+native-audit/
+python-native-audit/

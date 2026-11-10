@@ -879,6 +879,25 @@ class Spider:
         finally:
             runtime.close()
 
+    def test_startup_index_error_keeps_source_location_without_secret_values(self):
+        with tempfile.TemporaryDirectory() as root:
+            Path(root, 'source.py').write_text("class Spider:\n    def init(self, extend=''):\n        secret='tk_fixture_secret'\n        return [][1]\n")
+            runtime = media.MediaRuntime()
+            runtime.start_initialization(lambda: media.PythonSpider(root, 'source.py'))
+            try:
+                for _ in range(100):
+                    if runtime.health_status()['runtime_state'] == 'failed':
+                        break
+                    threading.Event().wait(.01)
+                health = runtime.health_status()
+                self.assertEqual(health['startup_error'], 'IndexError')
+                self.assertEqual(health['startup_failure'], {'stage': 'spider_init', 'entry': 'source.py',
+                    'error_type': 'IndexError', 'line': 4, 'function': 'init'})
+                self.assertNotIn('tk_fixture_secret', json.dumps(health))
+                self.assertNotIn(root, json.dumps(health))
+            finally:
+                runtime.close()
+
     def test_async_initialization_preserves_host_service_context(self):
         class Owner:
             def __init__(self):
@@ -2059,7 +2078,8 @@ class Spider:
             upstream.server_close()
             upstream_thread.join(2)
 
-    def test_dash_manifest_keeps_original_url_for_relative_segment_resolution(self):
+    @mock.patch.object(MediaRelay, 'register_dash', side_effect=ValueError('dash_fixture_unsupported'))
+    def test_dash_manifest_keeps_original_url_for_relative_segment_resolution(self, _register_dash):
         address = 'https://cdn.fixture.test/dash/manifest.mpd?token=fixture'
         alternate = 'https://cdn.fixture.test/dash/alternate.mpd?token=alternate'
         self.engine.spider.playerContent = lambda *_: {

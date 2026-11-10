@@ -16,12 +16,15 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from host_media_url import http_url
+from host_dash import DashSession
 import uuid
 import zlib
 
 
 class ScopedRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, request, response, code, message, headers, new_url):
+        new_url = http_url(new_url)
         redirected = super().redirect_request(request, response, code, message, headers, new_url)
         if redirected is not None and (urllib.parse.urlsplit(request.full_url).scheme.lower(), urllib.parse.urlsplit(request.full_url).netloc.lower()) != (urllib.parse.urlsplit(new_url).scheme.lower(), urllib.parse.urlsplit(new_url).netloc.lower()):
             for name in list(redirected.headers):
@@ -170,6 +173,7 @@ class MediaRelay:
         self.inline_keys = collections.OrderedDict()
         self.remote_key_cache = collections.OrderedDict()
         self.inline_manifests = collections.OrderedDict()
+        self.dash_playlists = collections.OrderedDict()
         self.responses = set()
         self.stopping = threading.Event()
 
@@ -321,6 +325,9 @@ class MediaRelay:
     def register(self, url, headers, origin=None, diagnostic_id=None, fallback_url=None,
                  refresh=None, refresh_after=0, refresh_interval=0, refresh_relative=None,
                  expected_hls=False, segment=False, resource_kind="media", resource_scope=None):
+        url = http_url(url)
+        if fallback_url:
+            fallback_url = http_url(fallback_url)
         parsed = urllib.parse.urlsplit(url)
         if parsed.scheme.lower() not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password:
             raise ValueError('不支持的媒体地址')
@@ -373,6 +380,53 @@ class MediaRelay:
                 self.refreshFailures.pop(removed, None)
                 self.diagnosed_manifests.discard(removed)
             return token
+
+    def register_dash(self, url, headers, diagnostic_id='', resource_scope='', validate=True):
+        session = DashSession(self, url, headers, diagnostic_id, resource_scope)
+        # Validate before returning HLS metadata. Unsupported MPDs can still be
+        # handed to the original DASH engine by the caller.
+        if validate:
+            session.load()
+        token = uuid.uuid4().hex
+        with self.lock:
+            if self.stopping.is_set():
+                raise ValueError('dash_service_stopping')
+            self.dash_playlists[token] = (session, None)
+            while len(self.dash_playlists) > 256:
+                self.dash_playlists.popitem(last=False)
+        return token
+
+    def dash_track_url(self, session, track_id, base):
+        with self.lock:
+            if self.stopping.is_set():
+                raise ValueError('dash_service_stopping')
+            token = session.tokens.get(track_id)
+            if token not in self.dash_playlists:
+                token = uuid.uuid4().hex
+                session.tokens[track_id] = token
+                self.dash_playlists[token] = (session, track_id)
+                while len(self.dash_playlists) > 256:
+                    self.dash_playlists.popitem(last=False)
+            else:
+                self.dash_playlists.move_to_end(token)
+        return base + '/media/' + token
+
+    def read_dash_manifest(self, url, headers, diagnostic_id):
+        headers = {k: v for k, v in headers.items() if k.lower() not in ('range', 'accept-encoding')}
+        request = urllib.request.Request(http_url(url), headers={**headers, 'Accept-Encoding': 'identity'})
+        response = _open_with_timeout_retry(request, diagnostic_id)
+        with self.lock:
+            if self.stopping.is_set():
+                response.close()
+                raise ValueError('dash_service_stopping')
+            self.responses.add(response)
+        try:
+            data = response.read(2 * 1024 * 1024 + 1)
+            return data, response.geturl()
+        finally:
+            with self.lock:
+                self.responses.discard(response)
+            response.close()
 
     @staticmethod
     def _same_origin(left, right):
@@ -572,6 +626,28 @@ class MediaRelay:
 
     def serve(self, handler, token, head=False):
         with self.lock:
+            dash = self.dash_playlists.get(token) if not self.stopping.is_set() else None
+            if dash:
+                self.dash_playlists.move_to_end(token)
+        if dash:
+            session, track_id = dash
+            try:
+                body = session.playlist(track_id, f'http://127.0.0.1:{handler.server.server_port}').encode('utf-8')
+                handler.send_response(200)
+                handler.send_header('Content-Type', 'application/vnd.apple.mpegurl')
+                handler.send_header('Content-Length', str(len(body)))
+                handler.send_header('Cache-Control', 'no-store')
+                handler.send_header('Connection', 'close')
+                handler.end_headers()
+                if not head:
+                    self._write_client(handler, body)
+            except RelayClientDisconnected:
+                pass
+            except Exception as error:
+                stage = str(error) if str(error).startswith('dash_') else 'dash_manifest_failed'
+                self._failed(handler, stage, session.diagnostic_id, session.url, error=error)
+            return
+        with self.lock:
             inline_key_entry = self.inline_keys.get(token)
             if inline_key_entry is not None and not self.stopping.is_set():
                 self.inline_keys.move_to_end(token)
@@ -691,13 +767,13 @@ class MediaRelay:
                     self._write_client(handler, cached_norm_key)
                     resource_event('completed', len(cached_norm_key))
                     return
-            request = urllib.request.Request(url, headers=headers, method='HEAD' if head else 'GET')
+            request = urllib.request.Request(http_url(url), headers=headers, method='HEAD' if head else 'GET')
             try:
                 response = _open_with_timeout_retry(request, diagnostic_id)
             except urllib.error.HTTPError as upstream_error:
                 if fallback_url and upstream_error.code in (401, 403):
                     upstream_error.close()
-                    fallback_request = urllib.request.Request(fallback_url, headers=headers,
+                    fallback_request = urllib.request.Request(http_url(fallback_url), headers=headers,
                         method='HEAD' if head else 'GET')
                     response = _open_with_timeout_retry(fallback_request, diagnostic_id)
                 elif upstream_error.code in (401,403) and record[3]:
@@ -715,12 +791,12 @@ class MediaRelay:
                     manifest_request = expected_hls or parsed.path.lower().endswith(('.m3u8', '.m3u'))
                     if manifest_request:headers={k:v for k,v in headers.items() if k.lower()!='range'}
                     elif handler.headers.get('Range'):headers['Range']=handler.headers['Range']
-                    refreshed_request=urllib.request.Request(url,headers=headers,method='HEAD' if head else 'GET')
+                    refreshed_request=urllib.request.Request(http_url(url),headers=headers,method='HEAD' if head else 'GET')
                     response=_open_with_timeout_retry(refreshed_request, diagnostic_id)
                 elif upstream_error.code == 403 and any(k.lower() in ('referer', 'origin') for k in headers):
                     upstream_error.close()
                     stripped_headers = {k: v for k, v in headers.items() if k.lower() not in ('referer', 'origin')}
-                    stripped_request = urllib.request.Request(url, headers=stripped_headers, method='HEAD' if head else 'GET')
+                    stripped_request = urllib.request.Request(http_url(url), headers=stripped_headers, method='HEAD' if head else 'GET')
                     response = _open_with_timeout_retry(stripped_request, diagnostic_id)
                 else:
                     raise
@@ -966,6 +1042,7 @@ class MediaRelay:
             self.diagnosed_resources.clear()
             self.refreshFailures.clear()
             self.remote_key_cache.clear()
+            self.dash_playlists.clear()
         for event in flights:
             event['event'].set()
         for response in responses:

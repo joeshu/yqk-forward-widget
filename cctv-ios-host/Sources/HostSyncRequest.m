@@ -13,7 +13,7 @@
 @implementation HostSyncRequest
 - (instancetype)initWithConfiguration:(NSURLSessionConfiguration *)configuration {if((self=[super init]))_configuration=configuration.copy;return self;}
 - (NSDictionary *)performRequest:(NSURLRequest *)request {
-    NSAssert(!NSThread.isMainThread,@"Synchronous plugin requests must stay off the UI thread");
+    if(NSThread.isMainThread)return @{@"error":@"同步 JS 请求须从后台调用"};
     @synchronized(self){
         if(self.cancelled)return @{@"error":@"请求已取消"};
         self.body=[NSMutableData data];self.done=dispatch_semaphore_create(0);

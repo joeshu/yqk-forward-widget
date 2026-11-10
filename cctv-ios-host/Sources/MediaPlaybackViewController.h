@@ -1,7 +1,7 @@
 #import <UIKit/UIKit.h>
 NS_ASSUME_NONNULL_BEGIN
 @interface MediaPlaybackViewController : UIViewController
-@property(nonatomic,copy) NSDictionary *result;
+@property(nonatomic,copy,nullable) NSDictionary *result;
 @property(nonatomic,copy) NSDictionary *context;
 @property(nonatomic) BOOL embeddedMode;
 @property(nonatomic,strong) UILabel *status;

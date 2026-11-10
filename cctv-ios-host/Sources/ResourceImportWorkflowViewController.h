@@ -6,7 +6,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic,copy,nullable) dispatch_block_t onOpenServices;
 @property(nonatomic,copy) NSArray<NSDictionary *> *(^existingImportTargetsProvider)(void);
 @property(nonatomic,readonly) BOOL busy;
-@property(nonatomic,readonly,copy) NSString *taskSummary;
+@property(nonatomic,readonly,copy,nullable) NSString *taskSummary;
 - (void)refreshExistingResourceMatches;
 - (void)reloadThemeAppearance;
 - (void)saveAndActivateSelected;

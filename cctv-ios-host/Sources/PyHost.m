@@ -449,6 +449,7 @@ static PyObject *pyHostJSCall(PyObject *self, PyObject *args) {
         BOOL diagnosticsEnabled=RuntimeDiagnostics.shared.enabled;
         NSString *operationName=[NSString stringWithUTF8String:operation];
         NSString *requestJSON=[NSString stringWithUTF8String:json];
+        if(!operationName.length||!requestJSON){PyErr_SetString(PyExc_ValueError,"Invalid UTF-8 JS bridge request");return NULL;}
         NSString *serviceID=diagnosticsEnabled?CCTVPluginBridgeServiceID(requestJSON):@"";
         NSString *requestID=diagnosticsEnabled?NSUUID.UUID.UUIDString.lowercaseString:@"";
         NSTimeInterval startedAt=diagnosticsEnabled?CACurrentMediaTime():0;

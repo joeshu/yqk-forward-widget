@@ -92,7 +92,7 @@ static void RuntimeDiagnosticsHandleUncaughtException(NSException *exception) {
 - (NSDictionary * _Nullable)readSessionMarker;
 - (BOOL)writeSessionMarker:(NSDictionary *)marker;
 - (void)migrateLegacyLogIfNeeded;
-- (NSString * _Nullable)pathForSessionID:(NSString *)sessionID;
+- (NSString * _Nullable)pathForSessionID:(nullable NSString *)sessionID;
 - (void)pruneOldSessions;
 - (void)recordEvent:(NSString *)event category:(NSString *)category fields:(nullable NSDictionary<NSString *, id> *)fields synchronously:(BOOL)synchronously;
 @end
@@ -131,7 +131,7 @@ static void RuntimeDiagnosticsHandleUncaughtException(NSException *exception) {
     return self;
 }
 
-- (NSString *)pathForSessionID:(NSString *)sessionID {
+- (NSString *)pathForSessionID:(nullable NSString *)sessionID {
     if (![sessionID isKindOfClass:NSString.class] || !sessionID.length || sessionID.length > 80) return nil;
     NSString *lower = sessionID.lowercaseString;
     BOOL isUUID = [[NSUUID alloc] initWithUUIDString:lower] != nil;
@@ -155,7 +155,7 @@ static void RuntimeDiagnosticsHandleUncaughtException(NSException *exception) {
         NSData *lineData = [line dataUsingEncoding:NSUTF8StringEncoding];
         id object = [NSJSONSerialization JSONObjectWithData:lineData options:NSJSONReadingFragmentsAllowed error:NULL];
         NSString *sessionID = [object isKindOfClass:NSDictionary.class] ? object[@"session_id"] : nil;
-        if (![self pathForSessionID:sessionID]) sessionID = @"legacy-unknown";
+        if (![sessionID isKindOfClass:NSString.class] || !sessionID.length || ![self pathForSessionID:sessionID]) sessionID = @"legacy-unknown";
         if (!groups[sessionID]) groups[sessionID] = [NSMutableArray array];
         [groups[sessionID] addObject:line];
     }
