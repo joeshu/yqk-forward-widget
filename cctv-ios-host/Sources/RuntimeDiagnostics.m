@@ -155,7 +155,7 @@ static void RuntimeDiagnosticsHandleUncaughtException(NSException *exception) {
         NSData *lineData = [line dataUsingEncoding:NSUTF8StringEncoding];
         id object = [NSJSONSerialization JSONObjectWithData:lineData options:NSJSONReadingFragmentsAllowed error:NULL];
         NSString *sessionID = [object isKindOfClass:NSDictionary.class] ? object[@"session_id"] : nil;
-        if (![self pathForSessionID:sessionID]) sessionID = @"legacy-unknown";
+        if (![sessionID isKindOfClass:NSString.class] || !sessionID.length || ![self pathForSessionID:sessionID]) sessionID = @"legacy-unknown";
         if (!groups[sessionID]) groups[sessionID] = [NSMutableArray array];
         [groups[sessionID] addObject:line];
     }

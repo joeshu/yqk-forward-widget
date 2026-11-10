@@ -4913,7 +4913,7 @@ configureCatalogNavigation;
     if(![channel[@"remoteURL"] length] && ![ProfileStore isHTTP:cid]){
         __weak typeof(self) weakSelf=self;
         page.onReplay=^(NSDictionary *program){
-            RootViewController *owner=weakSelf;if(!owner)return;
+            RootViewController *owner=weakSelf;if(!owner||!cid.length)return;
             [owner.navigationController popToViewController:owner animated:YES];
             owner.playerTabs.selectedSegmentIndex=1;[owner selectPlayerPanel];
             if(![owner.channelID isEqualToString:cid] || !owner.currentPlayer || owner.avPlayer || !owner.firstRender){
