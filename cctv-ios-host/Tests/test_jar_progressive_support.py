@@ -795,7 +795,8 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
         self.assertNotIn('if([from.scheme.lowercaseString isEqual:@"https"]&&[to.scheme.lowercaseString isEqual:@"http"])valid=NO;', api_m)
 
         root_m = (SOURCES / 'RootViewController.m').read_text(encoding='utf-8')
-        self.assertIn('return @"95f9cbf6";', root_m)
+        self.assertNotIn('return @"95f9cbf6";', root_m)
+        self.assertIn('MediaLytvsSubscriptionToken(stored)', root_m)
 
         dl_m = (SOURCES / 'MediaPackageDownloader.m').read_text(encoding='utf-8')
         self.assertIn('PackageFallbackScriptForFailedURL', dl_m)

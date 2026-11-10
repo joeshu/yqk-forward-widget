@@ -1,10 +1,14 @@
 #import <Foundation/Foundation.h>
 #import "MediaSP360Adapter.h"
 #import "MediaApp3QAdapter.h"
+#import "MediaSubscriptionToken.h"
 #import "MediaPlaybackDecodeRouter.h"
 #import "MediaPlaybackHeaders.h"
 static void check(BOOL ok, NSString *message){if(!ok){NSLog(@"FAILED: %@",message);exit(1);}}
 int main(void){@autoreleasepool{
+    check([MediaLytvsSubscriptionToken(@"abcdef12") isEqual:@"tk_abcdef12"],@"legacy subscription token regains its required prefix");
+    check([MediaLytvsSubscriptionToken(@" tk_abcdef12 ") isEqual:@"tk_abcdef12"],@"full subscription token is preserved without doubling prefix");
+    check(!MediaLytvsSubscriptionToken(@"")&&!MediaLytvsSubscriptionToken(@"tk_fixture\r\nunsafe"),@"empty and malformed credentials are rejected");
     NSDictionary *appConfig=@{@"host":@"https://app.example",@"finger":@"f",@"pkg":@"p",@"sk":@"s",@"ver":@"6"};
     NSDictionary *appHeaders=MediaApp3QHeaders(appConfig,@"1700000000",@"123");
     check([appHeaders[@"x-sign"] isEqual:@"6E2317F31FCEF18A3BECC578C58A5A12E84083A8E19725FA035E69D68FA6FBFE"],@"App3Q request matches independent SHA256 wire-format vector");

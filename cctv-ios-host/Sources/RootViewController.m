@@ -1,5 +1,6 @@
 #import "MediaRelayDiagnostics.h"
 #import "RootViewController.h"
+#import "MediaSubscriptionToken.h"
 #import "CNPlayerSDK.h"
 #import "CicadaSDK.h"
 #import "EPGViewController.h"
@@ -110,6 +111,7 @@ static NSURL *CCTVURLFromPossiblyUnescapedString(NSString *raw) {
     return encoded.length?[NSURL URLWithString:encoded]:nil;
 }
 static BOOL CCTVTVBoxSaveSubscriptionToken(NSString *token) {
+    token=MediaLytvsSubscriptionToken(token);
     NSData *data=[token dataUsingEncoding:NSUTF8StringEncoding];if(!data.length||data.length>512)return NO;
     NSMutableDictionary *attributes=[@{(__bridge id)kSecValueData:data,(__bridge id)kSecAttrAccessible:(__bridge id)kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly} mutableCopy];
     NSDictionary *query=CCTVTVBoxTokenKeychainQuery();OSStatus status=SecItemUpdate((__bridge CFDictionaryRef)query,(__bridge CFDictionaryRef)attributes);
@@ -119,25 +121,25 @@ static BOOL CCTVTVBoxSaveSubscriptionToken(NSString *token) {
 static NSString *CCTVTVBoxTokenFromInput(NSString *input) {
     NSString *value=[input stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]?:@"";NSURL *u=CCTVURLFromPossiblyUnescapedString(value);NSURLComponents *parts=u?[NSURLComponents componentsWithURL:u resolvingAgainstBaseURL:NO]:[NSURLComponents componentsWithString:value];
     if([parts.host.lowercaseString isEqual:@"sub.lytvs.top"]){
-        for(NSURLQueryItem *item in parts.queryItems)if([@[@"token",@"tk"] containsObject:item.name.lowercaseString]&&item.value.length&&![item.value isEqualToString:CCTVTVBoxTokenPlaceholder])return item.value;
+        for(NSURLQueryItem *item in parts.queryItems)if([@[@"token",@"tk"] containsObject:item.name.lowercaseString]&&item.value.length&&![item.value isEqualToString:CCTVTVBoxTokenPlaceholder])return MediaLytvsSubscriptionToken(item.value);
         NSString *path=parts.path?:@"";
         if(path.length){
             NSRegularExpression *pathRe=[NSRegularExpression regularExpressionWithPattern:@"(?:^|[_/-])tk_([A-Za-z0-9]{6,64})(?:\\.[A-Za-z0-9]+|$)" options:NSRegularExpressionCaseInsensitive error:NULL];
             NSTextCheckingResult *match=[pathRe firstMatchInString:path options:0 range:NSMakeRange(0,path.length)];
             if(match&&match.numberOfRanges>1){
                 NSString *tk=[path substringWithRange:[match rangeAtIndex:1]];
-                if(tk.length&&![tk isEqualToString:CCTVTVBoxTokenPlaceholder])return tk;
+                if(tk.length&&![tk isEqualToString:CCTVTVBoxTokenPlaceholder])return MediaLytvsSubscriptionToken(tk);
             }
         }
         return nil;
     }
-    if(value.length>512||[value rangeOfCharacterFromSet:NSCharacterSet.newlineCharacterSet].location!=NSNotFound)return nil;return value;
+    if(value.length>512||[value rangeOfCharacterFromSet:NSCharacterSet.newlineCharacterSet].location!=NSNotFound)return nil;return MediaLytvsSubscriptionToken(value);
 }
 static NSString *CCTVTVBoxStoredSubscriptionToken(void) {
     NSMutableDictionary *query=[CCTVTVBoxTokenKeychainQuery() mutableCopy];query[(__bridge id)kSecReturnData]=@YES;query[(__bridge id)kSecMatchLimit]=(__bridge id)kSecMatchLimitOne;
     CFTypeRef result=NULL;if(SecItemCopyMatching((__bridge CFDictionaryRef)query,&result)==errSecSuccess&&result){
         NSData *data=(__bridge_transfer NSData *)result;NSString *stored=[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-        if(stored.length)return stored;
+        if(stored.length){NSString *normalized=MediaLytvsSubscriptionToken(stored);if(normalized.length&&![normalized isEqualToString:stored])CCTVTVBoxSaveSubscriptionToken(normalized);return normalized?:@"";}
     }
     for(NSDictionary *cat in [TVBoxCatalogStore catalogs]){
         for(NSString *urlKey in @[@"url",@"origin",@"sourceURL"]){
@@ -148,7 +150,7 @@ static NSString *CCTVTVBoxStoredSubscriptionToken(void) {
             }
         }
     }
-    return @"95f9cbf6";
+    return @"";
 }
 static NSString *CCTVTVBoxURLByResolvingToken(NSString *url,NSString *token) {
     if(![url containsString:CCTVTVBoxTokenPlaceholder]){
