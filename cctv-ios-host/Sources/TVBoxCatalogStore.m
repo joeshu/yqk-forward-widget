@@ -194,7 +194,7 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
         apiParts=TVBoxURLComponents(api?:@"");
         NSString *path=apiParts.path.lowercaseString;
         if ([path hasSuffix:@".md5"]) path=[path stringByDeletingPathExtension];
-        NSString *siteType=TVBoxString(value[@"type"],32)?:@"";BOOL scriptFile=[@[@"js",@"hjs",@"mjs",@"cjs",@"py",@"zip"] containsObject:path.pathExtension.lowercaseString];BOOL jarFile=[path.pathExtension.lowercaseString isEqual:@"jar"];BOOL jarSpiderClass=MediaJARClass(api).length>0;BOOL apiKindDouban=[siteType isEqual:@"3"]&&[api.lowercaseString isEqual:@"csp_doudou"];BOOL apiKindJARBridge=[siteType isEqual:@"3"]&&(TVBoxSupportedJARClass(api)||MediaJARClass(api).length);
+        NSString *siteType=TVBoxString(value[@"type"],32)?:@"";BOOL scriptFile=[@[@"js",@"hjs",@"mjs",@"cjs",@"py",@"zip"] containsObject:path.pathExtension.lowercaseString];BOOL jarFile=[path.pathExtension.lowercaseString isEqual:@"jar"];BOOL jarSpiderClass=MediaJARClass(api).length>0;BOOL apiKindDouban=[siteType isEqual:@"3"]&&[api.lowercaseString isEqual:@"csp_doudou"];BOOL apiKindJARBridge=[siteType isEqual:@"3"]&&(TVBoxSupportedJARClass(api)||[MediaJARClass(api) hasPrefix:@"com.github.catvod.spider."]);
         BOOL apiKindMacCMS=!scriptFile&&!jarFile&&TVBoxWebURL(api)&&[siteType isEqual:@"0"];
         BOOL apiKindTVBox=!scriptFile&&!jarFile&&TVBoxWebURL(api)&&([siteType isEqual:@"1"]||[siteType isEqual:@"4"]);
         BOOL direct=TVBoxWebURL(api)&&scriptFile;
