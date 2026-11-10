@@ -22,7 +22,7 @@ class NativePackageTests(unittest.TestCase):
         cls.executable = cls.folder / 'package-test'
         build = subprocess.run(['xcrun', 'clang', '-fobjc-arc', '-framework', 'Foundation', '-lz', '-I', str(root / 'Sources'),
                                 str(root / 'Tests/native_package_tests.m'), str(root / 'Sources/MediaPackageImporter.m'),
-                                str(root / 'Sources/MediaPackageDownloader.m'),
+                                str(root / 'Sources/MediaPackageDownloader.m'), str(root / 'Sources/ResourceContentInspection.m'),
                                 str(root / 'Sources/ProfileStore.m'),
                                 str(root / 'Sources/ServiceStore.m'), '-o', str(cls.executable)], capture_output=True, text=True)
         if build.returncode:
@@ -42,6 +42,22 @@ class NativePackageTests(unittest.TestCase):
                                 capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
+
+    def test_actual_content_overrides_unknown_resource_filename(self):
+        file = self.folder / 'download.php'
+        file.write_text('from base.spider import Spider\nclass Spider: pass')
+        result = self.inspect(file)
+        self.assertTrue(result['ok'], result)
+        self.assertEqual(result['engine'], 'python')
+        archived = self.archive({'index.js': 'module.exports={search(){return {list:[]}}}'})
+        file.write_bytes(archived.read_bytes())
+        result = self.inspect(file)
+        self.assertTrue(result['ok'], result)
+        self.assertTrue(result['archiveExists'])
+        file.write_text('<!doctype html><html><a href="source.json">配置</a></html>')
+        result = self.inspect(file)
+        self.assertFalse(result['ok'])
+        self.assertIn('HTML', result['error'])
 
     def test_encrypted_hjs_is_not_executed_as_javascript(self):
         file = self.folder / 'encrypted.hjs'

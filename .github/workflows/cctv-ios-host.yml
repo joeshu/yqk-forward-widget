@@ -24,6 +24,30 @@ permissions:
 
 
 jobs:
+  source-audit:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18.20.4
+      - name: Inventory and check all app sources
+        working-directory: cctv-ios-host
+        run: python3 Scripts/source_audit.py --output source-audit.json
+      - name: Analyze native app sources
+        if: always()
+        working-directory: cctv-ios-host
+        run: bash Scripts/audit_native.sh native-audit
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: CCTVHost-source-audit-${{ github.sha }}
+          path: |
+            cctv-ios-host/source-audit.json
+            cctv-ios-host/native-audit/
+          retention-days: 30
+
   media-compat:
     if: github.event_name == 'workflow_dispatch' && inputs.run_media_compat == true
     uses: ./.github/workflows/cctv-media-compat.yml
@@ -70,7 +94,7 @@ jobs:
           retention-days: 14
 
   build:
-    needs: jar-runtime
+    needs: [jar-runtime, source-audit]
     strategy:
       fail-fast: false
       matrix:
@@ -210,6 +234,10 @@ jobs:
           set -o pipefail
           python3 Scripts/validate_ipa.py build/CCTVHost-unsigned.ipa | tee build/validation.json
 
+      - name: Analyze embedded Python bridge
+        working-directory: cctv-ios-host
+        run: CCTV_AUDIT_ONLY=PyHost bash Scripts/audit_native.sh python-native-audit
+
       - name: Preserve build artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -230,6 +258,7 @@ jobs:
             cctv-ios-host/build.log
             cctv-ios-host/syntax.log
             cctv-ios-host/regression.log
+            cctv-ios-host/python-native-audit/
           if-no-files-found: ignore
           retention-days: 14
 

@@ -1,4 +1,5 @@
 #import "MediaPackageImporter.h"
+#import "ResourceContentInspection.h"
 #import "ServiceStore.h"
 #include <zlib.h>
 #import <CommonCrypto/CommonDigest.h>
@@ -378,12 +379,15 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     NSString *identifier=NSUUID.UUID.UUIDString,*stage=[[ServiceStore directory] stringByAppendingPathComponent:[@".import-" stringByAppendingString:identifier]];
     NSString *package=[stage stringByAppendingPathComponent:@"package"];NSFileManager *fm=NSFileManager.defaultManager;
     if(![fm createDirectoryAtPath:package withIntermediateDirectories:YES attributes:nil error:error])return nil;
-    NSDictionary *service=nil;
+    NSDictionary *service=nil;BOOL isArchive=[file.pathExtension.lowercaseString isEqual:@"zip"]||(bytes.length>=4&&memcmp(bytes.bytes,"PK\003\004",4)==0);
     @try {
-        if([file.pathExtension.lowercaseString isEqual:@"zip"]){if(!ExtractZip(bytes,package,error))return nil;}
+        if(ResourceContentIsHTML(bytes)){PackageError(error,@"此文件是 HTML 网页，请导入网页中的资源直链");return nil;}
+        if(isArchive){if(!ExtractZip(bytes,package,error))return nil;}
         else {
             NSString *name=file.lastPathComponent;
-            if(![@[@"js",@"hjs",@"mjs",@"cjs",@"py"] containsObject:file.pathExtension.lowercaseString] || !SafeRelative(name) || bytes.length>PackageFileLimit){PackageError(error,@"请选择 JS、Python 或 ZIP 资源文件");return nil;}
+            NSString *detected=ResourceContentExtension(bytes,name);
+            if(![@[@"js",@"hjs",@"mjs",@"cjs",@"py"] containsObject:file.pathExtension.lowercaseString]&&[@[@"py",@"js",@"mjs",@"cjs"] containsObject:detected])name=[[name stringByDeletingPathExtension] stringByAppendingPathExtension:detected];
+            if(![@[@"js",@"hjs",@"mjs",@"cjs",@"py"] containsObject:name.pathExtension.lowercaseString] || !SafeRelative(name) || bytes.length>PackageFileLimit){PackageError(error,@"请选择 JS、Python 或 ZIP 资源文件");return nil;}
             bytes=PackageAdaptWeBoxScriptIfNeeded(bytes);
             if(![bytes writeToFile:[package stringByAppendingPathComponent:name] options:NSDataWritingAtomic error:error])return nil;
         }
@@ -424,7 +428,7 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
             }
         }
         NSString *relative=[manifest[@"packageRoot"] substringFromIndex:stage.length+1];[manifest removeObjectForKey:@"packageRoot"];
-        BOOL zip=[file.pathExtension.lowercaseString isEqual:@"zip"];
+        BOOL zip=isArchive;
         if(zip && ![bytes writeToFile:[stage stringByAppendingPathComponent:@"source.zip"] options:NSDataWritingAtomic error:error])return nil;
         NSString *target=[[ServiceStore directory] stringByAppendingPathComponent:identifier];
         if(![fm moveItemAtPath:stage toPath:target error:error])return nil;

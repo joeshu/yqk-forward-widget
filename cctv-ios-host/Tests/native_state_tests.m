@@ -106,6 +106,12 @@ int main(void) {
         check([metadata resultForSource:mediaSource operation:@"search" arguments:@{@"keyword":@"other",@"page":@1,@"provider":@"site-a"} maximumAge:3600 isStale:NULL]==nil,@"metadata cache isolates different search arguments");
         NSMutableDictionary *otherSource=[mediaSource mutableCopy];otherSource[@"id"]=@"source-b";
         check([metadata resultForSource:otherSource operation:@"search" arguments:searchArgs maximumAge:3600 isStale:NULL]==nil,@"metadata cache isolates different plugin sources");
+        NSMutableDictionary *jarSource=[mediaSource mutableCopy];jarSource[@"jar"]=@{@"url":@"https://fixture.test/spider.jar",@"md5":@"first"};jarSource[@"subscriptionURL"]=@"https://fixture.test/a/config.json";
+        [metadata storeResult:searchResult forSource:jarSource operation:@"search" arguments:searchArgs];
+        NSMutableDictionary *changedJar=[jarSource mutableCopy];changedJar[@"jar"]=@{@"url":@"https://fixture.test/spider.jar",@"md5":@"second"};
+        check([metadata resultForSource:changedJar operation:@"search" arguments:searchArgs maximumAge:3600 isStale:NULL]==nil,@"updated JAR checksums cannot reuse stale metadata");
+        changedJar=[jarSource mutableCopy];changedJar[@"subscriptionURL"]=@"https://fixture.test/b/config.json";
+        check([metadata resultForSource:changedJar operation:@"search" arguments:searchArgs maximumAge:3600 isStale:NULL]==nil,@"relative JAR ext resolution is isolated by subscription origin");
         [metadata storeResult:@{@"url":@"https://media.example/video.m3u8"} forSource:mediaSource operation:@"play" arguments:searchArgs];
         check([metadata resultForSource:mediaSource operation:@"play" arguments:searchArgs maximumAge:3600 isStale:NULL]==nil,@"resolved playback URLs are never cached");
         NSDictionary *detailWithSignedEpisode=@{@"lines":@[@{@"episodes":@[@{@"id":@"https://cdn.example/video.m3u8?token=secret"}]}]};

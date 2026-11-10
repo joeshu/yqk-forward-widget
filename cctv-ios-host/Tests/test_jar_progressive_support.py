@@ -27,6 +27,23 @@ from csp_adapter import (
 
 
 class AndroidJARProgressiveSupportTests(unittest.TestCase):
+    def test_yqk_signed_request_reaches_transport_and_preserves_parameters(self):
+        from unittest.mock import Mock, patch
+        import hashlib
+        engine = AppVideoEngine('YQK', {})
+        response = Mock()
+        response.json.return_value = {'data': {'list': []}}
+        engine.session.post = Mock(return_value=response)
+        with patch('uuid.uuid4', return_value='fixture-device'):
+            self.assertEqual(engine._yqk_post('/fixture', {'page': 2}), {'list': []})
+        args, kwargs = engine.session.post.call_args
+        body = kwargs['json']
+        self.assertEqual(body['page'], 2)
+        parts = [f"{key}={body[key]}" for key in sorted(body) if key != 'sign' and body[key] not in (None, '')]
+        signature = hashlib.md5(('&'.join(parts) + '&key=6142612b179040c292488e027a12264d').encode()).hexdigest()
+        self.assertEqual(body['sign'], signature)
+        self.assertEqual(engine.session.post.call_count, 1)
+
     def test_l1_sibling_script_association_contract(self):
         """Verifies that MediaBrowserViewController includes fallback sibling mapping."""
         mb = (SOURCES / 'MediaBrowserViewController.m').read_text(encoding='utf-8')

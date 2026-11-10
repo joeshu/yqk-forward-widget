@@ -138,7 +138,8 @@ JAR_ROOT="${CCTV_JAR_CACHE:-$PWD/.jar-runtime}/iphoneos"
 if [ ! -s "$JAR_ROOT/lib/libTVAppleRuntime.a" ]; then bash Scripts/prepare_jar_runtime.sh ios; fi
 cp -R "$JAR_ROOT/Resources/" "$APP/"
 JAR_FLAGS=(-DCCTV_JAR_ENABLED=1 -I "$JAR_ROOT/include" "$JAR_ROOT/AppleRuntime.m" -Wl,-force_load,"$JAR_ROOT/lib/libTVAppleRuntime.a" -Wl,-export_dynamic)
-/usr/libexec/PlistBuddy -c 'Set :MinimumOSVersion 17.0' "$APP/Info.plist"
+/usr/libexec/PlistBuddy -c 'Set :MinimumOSVersion 17.0' "$APP/Info.plist" 2>/dev/null || \
+  /usr/libexec/PlistBuddy -c 'Add :MinimumOSVersion string 17.0' "$APP/Info.plist"
 
 set -x
 clang -arch arm64 \

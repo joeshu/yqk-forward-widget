@@ -610,7 +610,8 @@
     __weak typeof(self) weakSelf=self;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{
         BOOL scoped=[u startAccessingSecurityScopedResource];
-        NSData *data=[NSData dataWithContentsOfURL:u];
+        NSFileHandle *handle=[NSFileHandle fileHandleForReadingFromURL:u error:NULL];NSData *data=nil;
+        @try{data=[handle readDataUpToLength:2*1024*1024+1 error:NULL];if(data.length>2*1024*1024)data=nil;}@catch(NSException *exception){data=nil;}@finally{[handle closeAndReturnError:NULL];}
         if(scoped)[u stopAccessingSecurityScopedResource];
         dispatch_async(dispatch_get_main_queue(),^{ServiceEditorViewController *owner=weakSelf;if(owner)[owner acceptCode:data];});
     });

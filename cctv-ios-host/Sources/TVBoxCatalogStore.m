@@ -248,6 +248,7 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
 // 不经 +catalogs，避免递归。直链 m3u8 走 AVPlayer；share 播放页由 MacCMS
 // play 路径判为网页走 WebView（WebView 会提取 video 地址回原生播放）。
 + (void)ensureBuiltInMacCMSCatalogs {
+    @synchronized(self){
     NSArray *specs=@[
         @{@"id":@"builtin-maccms-lziapi",@"name":@"量子采集",@"api":@"https://cj.lziapi.com/api.php/provide/vod/",@"siteKey":@"maccms-builtin-lziapi"},
         @{@"id":@"builtin-maccms-dytt",@"name":@"电影天堂采集",@"api":@"https://caiji.dyttzyapi.com/api.php/provide/vod/",@"siteKey":@"maccms-builtin-dytt"},
@@ -255,7 +256,8 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
         @{@"id":@"builtin-maccms-ffzy",@"name":@"非凡采集",@"api":@"https://api.ffzyapi.com/api.php/provide/vod/",@"siteKey":@"maccms-builtin-ffzy"},
     ];
     NSArray *rows=[NSUserDefaults.standardUserDefaults arrayForKey:@"tvboxCatalogs"];
-    NSMutableArray *mutable=[rows isKindOfClass:NSArray.class]?[rows mutableCopy]:[NSMutableArray array];
+    NSMutableArray *mutable=[NSMutableArray array];
+    for(id row in [rows isKindOfClass:NSArray.class]?rows:@[])if([row isKindOfClass:NSDictionary.class]&&[row[@"id"] isKindOfClass:NSString.class]&&[row[@"id"] length])[mutable addObject:row];
     NSMutableSet *ids=[NSMutableSet set];
     for(NSDictionary *row in mutable) if([row[@"id"] isKindOfClass:NSString.class]) [ids addObject:row[@"id"]];
     BOOL changed=NO;
@@ -266,8 +268,11 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
         changed=YES;
     }
     if(changed) [NSUserDefaults.standardUserDefaults setObject:mutable forKey:@"tvboxCatalogs"];
+
+    }
 }
 + (NSArray<NSDictionary *> *)catalogs {
+    @synchronized(self){
     [self ensureBuiltInMacCMSCatalogs];
     NSArray *rows=[NSUserDefaults.standardUserDefaults arrayForKey:@"tvboxCatalogs"];
     if(![rows isKindOfClass:NSArray.class])return @[];
@@ -320,6 +325,8 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
     }
     if(upgraded)[NSUserDefaults.standardUserDefaults setObject:updatedCatalogs forKey:@"tvboxCatalogs"];
     return updatedCatalogs.copy;
+
+    }
 }
 + (NSArray<NSDictionary *> *)playbackParsers {
     return [self playbackParsersForCatalogID:nil];
@@ -369,6 +376,8 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
     return result.copy;
 }
 + (void)saveCatalog:(NSDictionary *)catalog {
+    @synchronized(self){
+    if(![catalog isKindOfClass:NSDictionary.class]||![catalog[@"id"] isKindOfClass:NSString.class]||![catalog[@"id"] length])return;
     NSString *identifier=[catalog[@"id"] isKindOfClass:NSString.class]?catalog[@"id"]:@"";
     NSData *sourceData=[catalog[@"_sourceConfigData"] isKindOfClass:NSData.class]?catalog[@"_sourceConfigData"]:nil;
     NSMutableDictionary *storedCatalog=[catalog mutableCopy];
@@ -380,9 +389,14 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
     // 有界：最多保留 64 个目录，按 updatedAt 丢弃最旧（无时间戳的视为最旧）。
     while(rows.count>64){NSUInteger oldest=0;for(NSUInteger i=1;i<rows.count;i++)if([rows[i][@"updatedAt"] doubleValue]<[rows[oldest][@"updatedAt"] doubleValue])oldest=i;[rows removeObjectAtIndex:oldest];}
     [NSUserDefaults.standardUserDefaults setObject:rows forKey:@"tvboxCatalogs"];
+
+    }
 }
 + (NSDictionary *)catalogForID:(NSString *)identifier { for(NSDictionary *row in [self catalogs])if([row[@"id"] isEqual:identifier])return row; return nil; }
-+ (void)removeCatalog:(NSString *)identifier { NSMutableArray *rows=[[self catalogs] mutableCopy]; NSIndexSet *remove=[rows indexesOfObjectsPassingTest:^BOOL(NSDictionary *row,NSUInteger idx,BOOL *stop){return [row[@"id"] isEqual:identifier];}]; [rows removeObjectsAtIndexes:remove]; [NSUserDefaults.standardUserDefaults setObject:rows forKey:@"tvboxCatalogs"];if(TVBoxSafeCatalogID(identifier)){NSString *path=[TVBoxCatalogStorageDirectory() stringByAppendingPathComponent:[identifier stringByAppendingPathExtension:@"json"]];[NSFileManager.defaultManager removeItemAtPath:path error:NULL];} }
++ (void)removeCatalog:(NSString *)identifier {
+    @synchronized(self){ NSMutableArray *rows=[[self catalogs] mutableCopy]; NSIndexSet *remove=[rows indexesOfObjectsPassingTest:^BOOL(NSDictionary *row,NSUInteger idx,BOOL *stop){return [row[@"id"] isEqual:identifier];}]; [rows removeObjectsAtIndexes:remove]; [NSUserDefaults.standardUserDefaults setObject:rows forKey:@"tvboxCatalogs"];if(TVBoxSafeCatalogID(identifier)){NSString *path=[TVBoxCatalogStorageDirectory() stringByAppendingPathComponent:[identifier stringByAppendingPathExtension:@"json"]];[NSFileManager.defaultManager removeItemAtPath:path error:NULL];}
+    }
+}
 + (NSArray<NSDictionary *> *)liveSourcesInCatalog:(NSDictionary *)catalog { return [catalog[@"lives"] isKindOfClass:NSArray.class]?catalog[@"lives"]:@[]; }
 + (NSDictionary *)reconstructedConfigForCatalog:(NSDictionary *)catalog {
     NSMutableDictionary *config=[NSMutableDictionary dictionary];NSString *name=[catalog[@"name"] isKindOfClass:NSString.class]?catalog[@"name"]:@"资源合集";config[@"name"]=name;
