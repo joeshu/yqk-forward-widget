@@ -22,5 +22,7 @@ out=BytesIO()
 with ZipFile(out,'w',ZIP_DEFLATED) as jar:
  info=ZipInfo('classes.dex',(2026,1,1,0,0,0));info.compress_type=ZIP_DEFLATED
  jar.writestr(info,Path(sys.argv[1]).read_bytes())
+ info=ZipInfo('assets/compatibility.txt',(2026,1,1,0,0,0));info.compress_type=ZIP_DEFLATED
+ jar.writestr(info,b'plugin asset preserved')
 Path('Tests/JARFixture/fixture.jar.b64').write_bytes(base64.encodebytes(out.getvalue()))
 PY

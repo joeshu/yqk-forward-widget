@@ -17,7 +17,7 @@ public final class HostFixtureTest {
             JSONObject envelope=new JSONObject(InProcessHost.request(input.toString()));
             check(!envelope.has("error"),"request "+i+" failed: "+envelope);
             JSONObject answer=new JSONObject(envelope.getString("result"));
-            if(i==0)check(answer.getJSONArray("class").length()==1&&answer.getJSONArray("list").length()==1,"home");
+            if(i==0)check(answer.getJSONArray("class").length()==1&&answer.getJSONArray("list").length()==1&&answer.getJSONArray("runtime_checks").length()==7,"home/runtime compatibility");
             if(i==1)check(answer.getJSONArray("list").getJSONObject(0).getString("vod_name").equals("测试地区"),"filters");
             if(i==2)check(answer.getJSONArray("list").getJSONObject(0).getString("vod_name").equals("中文😀+&"),"Unicode");
             if(i==3)check(answer.getJSONArray("list").getJSONObject(0).getString("vod_play_url").endsWith("opaque+id%26signed"),"opaque ID");

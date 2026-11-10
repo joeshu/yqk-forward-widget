@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Validate IPA structure and Mach-O device platform. Does not claim playback works."""
-import argparse, hashlib, json, plistlib, struct, zipfile
+import argparse, hashlib, json, os, plistlib, struct, zipfile
 
 def macho_info(data):
     if len(data) < 4:
@@ -48,6 +48,7 @@ def validate(path):
         primary_icon = info.get('CFBundleIcons', {}).get('CFBundlePrimaryIcon', {})
         assert primary_icon, 'missing CFBundlePrimaryIcon in Info.plist'
         result = {'bundle_id': info['CFBundleIdentifier'], 'app_icon': True, 'binaries': {}}
+        result['size_bytes'] = {'ipa': os.path.getsize(path), 'app_uncompressed': sum(i.file_size for i in z.infolist() if i.filename.startswith(root))}
         binary = info.get('CFBundleExecutable')
         assert binary == 'CCTVHost', 'unexpected or missing app executable'
         result['version'] = info.get('CFBundleShortVersionString')
@@ -104,7 +105,7 @@ def validate(path):
             # A JavaHost resource alone is insufficient: require the statically linked JNI bridge too.
             executable = z.read(root + binary)
             assert b'TVAppleRuntimeRequest' in executable and b'JNI_CreateJavaVM' in executable, 'missing linked JVM/bridge'
-            for member in ('JavaHost/host.jar', 'JavaHost/apple-bindings.jar', 'lib/lib/modules', 'lib/lib/security/cacerts', 'jar-runtime.json', 'JARLicenses/COPYING'):
+            for member in ('JavaHost/host.jar', 'JavaHost/apple-bindings.jar', 'JavaHost/lib/android-4.1.1.4.jar', 'lib/lib/modules', 'lib/lib/security/cacerts', 'jar-runtime.json', 'JARLicenses/COPYING'):
                 assert root + member in z.namelist(), 'missing JAR runtime resource: ' + member
             assert int(info.get('MinimumOSVersion', '0').split('.')[0]) >= 17, 'JAR runtime requires iOS 17+'
             result['jar_runtime'] = json.loads(z.read(root + 'jar-runtime.json'))
@@ -113,6 +114,12 @@ def validate(path):
                     import io
                     with zipfile.ZipFile(io.BytesIO(z.read(name))) as jar:
                         assert not any(n.startswith('natives/') or n.endswith(('.dylib', '.jnilib', '.dll')) or (n.endswith('.so') and not n.startswith('android/')) for n in jar.namelist()), 'desktop native code in JAR: ' + name
+                        if name.endswith('/android-4.1.1.4.jar'):
+                            names = jar.namelist()
+                            assert not any(n.startswith('res/') or n in ('resources.arsc', 'AndroidManifest.xml') for n in names), 'unused SDK UI resources were bundled'
+                            assert 'android/app/Activity.class' in names and 'android/content/res/Resources.class' in names, 'Android compatibility classes missing'
+                            assert any(n.startswith('assets/') and not n.endswith('/') for n in names), 'SDK class-loader assets were removed'
+                            result['android_sdk_classes'] = sum(n.endswith('.class') for n in names)
         channels = json.loads(z.read(root + 'channels.json'))
         assert isinstance(channels, list) and channels, 'empty channel catalog'
         result['channel_count'] = len(channels)
