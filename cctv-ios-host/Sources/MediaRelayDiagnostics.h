@@ -11,7 +11,7 @@ static inline NSDictionary *MediaRelayDiagnosticRecord(NSString *line) {
     id value=[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
     if(![value isKindOfClass:NSDictionary.class])return nil;
     NSString *event=value[@"event"];
-    if(![@[@"media_relay_failed",@"media_relay_client_disconnected",@"media_relay_manifest_requested",@"media_relay_manifest_readable",@"media_play_result_rejected",@"media_relay_first_resource_requested",@"media_relay_first_resource_headers",@"media_relay_first_resource_byte",@"media_relay_first_resource_completed"] containsObject:event?:@""])return nil;
+    if(![@[@"media_relay_failed",@"media_dash_bridge_ready",@"media_dash_bridge_unavailable",@"media_relay_client_disconnected",@"media_relay_manifest_requested",@"media_relay_manifest_readable",@"media_play_result_rejected",@"media_relay_first_resource_requested",@"media_relay_first_resource_headers",@"media_relay_first_resource_byte",@"media_relay_first_resource_completed"] containsObject:event?:@""])return nil;
     NSMutableDictionary *record=[NSMutableDictionary dictionaryWithObject:event forKey:@"event"];
     for(NSString *key in @[@"request_id",@"stage",@"upstream_status",@"upstream_host",@"scheme",@"media_extension",@"error_type",@"error_summary",@"manifest_bytes",@"result_type",@"recognized_fields",@"address_type",@"candidate_count",@"validation_reason",@"elapsed_ms",@"response_bytes",@"resource_kind",@"play_request_id"]){
         id item=value[key];if([item isKindOfClass:NSNumber.class]||([item isKindOfClass:NSString.class]&&[item length]<=512))record[key]=item;

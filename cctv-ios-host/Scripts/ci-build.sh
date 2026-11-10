@@ -133,10 +133,17 @@ done
 
 SOURCES=$(find Sources -maxdepth 1 -name '*.m' -print | sort | tr '\n' ' ')
 
+# The release app always embeds the real JAR runtime. A missing runtime fails the build.
+JAR_ROOT="${CCTV_JAR_CACHE:-$PWD/.jar-runtime}/iphoneos"
+if [ ! -s "$JAR_ROOT/lib/libTVAppleRuntime.a" ]; then bash Scripts/prepare_jar_runtime.sh ios; fi
+cp -R "$JAR_ROOT/Resources/" "$APP/"
+JAR_FLAGS=(-DCCTV_JAR_ENABLED=1 -I "$JAR_ROOT/include" "$JAR_ROOT/AppleRuntime.m" -Wl,-force_load,"$JAR_ROOT/lib/libTVAppleRuntime.a" -Wl,-export_dynamic)
+/usr/libexec/PlistBuddy -c 'Set :MinimumOSVersion 17.0' "$APP/Info.plist"
+
 set -x
 clang -arch arm64 \
   -isysroot "$SDK" \
-  -miphoneos-version-min=15.0 \
+  -miphoneos-version-min=17.0 \
   -fobjc-arc \
   -I Sources/Include \
   -F Frameworks \
@@ -147,7 +154,7 @@ clang -arch arm64 \
   -Wl,-rpath,@executable_path/Frameworks \
   -Wl,-undefined,dynamic_lookup \
   -ObjC -lresolv \
-  $SOURCES \
+  $SOURCES "${JAR_FLAGS[@]}" \
   -o "$APP/CCTVHost"
 set +x
 

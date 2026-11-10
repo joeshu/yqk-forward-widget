@@ -1,3 +1,4 @@
+#import "MediaJARSource.h"
 #import "MediaRelayDiagnostics.h"
 #import "RootViewController.h"
 #import "MediaSubscriptionToken.h"
@@ -1809,9 +1810,10 @@ configureCatalogNavigation;
                     NSString *protocol=apiKind,*siteID=[NSString stringWithFormat:@"%@:%@:%@",protocol,catalogID,siteKey];
                     NSString *type=site[@"type"]?:@"1";
                     NSString *effectiveAPI=site[@"api"]?:@"";
-                    NSString *engine=[apiKind isEqual:@"maccms-api"]?@"MacCMS JSON/XML API":([apiKind isEqual:@"douban-index"]?@"豆瓣影视索引 · 原生适配":([apiKind isEqual:@"jar-bridge"]?@"站点接口适配 · 待读取验证":[NSString stringWithFormat:@"TVBox type %@ JSON API",type]));
+                    NSString *engine=[apiKind isEqual:@"maccms-api"]?@"MacCMS JSON/XML API":([apiKind isEqual:@"douban-index"]?@"豆瓣影视索引 · 原生适配":([apiKind isEqual:@"jar-bridge"]?@"JAR 站点 · 首次准备可能较慢":[NSString stringWithFormat:@"TVBox type %@ JSON API",type]));
                     NSArray *capabilities=[apiKind isEqual:@"douban-index"]?@[@"home",@"category",@"search"]:@[@"home",@"category",@"search",@"detail",@"play"];
                     NSMutableDictionary *source=[@{@"id":siteID,@"name":site[@"name"]?:@"影视来源",@"engine":engine,@"protocol":protocol,@"tvboxType":@([type integerValue]),@"api":effectiveAPI,@"url":effectiveAPI,@"options":site[@"ext"]?:@"",@"header":site[@"header"]?:@{},@"playUrl":site[@"playUrl"]?:@"",@"status":site[@"status"]?:@"可直接访问",@"catalogID":catalogID,@"catalogName":catalog[@"name"]?:@"资源合集",@"capabilities":capabilities,@"tvboxSiteKey":siteKey,@"tvboxSiteKeys":siteKey.length?@[siteKey]:@[]} mutableCopy];
+                    MediaJARAttachSource(source,site,catalog);
                     [sources addObject:source];
                 }
             }

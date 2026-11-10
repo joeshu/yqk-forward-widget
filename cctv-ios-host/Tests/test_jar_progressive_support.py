@@ -753,7 +753,8 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
 
         mp_m = (SOURCES / 'MediaPlaybackViewController.m').read_text(encoding='utf-8')
         self.assertIn('observed>=2)[owner prefetchNextEpisodeIfNeeded];', mp_m)
-        self.assertIn('[warmReq setValue:@"bytes=0-1023" forHTTPHeaderField:@"Range"];', mp_m)
+        self.assertIn('[owner.prefetchedAsset loadValuesAsynchronouslyForKeys:@[@"playable"]', mp_m)
+        self.assertNotIn('[warmReq setValue:@"bytes=0-1023"', mp_m)
         self.assertIn('@[@0.2,@0.45,@1.1,@2.0,@3.0]', mp_m)
 
         api_m = (SOURCES / 'MediaAPIClient.m').read_text(encoding='utf-8')

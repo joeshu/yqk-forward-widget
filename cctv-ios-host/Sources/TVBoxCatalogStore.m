@@ -1,4 +1,5 @@
 #import "TVBoxCatalogStore.h"
+#import "MediaJARSource.h"
 #import <zlib.h>
 
 static NSError *TVBoxError(NSString *message) {
@@ -163,7 +164,7 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
             if(inferred.length)name=inferred;
         }
         if(!name.length)name=[NSString stringWithFormat:@"未命名站点 %lu",(unsigned long)siteIndex];
-        if(api.length&&!TVBoxWebURL(api)&&TVBoxWebURL(sourceURL)){
+        if(api.length&&!MediaJARClass(api).length&&!TVBoxWebURL(api)&&TVBoxWebURL(sourceURL)){
             NSURL *base=[NSURL URLWithString:sourceURL];
             NSURL *resolved=[NSURL URLWithString:api relativeToURL:base].absoluteURL;
             if(!resolved){
@@ -193,7 +194,7 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
         apiParts=TVBoxURLComponents(api?:@"");
         NSString *path=apiParts.path.lowercaseString;
         if ([path hasSuffix:@".md5"]) path=[path stringByDeletingPathExtension];
-        NSString *siteType=TVBoxString(value[@"type"],32)?:@"";BOOL scriptFile=[@[@"js",@"hjs",@"mjs",@"cjs",@"py",@"zip"] containsObject:path.pathExtension.lowercaseString];BOOL jarFile=[path.pathExtension.lowercaseString isEqual:@"jar"];BOOL jarSpiderClass=[api.lowercaseString hasPrefix:@"csp_"];BOOL apiKindDouban=[siteType isEqual:@"3"]&&[api.lowercaseString isEqual:@"csp_doudou"];BOOL apiKindJARBridge=[siteType isEqual:@"3"]&&TVBoxSupportedJARClass(api);
+        NSString *siteType=TVBoxString(value[@"type"],32)?:@"";BOOL scriptFile=[@[@"js",@"hjs",@"mjs",@"cjs",@"py",@"zip"] containsObject:path.pathExtension.lowercaseString];BOOL jarFile=[path.pathExtension.lowercaseString isEqual:@"jar"];BOOL jarSpiderClass=MediaJARClass(api).length>0;BOOL apiKindDouban=[siteType isEqual:@"3"]&&[api.lowercaseString isEqual:@"csp_doudou"];BOOL apiKindJARBridge=[siteType isEqual:@"3"]&&(TVBoxSupportedJARClass(api)||MediaJARClass(api).length);
         BOOL apiKindMacCMS=!scriptFile&&!jarFile&&TVBoxWebURL(api)&&[siteType isEqual:@"0"];
         BOOL apiKindTVBox=!scriptFile&&!jarFile&&TVBoxWebURL(api)&&([siteType isEqual:@"1"]||[siteType isEqual:@"4"]);
         BOOL direct=TVBoxWebURL(api)&&scriptFile;
@@ -209,6 +210,7 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
         else if([apiParts.scheme.lowercaseString isEqual:@"http"]||[apiParts.scheme.lowercaseString isEqual:@"https"])reason=@"此脚本类型需 Android/JAR 运行时；iOS 不支持";
         NSString *apiKind=apiKindDouban?@"douban-index":(apiKindMacCMS?@"maccms-api":(apiKindTVBox?@"tvbox-api":(direct?@"script":(apiKindJARBridge?@"jar-bridge":@"unsupported"))));
         NSMutableDictionary *site=[@{@"key":key,@"name":name,@"api":api?:@"",@"ext":ext?:@"",@"type":siteType,@"supported":@(supported),@"status":reason,@"apiKind":apiKind,@"sourceIndex":@(siteIndex-1)} mutableCopy];
+        if([value[@"jar"] isKindOfClass:NSString.class]&&[value[@"jar"] length]<=8192)site[@"jar"]=value[@"jar"];
         if(safeHeaders.count)site[@"header"]=safeHeaders;
         if([value[@"playUrl"] isKindOfClass:NSString.class]&&[value[@"playUrl"] length]<=4096)site[@"playUrl"]=value[@"playUrl"];
         [cleanSites addObject:site];
@@ -283,6 +285,9 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
             NSDictionary *site=(NSDictionary *)rawSite;
             NSString *siteType=[site[@"type"] description]?:@"";
             NSString *api=[site[@"api"] isKindOfClass:NSString.class]?site[@"api"]:@"";
+            if([siteType isEqual:@"3"]&&!MediaJARClass(api).length&&MediaJARClass([NSURL URLWithString:api].lastPathComponent).length){
+                NSMutableDictionary *restored=[site mutableCopy];api=[NSURL URLWithString:api].lastPathComponent;restored[@"api"]=api;site=restored;catChanged=YES;upgraded=YES;
+            }
             NSURLComponents *siteParts=TVBoxURLComponents(api);
             NSString *sitePath=siteParts.path.lowercaseString?:@"";
             if([sitePath hasSuffix:@".md5"])sitePath=[sitePath stringByDeletingPathExtension];

@@ -288,12 +288,12 @@ const fn = {fn_code};
 
         # 3. Playback startup buffer, post-first-frame immediate play, Cicada buffer & cache optimizations
         mp_src = (ROOT / "Sources/MediaPlaybackViewController.m").read_text(encoding="utf-8")
-        self.assertIn("item.preferredForwardBufferDuration=fastStartup?1.5:3.0;", mp_src)
-        self.assertIn("[self.player playImmediatelyAtRate:targetRate];", mp_src)
+        self.assertIn("item.preferredForwardBufferDuration=MediaPlaybackForwardBuffer(NO,fastStartup,", mp_src)
+        self.assertIn("[self startAVPlayerFromReadyBufferIfNeeded:item];", mp_src)
 
         ca_src = (ROOT / "Sources/MediaPlaybackCicadaAdapter.m").read_text(encoding="utf-8")
-        self.assertIn('NSSelectorFromString(@"setStartBufferDuration:"), 200', ca_src)
-        self.assertIn('NSSelectorFromString(@"setHighBufferDuration:"), 1200', ca_src)
+        self.assertIn('[self updateBufferConfiguration];', ca_src)
+        self.assertIn('MediaPlaybackForwardBuffer(YES,YES,', ca_src)
 
         mc_src = (ROOT / "Sources/MediaMetadataCache.m").read_text(encoding="utf-8")
         self.assertIn('@"cost":@(persistentData.length)', mc_src)

@@ -249,6 +249,31 @@ jobs:
             --notes "Version ${version}, build ${build}. Built from $GITHUB_SHA on $(date -u +%Y-%m-%dT%H:%MZ). Device playback remains unverified."
           echo "https://github.com/${GITHUB_REPOSITORY}/releases/tag/$tag"
 
+  jar-smoke:
+    needs: jar-runtime
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: jar-runtime-ios-simulator
+          path: cctv-ios-host
+      - name: Verify embedded DEX to native playback
+        working-directory: cctv-ios-host
+        run: |
+          mkdir -p .jar-runtime
+          tar -xzf jar-runtime-ios-simulator.tgz -C .jar-runtime
+          bash Scripts/jar_smoke.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: CCTVHost-JAR-smoke-${{ github.sha }}
+          path: |
+            cctv-ios-host/jar-preview/*.json
+            cctv-ios-host/jar-preview/*.log
+          if-no-files-found: ignore
+
   ui-preview:
     runs-on: macos-15
     timeout-minutes: 15

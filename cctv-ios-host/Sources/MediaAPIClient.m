@@ -1,6 +1,8 @@
 #import "MediaAPIClient.h"
 #import "MediaSP360Adapter.h"
 #import "MediaApp3QAdapter.h"
+#import "MediaJARSource.h"
+#import "MediaJARRuntime.h"
 #import "MediaPlaybackHeaders.h"
 #import "RuntimeDiagnostics.h"
 #import "TVBoxCatalogStore.h"
@@ -495,6 +497,7 @@ static NSDictionary *MediaParserCleanHeaders(id value,NSURL *mediaURL,NSURL *par
 @property(nonatomic, copy) NSString *activeCorrelationID;
 @property(nonatomic, copy) NSString *activeOperation;
 @property(nonatomic, copy) NSDictionary *tvboxSource;
+@property(nonatomic,strong) MediaJARRequest *jarRequest;
 @property(nonatomic,copy) NSString *parserCatalogID;
 @property(nonatomic,copy) NSDictionary *parserFallbackResult;
 @property(nonatomic,copy) NSDictionary *parserWebFallbackResult;
@@ -582,6 +585,7 @@ static NSDictionary *MediaParserCleanHeaders(id value,NSURL *mediaURL,NSURL *par
         if(self.activeCorrelationID.length)fields[@"correlation_id"]=self.activeCorrelationID;
         [RuntimeDiagnostics.shared recordEvent:@"media_api_cancelled" category:@"media_api" fields:fields];
     }
+    [self.jarRequest cancel];self.jarRequest=nil;
     self.generation++;
     self.parserCompletion=nil;self.parserFallbackResult=nil;self.parserWebFallbackResult=nil;self.parserAPIEntries=nil;self.parserCorrelationID=nil;self.selectedParserID=nil;
     if(self.task){[self.contextLock lock];[self.requestContexts removeObjectForKey:@(self.task.taskIdentifier)];[self.contextLock unlock];}
@@ -593,6 +597,7 @@ static NSDictionary *MediaParserCleanHeaders(id value,NSURL *mediaURL,NSURL *par
 }
 - (void)cancel { [self cancelWithReason:@"caller_cancelled"]; }
 - (void)dealloc {
+    [self.jarRequest cancel];
     [self.task cancel];
     [self.session invalidateAndCancel];
     [self.playSession invalidateAndCancel];
@@ -1339,6 +1344,24 @@ static id MediaJARBridgeNormalize(NSString *operation,NSDictionary *arguments,NS
                                           @"argument_count":@([arguments isKindOfClass:NSDictionary.class]?arguments.count:0)} mutableCopy];
     if(correlationID.length)startFields[@"correlation_id"]=correlationID;
     [RuntimeDiagnostics.shared recordEvent:@"media_api_started" category:@"media_api" fields:startFields];
+    }
+
+    if(MediaJARUsesRuntime(self.tvboxSource)&&![@[@"capabilities",@"providers"] containsObject:operation]){
+        NSDictionary *source=self.tvboxSource;
+        __weak typeof(self) weakSelf=self;
+        self.jarRequest=[MediaJARRuntime requestSource:source operation:operation arguments:arguments?:@{} completion:^(id raw,NSError *failure){
+            MediaAPIClient *client=weakSelf;if(!client||client.generation!=generation)return;
+            client.jarRequest=nil;
+            NSMutableDictionary *delegate=[source mutableCopy];delegate[@"protocol"]=@"tvbox-api";delegate[@"tvboxType"]=@3;
+            // Only explicit playback headers returned by the spider go to its media CDN.
+            delegate[@"header"]=@{};
+            id result=failure?nil:MediaTVBoxNormalize(operation,arguments?:@{},delegate,raw);
+            if(!failure&&[result isKindOfClass:NSDictionary.class]&&[result[@"error"] isKindOfClass:NSString.class])failure=[NSError errorWithDomain:@"CCTVHostJARRuntime" code:11 userInfo:@{NSLocalizedDescriptionKey:@"JAR 爬虫返回的数据无法用于此操作"}];
+            if(diagnosticsEnabled){NSMutableDictionary *fields=[@{@"request_id":requestID,@"operation":operation?:@"unknown",@"port":@0,@"elapsed_ms":@((NSInteger)((CACurrentMediaTime()-startedAt)*1000)),@"protocol":@"jar-runtime",@"failure_stage":failure?@"jar_execution":@"none",@"error_domain":failure.domain?:@"",@"error_code":@(failure.code)} mutableCopy];if(correlationID.length)fields[@"correlation_id"]=correlationID;[RuntimeDiagnostics.shared recordEvent:failure?@"media_api_failed":@"media_api_succeeded" category:@"media_api" fields:fields];}
+            client.activeRequestID=nil;client.activeCorrelationID=nil;client.activeOperation=nil;
+            [client completeResult:result error:failure operation:operation generation:generation correlationID:correlationID completion:completion];
+        }];
+        return;
     }
 
     BOOL macCMS=[self.tvboxSource[@"protocol"] isEqual:@"maccms-api"],doubanIndex=[self.tvboxSource[@"protocol"] isEqual:@"douban-index"],jarBridge=[self.tvboxSource[@"protocol"] isEqual:@"jar-bridge"];

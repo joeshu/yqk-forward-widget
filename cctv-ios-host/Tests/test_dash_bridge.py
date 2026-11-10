@@ -139,7 +139,11 @@ class DashPlaybackTests(unittest.TestCase):
                 master = urllib.request.urlopen(result['url']).read().decode()
                 self.assertIn('TYPE=AUDIO', master)
                 self.assertIn('CODECS=', master)
-                decoded = subprocess.run(['ffmpeg', '-hide_banner', '-loglevel', 'info', '-i', result['url'], '-map', '0:v:0', '-map', '0:a:0', '-f', 'null', '-'], capture_output=True, text=True, timeout=25)
+                help_text = subprocess.run(['ffmpeg', '-hide_banner', '-h', 'demuxer=hls'], capture_output=True, text=True).stdout
+                segment_options = ['-allowed_extensions', 'ALL']
+                if 'allowed_segment_extensions' in help_text: segment_options += ['-allowed_segment_extensions', 'ALL']
+                if 'extension_picky' in help_text: segment_options += ['-extension_picky', '0']
+                decoded = subprocess.run(['ffmpeg', '-hide_banner', '-loglevel', 'info', *segment_options, '-i', result['url'], '-map', '0:v:0', '-map', '0:a:0', '-f', 'null', '-'], capture_output=True, text=True, timeout=25)
                 self.assertEqual(decoded.returncode, 0, decoded.stderr)
                 self.assertRegex(decoded.stderr, r'Video:.*h264')
                 self.assertRegex(decoded.stderr, r'Audio:.*aac')

@@ -100,6 +100,19 @@ def validate(path):
             assert root + 'python/lib/python3.13/site-packages/Cryptodome/__init__.py' in z.namelist(), 'missing Cryptodome namespace alias'
             result['python_crypto_compat'] = ['ARC4', 'AES ECB/CBC/CFB/OFB/CTR/GCM/EAX', 'RSA public-key PKCS#1 v1.5/OAEP', 'MD5/Hash/HMAC/CMAC', 'PBKDF2/HKDF', 'Padding/Counter/number/strxor']
             result['local_media_runtimes'] = ['Python Spider', 'JavaScriptCore', 'drpy', 'Node.js Mobile']
+        if variant == 'full':
+            # A JavaHost resource alone is insufficient: require the statically linked JNI bridge too.
+            executable = z.read(root + binary)
+            assert b'TVAppleRuntimeRequest' in executable and b'JNI_CreateJavaVM' in executable, 'missing linked JVM/bridge'
+            for member in ('JavaHost/host.jar', 'JavaHost/apple-bindings.jar', 'lib/lib/modules', 'lib/lib/security/cacerts', 'jar-runtime.json', 'JARLicenses/COPYING'):
+                assert root + member in z.namelist(), 'missing JAR runtime resource: ' + member
+            assert int(info.get('MinimumOSVersion', '0').split('.')[0]) >= 17, 'JAR runtime requires iOS 17+'
+            result['jar_runtime'] = json.loads(z.read(root + 'jar-runtime.json'))
+            for name in z.namelist():
+                if name.startswith(root + 'JavaHost/') and name.endswith('.jar'):
+                    import io
+                    with zipfile.ZipFile(io.BytesIO(z.read(name))) as jar:
+                        assert not any(n.startswith('natives/') or n.endswith(('.dylib', '.jnilib', '.dll')) or (n.endswith('.so') and not n.startswith('android/')) for n in jar.namelist()), 'desktop native code in JAR: ' + name
         channels = json.loads(z.read(root + 'channels.json'))
         assert isinstance(channels, list) and channels, 'empty channel catalog'
         result['channel_count'] = len(channels)

@@ -131,6 +131,7 @@ class NativeMediaAPITests(unittest.TestCase):
                     "xcrun", "clang", "-fobjc-arc", "-framework", "Foundation", "-framework", "QuartzCore", "-lz",
                     "-I", str(root / "Sources"), str(root / "Tests" / "native_media_api_tests.m"),
                     str(root / "Sources" / "MediaAPIClient.m"),
+                    str(root / "Sources" / "MediaJARRuntime.m"),
                     str(root / "Sources" / "TVBoxCatalogStore.m"),
                     str(root / "Sources" / "MediaPlaybackHeaders.m"), "-o", executable,
                 ], capture_output=True, text=True)
