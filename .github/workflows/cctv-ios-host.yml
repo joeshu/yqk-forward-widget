@@ -50,6 +50,10 @@ jobs:
         with:
           path: cctv-ios-host/.jar-runtime
           key: jar-zero-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-${{ hashFiles('cctv-ios-host/Runtime/JAR/upstream.json', 'cctv-ios-host/Scripts/prepare_jar_runtime.sh') }}
+      - name: Install native runtime build tools
+        run: |
+          brew install autoconf automake libtool pkg-config make
+          echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
       - name: Build interpreter-only JAR runtime
         working-directory: cctv-ios-host
         run: bash Scripts/prepare_jar_runtime.sh '${{ matrix.target }}'
