@@ -16,7 +16,10 @@ PROFILE=$(cat "$ROOT/Scripts/prepare_jar_runtime.sh" "$ROOT/Scripts/optimize_jar
 NATIVE_STAMP="$REV-$(xcrun --sdk "$PLATFORM" --show-sdk-version)-2"
 STAMP="$NATIVE_STAMP-$PROFILE"
 if [ -f "$OUT/complete" ] && [ "$(cat "$OUT/complete")" = "$STAMP" ] && [ -s "$OUT/lib/libTVAppleRuntime.a" ] && [ -s "$OUT/packaging-report.json" ] && { [ "$TARGET" != ios ] || [ -s "$OUT/compatibility/summary.json" ]; }; then
-  echo "Using verified JAR runtime: $PLATFORM"; exit 0
+  echo "Using verified JAR runtime: $PLATFORM"
+  cat "$OUT/packaging-report.json"
+  if [ "$TARGET" = ios ]; then cat "$OUT/compatibility/summary.json"; fi
+  exit 0
 fi
 # A prefix cache restore may come from another SDK. Do not reuse that native build.
 if [ -f "$OUT/complete" ]; then
