@@ -859,6 +859,30 @@ class Handler(BaseHTTPRequestHandler):
                         diagnostic_id=diagnostic_id, expected_hls=expected_hls, resource_scope=request_id)
                     return f'http://127.0.0.1:{self.server.server_port}/media/{token}'
                 result = dict(result)
+                def adapt_dash(candidate, request_headers, validate=True):
+                    if not is_dash_media(candidate, candidate.get('url')) or candidate.get('proxy'):
+                        return False
+                    address = candidate['url']
+                    try:
+                        token = self.server.relay.register_dash(address, request_headers,
+                            diagnostic_id=diagnostic_id, resource_scope=request_id, validate=validate)
+                    except Exception as error:
+                        # The original DASH engine remains available for layouts
+                        # or licensed streams the clear manifest bridge cannot handle.
+                        stage = str(error) if re.fullmatch(r'dash_[a-z_]+', str(error)) else 'dash_manifest_fetch_failed'
+                        print('[CCTVHostMediaRelay] ' + json.dumps({'event': 'media_dash_bridge_unavailable',
+                            'request_id': diagnostic_id, 'stage': stage,
+                            'error_type': type(error).__name__}, separators=(',', ':')))
+                        return False
+                    candidate.update(originalURL=address,
+                        url=f'http://127.0.0.1:{self.server.server_port}/media/{token}',
+                        format='hls', contentType='application/vnd.apple.mpegurl',
+                        dashRemuxed=True, directMedia=True, nativePlayable=True,
+                        playbackEngine='avplayer', parse=0, jx=0, requiresWebPlayback=False,
+                        headers={}, baseHeaders=dict(request_headers))
+                    print('[CCTVHostMediaRelay] ' + json.dumps({'event': 'media_dash_bridge_ready',
+                        'request_id': diagnostic_id, 'stage': 'clear_dash_hls_ready'}, separators=(',', ':')))
+                    return True
                 direct_media = bool(result.get('directMedia') or is_direct_media_url(result.get('url')))
                 alternate_proxy = any(isinstance(item, dict) and item.get('proxy')
                                       for item in result.get('alternates', []))
@@ -893,7 +917,8 @@ class Handler(BaseHTTPRequestHandler):
                     result['baseHeaders'] = {}
                     result['directMedia'] = True
                     result['nativePlayable'] = True
-                can_relay_primary = (not result.get('proxy') and not is_dash_media(result, result.get('url')) and (headers or is_declared_hls(result, result.get('url'))
+                adapt_dash(result, headers)
+                can_relay_primary = (not result.get('proxy') and not result.get('dashRemuxed') and not is_dash_media(result, result.get('url')) and (headers or is_declared_hls(result, result.get('url'))
                                      or is_extensionless_url(result.get('url')))
                                      and (not result.get('parse') or direct_media))
                 if can_relay_primary:
@@ -916,6 +941,9 @@ class Handler(BaseHTTPRequestHandler):
                             alternate['originalURL'] = address
                             alternate['url'] = self.server.register_plugin_proxy(address, alternate_headers)
                             alternate.pop('headers', None)
+                            relayed.append(alternate)
+                            continue
+                        if adapt_dash(alternate, alternate_headers, validate=False):
                             relayed.append(alternate)
                             continue
                         alternate_media = dict(alternate)

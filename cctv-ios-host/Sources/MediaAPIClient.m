@@ -1,4 +1,5 @@
 #import "MediaAPIClient.h"
+#import "MediaSP360Adapter.h"
 #import "MediaPlaybackHeaders.h"
 #import "RuntimeDiagnostics.h"
 #import "TVBoxCatalogStore.h"
@@ -940,6 +941,7 @@ static NSURLRequest *MediaJARBridgeRequest(NSDictionary *source,NSString *operat
     NSString *api=MediaTVBoxString(source[@"api"]);
     NSString *siteName=MediaTVBoxString(source[@"name"]).length?MediaTVBoxString(source[@"name"]):api;
     NSString *lowAPI=api.lowercaseString;
+    if([lowAPI isEqual:@"csp_sp360"])return MediaSP360Request(operation,arguments,error);
     id rawOptions=source[@"options"];
     NSDictionary *cfg=MediaJARBridgeJSONDictionary(rawOptions);
     NSArray<NSString *> *candidates=MediaJARBridgeCandidatesForSource(source);
@@ -1075,9 +1077,10 @@ static NSDictionary *MediaJARBridgeBuildPlayResult(NSString *url,NSDictionary *s
     return res.copy;
 }
 static id MediaJARBridgeNormalize(NSString *operation,NSDictionary *arguments,NSDictionary *source,id raw) {
-    if([operation isEqual:@"capabilities"])return @{@"engine":@"Android/JAR 适配引擎 · iOS 原生执行",@"protocol":@"jar-bridge",@"capabilities":@[@"home",@"category",@"search",@"detail",@"play"]};
+    if([operation isEqual:@"capabilities"])return @{@"engine":@"站点接口适配 · 待读取验证",@"protocol":@"jar-bridge",@"capabilities":@[@"home",@"category",@"search",@"detail",@"play"]};
     if([operation isEqual:@"providers"])return @[@{@"id":@"",@"name":source[@"name"]?:@"JAR 站点"}];
     NSString *api=MediaTVBoxString(source[@"api"]).lowercaseString;
+    if([api isEqual:@"csp_sp360"])return MediaSP360Normalize(operation,arguments,raw);
     id rawOptions=source[@"options"];
     NSDictionary *cfg=MediaJARBridgeJSONDictionary(rawOptions);
     if([api containsString:@"bili"]){
@@ -1320,7 +1323,7 @@ static id MediaJARBridgeNormalize(NSString *operation,NSDictionary *arguments,NS
 
     BOOL macCMS=[self.tvboxSource[@"protocol"] isEqual:@"maccms-api"],doubanIndex=[self.tvboxSource[@"protocol"] isEqual:@"douban-index"],jarBridge=[self.tvboxSource[@"protocol"] isEqual:@"jar-bridge"];
     NSString *playArgID=MediaTVBoxString(arguments[@"id"]);
-    BOOL jarDirectPlay=jarBridge&&([[self.tvboxSource[@"api"] lowercaseString] containsString:@"bili"]||MediaPlaybackResultIsDirectMedia(@{@"url":playArgID})||MediaTVBoxURLHasSignedQuery(playArgID));
+    BOOL jarDirectPlay=jarBridge&&([[self.tvboxSource[@"api"] lowercaseString] containsString:@"bili"]||[[self.tvboxSource[@"api"] lowercaseString] isEqual:@"csp_sp360"]||MediaPlaybackResultIsDirectMedia(@{@"url":playArgID})||MediaTVBoxURLHasSignedQuery(playArgID));
     BOOL localBiliDetail=jarBridge&&[operation isEqual:@"detail"]&&[[self.tvboxSource[@"api"] lowercaseString] containsString:@"bili"];
     BOOL localDirectPlay=[operation isEqual:@"play"]&&(macCMS||doubanIndex||jarDirectPlay||[self.tvboxSource[@"tvboxType"] integerValue]==1||(self.tvboxSource[@"tvboxType"]!=nil&&[self.tvboxSource[@"tvboxType"] integerValue]==0));
     BOOL localTVBoxOperation=self.tvboxSource&&([operation isEqual:@"capabilities"]||[operation isEqual:@"providers"]||localDirectPlay||localBiliDetail||(doubanIndex&&[operation isEqual:@"detail"]));

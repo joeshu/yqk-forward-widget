@@ -203,7 +203,7 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
         else if(apiKindMacCMS)reason=@"TVBox type 0 · MacCMS JSON/XML API · 选中后请求";
         else if(apiKindTVBox)reason=[NSString stringWithFormat:@"TVBox type %@ JSON API · 选中后请求，尚未验证",siteType];
         else if(direct)reason=@"可导入 · 将由现有脚本适配器检查";
-        else if(apiKindJARBridge)reason=@"Android/JAR 适配引擎 · iOS 原生执行";
+        else if(apiKindJARBridge)reason=@"站点接口适配 · 待读取验证";
         else if([siteType isEqual:@"0"])reason=@"TVBox type 0 为 JS 爬虫，需脚本文件地址；iOS 不支持此地址形式";
         else if([siteType isEqual:@"3"])reason=(jarFile||jarSpiderClass)?@"需要 Android/JAR 运行时；iOS 不支持":@"脚本地址无法识别；保留在合集中";
         else if([apiParts.scheme.lowercaseString isEqual:@"http"]||[apiParts.scheme.lowercaseString isEqual:@"https"])reason=@"此脚本类型需 Android/JAR 运行时；iOS 不支持";
@@ -287,11 +287,11 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
             NSString *sitePath=siteParts.path.lowercaseString?:@"";
             if([sitePath hasSuffix:@".md5"])sitePath=[sitePath stringByDeletingPathExtension];
             BOOL isScriptURL=TVBoxWebURL(api)&&[@[@"js",@"hjs",@"mjs",@"cjs",@"py",@"zip"] containsObject:sitePath.pathExtension.lowercaseString];
-            if([siteType isEqual:@"3"]&&TVBoxSupportedJARClass(api)&&(![site[@"supported"] boolValue]||![site[@"apiKind"] isEqual:@"jar-bridge"])){
+            if([siteType isEqual:@"3"]&&TVBoxSupportedJARClass(api)&&(![site[@"supported"] boolValue]||![site[@"apiKind"] isEqual:@"jar-bridge"]||[site[@"status"] isEqual:@"Android/JAR 适配引擎 · iOS 原生执行"])){
                 NSMutableDictionary *mSite=[site mutableCopy];
                 mSite[@"supported"]=@YES;
                 mSite[@"apiKind"]=@"jar-bridge";
-                mSite[@"status"]=@"Android/JAR 适配引擎 · iOS 原生执行";
+                mSite[@"status"]=@"站点接口适配 · 待读取验证";
                 [updatedSites addObject:mSite.copy];
                 catChanged=YES;upgraded=YES;
             }else if(isScriptURL&&(![site[@"supported"] boolValue]||![site[@"apiKind"] isEqual:@"script"])){

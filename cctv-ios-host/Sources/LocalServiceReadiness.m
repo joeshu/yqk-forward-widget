@@ -140,6 +140,10 @@
                   if ([runtimeState isEqualToString:@"failed"] || [runtimeState isEqualToString:@"stopping"]) {
                       NSString *detail = [healthJSON[@"startup_error"] isKindOfClass:NSString.class]
                           ? healthJSON[@"startup_error"] : @"未知错误";
+                      NSDictionary *location=[healthJSON[@"startup_failure"] isKindOfClass:NSDictionary.class]?healthJSON[@"startup_failure"]:@{};
+                      NSString *entry=[location[@"entry"] isKindOfClass:NSString.class]?[location[@"entry"] lastPathComponent]:@"";
+                      NSInteger line=[location[@"line"] respondsToSelector:@selector(integerValue)]?[location[@"line"] integerValue]:0;
+                      if(entry.length&&entry.length<=256&&line>0)detail=[NSString stringWithFormat:@"%@ · %@:%ld",detail,entry,(long)line];
                       self.lastFailureKind = [runtimeState isEqualToString:@"failed"] ? @"runtime_failed" : @"runtime_stopping";
                       [self finish:[NSError errorWithDomain:@"CCTVHostMediaRuntime"
                                                        code:[runtimeState isEqualToString:@"failed"] ? 2 : 3

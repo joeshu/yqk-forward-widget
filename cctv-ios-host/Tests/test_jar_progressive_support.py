@@ -227,7 +227,7 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
         self.assertIn('apiKindJARBridge', store_code)
         self.assertIn('csp_xbpq', store_code)
         self.assertIn('csp_appdrama', store_code)
-        self.assertIn('Android/JAR 适配引擎 · iOS 原生执行', store_code)
+        self.assertIn('站点接口适配 · 待读取验证', store_code)
         self.assertIn('apiKindDouban=[siteType isEqual:@"3"]&&[api.lowercaseString isEqual:@"csp_doudou"]', store_code)
 
     def test_media_api_client_jar_bridge_and_non_recursive_delegation(self):

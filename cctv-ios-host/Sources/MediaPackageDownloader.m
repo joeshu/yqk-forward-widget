@@ -284,7 +284,7 @@ static BOOL PackageSameCredentialScope(NSURL *origin,NSURL *target) {
             NSData *bundledWeBox=PackageFallbackScriptForFailedURL(self.targetURL?:self.originalURL);
             if(bundledWeBox.length){self.scriptData=bundledWeBox;[self install:@{}];return;}
         }
-        NSString *statusHint=(self.responseStatus==403||self.responseStatus==401)?@"（源站拒绝访问或订阅鉴权已失效）":(self.responseStatus==404?@"（远端脚本文件不存在）":@"，或响应超过大小上限");[self finish:nil error:[self error:[NSString stringWithFormat:@"%@失败：HTTP %ld%@",self.stage,(long)self.responseStatus,statusHint]]];
+        NSString *statusHint=self.responseStatus==403?@"（源站拒绝此请求，请确认来源允许当前客户端访问）":(self.responseStatus==401?@"（源站要求有效登录或订阅凭据）":(self.responseStatus==404?@"（远端脚本文件不存在）":@"，或响应超过大小上限"));[self finish:nil error:[self error:[NSString stringWithFormat:@"%@失败：HTTP %ld%@",self.stage,(long)self.responseStatus,statusHint]]];
     }
 }
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task didReceiveData:(NSData *)data {

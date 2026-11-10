@@ -43,6 +43,14 @@ class NativePackageTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
 
+    def test_encrypted_hjs_is_not_executed_as_javascript(self):
+        file = self.folder / 'encrypted.hjs'
+        file.write_text(json.dumps({'ver': 1, 'alg': 'AES-256-GCM', 'iv': 'fixture-iv', 'cipher': 'fixture-cipher'}))
+        result = self.inspect(file)
+        self.assertFalse(result['ok'])
+        self.assertIn('加密模块', result['error'])
+        self.assertIn('授权', result['error'])
+
     def archive(self, entries):
         file = self.folder / 'fixture.zip'
         with zipfile.ZipFile(file, 'w', zipfile.ZIP_DEFLATED) as archive:

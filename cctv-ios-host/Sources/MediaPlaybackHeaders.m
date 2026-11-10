@@ -63,6 +63,7 @@ static NSString *MediaPlaybackString(id value) {
 
 BOOL MediaPlaybackResultSupportsAVPlayer(NSDictionary *result) {
     if(![result isKindOfClass:NSDictionary.class])return NO;
+    if([result[@"dashRemuxed"] boolValue])return YES;
     NSString *format=MediaPlaybackString(result[@"format"]?:result[@"mediaType"]?:result[@"playbackType"]);
     NSString *mime=MediaPlaybackString(result[@"contentType"]?:result[@"content_type"]?:result[@"mimeType"]?:result[@"mime"]);
     NSRange semicolon=[mime rangeOfString:@";"];if(semicolon.location!=NSNotFound)mime=[mime substringToIndex:semicolon.location];
@@ -86,6 +87,7 @@ BOOL MediaPlaybackResultSupportsAVPlayer(NSDictionary *result) {
 
 BOOL MediaPlaybackResultSupportsCicada(NSDictionary *result) {
     if(![result isKindOfClass:NSDictionary.class])return NO;
+    if([result[@"dashRemuxed"] boolValue])return NO;
     NSString *engine=MediaPlaybackString(result[@"playbackEngine"]);
     if([engine isEqual:@"cicada"])return YES;
     NSString *format=MediaPlaybackString(result[@"format"]?:result[@"mediaType"]?:result[@"playbackType"]);

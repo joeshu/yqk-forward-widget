@@ -234,6 +234,12 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     }
     if(!SafeRelative(entry) || ![fm fileExistsAtPath:[root stringByAppendingPathComponent:entry]]){PackageError(error,@"无法识别入口；请在 cctvhost.json 中指定 entry");return nil;}
     NSString *text=[[NSString alloc] initWithData:ReadBounded([NSURL fileURLWithPath:[root stringByAppendingPathComponent:entry]],PackageFileLimit,error) encoding:NSUTF8StringEncoding];if(!text.length){PackageError(error,@"入口不是有效 UTF-8 文本或文件过大");return nil;}
+    if([entry.pathExtension.lowercaseString isEqual:@"hjs"]){
+        id envelope=[NSJSONSerialization JSONObjectWithData:[text dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL];
+        if([envelope isKindOfClass:NSDictionary.class]&&[envelope[@"alg"] isKindOfClass:NSString.class]&&[envelope[@"cipher"] isKindOfClass:NSString.class]&&[envelope[@"iv"] isKindOfClass:NSString.class]){
+            PackageError(error,@"此 HJS 是加密模块，不是 JavaScript 明文。需要发布方提供适用于 CCTVHost 的明文模块或授权解密接口；当前无法执行此加密包。");return nil;
+        }
+    }
     NSString *runtime=result[@"runtime"],*protocol=result[@"protocol"],*moduleType=result[@"moduleType"];
     NSString *routerPath=[entry.stringByDeletingLastPathComponent stringByAppendingPathComponent:@"router.js"];
     if([routerPath isEqual:@"./router.js"])routerPath=@"router.js";

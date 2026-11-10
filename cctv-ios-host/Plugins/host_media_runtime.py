@@ -1047,8 +1047,23 @@ class PythonSpider:
         except BaseException as error:
             self._capture_plugin_loopback_servers()
             self._stop_plugin_loopback_servers()
+            # Preserve the failing source location without source text, local
+            # variable values, exception messages, absolute paths or URL tokens.
+            failure = {'stage': prepare_stage, 'entry': os.path.basename(entry),
+                       'error_type': type(error).__name__}
+            trace = error.__traceback__
+            while trace:
+                filename = os.path.realpath(trace.tb_frame.f_code.co_filename)
+                if filename.startswith(self.root + os.sep):
+                    failure['line'] = trace.tb_lineno
+                    failure['function'] = trace.tb_frame.f_code.co_name[:96]
+                trace = trace.tb_next
+            try:
+                error.cctvhost_failure = failure
+            except Exception:
+                pass
             _python_spider_log_stage('python_spider_prepare_failed', entry, prepare_started_at,
-                                     stage=prepare_stage, error_type=type(error).__name__)
+                                     **{key: value for key, value in failure.items() if key != 'entry'})
             self._remove_package_modules()
             if self.added_path and self.root in sys.path:
                 sys.path.remove(self.root)
@@ -1518,6 +1533,7 @@ class MediaRuntime:
         self._state_lock = threading.RLock()
         self._state = 'ready' if engine is not None else 'starting'
         self._startup_error = ''
+        self._startup_failure = {}
         self._startup_thread = None
         self.cache = collections.OrderedDict()
         self.cache_lock = threading.Lock()
@@ -1552,6 +1568,7 @@ class MediaRuntime:
                             if not stopped:
                                 self._state = 'failed'
                                 self._startup_error = type(error).__name__
+                                self._startup_failure = getattr(error, 'cctvhost_failure', {})
                         if not stopped and on_failure:
                             try:
                                 on_failure(error)
@@ -1581,7 +1598,8 @@ class MediaRuntime:
         with self._state_lock:
             return {'runtime_ready': self._state == 'ready',
                     'runtime_state': self._state,
-                    'startup_error': self._startup_error}
+                    'startup_error': self._startup_error,
+                    'startup_failure': dict(self._startup_failure)}
 
     def call(self, operation, args=None):
         if self.stopping.is_set():

@@ -1064,7 +1064,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     NSArray *alternates=[self.result[@"alternates"] isKindOfClass:NSArray.class]?self.result[@"alternates"]:@[];if(alternates.count<2||sender.tag<0||sender.tag>=(NSInteger)alternates.count)return;
     NSDictionary *alternate=[alternates[sender.tag] isKindOfClass:NSDictionary.class]?alternates[sender.tag]:nil;if(!alternate)return;NSString *url=[alternate[@"url"] isKindOfClass:NSString.class]?alternate[@"url"]:@"";NSString *originalURL=[alternate[@"originalURL"] isKindOfClass:NSString.class]?alternate[@"originalURL"]:url;if(!url.length)return;
     if(!self.basePlaybackHeaders){NSDictionary *base=[self.result[@"baseHeaders"] isKindOfClass:NSDictionary.class]?self.result[@"baseHeaders"]:MediaPlaybackHeadersFromResult(self.result);self.basePlaybackHeaders=base.copy;}
-    NSDictionary *parentResult=self.result;self.selectedAlternateIndex=sender.tag;NSMutableDictionary *selected=[parentResult mutableCopy];selected[@"url"]=url;selected[@"originalURL"]=originalURL;NSMutableDictionary *headers=[self.basePlaybackHeaders mutableCopy]?:[NSMutableDictionary dictionary];[headers addEntriesFromDictionary:MediaPlaybackHeadersFromResult(alternate)];selected[@"headers"]=headers.copy;[selected removeObjectForKey:@"header"];for(NSString *key in @[@"format",@"mediaType",@"playbackType",@"contentType",@"content_type",@"mimeType",@"mime",@"playbackEngine",@"nativePlayable",@"directMedia",@"requiresWebPlayback",@"parse",@"jx"]){[selected removeObjectForKey:key];if(alternate[key]!=nil)selected[key]=alternate[key];}NSURLComponents *alternateParts=[NSURLComponents componentsWithString:url];if(!alternateParts.path.pathExtension.length&&!MediaPlaybackResultSupportsNativePlayback(alternate)&&MediaPlaybackResultSupportsCicada(parentResult)){selected[@"playbackEngine"]=@"cicada";for(NSString *key in @[@"format",@"mediaType",@"playbackType",@"contentType",@"content_type",@"mimeType",@"mime"])if(!selected[key]&&parentResult[key])selected[key]=parentResult[key];}self.result=selected;[self buildQualityButtons];
+    NSDictionary *parentResult=self.result;self.selectedAlternateIndex=sender.tag;NSMutableDictionary *selected=[parentResult mutableCopy];selected[@"url"]=url;selected[@"originalURL"]=originalURL;NSMutableDictionary *headers=[self.basePlaybackHeaders mutableCopy]?:[NSMutableDictionary dictionary];[headers addEntriesFromDictionary:MediaPlaybackHeadersFromResult(alternate)];selected[@"headers"]=headers.copy;[selected removeObjectForKey:@"header"];for(NSString *key in @[@"format",@"mediaType",@"playbackType",@"contentType",@"content_type",@"mimeType",@"mime",@"playbackEngine",@"nativePlayable",@"directMedia",@"requiresWebPlayback",@"parse",@"jx",@"dashRemuxed"]){[selected removeObjectForKey:key];if(alternate[key]!=nil)selected[key]=alternate[key];}NSURLComponents *alternateParts=[NSURLComponents componentsWithString:url];if(!alternateParts.path.pathExtension.length&&!MediaPlaybackResultSupportsNativePlayback(alternate)&&MediaPlaybackResultSupportsCicada(parentResult)){selected[@"playbackEngine"]=@"cicada";for(NSString *key in @[@"format",@"mediaType",@"playbackType",@"contentType",@"content_type",@"mimeType",@"mime"])if(!selected[key]&&parentResult[key])selected[key]=parentResult[key];}self.result=selected;[self buildQualityButtons];
     [self persistPlaybackProgress];NSTimeInterval current=[self activeEngineCurrentPosition];self.pendingQualitySeekTime=(isfinite(current)&&current>=0)?@(MAX(0,current)):nil;self.pendingQualityWasPlaying=[self isCicadaEngineActive]?self.cicadaAdapter.state==MediaPlaybackCicadaAdapterStatePlaying:self.player.timeControlStatus!=AVPlayerTimeControlStatusPaused;self.pendingQualityRestorePlaybackState=YES;
     [RuntimeDiagnostics.shared recordEvent:@"playback_quality_selected" category:@"playback" fields:@{@"alternate_index":@(sender.tag),@"line_index":@(self.lineIndex),@"episode_index":@(self.episodeIndex),@"parse_mode":@([selected[@"parse"] integerValue]),@"requires_web_playback":@([selected[@"requiresWebPlayback"] boolValue]),@"native_playable_declared":@([selected[@"nativePlayable"] boolValue]),@"correlation_id":self.diagnosticTraceID?:@""}];self.attemptedRoutes=0;[self playResult:selected];
 }
@@ -1626,7 +1626,9 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     self.status.text=self.cicadaAdapterSoftwareDecodeFallbackAttempted?@"正在使用 CicadaPlayer 软解码 (cc) 载入媒体…":@"正在使用 ffmpeg 内核载入媒体…";self.status.accessibilityLabel=self.status.text;
     [self.spinner startAnimating];[self setRetryAvailable:NO];
     NSTimeInterval timeout=[[NSUserDefaults standardUserDefaults] objectForKey:@"cctv.networkTimeout.v1"]?[[NSUserDefaults standardUserDefaults] doubleForKey:@"cctv.networkTimeout.v1"]:20;
-    NSDictionary *requestHeaders=self.basePlaybackHeaders?:MediaPlaybackHeadersFromResult(result);
+    NSMutableDictionary *requestHeaders=[self.basePlaybackHeaders mutableCopy]?:[NSMutableDictionary dictionary];
+    if([result[@"baseHeaders"] isKindOfClass:NSDictionary.class])[requestHeaders addEntriesFromDictionary:result[@"baseHeaders"]];
+    [requestHeaders addEntriesFromDictionary:MediaPlaybackHeadersFromResult(result)];
     NSURL *effectiveURL=url;
     NSString *urlHost=url.host.lowercaseString?:@"";
     BOOL isLoopbackRelay=[@[@"127.0.0.1",@"localhost",@"::1"] containsObject:urlHost]&&sourceURL&&[@[@"http",@"https"] containsObject:sourceURL.scheme.lowercaseString]&&![sourceURL.absoluteString isEqualToString:url.absoluteString];
@@ -1704,8 +1706,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     // 软件解码重试（移植自直连路径 handleCicadaFailure: 的解码关键词表）：
     // 报错指向解码且尚未试过软件解码时，用软件解码重建一次适配器，
     // 从上次位置续播（pendingPlaybackSeekTime 由 prepare 回调消费）。
-    NSString *lowerMessage=(error.localizedDescription?:@"").lowercaseString;
-    BOOL decoderFailure=(error.code!=-1002)||[lowerMessage containsString:@"decode"]||[lowerMessage containsString:@"decoder"]||[lowerMessage containsString:@"codec"]||[lowerMessage containsString:@"avcodec"]||[lowerMessage containsString:@"解码"]||[lowerMessage containsString:@"硬件解码"];
+    BOOL decoderFailure=MediaPlaybackCicadaErrorAllowsSoftwareRetry(error);
     if(!self.cicadaAdapterSoftwareDecodeFallbackAttempted&&decoderFailure){
         self.cicadaAdapterSoftwareDecodeFallbackAttempted=YES;
         NSTimeInterval position=self.cicadaPosition;
@@ -1721,7 +1722,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     MediaPlaybackDecodeRoute nextRoute=MediaPlaybackDecodeRouteNextForResult(self.result,self.attemptedRoutes);
     NSString *failedSourceExt=MediaPlaybackOriginalSourceURL(self.result).pathExtension.lowercaseString?:@"";
     BOOL avIncompatibleContainer=[@[@"mpd",@"flv",@"mkv",@"webm"] containsObject:failedSourceExt];
-    if(nextRoute==MediaPlaybackDecodeRouteAVPlayer&&avIncompatibleContainer){
+    if(nextRoute==MediaPlaybackDecodeRouteAVPlayer&&avIncompatibleContainer&&![self.result[@"dashRemuxed"] boolValue]){
         self.attemptedRoutes|=MediaPlaybackDecodeRouteAttemptedAVPlayer;
         nextRoute=MediaPlaybackDecodeRouteNextForResult(self.result,self.attemptedRoutes);
     }
@@ -1972,7 +1973,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
         NSMutableDictionary *headers=[self.basePlaybackHeaders mutableCopy]?:[NSMutableDictionary dictionary];
         [headers addEntriesFromDictionary:MediaPlaybackHeadersFromResult(alternate)];
         selected[@"headers"]=headers.copy;[selected removeObjectForKey:@"header"];
-        for(NSString *key in @[@"format",@"mediaType",@"playbackType",@"contentType",@"content_type",@"mimeType",@"mime",@"playbackEngine",@"nativePlayable",@"directMedia",@"requiresWebPlayback",@"parse",@"jx"]){[selected removeObjectForKey:key];if(alternate[key]!=nil)selected[key]=alternate[key];}
+        for(NSString *key in @[@"format",@"mediaType",@"playbackType",@"contentType",@"content_type",@"mimeType",@"mime",@"playbackEngine",@"nativePlayable",@"directMedia",@"requiresWebPlayback",@"parse",@"jx",@"dashRemuxed"]){[selected removeObjectForKey:key];if(alternate[key]!=nil)selected[key]=alternate[key];}
         NSString *candidateName=[alternate[@"name"] isKindOfClass:NSString.class]&&[alternate[@"name"] length]?alternate[@"name"]:[NSString stringWithFormat:@"清晰度 %lu",(unsigned long)candidateIndex+1];
         [RuntimeDiagnostics.shared recordEvent:@"playback_auto_alternate_fallback" category:@"playback" fields:@{@"correlation_id":self.diagnosticTraceID?:@"",@"playback_attempt_id":self.playbackAttemptID?:@"",@"from_alternate_index":@(currentAlt),@"alternate_index":@(candidateIndex),@"alternate_count":@(alternates.count),@"line_index":@(self.lineIndex),@"episode_index":@(self.episodeIndex),@"reason":reason?:@"automatic_compatibility"}];
         self.status.text=[NSString stringWithFormat:@"当前档位未就绪 · 正在尝试切换至 %@",candidateName];
