@@ -26,6 +26,10 @@ class ScopedRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, request, response, code, message, headers, new_url):
         new_url = http_url(new_url)
         redirected = super().redirect_request(request, response, code, message, headers, new_url)
+        # urllib creates a fresh Request without a method on redirects, which
+        # turns HEAD into GET and can download the media during a probe.
+        if redirected is not None and request.get_method() == 'HEAD':
+            redirected.method = 'HEAD'
         if redirected is not None and (urllib.parse.urlsplit(request.full_url).scheme.lower(), urllib.parse.urlsplit(request.full_url).netloc.lower()) != (urllib.parse.urlsplit(new_url).scheme.lower(), urllib.parse.urlsplit(new_url).netloc.lower()):
             for name in list(redirected.headers):
                 if name.lower() in ('authorization', 'cookie'):
@@ -72,33 +76,9 @@ def _configure_tolerant_ssl_context(ctx):
     return ctx
 
 
-def _is_cert_verification_error(error):
-    if isinstance(error, urllib.error.HTTPError):
-        return False
-    reason = error.reason if isinstance(error, urllib.error.URLError) else error
-    if isinstance(reason, (ssl.SSLCertVerificationError, getattr(ssl, 'SSLEOFError', ssl.SSLError))):
-        if isinstance(reason, ssl.SSLCertVerificationError):
-            return True
-    msg = str(reason).lower()
-    return isinstance(reason, ssl.SSLError) and any(
-        token in msg for token in (
-            'certificate_verify_failed', 'self-signed', 'local issuer',
-            'unexpected_eof_while_reading', 'eof occurred in violation of protocol',
-            'tlsv1 alert', 'wrong version number', 'handshake failure', ' dh key too small'
-        )
-    )
-
-
-_UNVERIFIED_TLS_HOSTS = set()
 _DEFAULT_SSL_CONTEXT = _configure_tolerant_ssl_context(ssl.create_default_context())
-_UNVERIFIED_SSL_CONTEXT = _configure_tolerant_ssl_context(ssl._create_unverified_context())
-try:
-    _UNVERIFIED_SSL_CONTEXT.set_ciphers('DEFAULT:@SECLEVEL=1')
-except Exception:
-    pass
 _ORIG_BUILD_OPENER = urllib.request.build_opener
 _DEFAULT_OPENER = _ORIG_BUILD_OPENER(ScopedRedirect(), urllib.request.HTTPSHandler(context=_DEFAULT_SSL_CONTEXT))
-_UNVERIFIED_OPENER = _ORIG_BUILD_OPENER(ScopedRedirect(), urllib.request.HTTPSHandler(context=_UNVERIFIED_SSL_CONTEXT))
 
 
 def _tune_response_socket(resp):
@@ -114,24 +94,14 @@ def _tune_response_socket(resp):
 
 
 def _open_with_timeout_retry(request, diagnostic_id=''):
-    """Retry one idempotent request once when the connection handshake times out or CDN cert chain is self-signed."""
+    """Retry a transient GET/HEAD timeout once, preserving TLS verification."""
     method = request.get_method().upper()
-    parsed_init = urllib.parse.urlsplit(request.full_url)
-    host_init = (parsed_init.hostname or '').lower()
     use_cached_opener = urllib.request.build_opener is _ORIG_BUILD_OPENER
-    if host_init in _UNVERIFIED_TLS_HOSTS:
-        opener = _UNVERIFIED_OPENER if use_cached_opener else urllib.request.build_opener(ScopedRedirect(), urllib.request.HTTPSHandler(context=_UNVERIFIED_SSL_CONTEXT))
-    else:
-        opener = _DEFAULT_OPENER if use_cached_opener else urllib.request.build_opener(ScopedRedirect())
+    opener = _DEFAULT_OPENER if use_cached_opener else urllib.request.build_opener(
+        ScopedRedirect(), urllib.request.HTTPSHandler(context=_DEFAULT_SSL_CONTEXT))
     try:
         return _tune_response_socket(opener.open(request, timeout=8))
     except (TimeoutError, socket.timeout, urllib.error.URLError) as error:
-        parsed = urllib.parse.urlsplit(request.full_url)
-        host = (parsed.hostname or '').lower()
-        if _is_cert_verification_error(error) and host not in ('127.0.0.1', 'localhost', '::1') and not host.endswith('.test'):
-            _UNVERIFIED_TLS_HOSTS.add(host)
-            tls_opener = urllib.request.build_opener(ScopedRedirect(), urllib.request.HTTPSHandler(context=_UNVERIFIED_SSL_CONTEXT))
-            return tls_opener.open(_retry_request(request), timeout=8)
         if method not in ('GET', 'HEAD') or not _transient_open_timeout(error):
             raise
         parsed = urllib.parse.urlsplit(request.full_url)
@@ -145,8 +115,9 @@ def _open_with_timeout_retry(request, diagnostic_id=''):
             'upstream_host': parsed.hostname or '',
         }, separators=(',', ':')))
         time.sleep(0.15)
-        retry_opener = urllib.request.build_opener(ScopedRedirect())
-        return retry_opener.open(_retry_request(request), timeout=2)
+        retry_opener = urllib.request.build_opener(
+            ScopedRedirect(), urllib.request.HTTPSHandler(context=_DEFAULT_SSL_CONTEXT))
+        return _tune_response_socket(retry_opener.open(_retry_request(request), timeout=2))
 
 
 def safe_error_summary(error):
@@ -167,6 +138,9 @@ class MediaRelay:
         self.segment_limit = max(1, min(int(segment_limit), 16384))
         self.lock = threading.Lock()
         self.refreshing = {}
+        # Share only an in-progress declared-HLS fetch, never a retained live
+        # playlist. The exact token/URL/headers/server isolate playback scopes.
+        self.manifest_flights = {}
         self.refreshFailures = {}
         self.diagnosed_manifests = set()
         self.diagnosed_resources = collections.OrderedDict()
@@ -292,13 +266,20 @@ class MediaRelay:
                 if flags == 0:
                     found = payload
                 elif flags == 1:
-                    try:
-                        found = zlib.decompress(payload)
-                    except Exception:
+                    # Bound decoded bytes as well as downloaded PNG bytes. A
+                    # tiny compressed chunk can otherwise exhaust App memory.
+                    for candidate in (payload, payload[3:]):
                         try:
-                            found = zlib.decompress(payload[3:]) if len(payload) > 3 else None
-                        except Exception:
-                            return None
+                            decoder = zlib.decompressobj()
+                            decoded = decoder.decompress(candidate, 16 * 1024 * 1024 + 1)
+                            if len(decoded) > 16 * 1024 * 1024 or not decoder.eof:
+                                return None
+                            found = decoded
+                            break
+                        except zlib.error:
+                            continue
+                    else:
+                        return None
             offset += length + 12
             if chunk_type == b'IEND':
                 return found
@@ -617,12 +598,53 @@ class MediaRelay:
         except (BrokenPipeError, ConnectionResetError, OSError):
             pass
 
+    def _join_manifest_fetch(self, identity):
+        with self.lock:
+            if self.stopping.is_set():
+                raise RelayFailure('media_service_stopping')
+            flight = self.manifest_flights.get(identity)
+            if flight is not None:
+                return flight, False
+            # A playlist is bounded to 2 MiB, and rewritten data is shared by
+            # reference. Limit concurrent coalesced fetches on memory-limited iOS.
+            if len(self.manifest_flights) >= 4:
+                return None, True
+            flight = {'event': threading.Event(), 'body': None, 'error': None}
+            self.manifest_flights[identity] = flight
+            return flight, True
+
+    def _finish_manifest_fetch(self, identity, flight, body=None, error=None):
+        if flight is None:
+            return
+        with self.lock:
+            if self.manifest_flights.get(identity) is not flight:
+                return
+            self.manifest_flights.pop(identity)
+            flight['body'], flight['error'] = body, error
+            flight['event'].set()
+
+    def _send_manifest(self, handler, body):
+        handler.send_response(200)
+        handler.send_header('Content-Type', 'application/vnd.apple.mpegurl')
+        handler.send_header('Content-Length', str(len(body)))
+        handler.send_header('Cache-Control', 'no-store')
+        handler.send_header('Connection', 'close')
+        handler.end_headers()
+        self._write_client(handler, body)
+
     @staticmethod
     def _write_client(handler, data):
         try:
             handler.wfile.write(data)
         except (BrokenPipeError, ConnectionResetError) as error:
             raise RelayClientDisconnected(type(error).__name__) from error
+
+    @staticmethod
+    def _is_clean_media_head(data):
+        return (not data or data[0] == 0x47 or
+                (len(data) >= 8 and data[4:8] in
+                 (b'ftyp', b'styp', b'moof', b'moov', b'sidx', b'emsg')) or
+                data[:3] == b'ID3' or data[:2] in (b'\xff\xf1', b'\xff\xf9'))
 
     def serve(self, handler, token, head=False):
         with self.lock:
@@ -719,6 +741,15 @@ class MediaRelay:
                     'upstream_status': getattr(response, 'status', 0) if response is not None else 0,
                 }, separators=(',', ':')))
         resource_event('requested')
+        manifest_identity = None
+        manifest_flight = None
+        manifest_owner = True
+        def fail(stage, status=502, error=None, upstream_status=0):
+            if manifest_owner:
+                self._finish_manifest_fetch(manifest_identity, manifest_flight,
+                                            error=(stage, status))
+            self._failed(handler, stage, diagnostic_id, url, status=status,
+                         error=error, upstream_status=upstream_status, sent=sent)
         try:
             refreshed=self._refresh_record(token)
             if refreshed is None:
@@ -749,6 +780,29 @@ class MediaRelay:
                 headers = {k: v for k, v in headers.items() if k.lower() != 'range'}
             elif handler.headers.get('Range'):
                 headers['Range'] = handler.headers['Range']
+            if expected_hls and not head:
+                manifest_identity = (token, url, tuple(sorted(headers.items())),
+                                     handler.server.server_port)
+                manifest_flight, manifest_owner = self._join_manifest_fetch(manifest_identity)
+                if not manifest_owner:
+                    joined_at = time.perf_counter()
+                    if not manifest_flight['event'].wait(20):
+                        raise RelayFailure('manifest_request_timeout')
+                    if manifest_flight['error'] is not None:
+                        stage, status = manifest_flight['error']
+                        fail(stage, status=status)
+                        return
+                    if manifest_flight['body'] is None or self.stopping.is_set():
+                        raise RelayFailure('media_service_stopping')
+                    print('[CCTVHostMediaRelay] ' + json.dumps({
+                        'event': 'media_relay_manifest_coalesced', 'request_id': diagnostic_id,
+                        'elapsed_ms': max(0, int((time.perf_counter()-joined_at)*1000)),
+                        'manifest_bytes': len(manifest_flight['body']),
+                        'upstream_host': parsed.hostname or '',
+                    }, separators=(',', ':')))
+                    sent = True
+                    self._send_manifest(handler, manifest_flight['body'])
+                    return
             if resource_kind == 'key' and not head and not record[3]:
                 with self.lock:
                     cached_norm_key = self.remote_key_cache.get((url, pairs))
@@ -841,20 +895,16 @@ class MediaRelay:
                 if first_manifest:
                     print('[CCTVHostMediaRelay] ' + json.dumps({'event': 'media_relay_manifest_readable',
                         'request_id': diagnostic_id, 'upstream_host': urllib.parse.urlsplit(final_url).hostname or '',
-                        'upstream_status': response.status, 'manifest_bytes': len(body)}, separators=(',', ':')))
+                        'upstream_status': response.status, 'manifest_bytes': len(body),
+                        'elapsed_ms': max(0, int((time.perf_counter()-resource_started)*1000))}, separators=(',', ':')))
                 body = self.rewrite(text, final_url, dict(pairs), origin,
                                     f'http://127.0.0.1:{handler.server.server_port}', diagnostic_id,
                                     refresh=record[3],refresh_after=record[4],
                                     refresh_interval=record[5],
                                     refresh_relative_base=record[6],resource_scope=resource_scope).encode()
-                handler.send_response(200)
-                handler.send_header('Content-Type', 'application/vnd.apple.mpegurl')
-                handler.send_header('Content-Length', str(len(body)))
-                handler.send_header('Cache-Control', 'no-store')
-                handler.send_header('Connection', 'close')
-                handler.end_headers()
+                self._finish_manifest_fetch(manifest_identity, manifest_flight, body=body)
                 sent = True
-                self._write_client(handler, body)
+                self._send_manifest(handler, body)
                 return
             if resource_kind == 'key' and not head and response.status == 200:
                 raw_key = prefix + response.read(4096)
@@ -895,7 +945,10 @@ class MediaRelay:
             received_bytes = len(prefix)
             stripped_diff = 0
             override_ct = None
-            if not head and token in self.segments and resource_kind == 'media' and response.status in (200, 206):
+            # A partial response is already a selection of source bytes. Any
+            # prefix removal/unwrapping would corrupt BYTERANGE offsets and
+            # contradict Content-Range; transformations apply only to full GETs.
+            if not head and token in self.segments and resource_kind == 'media' and response.status == 200:
                 first_chunk = prefix + read_stream_chunk(65536) if not prefix else prefix
                 prefix = b''
                 received_bytes = len(first_chunk)
@@ -917,13 +970,7 @@ class MediaRelay:
                         return
                     first_chunk = raw_png
                     received_bytes = len(first_chunk)
-                is_clean_media_head = (
-                    not first_chunk or
-                    first_chunk[0] == 0x47 or
-                    (len(first_chunk) >= 8 and first_chunk[4:8] in (b'ftyp', b'styp', b'moof', b'moov', b'sidx', b'emsg')) or
-                    first_chunk[:3] == b'ID3' or
-                    first_chunk[:2] in (b'\xff\xf1', b'\xff\xf9')
-                )
+                is_clean_media_head = self._is_clean_media_head(first_chunk)
                 may_be_disguised = (
                     not is_clean_media_head and (
                         expected_bytes is None or
@@ -933,7 +980,12 @@ class MediaRelay:
                 )
                 if may_be_disguised:
                     need_more_probe = first_chunk.startswith((b'\x89PNG', b'\xff\xd8\xff', b'GIF8', b'BM', b'RIFF')) or len(first_chunk) < 512
-                    while need_more_probe and len(first_chunk) < 16384 and self._strip_disguised_ts_prefix(first_chunk) is first_chunk:
+                    # TCP/TLS can split an ordinary fMP4 header before its box
+                    # type. Stop probing as soon as later bytes identify clean
+                    # media instead of waiting for 16 KiB or the whole fragment.
+                    while (need_more_probe and len(first_chunk) < 16384 and
+                           not self._is_clean_media_head(first_chunk) and
+                           self._strip_disguised_ts_prefix(first_chunk) is first_chunk):
                         more = read_stream_chunk(16384)
                         if not more:
                             break
@@ -973,7 +1025,7 @@ class MediaRelay:
                     received_bytes += len(chunk)
                     if not first_byte:
                         first_byte = True
-                        if token in self.segments and resource_kind == 'media':
+                        if token in self.segments and resource_kind == 'media' and response.status == 200:
                             chunk = self._strip_disguised_ts_prefix(chunk)
                         resource_event('byte', received_bytes)
                     self._write_client(handler, chunk)
@@ -989,15 +1041,14 @@ class MediaRelay:
             }, separators=(',', ':')))
         except urllib.error.HTTPError as error:
             status = error.code if 400 <= error.code <= 599 else 502
-            self._failed(handler, 'upstream_http_error', diagnostic_id, url, status=status,
-                         error=error, upstream_status=error.code, sent=sent)
+            fail('upstream_http_error', status=status, error=error, upstream_status=error.code)
             error.close()
         except http.client.IncompleteRead:
             # Partial bytes may contain media or credentials. Record only the
             # failure stage; never serialize the exception's partial payload.
-            self._failed(handler, 'upstream_body_truncated', diagnostic_id, url, sent=sent)
+            fail('upstream_body_truncated')
         except (TimeoutError, socket.timeout) as error:
-            self._failed(handler, 'upstream_timeout', diagnostic_id, url, status=504, error=error, sent=sent)
+            fail('upstream_timeout', status=504, error=error)
         except urllib.error.URLError as error:
             reason = getattr(error, 'reason', None)
             if isinstance(reason, (TimeoutError, socket.timeout)):
@@ -1010,20 +1061,22 @@ class MediaRelay:
                 stage = 'upstream_connect_error'
             else:
                 stage = 'upstream_network_error'
-            self._failed(handler, stage, diagnostic_id, url,
-                         status=504 if stage == 'upstream_timeout' else 502, error=error, sent=sent)
+            fail(stage, status=504 if stage == 'upstream_timeout' else 502, error=error)
         except UnicodeDecodeError as error:
-            self._failed(handler, 'manifest_encoding_invalid', diagnostic_id, url, error=error, sent=sent)
+            fail('manifest_encoding_invalid', error=error)
         except RelayFailure as error:
-            self._failed(handler, error.stage, diagnostic_id, url, error=error, sent=sent)
+            fail(error.stage, error=error)
         except ValueError as error:
             stage = 'manifest_invalid' if '清单' in str(error) else 'media_response_invalid'
-            self._failed(handler, stage, diagnostic_id, url, error=error, sent=sent)
+            fail(stage, error=error)
         except (BrokenPipeError, ConnectionResetError, OSError) as error:
-            self._failed(handler, 'client_or_upstream_stream_interrupted', diagnostic_id, url, error=error, sent=sent)
+            fail('client_or_upstream_stream_interrupted', error=error)
         except Exception as error:
-            self._failed(handler, 'relay_internal_error', diagnostic_id, url, error=error, sent=sent)
+            fail('relay_internal_error', error=error)
         finally:
+            if manifest_owner:
+                self._finish_manifest_fetch(manifest_identity, manifest_flight,
+                                            error=('manifest_request_failed', 502))
             if response:
                 with self.lock:
                     self.responses.discard(response)
@@ -1034,17 +1087,24 @@ class MediaRelay:
         with self.lock:
             responses = list(self.responses)
             flights = list(self.refreshing.values())
+            manifest_flights = list(self.manifest_flights.values())
             self.refreshing.clear()
+            self.manifest_flights.clear()
             self.targets.clear()
             self.segments.clear()
             self.segment_index.clear()
             self.diagnosed_manifests.clear()
             self.diagnosed_resources.clear()
             self.refreshFailures.clear()
+            self.inline_keys.clear()
+            self.inline_manifests.clear()
             self.remote_key_cache.clear()
             self.dash_playlists.clear()
         for event in flights:
             event['event'].set()
+        for flight in manifest_flights:
+            flight['error'] = ('media_service_stopping', 503)
+            flight['event'].set()
         for response in responses:
             try:
                 response.close()

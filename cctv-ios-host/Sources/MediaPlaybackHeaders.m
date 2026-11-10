@@ -10,26 +10,40 @@ static BOOL MediaPlaybackHeaderNameIsAllowed(NSString *name) {
 static void MediaPlaybackInsertHeader(NSMutableDictionary<NSString *,NSString *> *headers, NSString *name, NSString *value) {
     NSString *key=[name stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     NSString *text=[value stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    if(headers.count>=64||!MediaPlaybackHeaderNameIsAllowed(key)||text.length>8192||[text rangeOfCharacterFromSet:NSCharacterSet.newlineCharacterSet].location!=NSNotFound)return;
+    if(!MediaPlaybackHeaderNameIsAllowed(key)||text.length>8192)return;
+    // Header fields are case-insensitive. Later sources override earlier ones,
+    // including at the field-count limit; never send two Referer/Cookie values.
+    for(NSUInteger i=0;i<text.length;i++){
+        unichar c=[text characterAtIndex:i];
+        if((c<0x20&&c!='\t')||c==0x7f||[NSCharacterSet.newlineCharacterSet characterIsMember:c])return;
+    }
+    NSString *oldKey=nil;
+    for(NSString *existing in headers){if([existing caseInsensitiveCompare:key]==NSOrderedSame){oldKey=existing;break;}}
+    if(!oldKey&&headers.count>=64)return;
+    if(oldKey)[headers removeObjectForKey:oldKey];
     headers[key]=text;
 }
 
 static void MediaPlaybackAddHeaderValue(NSMutableDictionary<NSString *,NSString *> *headers, id value) {
     if([value isKindOfClass:NSDictionary.class]){
         NSDictionary *dictionary=value;
-        for(id rawName in dictionary){if(![rawName isKindOfClass:NSString.class])continue;id rawValue=dictionary[rawName];if([rawValue isKindOfClass:NSString.class])MediaPlaybackInsertHeader(headers,rawName,rawValue);if(headers.count>=64)break;}
+        NSUInteger inspected=0;
+        for(id rawName in dictionary){if(inspected++>=256)break;if(![rawName isKindOfClass:NSString.class])continue;id rawValue=dictionary[rawName];if([rawValue isKindOfClass:NSString.class])MediaPlaybackInsertHeader(headers,rawName,rawValue);}
         return;
     }
     if(![value isKindOfClass:NSString.class]||[value length]>65536)return;
     for(NSString *part in [(NSString *)value componentsSeparatedByCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"\r\n#"]]){
-        NSRange separator=[part rangeOfString:@"$"];NSUInteger offset=separator.location;
-        if(separator.location==NSNotFound){separator=[part rangeOfString:@":"];offset=separator.location;}
+        NSRange separator=[part rangeOfString:@"$"];
+        NSRange colon=[part rangeOfString:@":"];
+        if(colon.location<separator.location)separator=colon;
+        NSUInteger offset=separator.location;
         if(separator.location==NSNotFound||offset==0)continue;
         MediaPlaybackInsertHeader(headers,[part substringToIndex:offset],[part substringFromIndex:offset+1]);
     }
 }
 
 NSDictionary<NSString *,NSString *> *MediaPlaybackHeadersFromResult(NSDictionary *result) {
+    if(![result isKindOfClass:NSDictionary.class])return @{};
     NSMutableDictionary<NSString *,NSString *> *headers=[NSMutableDictionary dictionary];
     if([result[@"ext"] isKindOfClass:NSDictionary.class]){
         MediaPlaybackAddHeaderValue(headers,result[@"ext"][@"headers"]);
@@ -58,7 +72,7 @@ NSDictionary<NSString *,id> *MediaPlaybackDiagnosticHeaderFields(NSDictionary *h
 }
 
 static NSString *MediaPlaybackString(id value) {
-    return [value isKindOfClass:NSString.class] ? [(NSString *)value lowercaseString] : @"";
+    return [value isKindOfClass:NSString.class] ? [[(NSString *)value stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] lowercaseString] : @"";
 }
 
 BOOL MediaPlaybackResultSupportsAVPlayer(NSDictionary *result) {
@@ -66,7 +80,7 @@ BOOL MediaPlaybackResultSupportsAVPlayer(NSDictionary *result) {
     if([result[@"dashRemuxed"] boolValue])return YES;
     NSString *format=MediaPlaybackString(result[@"format"]?:result[@"mediaType"]?:result[@"playbackType"]);
     NSString *mime=MediaPlaybackString(result[@"contentType"]?:result[@"content_type"]?:result[@"mimeType"]?:result[@"mime"]);
-    NSRange semicolon=[mime rangeOfString:@";"];if(semicolon.location!=NSNotFound)mime=[mime substringToIndex:semicolon.location];
+    NSRange semicolon=[mime rangeOfString:@";"];if(semicolon.location!=NSNotFound)mime=[[mime substringToIndex:semicolon.location] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     NSString *engine=MediaPlaybackString(result[@"playbackEngine"]);
     if([engine isEqual:@"cicada"]||MediaPlaybackResultSupportsCicada(result))return NO;
     if([result[@"nativePlayable"] respondsToSelector:@selector(boolValue)]&&[result[@"nativePlayable"] boolValue])return YES;
@@ -92,14 +106,17 @@ BOOL MediaPlaybackResultSupportsCicada(NSDictionary *result) {
     if([engine isEqual:@"cicada"])return YES;
     NSString *format=MediaPlaybackString(result[@"format"]?:result[@"mediaType"]?:result[@"playbackType"]);
     NSString *mime=MediaPlaybackString(result[@"contentType"]?:result[@"content_type"]?:result[@"mimeType"]?:result[@"mime"]);
-    NSRange semicolon=[mime rangeOfString:@";"];if(semicolon.location!=NSNotFound)mime=[mime substringToIndex:semicolon.location];
+    NSRange semicolon=[mime rangeOfString:@";"];if(semicolon.location!=NSNotFound)mime=[[mime substringToIndex:semicolon.location] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     NSString *raw=[result[@"originalURL"] isKindOfClass:NSString.class]?result[@"originalURL"]:result[@"url"];
     NSURLComponents *components=[NSURLComponents componentsWithString:[raw isKindOfClass:NSString.class]?raw:@""];
     NSString *extension=components.path.pathExtension.lowercaseString?:@"";
-    NSSet *formats=[NSSet setWithArray:@[@"mpd",@"dash",@"mpeg-dash",@"flv",@"mkv",@"matroska",@"avi",@"webm",@"wmv",@"asf",@"rmvb",@"rm",@"mpg",@"mpeg",@"m2ts",@"3gp"]];
-    NSSet *extensions=[NSSet setWithArray:@[@"mpd",@"flv",@"mkv",@"avi",@"webm",@"wmv",@"asf",@"rmvb",@"rm",@"mpg",@"mpeg",@"m2ts",@"3gp"]];
-    NSSet *mimes=[NSSet setWithArray:@[@"application/dash+xml",@"application/vnd.ms-sstr+xml",@"video/x-flv",@"video/x-matroska",@"video/webm",@"video/x-msvideo",@"video/x-ms-wmv"]];
-    return [formats containsObject:format]||[extensions containsObject:extension]||[mimes containsObject:mime]||[mimes containsObject:format];
+    // Match the bundled demuxers documented in MediaPlaybackDecodeRouter.m.
+    // A container hint does not establish codec support (notably WebM).
+    NSSet *formats=[NSSet setWithArray:@[@"mpd",@"dash",@"mpeg-dash",@"flv",@"live_flv",@"mkv",@"matroska",@"webm",@"3gp",@"3gpp",@"rtmp"]];
+    NSSet *extensions=[NSSet setWithArray:@[@"mpd",@"flv",@"mkv",@"webm",@"3gp",@"3gpp"]];
+    NSSet *mimes=[NSSet setWithArray:@[@"application/dash+xml",@"video/x-flv",@"video/x-matroska",@"video/webm",@"video/3gpp",@"video/3gpp2",@"application/x-rtmp"]];
+    NSString *scheme=components.scheme.lowercaseString;
+    return [formats containsObject:format]||[extensions containsObject:extension]||[mimes containsObject:mime]||[mimes containsObject:format]||[scheme isEqual:@"rtmp"]||[scheme isEqual:@"rtmps"];
 }
 
 BOOL MediaPlaybackResultSupportsNativePlayback(NSDictionary *result) {

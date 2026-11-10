@@ -3,7 +3,8 @@
 NS_ASSUME_NONNULL_BEGIN
 
 /// Bounded cache for browse metadata. Home/category results survive app restarts;
-/// playback URLs, request headers, and credentials are excluded from disk storage.
+/// Detail results use a short-lived memory cache and exclude signed/proxy URLs.
+/// Playback URLs, request headers, and credentials are excluded from disk storage.
 @interface MediaMetadataCache : NSObject
 + (instancetype)shared;
 - (nullable id)resultForSource:(NSDictionary *)source

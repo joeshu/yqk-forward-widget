@@ -38,7 +38,8 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('if(!self.pendingScreenExit)return;', did)
         self.assertLess(did.index('self.generation++'), did.index('[self.client cancel]'))
         self.assertIn('[self clearCurrentPlayerItem]', did)
-        self.assertIn('replaceCurrentItemWithPlayerItem:nil', did)
+        clear = self.playback.split('- (void)clearCurrentPlayerItem {', 1)[1].split('- (void)updateEpisodeTitle', 1)[0]
+        self.assertIn('replaceCurrentItemWithPlayerItem:nil', clear)
         appeared = self.playback.split('- (void)viewDidAppear:', 1)[1].split('- (void)viewWillDisappear:', 1)[0]
         self.assertIn('self.pendingScreenExit=NO', appeared)
 
@@ -816,7 +817,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         runtime = (ROOT / 'Plugins/host_media_runtime.py').read_text()
         service = (ROOT / 'Plugins/media-service.py').read_text()
         api = (ROOT / 'Sources/MediaAPIClient.m').read_text()
-        self.assertIn("choice_headers.update(media_headers(item.get('headers', {})))", runtime)
+        self.assertIn("choice_headers = merge_media_headers(item.get('headers', {}), item.get('header', {}),", runtime)
         self.assertIn("'baseHeaders': media_headers(base_headers)", runtime)
         self.assertIn("alternate_headers.update(alternate.get('headers') or {})", service)
         self.assertIn('alternate_headers or is_declared_hls(alternate_media, address)', service)
@@ -1426,8 +1427,9 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('MediaMetadataPersistentEntryLimit = 32', cache)
         self.assertIn('MediaMetadataPersistentByteLimit = 4 * 1024 * 1024', cache)
         self.assertIn('MediaMetadataPersistentSafeValue', cache)
-        self.assertNotIn('@"detail"', cache)
-        self.assertIn('影片详情与播放线路不缓存', settings)
+        self.assertIn('MediaDetailContainsTransientAddress', cache)
+        self.assertIn('BOOL persist=[@[@"home",@"category"] containsObject:operation]', cache)
+        self.assertIn('影片详情仅短时缓存在内存中，播放地址不持久化', settings)
 
     def test_rotation_is_limited_to_the_player_and_supported_by_the_app(self):
         with (ROOT / 'Resources/Info.plist').open('rb') as f:

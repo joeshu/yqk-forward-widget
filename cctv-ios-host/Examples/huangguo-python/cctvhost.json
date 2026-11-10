@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "name": "黄果剧场（iOS 播放适配）",
+  "runtime": "python",
+  "protocol": "python-spider",
+  "entry": "spider.py"
+}

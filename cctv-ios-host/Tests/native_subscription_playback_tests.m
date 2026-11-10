@@ -6,6 +6,13 @@
 #import "MediaPlaybackHeaders.h"
 static void check(BOOL ok, NSString *message){if(!ok){NSLog(@"FAILED: %@",message);exit(1);}}
 int main(void){@autoreleasepool{
+    NSDictionary *headers=MediaPlaybackHeadersFromResult(@{@"ext":@{@"header":@{@"Referer":@"https://old.example/",@"Cookie":@"old=1"}},@"headers":@{@"referer":@"https://new.example/"},@"header":@"Referer:https://cdn.example/?token=$signed\nCookie$new=1",@"customHeaders":@{@"HOST":@"blocked.example",@"X-Bad":@"a\001b",@"X-OK":@"ok"}});
+    check(headers.count==3&&[headers[@"Referer"] isEqual:@"https://cdn.example/?token=$signed"]&&[headers[@"Cookie"] isEqual:@"new=1"]&&[headers[@"X-OK"] isEqual:@"ok"],@"headers override case-insensitively, retain dollar in values, and reject controls/hop headers");
+    check(MediaPlaybackHeadersFromResult((id)NSNull.null).count==0,@"malformed result does not crash header extraction");
+    for(NSString *ext in @[@"avi",@"wmv",@"rmvb",@"mpg",@"mpeg"]){
+        check(!MediaPlaybackResultSupportsCicada(@{@"url":[@"https://cdn.example/video." stringByAppendingString:ext]}),@"unsupported bundled demuxers are not advertised");
+    }
+    check(MediaPlaybackResultSupportsAVPlayer(@{@"url":@"https://cdn.example/live",@"contentType":@" Video/MP4 ; charset=binary"}),@"MIME whitespace and casing do not block AVPlayer");
     check([MediaLytvsSubscriptionToken(@"abcdef12") isEqual:@"tk_abcdef12"],@"legacy subscription token regains its required prefix");
     check([MediaLytvsSubscriptionToken(@" tk_abcdef12 ") isEqual:@"tk_abcdef12"],@"full subscription token is preserved without doubling prefix");
     check(!MediaLytvsSubscriptionToken(@"")&&!MediaLytvsSubscriptionToken(@"tk_fixture\r\nunsafe"),@"empty and malformed credentials are rejected");

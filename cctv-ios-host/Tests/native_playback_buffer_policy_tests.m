@@ -8,6 +8,11 @@ int main(void){@autoreleasepool {
     Check(MediaPlaybackForwardBuffer(YES,YES,3,100,NO)<=30);
     Check(MediaPlaybackForwardBuffer(YES,YES,NAN,0,NO)==steady);
     Check(MediaPlaybackForwardBuffer(YES,YES,2,3,YES)<=12);
+    Check(!MediaPlaybackCanGrowForwardBuffer(0,12,12,YES));
+    Check(!MediaPlaybackCanGrowForwardBuffer(5,3,12,YES));
+    Check(!MediaPlaybackCanGrowForwardBuffer(5,12,12,NO));
+    Check(!MediaPlaybackCanGrowForwardBuffer(5,NAN,12,YES));
+    Check(MediaPlaybackCanGrowForwardBuffer(5,12,12,YES));
     Check(!MediaPlaybackShouldPrefetch(10,1800,10,NO,NO));
     Check(MediaPlaybackShouldPrefetch(1750,1800,10,NO,NO));
     Check(!MediaPlaybackShouldPrefetch(1750,1800,0.5,NO,NO));

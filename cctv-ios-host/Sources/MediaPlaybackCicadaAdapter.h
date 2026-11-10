@@ -49,6 +49,8 @@ typedef NS_ENUM(NSInteger, MediaPlaybackCicadaAdapterState) {
 - (void)cicadaAdapterDidSeek:(id)adapter;
 @end
 
+// Lifecycle and control methods are used on the main thread. SDK callbacks
+// are marshalled to that thread before state changes or delegate delivery.
 @interface MediaPlaybackCicadaAdapter : NSObject
 
 // SDK 类是否存在（NSClassFromString(@"CicadaPlayer")）。ui-smoke 构建里为 NO。
@@ -77,6 +79,7 @@ typedef NS_ENUM(NSInteger, MediaPlaybackCicadaAdapterState) {
 - (void)prepareWithHardwareDecoder:(BOOL)enableHardwareDecoder;
 - (void)start;
 - (void)pause;
+// Stop ends this source session; create a new adapter to prepare it again.
 - (void)stop;
 - (void)destroy;
 // seekMode 传 CICADA_SEEKMODE_ACCURATE（0x01，见 CicadaSDK.h）。
@@ -85,6 +88,7 @@ typedef NS_ENUM(NSInteger, MediaPlaybackCicadaAdapterState) {
 // 长按手势会请求 3.0x：上限放宽到 3.0（设置菜单的持久倍速仍由调用方
 // 钳制在 2.0 以内，见 MediaPlaybackViewController setPlaybackRate:）。
 // gravity 取 AVLayerVideoGravityResizeAspect / ResizeAspectFill / Resize；
+// 可在 prepare 之前设置，创建 SDK 播放器后会应用保存的值。
 // 映射到 CicadaPlayer scalingMode（CicadaSDK.h 的 CicadaScalingMode：
 // 0=SCALETOFILL、1=SCALEASPECTFIT、2=SCALEASPECTFILL）。SDK 不支持时静默保留默认。
 - (void)applyVideoGravity:(NSString *)gravity;

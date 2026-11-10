@@ -482,9 +482,9 @@ def media_headers(value):
         if len(value) > 65536:
             return parsed
         for part in re.split(r'[\r\n#]+', value):
-            name, separator, content = part.partition('$')
-            if not separator:
-                name, separator, content = part.partition(':')
+            # A Referer may contain '$' in its URL; choose the first delimiter.
+            match = re.search(r'[:$]', part)
+            name, separator, content = (part[:match.start()], match.group(), part[match.end():]) if match else (part, '', '')
             if separator and name.strip():
                 parsed[name.strip()] = content.strip()
         value = parsed
@@ -497,11 +497,25 @@ def media_headers(value):
         name, text = str(key), str(content)
         if (len(result) >= 64 or len(name) > 128 or len(text) > 16384 or
                 not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", name) or
-                '\r' in text or '\n' in text or name.lower() in
+                any(ord(char) < 32 and char != '\t' or ord(char) == 127 for char in text) or name.lower() in
                 ('host', 'content-length', 'connection', 'transfer-encoding', 'keep-alive', 'upgrade')):
             continue
+        previous = next((key for key in result if key.lower() == name.lower()), None)
+        if previous is not None:
+            result.pop(previous)
         result[name] = text
     return result
+
+
+def merge_media_headers(*values):
+    result = {}
+    for value in values:
+        for key, text in media_headers(value).items():
+            previous = next((name for name in result if name.lower() == key.lower()), None)
+            if previous is not None:
+                result.pop(previous)
+            result[key] = text
+    return media_headers(result)
 
 
 def media_choice_address(value):
@@ -600,9 +614,8 @@ def playback(value, _depth=0):
     transport_keys = ('format', 'mediaType', 'playbackType', 'playerType', 'contentType', 'content_type',
                       'mimeType', 'mime', 'parse', 'jx', 'proxy', 'requiresWebPlayback', 'webPlayback')
     source_transport = {key: value[key] for key in transport_keys if key in value}
-    headers = media_headers(value.get('header', {}))
-    headers.update(media_headers(value.get('headers', {})))
-    headers.update(media_headers(value.get('customHeaders', {})))
+    headers = merge_media_headers(value.get('headers', {}), value.get('header', {}),
+                                  value.get('customHeaders', {}))
     url = next((value.get(key) for key in
                 ('url', 'playUrl', 'playurl', 'play_url', 'videoUrl', 'video_url', 'mediaUrl', 'src',
                  'm3u8', 'mp4', 'flv', 'stream', 'streamUrl', 'stream_url', 'link', 'vurl', 'uri', 'file')
@@ -611,10 +624,9 @@ def playback(value, _depth=0):
     alternates = value.get('alternates', [])
     primary_choice_headers = {}
     if isinstance(url, dict):
-        nested_headers = media_headers(url.get('header', {}))
-        nested_headers.update(media_headers(url.get('headers', {})))
-        nested_headers.update(media_headers(url.get('customHeaders', {})))
-        headers.update(nested_headers)
+        nested_headers = merge_media_headers(url.get('headers', {}), url.get('header', {}),
+                                             url.get('customHeaders', {}))
+        headers = merge_media_headers(headers, nested_headers)
         # Some spiders put transport metadata beside the nested media URL.
         # Keep it before replacing the object with its URL string.
         for key in ('format', 'mediaType', 'playbackType', 'playerType', 'contentType', 'content_type',
@@ -638,9 +650,8 @@ def playback(value, _depth=0):
                 if 'proxy' not in value and 'proxy' in first:
                     value['proxy'] = first['proxy']
                     proxy_requested = enabled(first['proxy'])
-                first_headers = media_headers(first.get('header', {}))
-                first_headers.update(media_headers(first.get('headers', {})))
-                first_headers.update(media_headers(first.get('customHeaders', {})))
+                first_headers = merge_media_headers(first.get('headers', {}), first.get('header', {}),
+                                                    first.get('customHeaders', {}))
                 primary_choice_headers.update(first_headers)
             url = choices
         else:
@@ -662,9 +673,8 @@ def playback(value, _depth=0):
                         'mimeType', 'mime', 'parse', 'jx', 'requiresWebPlayback', 'webPlayback'):
                 if key not in value and key in first:
                     value[key] = first[key]
-            first_headers = media_headers(first.get('header', {}))
-            first_headers.update(media_headers(first.get('headers', {})))
-            first_headers.update(media_headers(first.get('customHeaders', {})))
+            first_headers = merge_media_headers(first.get('headers', {}), first.get('header', {}),
+                                                first.get('customHeaders', {}))
             primary_choice_headers.update(first_headers)
             for index, item in enumerate(url):
                 address = media_choice_address(item)
@@ -674,9 +684,8 @@ def playback(value, _depth=0):
                           'url': str(address)}
                 if enabled(item.get('proxy')) or proxy_requested:
                     choice['proxy'] = True
-                choice_headers = media_headers(item.get('header', {}))
-                choice_headers.update(media_headers(item.get('headers', {})))
-                choice_headers.update(media_headers(item.get('customHeaders', {})))
+                choice_headers = merge_media_headers(item.get('headers', {}), item.get('header', {}),
+                                                     item.get('customHeaders', {}))
                 if choice_headers:
                     choice['headers'] = choice_headers
                 for key in ('format', 'mediaType', 'playbackType', 'playerType', 'contentType', 'mimeType',
@@ -718,7 +727,7 @@ def playback(value, _depth=0):
             alternates[0]['url'] if alternates else '',
         )
     base_headers = dict(headers)
-    headers.update(primary_choice_headers)
+    headers = merge_media_headers(headers, primary_choice_headers)
     parse = 1 if enabled(value.get('parse')) else 0
     jx = 1 if enabled(value.get('jx')) else 0
     # Player pages commonly HTML-escape separators inside an m3u8 URL.
@@ -774,9 +783,8 @@ def playback(value, _depth=0):
             item_proxy = enabled(item.get('proxy')) or proxy_requested
             if valid_media_url(candidate) or item_proxy and valid_proxy_address(candidate):
                 choice = {'name': str(item.get('name') or item.get('n') or item.get('quality') or f'线路 {index + 1}')[:128], 'url': candidate}
-                choice_headers = media_headers(item.get('header', {}))
-                choice_headers.update(media_headers(item.get('headers', {})))
-                choice_headers.update(media_headers(item.get('customHeaders', {})))
+                choice_headers = merge_media_headers(item.get('headers', {}), item.get('header', {}),
+                                                     item.get('customHeaders', {}))
                 if choice_headers:
                     choice['headers'] = choice_headers
                 for key in ('format', 'mediaType', 'playbackType', 'playerType', 'contentType', 'mimeType',
@@ -1023,7 +1031,6 @@ class PythonSpider:
                 ('base.spider' in self._source_text or 'BaseSpider' in self._source_text) and
                 not any(tok in self._source_text for tok in ('.test', '.example', '127.0.0.1'))
             )
-            self._cms_fallback = None
             self._last_detail_title = ''
             self._episode_map = {}
             self._vod_title_by_id = {}
@@ -1286,12 +1293,6 @@ class PythonSpider:
             self.lock.release()
 
 
-    def _get_cms_fallback(self):
-        if self._cms_fallback is None:
-            csp_adapter = _load_csp_adapter()
-            self._cms_fallback = csp_adapter.AppVideoEngine('csp_AppRJ', '')
-        return self._cms_fallback
-
     def _record_vod_titles(self, payload):
         try:
             for r in rows(payload):
@@ -1351,7 +1352,6 @@ class PythonSpider:
 
     def _upgrade_tvbox_play_result(self, result, ep_id, args=None):
         try:
-            csp_adapter = _load_csp_adapter()
             url = ''
             if isinstance(result, dict):
                 url = str(media_choice_address(result) or '').strip()
@@ -1359,6 +1359,24 @@ class PythonSpider:
                 url = result.strip()
             if not url and ep_id.startswith(('http://', 'https://')):
                 url = ep_id
+            # Obscured HLS endpoints may end in .png or have no extension.
+            # Honor explicit media metadata before page probes or extraction.
+            if isinstance(result, dict) and not any(enabled(result.get(key)) for key in
+                    ('parse', 'jx', 'requiresWebPlayback', 'webPlayback')):
+                declared_format = str(result.get('format') or result.get('mediaType') or
+                                      result.get('playbackType') or '').strip().lower()
+                declared_type = str(result.get('contentType') or result.get('content_type') or
+                                    result.get('mimeType') or result.get('mime') or '').split(';', 1)[0].strip().lower()
+                direct_formats = {'hls', 'm3u8', 'm3u', 'mpegurl', 'mp4', 'm4v', 'mov',
+                                  'flv', 'mpd', 'dash', 'mpeg-dash', 'mkv', 'matroska',
+                                  'mp3', 'm4a', 'aac', 'ts', 'fmp4', 'cmaf'}
+                direct_mimes = {'application/vnd.apple.mpegurl', 'application/x-mpegurl',
+                                'application/mpegurl', 'application/dash+xml'}
+                declared_direct = (enabled(result.get('directMedia')) or enabled(result.get('nativePlayable')) or
+                                   declared_format in direct_formats or declared_format in direct_mimes or
+                                   declared_type in direct_mimes or declared_type.startswith(('video/', 'audio/')))
+                if declared_direct and url.startswith(('http://', 'https://')):
+                    return result
             low = url.lower()
             parsed = urllib.parse.urlsplit(url) if url else None
             path_low = parsed.path.lower() if parsed else ''
@@ -1379,26 +1397,11 @@ class PythonSpider:
                         return result
                 except Exception:
                     pass
-                # Rescue broken loopback HGTV proxy (e.g. 127.0.0.1:9990/?vid=... returning 502)
-                try:
-                    qs = urllib.parse.parse_qs(parsed.query if parsed else '')
-                    hg_vid = (qs.get('vid') or [''])[0] or (re.findall(r'/play/(\d{15,24})', path_low) or [''])[0]
-                    if not hg_vid and re.fullmatch(r'\d{15,24}', str(ep_id).split('~')[-1]):
-                        hg_vid = str(ep_id).split('~')[-1]
-                    if hg_vid and re.fullmatch(r'\d{15,24}', str(hg_vid)):
-                        builtin_hg = Path(__file__).resolve().parent.parent / 'Resources/BuiltinMedia/hongguo-python.py'
-                        if builtin_hg.is_file():
-                            spec = importlib.util.spec_from_file_location('_cctvhost_builtin_hg_rescue', str(builtin_hg))
-                            mod = importlib.util.module_from_spec(spec)
-                            spec.loader.exec_module(mod)
-                            dec_url, ref, _ = mod.resolve_signed('', str(hg_vid), False, host_proxy=False)
-                            if dec_url:
-                                return {'parse': 0, 'jx': 0, 'url': dec_url, 'format': 'mp4', 'contentType': 'video/mp4',
-                                        'header': {'User-Agent': 'Mozilla/5.0', 'Referer': ref or 'https://hongguoduanju.com/'}}
-                except Exception:
-                    pass
+                # A loopback failure does not establish which provider owns
+                # the numeric ID. Never reinterpret it as a built-in HGTV ID.
             if is_direct:
                 return result
+            csp_adapter = _load_csp_adapter()
             vip_domains = ('mgtv.com', 'qq.com', 'iqiyi.com', 'youku.com', 'bilibili.com', 'sohu.com', 'le.com', 'xmflv.com')
             if url.startswith(('http://', 'https://')) and not any(d in low for d in vip_domains) and '127.0.0.1' not in low and not is_dead_cdn:
                 try:
@@ -1409,31 +1412,8 @@ class PythonSpider:
                         return {'parse': 0, 'jx': 0, 'url': sniffed, 'header': {'User-Agent': 'Mozilla/5.0'}}
                 except Exception:
                     pass
-            args_dict = args if isinstance(args, dict) else {}
-            title, ep_idx, ep_name = self._episode_map.get(ep_id, ('', None, ''))
-            if _is_opaque_id_name(title, ep_id):
-                title = ''
-            if not title:
-                for cand_t in (args_dict.get('vodName'), args_dict.get('title'), self._last_detail_title):
-                    ct = _clean_meta_text(cand_t or '')
-                    if ct and not _is_opaque_id_name(ct, ep_id):
-                        title = ct
-                        break
-            if ep_idx is None:
-                try:
-                    ep_idx = int(args_dict.get('episodeIndex', 0) or 0)
-                except (TypeError, ValueError):
-                    ep_idx = 0
-            if not ep_name:
-                ep_name = str(args_dict.get('episodeName') or '').strip()
-            if not title and url.startswith(('http://', 'https://')) and any(d in low for d in vip_domains):
-                title, scraped_ep = csp_adapter.extract_title_from_vip_url(url)
-                if scraped_ep and not ep_name:
-                    ep_name = scraped_ep
-            if title:
-                resolved = csp_adapter.resolve_maccms_stream_by_title(title, episode_index=ep_idx, episode_name=ep_name)
-                if resolved:
-                    return {'parse': 0, 'jx': 0, 'url': resolved, 'header': {'User-Agent': 'Mozilla/5.0'}}
+            # Preserve the selected source if page extraction cannot resolve
+            # it. Matching another catalog by title does not prove identity.
         except Exception:
             pass
         return result
@@ -1486,7 +1466,6 @@ class NativeJS:
             raise MediaError('RUNTIME_MISSING', '此版本未包含所需的本机 JS 运行时')
         self.session = uuid.uuid4().hex
         self.manifest = dict(manifest or {})
-        self._cms_fallback = None
         self._use_cms_only = False
         owner = getattr(threading.current_thread(), '_host_session', None)
         self.service_identifier = getattr(owner, 'identifier', '')
@@ -1695,39 +1674,9 @@ class MediaRuntime:
             elif operation == 'play':
                 try:
                     value = playback(raw)
-                    try:
-                        play_u = str(value.get('url') or '').lower() if isinstance(value, dict) else ''
-                        if play_u and not any(tok in play_u for tok in ('.test', '.example', 'fixture')) and any(
-                            d in play_u for d in ('youku.com', 'qq.com', 'iqiyi.com', 'mgtv.com', 'bilibili.com', 'xmflv.com', 'lzcdn', 'lzfile', 'lfthirtytwo')
-                        ):
-                            ep_key = str(args.get('id') or '')
-                            title, ep_idx, ep_name = self._episode_map.get(ep_key, ('', None, ''))
-                            if _is_opaque_id_name(title, ep_key):
-                                title = ''
-                            if not title:
-                                for cand_t in (args.get('vodName'), args.get('title'), self._last_detail_title):
-                                    ct = _clean_meta_text(cand_t or '')
-                                    if ct and not _is_opaque_id_name(ct, ep_key):
-                                        title = ct
-                                        break
-                            if ep_idx is None:
-                                try:
-                                    ep_idx = int(args.get('episodeIndex', 0) or 0)
-                                except (TypeError, ValueError):
-                                    ep_idx = 0
-                            if not ep_name:
-                                ep_name = str(args.get('episodeName') or '').strip()
-                            csp_adapter = _load_csp_adapter()
-                            if not title and value.get('url'):
-                                title, scraped_ep = csp_adapter.extract_title_from_vip_url(value.get('url'))
-                                if scraped_ep and not ep_name:
-                                    ep_name = scraped_ep
-                            if title:
-                                rescued = csp_adapter.resolve_maccms_stream_by_title(title, episode_index=ep_idx, episode_name=ep_name)
-                                if rescued:
-                                    value = playback({'parse': 0, 'jx': 0, 'url': rescued, 'header': {'User-Agent': 'Mozilla/5.0'}})
-                    except Exception:
-                        pass
+                    # Keep the selected source and episode. A title search in a
+                    # different catalog cannot establish media identity and may
+                    # silently replace a valid signed stream with another video.
                 except MediaError as error:
                     if error.code == 'NO_MEDIA':
                         fallback = direct_episode_media_fallback(raw, args.get('id', ''))

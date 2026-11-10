@@ -8,6 +8,11 @@ static inline NSTimeInterval MediaPlaybackForwardBuffer(BOOL firstFrame, BOOL fa
     if(firstFrame)seconds+=MIN(stalls,(NSUInteger)3)*4.0;
     return MIN(constrained?12.0:30.0,seconds*MAX(1.0,rate));
 }
+// A displayed poster/first frame does not prove continuous playback. Increasing
+// the target while data is still scarce can create another startup wait.
+static inline BOOL MediaPlaybackCanGrowForwardBuffer(double observed, double ahead, double target, BOOL playing) {
+    return playing&&isfinite(observed)&&observed>=5.0&&isfinite(ahead)&&isfinite(target)&&target>0&&ahead>=target;
+}
 static inline BOOL MediaPlaybackShouldPrefetch(double position,double duration,double bufferedAhead,BOOL waiting,BOOL constrained) {
     if(waiting||constrained||!isfinite(position)||!isfinite(duration)||!isfinite(bufferedAhead)||position<2||duration<=0||position>=duration||bufferedAhead<2)return NO;
     return duration-position<=MIN(90.0,duration*0.25);

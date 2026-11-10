@@ -19,6 +19,7 @@
 #import "ServiceEditorViewController.h"
 #import "MediaGlobalSearchViewController.h"
 #import "MediaAPIClient.h"
+#import "MediaMetadataCache.h"
 #import "MediaSearchResults.h"
 #import "LocalServiceReadiness.h"
 #import "RuntimeDiagnostics.h"
@@ -106,6 +107,31 @@
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(delay*NSEC_PER_SEC)),dispatch_get_main_queue(),^{completion(@{@"items":@[@{@"id":keyword?:@"",@"name":keyword?:@""}]},nil);});
 }
 @end
+@interface SmokeDetailCacheClient : MediaAPIClient
+@property(nonatomic) NSUInteger detailCalls;
+@end
+@implementation SmokeDetailCacheClient
+- (void)call:(NSString *)operation arguments:(NSDictionary *)arguments correlationID:(NSString *)correlationID completion:(void (^)(id,NSError *))completion {
+    if([operation isEqual:@"detail"])self.detailCalls++;
+}
+@end
+@interface UIViewController (SmokeDetailCache)
+- (void)loadDetail;
+- (void)reloadDetail;
+@end
+@interface MediaMetadataCache (SmokeDetailCacheKey)
+- (NSString *)keyForSource:(NSDictionary *)source operation:(NSString *)operation arguments:(NSDictionary *)arguments;
+@end
+// Deterministic startup probe: no decoder or network request is needed to
+// exercise the controller's user-pause budget and stale-item cancellation.
+@interface SmokeWaitingAVPlayer : AVPlayer
+@property(nonatomic,strong) AVPlayerItem *fixtureItem;
+@end
+@implementation SmokeWaitingAVPlayer
+- (AVPlayerItem *)currentItem {return self.fixtureItem;}
+- (AVPlayerTimeControlStatus)timeControlStatus {return AVPlayerTimeControlStatusWaitingToPlayAtSpecifiedRate;}
+- (void)replaceCurrentItemWithPlayerItem:(AVPlayerItem *)item {self.fixtureItem=item;}
+@end
 @interface RuntimeDiagnostics (SmokeMarker)
 - (NSDictionary *)readSessionMarker;
 @end
@@ -115,10 +141,52 @@
 @end
 @interface MediaPlaybackViewController (SmokeEpisodePicker)
 - (void)openEpisodeSelection;
+- (void)clearCurrentPlayerItem;
+- (void)resolveAndPlay;
+- (void)resetAutomaticFallbackLines;
+- (void)prefetchNextEpisodeIfNeeded;
+- (NSString *)prefetchIdentityForEpisode:(NSDictionary *)episode;
+- (AVURLAsset *)assetForPlaybackURL:(NSURL *)url headers:(NSDictionary *)headers;
+- (void)prepareAssetForPrefetchedResult:(NSDictionary *)result identity:(NSString *)identity;
+- (AVURLAsset *)consumePrefetchedAssetForURL:(NSURL *)url headers:(NSDictionary *)headers;
+- (void)watchAVPlayerFirstFrameForItem:(AVPlayerItem *)item generation:(NSUInteger)generation url:(NSURL *)url sourceURL:(NSURL *)sourceURL;
 - (void)updatePlaybackLayoutForSize:(CGSize)size;
 - (void)setPlaybackRate:(double)rate;
 - (void)seekActiveEngineToTime:(NSTimeInterval)time completion:(nullable void (^)(BOOL finished))completion;
 - (void)recordPlaybackAttemptOutcome:(NSString *)outcome failureKind:(NSString *)kind httpStatus:(NSInteger)status terminal:(BOOL)terminal;
+@end
+@interface SmokePrefetchClient : MediaAPIClient
+@property(nonatomic) NSInteger calls;
+@property(nonatomic) NSInteger cancellations;
+@property(nonatomic,copy) void (^pending)(id,NSError *);
+@end
+@implementation SmokePrefetchClient
+- (void)cancel {self.cancellations++;}
+- (void)call:(NSString *)operation arguments:(NSDictionary *)arguments correlationID:(NSString *)correlationID completion:(void (^)(id,NSError *))completion {self.calls++;self.pending=completion;}
+@end
+@interface SmokePreparedAsset : AVURLAsset
+@property(nonatomic) NSInteger metadataLoads;
+@property(nonatomic) NSInteger cancellations;
+@end
+@implementation SmokePreparedAsset
+- (void)loadValuesAsynchronouslyForKeys:(NSArray<NSString *> *)keys completionHandler:(void (^)(void))handler {self.metadataLoads++;if(handler)handler();}
+- (void)cancelLoading {self.cancellations++;}
+@end
+@interface SmokePlayingAVPlayer : SmokeWaitingAVPlayer @end
+@implementation SmokePlayingAVPlayer
+- (AVPlayerTimeControlStatus)timeControlStatus {return AVPlayerTimeControlStatusPlaying;}
+@end
+@interface SmokePrefetchController : MediaPlaybackViewController
+@property(nonatomic,strong) NSDictionary *receivedResult;
+@property(nonatomic,strong) NSDictionary *preparedHeaders;
+@end
+@implementation SmokePrefetchController
+- (void)playResult:(NSDictionary *)result {self.receivedResult=result;}
+- (NSTimeInterval)activeEngineCurrentPosition {return 1750;}
+- (NSTimeInterval)activeEngineDuration {return 1800;}
+- (NSTimeInterval)bufferedAheadForItem:(AVPlayerItem *)item {return 10;}
+- (BOOL)playbackBufferConstrained {return NO;}
+- (AVURLAsset *)assetForPlaybackURL:(NSURL *)url headers:(NSDictionary *)headers {self.preparedHeaders=headers;return [[SmokePreparedAsset alloc] initWithURL:url options:nil];}
 @end
 @interface MediaWebViewController (SmokeConfiguration)
 - (void)close;
@@ -157,6 +225,86 @@ static NSURL *pluginLogExportURL;
 static void check(BOOL value, NSString *message) {
     if (!value)
         [failures addObject:message];
+}
+static void SmokePlaybackPrefetchReuse(void) {
+    NSString *decodeKey=@"cctv.mediaDecodeMode.v1";id previousDecode=[NSUserDefaults.standardUserDefaults objectForKey:decodeKey];[NSUserDefaults.standardUserDefaults setObject:@"auto" forKey:decodeKey];
+    NSArray *episodes=@[@{@"id":@"ep-0",@"name":@"第1集"},@{@"id":@"ep-1",@"name":@"第2集"}];
+    NSDictionary *context=@{@"source":@{@"id":@"prefetch-fixture"},@"detail":@{@"id":@"fixture-show",@"lines":@[@{@"id":@"line-1",@"episodes":episodes}]}};
+    SmokePrefetchController *probe=[SmokePrefetchController new];probe.context=context;
+    SmokePrefetchClient *background=[[SmokePrefetchClient alloc] initWithPort:1],*foreground=[[SmokePrefetchClient alloc] initWithPort:1];
+    [probe setValue:background forKey:@"prefetchClient"];[probe setValue:foreground forKey:@"client"];
+    [probe setValue:[SmokePlayingAVPlayer new] forKey:@"player"];[probe setValue:@YES forKey:@"videoFrameReady"];
+    [probe prefetchNextEpisodeIfNeeded];
+    NSInteger cancellations=background.cancellations;
+    check(background.calls==1&&background.pending!=nil,@"next episode starts one bounded background resolve");
+    [probe setValue:@1 forKey:@"episodeIndex"];[probe resetAutomaticFallbackLines];[probe resolveAndPlay];
+    check(foreground.calls==0&&background.cancellations==cancellations&&[probe valueForKey:@"promotedPrefetchCompletion"]!=nil,@"selecting the in-flight next episode promotes its request without cancellation or duplicate resolve");
+    [probe didReceiveMemoryWarning];
+    check(background.cancellations==cancellations&&[probe valueForKey:@"promotedPrefetchCompletion"]!=nil,@"memory pressure preserves a promoted foreground resolution");
+    NSDictionary *result=@{@"url":@"http://127.0.0.1:19876/media/fixture",@"originalURL":@"https://cdn.example/master.m3u8",@"format":@"hls",@"headers":@{@"Cookie":@"fixture=private"}};
+    background.pending(result,nil);
+    check(probe.receivedResult==result&&![[probe valueForKey:@"resolving"] boolValue],@"the original prefetch completion reaches the user's selected playback");
+    NSString *identity=[probe prefetchIdentityForEpisode:episodes[1]];
+    [probe prepareAssetForPrefetchedResult:result identity:identity];
+    SmokePreparedAsset *prepared=[probe valueForKey:@"prefetchedAsset"];
+    check(prepared&&prepared.metadataLoads==1&&probe.preparedHeaders.count==0,@"local relay metadata is warmed once without forwarding source credentials");
+    check([probe consumePrefetchedAssetForURL:[NSURL URLWithString:result[@"url"]] headers:@{}]==prepared&&prepared.cancellations==0,@"the next selection consumes the exact prepared AVURLAsset");
+    check([probe consumePrefetchedAssetForURL:[NSURL URLWithString:result[@"url"]] headers:@{}]==nil,@"prepared asset ownership transfers only once");
+    [probe prepareAssetForPrefetchedResult:result identity:identity];prepared=[probe valueForKey:@"prefetchedAsset"];
+    [probe setValue:@(CACurrentMediaTime()-121) forKey:@"prefetchedAssetAt"];
+    check([probe consumePrefetchedAssetForURL:[NSURL URLWithString:result[@"url"]] headers:@{}]==nil&&prepared.cancellations==1,@"expired prepared URLs are cancelled instead of reused");
+    [probe prepareAssetForPrefetchedResult:result identity:identity];prepared=[probe valueForKey:@"prefetchedAsset"];
+    NSMutableDictionary *changed=[context mutableCopy];changed[@"parserID"]=@"another-parser";probe.context=changed;
+    check([probe consumePrefetchedAssetForURL:[NSURL URLWithString:result[@"url"]] headers:@{}]==nil&&prepared.cancellations==1,@"a parser change invalidates the prepared episode identity");
+    [probe clearCurrentPlayerItem];
+    if(previousDecode)[NSUserDefaults.standardUserDefaults setObject:previousDecode forKey:decodeKey];else[NSUserDefaults.standardUserDefaults removeObjectForKey:decodeKey];
+}
+static void SmokePlaybackStartupLifecycle(void) {
+    MediaPlaybackViewController *probe=[MediaPlaybackViewController new];[probe loadViewIfNeeded];
+    NSURL *url=[NSURL fileURLWithPath:@"/nonexistent-startup-fixture.mp4"];
+    AVPlayerItem *item=[AVPlayerItem playerItemWithURL:url];
+    SmokeWaitingAVPlayer *player=[SmokeWaitingAVPlayer new];player.fixtureItem=item;
+    [probe setValue:player forKey:@"player"];[probe setValue:item forKey:@"observedItem"];
+    [probe setValue:@0 forKey:@"playerGeneration"];
+    [probe setValue:@YES forKey:@"resumePromptPending"];
+    [probe watchAVPlayerFirstFrameForItem:item generation:0 url:url sourceURL:url];
+    NSTimer *timer=[probe valueForKey:@"avFirstFrameTimer"];
+    [probe setValue:@19 forKey:@"avFirstFrameActiveWait"];[probe setValue:@(CACurrentMediaTime()-2) forKey:@"avFirstFrameLastCheck"];
+    [timer fire];
+    check(timer.isValid&&[[probe valueForKey:@"avFirstFrameActiveWait"] doubleValue]==19,@"resume decision keeps the watchdog alive without consuming the startup budget");
+    [probe setValue:@NO forKey:@"resumePromptPending"];[probe setValue:@YES forKey:@"playbackSuspendedForVisibility"];
+    [probe setValue:@(CACurrentMediaTime()-2) forKey:@"avFirstFrameLastCheck"];[timer fire];
+    check(timer.isValid&&[[probe valueForKey:@"avFirstFrameActiveWait"] doubleValue]==19,@"visibility pause does not fail or disable startup monitoring");
+    // No routes are available, so expiry finishes locally without invoking a
+    // real SDK. Resume must re-enter failure detection after a long prompt.
+    [probe setValue:@NO forKey:@"playbackSuspendedForVisibility"];[probe setValue:@3 forKey:@"attemptedRoutes"];
+    [probe setValue:@(CACurrentMediaTime()-2) forKey:@"avFirstFrameLastCheck"];[timer fire];
+    check(!timer.isValid&&[probe valueForKey:@"avFirstFrameTimer"]==nil,@"startup timeout still fires after the user resumes");
+    [probe watchAVPlayerFirstFrameForItem:item generation:0 url:url sourceURL:url];
+    timer=[probe valueForKey:@"avFirstFrameTimer"];
+    [probe clearCurrentPlayerItem];
+    check(!timer.isValid&&player.currentItem==nil&&[probe valueForKey:@"observedItem"]==nil,@"clearing playback releases the network item and cancels its watchdog");
+}
+static void SmokeDetailCacheLifecycle(void) {
+    NSDictionary *source=@{@"id":@"smoke-detail-cache",@"port":@1,@"protocol":@"python-spider"};
+    NSDictionary *args=@{@"id":@"film",@"vodName":@"Cached Film",@"provider":@"fixture"};
+    NSDictionary *detail=@{@"id":@"film",@"name":@"Cached Film",@"lines":@[@{@"id":@"main",@"name":@"Main",@"episodes":@[@{@"id":@"episode-1",@"name":@"第1集"}]}]};
+    MediaMetadataCache *cache=MediaMetadataCache.shared;
+    [cache storeResult:detail forSource:source operation:@"detail" arguments:args];
+    UIViewController *probe=[NSClassFromString(@"MediaDetailViewController") new];
+    [probe setValue:source forKey:@"source"];[probe setValue:@{@"id":@"film",@"name":@"Cached Film"} forKey:@"item"];[probe setValue:@"fixture" forKey:@"provider"];
+    [probe loadViewIfNeeded];
+    check([[probe valueForKey:@"detail"] isEqual:detail]&&[[probe valueForKey:@"playButton"] isEnabled],@"fresh detail cache renders playable episodes synchronously on page entry");
+    SmokeDetailCacheClient *client=[[SmokeDetailCacheClient alloc] initWithPort:1];[probe setValue:client forKey:@"client"];
+    [probe loadDetail];
+    check(client.detailCalls==0,@"fresh detail does not issue a duplicate network request");
+    [probe reloadDetail];
+    check(client.detailCalls==1,@"explicit reload bypasses fresh detail freshness without hiding cached episodes");
+    id entry=[[cache valueForKey:@"entries"] objectForKey:[cache keyForSource:source operation:@"detail" arguments:args]];
+    [entry setValue:@(NSDate.date.timeIntervalSince1970-90) forKey:@"storedAt"];
+    [probe loadDetail];
+    check(client.detailCalls==2&&[[probe valueForKey:@"detail"] isEqual:detail],@"stale detail remains visible while one revalidation request starts");
+    [cache removeResultsForSourceID:source[@"id"]];
 }
 static UIView *SmokeViewWithAccessibilityIdentifier(UIView *root, NSString *identifier) {
     if ([root.accessibilityIdentifier isEqualToString:identifier]) return root;
@@ -1061,6 +1209,9 @@ static void next(NSArray *steps, NSUInteger index) {
           }},
           @{ @"timeout":@16,@"until":^BOOL{AVPlayer *player=[mediaPlayback valueForKey:@"player"];UILabel *status=[mediaPlayback valueForKey:@"status"];AVURLAsset *asset=(AVURLAsset *)player.currentItem.asset;return player.currentItem.status==AVPlayerItemStatusReadyToPlay&&[asset.URL.pathExtension.lowercaseString isEqual:@"m3u8"]&&[status.text containsString:@"视频首帧已就绪"];},@"run":^{
             AVPlayer *player=[mediaPlayback valueForKey:@"player"];UILabel *status=[mediaPlayback valueForKey:@"status"];AVURLAsset *asset=(AVURLAsset *)player.currentItem.asset;NSDictionary *result=[mediaPlayback valueForKey:@"result"];check([result[@"parse"] boolValue]&&[result[@"format"] isEqual:@"hls"],@"legacy parse=1 HLS media result is routed to AVPlayer when the returned URL is a real HLS manifest");check([asset.URL.pathExtension.lowercaseString isEqual:@"m3u8"],@"plugin HLS route remains a native HLS asset");check([status.text containsString:@"视频首帧已就绪"],@"AVPlayer decodes and displays a real frame from the imported-source HLS fixture");[mediaPlayback seekActiveEngineToTime:0 completion:nil];check(player.currentItem.status==AVPlayerItemStatusReadyToPlay,@"the native player accepts seeking without a caller completion block");capture(self.window,@"20b-media-hls-first-frame");[nav popToViewController:mediaPage animated:NO];
+            SmokePlaybackStartupLifecycle();
+            SmokePlaybackPrefetchReuse();
+            SmokeDetailCacheLifecycle();
             MediaPlaybackViewController *viewportProbe=[MediaPlaybackViewController new];viewportProbe.context=@{@"source":@{@"id":@"viewport-fixture"},@"item":@{@"name":@"Viewport fixture"}};[nav pushViewController:viewportProbe animated:NO];[viewportProbe.view layoutIfNeeded];
             [viewportProbe setValue:@(9.0/16.0) forKey:@"videoAspectRatio"];[viewportProbe updatePlaybackLayoutForSize:viewportProbe.view.bounds.size];[viewportProbe.view layoutIfNeeded];UIView *probeVideo=[viewportProbe valueForKey:@"videoView"];NSLayoutConstraint *portraitViewport=[viewportProbe valueForKey:@"portraitTallViewportHeightConstraint"];NSLayoutConstraint *standardAspect=[viewportProbe valueForKey:@"videoAspectConstraint"];CGFloat expectedTallHeight=CGRectGetHeight(viewportProbe.view.bounds)*0.50;check(portraitViewport.isActive&&!standardAspect.isActive&&fabs(CGRectGetHeight(probeVideo.frame)-expectedTallHeight)<2,[NSString stringWithFormat:@"portrait media gets the configured half-height native-player viewport (actual=%.1f expected=%.1f)",CGRectGetHeight(probeVideo.frame),expectedTallHeight]);
             [viewportProbe setValue:@(16.0/9.0) forKey:@"videoAspectRatio"];[viewportProbe updatePlaybackLayoutForSize:viewportProbe.view.bounds.size];[viewportProbe.view layoutIfNeeded];check(standardAspect.isActive&&!portraitViewport.isActive&&fabs(CGRectGetHeight(probeVideo.frame)-CGRectGetWidth(probeVideo.frame)*0.5625)<2,@"landscape media restores the normal 16:9 player viewport");[nav popViewControllerAnimated:NO];

@@ -23,8 +23,9 @@
 //      onPlayerStatusChanged:oldStatus:newStatus:、
 //      onVideoSizeChanged:width:height:rotation:（另见适配器文件注释）。
 //   3) 因此：VP9 / AV1 / WMV / RMVB / AVI 在此构建上两路原生引擎都播不了，
-//      只能走 WebView；WebM 只保证容器可解，常见 VP8/VP9/Opus 内容实际不可播，
-//      仍先试 Cicada（极少数 H.264 内嵌的 WebM 能播），失败后进 WebView。
+//      本 App 的原生路由均无法保证播放，不应宣称 WebView 可补齐解码能力。
+//      WebM 只保证容器可解；常见 VP8/VP9/Opus 内容实际不可播。
+//      路由保留有界的原生尝试，失败后由调用方换线路或提示错误。
 //   4) DASH/MPD：Aliyun 播放器层自带 DASH 支持（二进制含 dash_manifest_demuxer），
 //      归入 Cicada 覆盖，但需真机验证（本机无 Xcode、无真机）。
 #import "MediaPlaybackDecodeRouter.h"
@@ -35,7 +36,7 @@ const NSUInteger MediaPlaybackDecodeRouteAttemptedCicadaPlayer = 1 << 1;
 const NSUInteger MediaPlaybackDecodeRouteAttemptedWebView = 1 << 2;
 
 static NSString *MediaPlaybackDecodeLowerString(id value) {
-    return [value isKindOfClass:NSString.class] ? [(NSString *)value lowercaseString] : @"";
+    return [value isKindOfClass:NSString.class] ? [[(NSString *)value stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] lowercaseString] : @"";
 }
 
 static NSString *MediaPlaybackDecodeResultURLString(NSDictionary *result) {
@@ -52,7 +53,7 @@ static NSString *MediaPlaybackDecodeResultMIME(NSDictionary *result) {
     NSString *mime = MediaPlaybackDecodeLowerString(result[@"contentType"] ?: result[@"content_type"] ?: result[@"mimeType"] ?: result[@"mime"]);
     NSRange semicolon = [mime rangeOfString:@";"];
     if (semicolon.location != NSNotFound) mime = [mime substringToIndex:semicolon.location];
-    return mime;
+    return [mime stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
 }
 
 static NSString *MediaPlaybackDecodeResultFormat(NSDictionary *result) {
@@ -66,7 +67,7 @@ BOOL MediaPlaybackResultSupportsCicadaPlayer(NSDictionary *result) {
     NSString *format = MediaPlaybackDecodeResultFormat(result);
     NSString *mime = MediaPlaybackDecodeResultMIME(result);
     // format 词：flv / live_flv / mpd / dash / mkv / matroska / webm / 3gp / rtmp
-    NSSet *formats = [NSSet setWithArray:@[@"flv", @"live_flv", @"mpd", @"dash", @"mkv", @"matroska", @"webm", @"3gp", @"3gpp", @"rtmp"]];
+    NSSet *formats = [NSSet setWithArray:@[@"flv", @"live_flv", @"mpd", @"dash", @"mpeg-dash", @"mkv", @"matroska", @"webm", @"3gp", @"3gpp", @"rtmp"]];
     // mime 词：video/x-flv、application/dash+xml、video/x-matroska、video/webm、
     // video/3gpp、application/x-rtmp。video/mp2t 归 AVPlayer，不列入。
     NSSet *mimes = [NSSet setWithArray:@[@"video/x-flv", @"application/dash+xml", @"video/x-matroska", @"video/webm", @"video/3gpp", @"video/3gpp2", @"application/x-rtmp"]];
@@ -83,7 +84,8 @@ BOOL MediaPlaybackResultRequiresWebViewOnly(NSDictionary *result) {
     NSString *format = MediaPlaybackDecodeResultFormat(result);
     NSString *mime = MediaPlaybackDecodeResultMIME(result);
     // AVI：无 avi demuxer；WMV/ASF：无 asf demuxer、无 wmv 解码器；
-    // RM/RMVB：无 rm demuxer、无 rv 解码器。AVPlayer 同样不支持这三类容器。
+    // RM/RMVB：无 rm demuxer、无 rv 解码器。AVPlayer 同样不支持这些容器。
+    // 此函数保留历史名称，仅表示原生能力限制；不承诺 WebView 能播放。
     NSSet *formats = [NSSet setWithArray:@[@"avi", @"wmv", @"asf", @"rm", @"rmvb"]];
     NSSet *mimes = [NSSet setWithArray:@[@"video/x-msvideo", @"video/x-ms-wmv", @"video/x-ms-asf", @"application/vnd.rn-realmedia", @"audio/x-pn-realaudio", @"video/vnd.rn-realvideo"]];
     if ([formats containsObject:format] || [mimes containsObject:mime]) return YES;
@@ -107,8 +109,8 @@ MediaPlaybackDecodeRoute MediaPlaybackDecodeRouteNextForResult(NSDictionary *res
     BOOL avSupported = MediaPlaybackResultSupportsAVPlayer(result);
     BOOL cicadaSupported = MediaPlaybackResultSupportsCicadaPlayer(result);
     BOOL requiresWebPlayback = ([result[@"requiresWebPlayback"] boolValue] || [result[@"parse"] integerValue] > 0 || [result[@"jx"] integerValue] > 0) && !directMedia;
-    NSString *decodeMode = [[NSUserDefaults standardUserDefaults] stringForKey:@"cctv.mediaDecodeMode.v1"] ?: @"auto";
-    BOOL preferCicada = [decodeMode isEqualToString:@"cicada"] || [decodeMode isEqualToString:@"cicada_soft"] || ([result[@"playbackEngine"] isKindOfClass:NSString.class] && [result[@"playbackEngine"] isEqualToString:@"cicada"]);
+    NSString *decodeMode = MediaPlaybackDecodeLowerString([[NSUserDefaults standardUserDefaults] stringForKey:@"cctv.mediaDecodeMode.v1"] ?: @"auto");
+    BOOL preferCicada = [decodeMode isEqualToString:@"cicada"] || [decodeMode isEqualToString:@"cicada_soft"] || [MediaPlaybackDecodeLowerString(result[@"playbackEngine"]) isEqualToString:@"cicada"];
 
     // 完全剔除网页播放：统一走 App 原生 AVPlayer 与 CicadaPlayer（硬解 -> ffmpeg 软解 cc）。
     MediaPlaybackDecodeRoute candidates[4];

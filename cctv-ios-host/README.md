@@ -43,6 +43,10 @@ CNPlayerSDK 是原生央视直播入口。CCTV 页按频道 ID 交给 SDK 自动
 
 Python Spider 的 `localProxy` 支持常见 `[状态码, 响应头, 内容]` 返回值；本机代理保留媒体类型、Range 与 Content-Range，GET/HEAD 分开传递，并对带请求头的 HLS 分片使用有界本机转发。相同参数的目录/详情请求会合并进行中的调用。协议测试只验证本机桥接行为，不能替代 iPhone 上的上游可达性和视频解码验收。
 
+本轮 AVPlayer/Cicada 生命周期、首帧监测、请求头、Range/HEAD 与 TLS 修复见 [播放器适配审计](Docs/PLAYBACK-ADAPTER-AUDIT-20261110.md)；三个附件 Python 源的可导入版本及离线验证见 [附件适配说明](Docs/ATTACHED-PYTHON-PLAYBACK.md)。
+
+详情缓存、切集预解析提升、AVPlayer 元数据预热及 HLS 并发清单/首部发送优化见 [详情与起播速度记录](Docs/DETAIL-AND-STARTUP-SPEED-20261110.md)，含可复现 loopback 基准命令和设备测量边界。
+
 Node 插件的 `https.request/get` 保留原生请求优先；若默认 TLS 配置在收到响应前遇到连接或握手错误，会通过带随机令牌的宿主回环接口让内嵌 Python `urllib` 重试一次，传递请求头、HTTP 状态、响应头和内容。证书校验错误、自定义 TLS 参数及自定义 Agent 不走回退路径，Python 仍使用默认 CA 验证，不会关闭 TLS 证书校验。宿主回退响应上限为 16 MiB。
 
 本地导入还识别 `WidgetMetadata` / `Widget.http` / `loadResource(params)` 影视解析脚本，并将搜索结果接入影视页详情和 AVPlayer 播放流程；Widget HTTP 响应限时、限大小。CatPaw 的 `globalThis.Pans` ESM Fastify 包由 Node 宿主绑定本机服务并在停止时关闭。带有明确 argparse `--port`、`--bind` 声明的 Python HTTP 包会使用 CCTVHost 分配的端口；检测到 `/all.m3u` 生成器与路由时，启用服务后自动添加本机订阅。原始 ZIP 会保留，运行时补充的 ESM `package.json` 只写入应用沙盒中的解包副本。

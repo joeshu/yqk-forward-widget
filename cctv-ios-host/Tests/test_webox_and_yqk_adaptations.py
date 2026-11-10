@@ -226,7 +226,8 @@ const fn = {fn_code};
         self.assertTrue(callable(getattr(adapter_mod, "resolve_maccms_stream_by_title", None)))
         self.assertTrue(callable(getattr(adapter_mod, "extract_title_from_vip_url", None)))
 
-        # Verify MediaRuntime.call("play") rescues Youku & QQ VIP URLs when vodName/detail title is known
+        # An available title must not silently substitute another catalog's
+        # stream for the selected provider. Explicit parsers remain available.
         class DummyYoukuTencentEngine:
             def capabilities(self):
                 return {"capabilities": ["home", "detail", "play"]}
@@ -242,17 +243,18 @@ const fn = {fn_code};
         rt = host_media_runtime.MediaRuntime(DummyYoukuTencentEngine())
         det = rt.call("detail", {"id": "yk1"})
         self.assertEqual(det["name"], "藏海传")
-        with mock.patch.object(adapter_mod, "resolve_maccms_stream_by_title", return_value="https://cdn.example/canghai/ep1.m3u8"):
+        with mock.patch.object(adapter_mod, "resolve_maccms_stream_by_title", return_value="https://cdn.example/canghai/ep1.m3u8") as rescue:
             play_yk = rt.call("play", {"id": "https://v.youku.com/v_show/id_XNjU.html", "lineId": "youku"})
-            self.assertEqual(play_yk["url"], "https://cdn.example/canghai/ep1.m3u8")
-            self.assertEqual(play_yk["parse"], 0)
-            self.assertTrue(play_yk["directMedia"])
-            self.assertTrue(play_yk["nativePlayable"])
+            self.assertEqual(play_yk["url"], "https://v.youku.com/v_show/id_XNjU.html")
+            self.assertEqual(play_yk["parse"], 1)
+            self.assertTrue(play_yk["requiresWebPlayback"])
+            self.assertFalse(play_yk["nativePlayable"])
 
             play_qq = rt.call("play", {"id": "https://v.qq.com/x/cover/mzc00200/v001.html", "lineId": "qq", "vodName": "藏海传"})
-            self.assertEqual(play_qq["url"], "https://cdn.example/canghai/ep1.m3u8")
-            self.assertEqual(play_qq["parse"], 0)
-            self.assertTrue(play_qq["directMedia"])
+            self.assertEqual(play_qq["url"], "https://v.qq.com/x/cover/mzc00200/v001.html")
+            self.assertEqual(play_qq["parse"], 1)
+            self.assertTrue(play_qq["requiresWebPlayback"])
+            rescue.assert_not_called()
         rt.close()
 
         # Verify WeBox 4kvm, HStream, JSPluginRuntime hostFetch fallback, and universal yqk parseLink
@@ -307,7 +309,7 @@ const fn = {fn_code};
         readiness_src = (ROOT / "Sources/LocalServiceReadiness.m").read_text(encoding="utf-8")
         self.assertIn('[self.lastFailureKind isEqualToString:@"network_error"]&&self.attemptCount<=3', readiness_src)
         self.assertIn("AVURLAssetPreferPreciseDurationAndTimingKey", mp_src)
-        self.assertIn("cmsEpisodeCache", mp_src)
+        self.assertNotIn("cmsEpisodeCache", mp_src)
         self.assertIn("prefetchNextEpisodeIfNeeded", mp_src)
         self.assertIn("prefetchedEpisodeResult", mp_src)
         self.assertIn("loaderKeyCache", mp_src)
@@ -336,8 +338,8 @@ const fn = {fn_code};
 
         mb_src = (ROOT / "Sources/MediaBrowserViewController.m").read_text(encoding="utf-8")
         self.assertIn("[self buildDetailLayout];[self refreshDetailHeader];[self loadDetail];", mb_src)
-        self.assertIn('resultForSource:self.source operation:@"detail" arguments:args maximumAge:1800', mb_src)
-        self.assertIn('storeResult:sanitizedDetail forSource:owner.source operation:@"detail" arguments:args', mb_src)
+        self.assertIn('resultForSource:self.source operation:@"detail" arguments:args maximumAge:300', mb_src)
+        self.assertIn('storeResult:sanitizedDetail forSource:requestedSource operation:@"detail" arguments:args', mb_src)
         self.assertIn("[CATransaction setDisableActions:YES];", mb_src)
 
         feed_src = (ROOT / "Sources/MediaFeedView.m").read_text(encoding="utf-8")

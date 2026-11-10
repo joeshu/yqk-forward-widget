@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "name": "肉视频（iOS 播放适配）",
+  "runtime": "python",
+  "protocol": "python-spider",
+  "entry": "spider.py"
+}

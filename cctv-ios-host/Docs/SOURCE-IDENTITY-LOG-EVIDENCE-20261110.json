@@ -1,0 +1,107 @@
+{
+  "input_files": [
+    {
+      "name": "1-CCTVHost-总日志-脱敏.txt",
+      "sha256": "5ccfb06331423dbc1345319c1ce4d7f9216451ae2f060761d0d2a805ad0d0096"
+    },
+    {
+      "name": "2-CCTVHost-运行诊断-2026-11-10T22-47-08Z-db11805b.jsonl",
+      "sha256": "11d72ce2eca76ad2d3acf6e1e1b0e3a13b8c4049dfbc455513291a9d790400b3"
+    }
+  ],
+  "records": 1365,
+  "app_started": {
+    "app_version": "1.34",
+    "system_uptime_seconds": 869275.3760345418,
+    "app_build": "507",
+    "application_state": "inactive",
+    "session_marker_saved": true,
+    "ios_version": "27.0.1",
+    "process_phys_footprint_bytes": 9717360
+  },
+  "event_counts": {
+    "media_detail_readable": 10,
+    "episode_player_handoff": 8,
+    "playback_first_frame_ready": 8,
+    "media_first_frame_ready": 0,
+    "media_parser_endpoint_succeeded": 0,
+    "playback_auto_line_fallback": 0,
+    "playback_auto_alternate_fallback": 0,
+    "playback_maccms_rescue_started": 0
+  },
+  "handoffs": [
+    {
+      "time": "2026-11-10T22:39:24Z",
+      "service_id": "34BF496A-6CC0-4D8E-B11A-776CFCDBE0D6",
+      "service_name": "718吃瓜",
+      "player": "avplayer",
+      "source_host": "yhxliang.igftwg.cn",
+      "line_index": 0,
+      "episode_index": 6
+    },
+    {
+      "time": "2026-11-10T22:40:03Z",
+      "service_id": "0D8CD2C5-0CA7-4599-B067-C8F5CD210B3D",
+      "service_name": "",
+      "player": "avplayer",
+      "source_host": "vd.wmvbo.com",
+      "line_index": 0,
+      "episode_index": 0
+    },
+    {
+      "time": "2026-11-10T22:41:55Z",
+      "service_id": "0C936F6A-6AFA-46A9-9BC4-FBA7E0A4EC1F",
+      "service_name": "🦋 腾讯视频",
+      "player": "avplayer",
+      "source_host": "vip.dytt-tvs.com",
+      "line_index": 0,
+      "episode_index": 0
+    },
+    {
+      "time": "2026-11-10T22:42:43Z",
+      "service_id": "69E8729B-E329-4765-A02D-C43A30447E0D",
+      "service_name": "肉视频",
+      "player": "avplayer",
+      "source_host": "vip.lz-cdn16.com",
+      "line_index": 0,
+      "episode_index": 0
+    },
+    {
+      "time": "2026-11-10T22:44:03Z",
+      "service_id": "69E8729B-E329-4765-A02D-C43A30447E0D",
+      "service_name": "肉视频",
+      "player": "avplayer",
+      "source_host": "v.cdnlz18.com",
+      "line_index": 0,
+      "episode_index": 0
+    },
+    {
+      "time": "2026-11-10T22:44:47Z",
+      "service_id": "34BF496A-6CC0-4D8E-B11A-776CFCDBE0D6",
+      "service_name": "718吃瓜",
+      "player": "avplayer",
+      "source_host": "yhxliang.igftwg.cn",
+      "line_index": 0,
+      "episode_index": 0
+    },
+    {
+      "time": "2026-11-10T22:44:57Z",
+      "service_id": "34BF496A-6CC0-4D8E-B11A-776CFCDBE0D6",
+      "service_name": "718吃瓜",
+      "player": "avplayer",
+      "source_host": "yhxliang.igftwg.cn",
+      "line_index": 0,
+      "episode_index": 0
+    },
+    {
+      "time": "2026-11-10T22:46:26Z",
+      "service_id": "E635190B-1577-4F8E-A76A-63224BF20B85",
+      "service_name": "",
+      "player": "avplayer",
+      "source_host": "142.248.97.91",
+      "line_index": 0,
+      "episode_index": 0
+    }
+  ],
+  "evidence_limit": "Source host is not content identity. No expected title/episode-to-media binding in this diagnostic export; no Cicada handoff or explicit fallback event was observed. Source defects are established by code review, not inferred from CDN host alone."
+}

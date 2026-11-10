@@ -44,12 +44,13 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
         self.assertEqual(body['sign'], signature)
         self.assertEqual(engine.session.post.call_count, 1)
 
-    def test_l1_sibling_script_association_contract(self):
-        """Verifies that MediaBrowserViewController includes fallback sibling mapping."""
+    def test_site_picker_preserves_selected_site_identity(self):
+        """An unsupported site must not launch a similarly named sibling."""
         mb = (SOURCES / 'MediaBrowserViewController.m').read_text(encoding='utf-8')
-        self.assertIn('MediaBrowserFallbackSupportedSite', mb)
-        self.assertIn('MediaBrowserStationCoreName', mb)
-        self.assertIn('iOS 脚本适配 · 已关联', mb)
+        self.assertNotIn('MediaBrowserFallbackSupportedSite', mb)
+        self.assertNotIn('MediaBrowserStationCoreName', mb)
+        self.assertNotIn('iOS 脚本适配 · 已关联', mb)
+        self.assertIn('NSDictionary *effectiveSite=site;', mb)
 
     def test_l2_xbpq_declarative_rule_crawler(self):
         """Verifies XBPQ rule engine parses categories, items, detail episodes, and sniffs streams."""
@@ -275,11 +276,11 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
         self.assertIn('MediaJARBridgeBuildPlayResult', api_code)
         self.assertIn('MediaJARBridgeMacCMSFallbackRequest', api_code)
         self.assertIn('BOOL jarDirectPlay=jarBridge', api_code)
-        self.assertIn('fbArgs[@"_jar_fallback"]=@YES;', api_code)
+        self.assertNotIn('fbArgs[@"_jar_fallback"]=@YES;', api_code)
 
-        # Verify empty ext csp_* site resolves to built-in CMS host instead of empty URL
-        empty_engine = AppVideoEngine('csp_Gz360', '')
-        self.assertTrue(empty_engine.base_url.startswith('https://'))
+        # Missing site configuration must not pick an unrelated built-in CMS.
+        with self.assertRaisesRegex(ValueError, '不使用默认站点'):
+            AppVideoEngine('csp_Gz360', '')
         # Verify /api.php/app/ suffix is stripped from base_url
         app_engine = AppVideoEngine('csp_AppYsV2', 'https://qpcj.69mini.com/api.php/app/')
         self.assertEqual(app_engine.base_url, 'https://qpcj.69mini.com')
@@ -347,7 +348,7 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
         self.assertIn('player_aaaa', api_code)
 
         mp_code = (SOURCES / 'MediaPlaybackViewController.m').read_text(encoding='utf-8')
-        self.assertIn('resolveMacCMSStreamByTitleForResult', mp_code)
+        self.assertNotIn('resolveMacCMSStreamByTitleForResult', mp_code)
 
 
 
@@ -444,7 +445,8 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
 
         atob_b64 = base64.b64encode(b'https://cdn.example/atob/index.m3u8').decode('ascii')
         html_atob = f'<script>const play = atob("{atob_b64}");</script>'
-        self.assertEqual(_extract_stream_from_html(html_atob), 'https://cdn.example/atob/index.m3u8')
+        self.assertEqual(_extract_stream_from_html(html_atob), '')
+        self.assertEqual(_extract_stream_from_html(html_atob, allow_unscoped=True), 'https://cdn.example/atob/index.m3u8')
 
         ecb_cipher = _aes_cbc_encrypt(b'{"list":[{"vod_id":"1"}]}', b'1234567887654321', b'')
         ecb_plain = _aes_cbc_decrypt(ecb_cipher, b'1234567887654321', b'wrong_iv_1234567')
@@ -467,13 +469,12 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
         import urllib.error
         import host_media_relay
 
-        eof_err = urllib.error.URLError(
-            ssl.SSLError(8, '[SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1032)')
-        )
-        self.assertTrue(host_media_relay._is_cert_verification_error(eof_err))
+        # Transport compatibility flags must preserve certificate/hostname checks.
+        self.assertEqual(host_media_relay._DEFAULT_SSL_CONTEXT.verify_mode, ssl.CERT_REQUIRED)
+        self.assertTrue(host_media_relay._DEFAULT_SSL_CONTEXT.check_hostname)
 
         mp_code = (SOURCES / 'MediaPlaybackViewController.m').read_text(encoding='utf-8')
-        self.assertIn('BOOL sourceIsDASH=[sourceURL.pathExtension.lowercaseString isEqualToString:@"mpd"]', mp_code)
+        self.assertIn('if(isLoopbackRelay&&[result[@"dashRemuxed"] boolValue])effectiveURL=sourceURL;', mp_code)
         self.assertIn('BOOL avIncompatibleContainer=[@[@"mpd",@"flv",@"mkv",@"webm"] containsObject:failedSourceExt];', mp_code)
         self.assertIn('for(NSUInteger pass=0;pass<2;pass++)', mp_code)
 
@@ -658,7 +659,7 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
 
         api_code = (SOURCES / 'MediaAPIClient.m').read_text(encoding='utf-8')
         self.assertIn('属于 Android JAR 封闭爬虫且未在合集 ext 中提供独立接口地址（ext 为空），无法在 iOS 上直连', api_code)
-        self.assertIn('NSString *sameHostCMS=[base.lowercaseString hasSuffix:@".php"]?base:[base stringByAppendingString:@"/api.php/provide/vod/"];', api_code)
+        self.assertNotIn('NSString *sameHostCMS=[base.lowercaseString hasSuffix:@".php"]?base:[base stringByAppendingString:@"/api.php/provide/vod/"];', api_code)
         self.assertNotIn('https://caiji.dyttzyapi.com/api.php/provide/vod/', api_code)
 
         importer_code = (SOURCES / 'MediaPackageImporter.m').read_text(encoding='utf-8')
@@ -756,7 +757,7 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
         self.assertIn('[persistentResult isEqual:result]?data:', mc_m)
 
         mb_m = (SOURCES / 'MediaBrowserViewController.m').read_text(encoding='utf-8')
-        self.assertIn('safeDetailMemCache', mb_m)
+        self.assertIn('if(!cacheStale&&!forceRefresh)return;', mb_m)
         self.assertIn('(15*NSEC_PER_MSEC)', mb_m)
         self.assertIn('[HostImageLoader.shared prefetchPosterURLs:prefetchPosters];', mb_m)
         self.assertIn('else{self.items=@[];[self.grid reloadData];[self showMessage:@"正在加载推荐与分类…" loading:YES];}', mb_m)
@@ -770,7 +771,8 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
 
         mp_m = (SOURCES / 'MediaPlaybackViewController.m').read_text(encoding='utf-8')
         self.assertIn('observed>=2)[owner prefetchNextEpisodeIfNeeded];', mp_m)
-        self.assertIn('[owner.prefetchedAsset loadValuesAsynchronouslyForKeys:@[@"playable"]', mp_m)
+        self.assertIn('[self.prefetchedAsset loadValuesAsynchronouslyForKeys:@[@"playable"]', mp_m)
+        self.assertIn('[owner prepareAssetForPrefetchedResult:result identity:targetIdentity]', mp_m)
         self.assertNotIn('[warmReq setValue:@"bytes=0-1023"', mp_m)
         self.assertIn('@[@0.2,@0.45,@1.1,@2.0,@3.0]', mp_m)
 
@@ -794,7 +796,7 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
         self.assertIn('- (void)onPlayerStatusChanged:(id)player oldStatus:(NSInteger)oldStatus newStatus:(NSInteger)newStatus', ca_m)
 
         mp_m = (SOURCES / 'MediaPlaybackViewController.m').read_text(encoding='utf-8')
-        self.assertIn('int64_t avFirstFrameTimeoutSec=[sourceURL.scheme.lowercaseString isEqualToString:@"cenc"]?45:20;', mp_m)
+        self.assertIn('NSTimeInterval timeout=[sourceURL.scheme.lowercaseString isEqualToString:@"cenc"]?45:20;', mp_m)
 
         hg_py = (ROOT / 'Resources/BuiltinMedia/hongguo-python.py').read_text(encoding='utf-8')
         self.assertIn('_cur_th._host_media_stream_read = True', hg_py)
@@ -868,7 +870,7 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
         self.assertIn("self._engine = csp_adapter.AppVideoEngine(", ss_m)
 
         mc_m = (SOURCES / 'MediaMetadataCache.m').read_text(encoding='utf-8')
-        self.assertIn('@"MediaMetadataCache-v2.json"', mc_m)
+        self.assertIn('@"MediaMetadataCache-v3.json"', mc_m)
 
 
 if __name__ == '__main__':

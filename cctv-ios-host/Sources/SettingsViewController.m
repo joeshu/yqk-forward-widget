@@ -156,7 +156,7 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
         @{ @"title":@"运行诊断记录", @"detail":@"按 App 运行分开查看 · 可单次导出、删除或清空", @"action":@"runtimeDiagnostics", @"icon":@"list.bullet.rectangle" },
         @{ @"title":@"日志中心", @"action":@"logs", @"detail":@"总日志与各插件独立日志", @"icon":@"doc.text.magnifyingglass" }
       ]},
-      @{ @"category":@"storage", @"title":@"数据备份与存储管理", @"footer":@"影视元数据缓存只保存目录、分类和搜索结果；影片详情与播放线路不缓存。清理缓存或恢复默认偏好时，收藏、观看历史、订阅和插件数据会保留。", @"rows":@[
+      @{ @"category":@"storage", @"title":@"数据备份与存储管理", @"footer":@"目录、分类和搜索结果可保存；影片详情仅短时缓存在内存中，播放地址不持久化。清理缓存或恢复默认偏好时，收藏、观看历史、订阅和插件数据会保留。", @"rows":@[
         @{ @"title":@"导出本机配置", @"detail":@"导出订阅、收藏、观看历史与全量偏好备份", @"action":@"export", @"icon":@"square.and.arrow.up" },
         @{ @"title":@"导入配置文件", @"detail":@"从 JSON 备份恢复配置并立即应用主题与字号", @"action":@"import", @"icon":@"square.and.arrow.down" },
         @{ @"title":@"恢复默认偏好设置", @"detail":@"重置界面与播放偏好为默认值（保留订阅与收藏）", @"action":@"resetDefaultPreferences", @"icon":@"arrow.counterclockwise.circle" },
@@ -857,7 +857,7 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
 - (void)confirmClearMediaMetadata:(NSIndexPath *)indexPath {
     NSDictionary *summary=[MediaMetadataCache.shared summary];
     NSString *size=[NSByteCountFormatter stringFromByteCount:[summary[@"bytes"] longLongValue] countStyle:NSByteCountFormatterCountStyleMemory];
-    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"清理影视元数据缓存？" message:[NSString stringWithFormat:@"将清理 %lu 项影视目录、分类和搜索缓存（%@）。影片详情与播放线路不写入此缓存；收藏、观看历史、订阅和插件数据会保留。",(unsigned long)[summary[@"entries"] unsignedIntegerValue],size] preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"清理影视元数据缓存？" message:[NSString stringWithFormat:@"将清理 %lu 项影视元数据缓存（%@）。详情仅短时保留在内存中，播放地址不持久化；收藏、观看历史、订阅和插件数据会保留。",(unsigned long)[summary[@"entries"] unsignedIntegerValue],size] preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     [alert addAction:[UIAlertAction actionWithTitle:@"清理缓存" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action){
         [MediaMetadataCache.shared clear];

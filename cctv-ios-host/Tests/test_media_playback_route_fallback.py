@@ -43,7 +43,7 @@ class MediaPlaybackRouteFallbackTests(unittest.TestCase):
         self.assertIn('currentEpisode[@"id"]', body)
         self.assertIn('currentEpisode[@"name"]', body)
         self.assertIn('isEqual:episodeID', body)
-        self.assertIn("MediaPlaybackEpisodeNamesMatch(candidateName,episodeName)", body)
+        self.assertIn("[candidateName localizedCaseInsensitiveCompare:episodeName]==NSOrderedSame", body)
         self.assertIn('@"(?i)s\\\\d+\\\\s*e\\\\s*0*(\\\\d{1,4})"', SOURCE)
         self.assertIn('@"(?i)(?:episode|ep)\\\\s*0*(\\\\d{1,4})"', SOURCE)
         self.assertIn("if(candidateEpisode<0){", body)
@@ -61,8 +61,24 @@ class MediaPlaybackRouteFallbackTests(unittest.TestCase):
         self.assertIn("NSURLErrorNotConnectedToInternet", failure)
         self.assertIn("!offline&&[self tryNextLineForAutomaticFallback:kind]", failure)
         play_result = method_body("- (void)playResult:(NSDictionary *)result")
-        self.assertIn('playback_video_frame_timeout', play_result)
-        self.assertIn('tryNextLineForAutomaticFallback:@"first_frame_timeout"', play_result)
+        self.assertIn('watchAVPlayerFirstFrameForItem:item', play_result)
+        watchdog = method_body("- (void)watchAVPlayerFirstFrameForItem:")
+        self.assertIn('playback_video_frame_timeout', watchdog)
+        self.assertIn('tryNextLineForAutomaticFallback:@"first_frame_timeout"', watchdog)
+
+    def test_cicada_preserves_proxy_transforms_unless_explicit_clear_dash(self):
+        body = method_body("- (void)startCicadaPlaybackWithResult:")
+        self.assertIn('isLoopbackRelay&&[result[@"dashRemuxed"] boolValue]', body)
+        self.assertNotIn('sourceIsDASH', body)
+        self.assertNotIn('attemptedRoutes&MediaPlaybackDecodeRouteAttemptedAVPlayer', body)
+
+    def test_failure_does_not_replace_content_from_unrelated_sites(self):
+        # The retained legacy implementation has no invocation site. Failure
+        # advances only among the source's own episode alternatives/lines.
+        self.assertNotIn('resolveMacCMSStreamByTitleForResult:', SOURCE)
+        body = method_body("- (void)finishNativeStreamSniffFailureForGeneration:")
+        self.assertIn('tryNextLineForAutomaticFallback:', body)
+        self.assertIn('setRetryAvailable:YES', body)
 
     def test_manual_line_episode_and_retry_choices_reset_auto_attempts(self):
         for anchor in (

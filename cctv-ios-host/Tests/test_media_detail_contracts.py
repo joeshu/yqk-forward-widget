@@ -39,6 +39,18 @@ class MediaDetailContracts(unittest.TestCase):
         self.assertIn('owner.detail=sanitizedDetail;', load)
         self.assertNotIn('owner.detail=result;', load)
 
+    def test_detail_fresh_cache_skips_network_and_manual_reload_revalidates(self):
+        load = self.impl.split('- (void)loadDetail {', 1)[1].split('- (void)restoreResumeEntrySelection', 1)[0]
+        self.assertIn('[self loadDetailRefreshing:NO]', load)
+        self.assertIn('[self loadDetailRefreshing:YES]', load)
+        self.assertIn('if(!cacheStale&&!forceRefresh)return;', load)
+        self.assertLess(load.index('if(!cacheStale&&!forceRefresh)return;'), load.index('[self.client call:@"detail"'))
+        self.assertNotIn('safeDetailMemCache', load)
+        self.assertIn('maximumAge:300', load)
+        self.assertIn('dispatch_async(detailProcessingQueue', load)
+        self.assertIn('dispatch_async(dispatch_get_main_queue()', load)
+        self.assertIn('owner.generation!=generation', load)
+
     def test_detail_favorite_key_tolerates_numeric_ids(self):
         key = self.impl.split('- (NSString *)favoriteKey', 1)[1].split('- (void)updateFavoriteButton', 1)[0]
         self.assertIn('[self safeDetailString:self.source[@\"id\"]]', key)

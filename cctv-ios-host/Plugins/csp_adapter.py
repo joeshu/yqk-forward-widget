@@ -218,7 +218,7 @@ def _decode_obfuscated_url_candidate(raw_u, enc=0, base_url=''):
     return u
 
 
-def _extract_stream_from_html(html, base_url=''):
+def _extract_stream_from_html(html, base_url='', allow_unscoped=False):
     """Extracts a direct .m3u8/.mp4/.flv/.mpd stream URL from HTML or MacCMS/JS player configs."""
     if not isinstance(html, str) or not html:
         return ''
@@ -248,6 +248,12 @@ def _extract_stream_from_html(html, base_url=''):
             u = _decode_obfuscated_url_candidate(raw_u, enc=enc, base_url=base_url)
             if u.startswith(('http://', 'https://')) and any(tok in u.lower() for tok in ('.m3u8', '.mp4', '.flv', '.mpd', '.m4v', '.mov', '.mkv', '/hls/', 'type=m3u8', 'format=m3u8')):
                 return u
+
+    # An arbitrary URL elsewhere in a page may be an ad, trailer or another
+    # title. Host playback accepts player-bound config only. Broad extraction
+    # remains available to an explicit source adapter that owns those rules.
+    if not allow_unscoped:
+        return ''
 
     # 2. Check inline atob("...") / Base64.decode("...") / base64-encoded aHR0c... URLs
     for m_b64 in re.finditer(r'(?:atob|Base64\.decode)\(\s*["\']([A-Za-z0-9+/=_-]{20,2048})["\']\s*\)|["\']((?:aHR0cHM6Ly|aHR0cDovL)[A-Za-z0-9+/=_-]{16,2048})["\']', html):
@@ -467,38 +473,6 @@ def resolve_maccms_stream_by_title(title, episode_index=0, episode_name=''):
     if fallback_rows:
         return pick_from_rows(fallback_rows, allow_dead_cdn=True)
     return ''
-
-
-BUILTIN_CSP_HOSTS = {
-    'csp_sp360': 'https://360zy.com',
-    'csp_gz360': 'https://caiji.dyttzyapi.com',
-    'csp_jpys': 'https://caiji.dyttzyapi.com',
-    'csp_appdrama': 'https://caiji.dyttzyapi.com',
-    'csp_qimaodj': 'https://api.ffzyapi.com',
-    'csp_hemadj': 'https://api.ffzyapi.com',
-    'csp_weiguandj': 'https://api.ffzyapi.com',
-    'csp_haokandj': 'https://api.ffzyapi.com',
-    'csp_xingyadj': 'https://api.ffzyapi.com',
-    'csp_miaowu': 'https://api.ffzyapi.com',
-    'csp_modu': 'https://api.ffzyapi.com',
-    'csp_wogg': 'https://api.wujinapi.me',
-    'csp_panwebshare': 'https://api.wujinapi.me',
-}
-
-
-def _default_cms_host_for_api(api_type):
-    low = str(api_type or '').strip().lower()
-    if low in BUILTIN_CSP_HOSTS:
-        return BUILTIN_CSP_HOSTS[low]
-    if 'sp360' in low:
-        return 'https://360zy.com'
-    if any(k in low for k in ('drama', 'jpys', 'gz360')):
-        return 'https://caiji.dyttzyapi.com'
-    if any(k in low for k in ('dj', 'miaowu', 'modu', 'appsy')):
-        return 'https://api.ffzyapi.com'
-    if any(k in low for k in ('wogg', 'pan', '4k')):
-        return 'https://api.wujinapi.me'
-    return 'https://caiji.dyttzyapi.com'
 
 
 def _first_valid_http_url(candidate, allow_txt=True):
@@ -797,10 +771,15 @@ class AppVideoEngine:
         else:
             self.config = {}
 
-        self._is_yqk = 'appyqk' in self.api_type.lower() or 'yqk' in str(ext_config or '').lower()
-        raw_base = self.config.get('url') or self.config.get('host') or self.config.get('site') or ''
-        self.base_url = _first_valid_http_url(raw_base) or _default_cms_host_for_api(self.api_type)
-        self.fallback_cms_url = _default_cms_host_for_api(self.api_type)
+        low_api = self.api_type.lower()
+        self._is_yqk = 'appyqk' in low_api or low_api in ('yqk', 'csp_yqk')
+        self.base_url = _first_valid_http_url(self.config)
+        if not self.base_url and self._is_yqk:
+            # This named provider has a concrete protocol, unlike generic App*
+            # adapters. Do not infer YQK from text in another site's options.
+            self.base_url = 'https://api.yqk3hxe.com'
+        if not self.base_url:
+            raise ValueError('来源缺少有效站点地址；请配置 url/host/site，不使用默认站点')
         self.key = (self.config.get('dataKey') or self.config.get('siteKey') or '1234567887654321').encode('utf-8')
         self.iv = (self.config.get('dataIv') or self.config.get('listKey') or self.config.get('dataKey') or '1234567887654321').encode('utf-8')
         self.session = requests.Session()
@@ -944,10 +923,6 @@ class AppVideoEngine:
                 break
         else:
             data = {}
-            if not self._is_test_host() and self.fallback_cms_url and self.fallback_cms_url != self.base_url:
-                data = self._request_json('api.php/provide/vod/', params={'ac': 'detail'}, base_override=self.fallback_cms_url)
-                if data:
-                    self.base_url = self.fallback_cms_url
         classes = []
         items = []
         raw_classes = data.get('class') or data.get('list') or data.get('data') or []
@@ -1004,10 +979,6 @@ class AppVideoEngine:
                 break
         else:
             data = {}
-            if not self._is_test_host() and self.fallback_cms_url and self.fallback_cms_url != self.base_url:
-                data = self._request_json('api.php/provide/vod/', params={'ac': 'detail', 't': str(tid), 'pg': str(pg)}, base_override=self.fallback_cms_url)
-                if data:
-                    self.base_url = self.fallback_cms_url
         raw_list = data.get('list') or data.get('data') or []
         if isinstance(raw_list, dict):
             raw_list = raw_list.get('list') or raw_list.get('videos') or []
@@ -1056,16 +1027,27 @@ class AppVideoEngine:
                         'vod_play_from': '$$$'.join(from_names),
                         'vod_play_url': '$$$'.join(url_groups),
                     }]}
+        item = None
+        mismatched_identity = False
         for candidate_path in ('api.php/app/video_detail', 'api.php/v1.vod/detail', 'api.php/provide/vod/'):
             data = self._request_json(candidate_path, params={'id': vid, 'vod_id': vid, 'ids': vid, 'ac': 'detail'})
-            if data and (data.get('data') or data.get('list')):
+            if not isinstance(data, dict):
+                continue
+            candidates = data.get('data') or data.get('list') or data
+            candidates = candidates if isinstance(candidates, list) else [candidates]
+            candidates = [row for row in candidates if isinstance(row, dict) and row.get('vod_name')]
+            exact = [row for row in candidates if str(row.get('vod_id', row.get('id', ''))) == vid]
+            if exact:
+                item = exact[0]
                 break
-        else:
-            data = {}
-            if not self._is_test_host() and self.fallback_cms_url and self.fallback_cms_url != self.base_url:
-                data = self._request_json('api.php/provide/vod/', params={'ids': vid, 'ac': 'detail'}, base_override=self.fallback_cms_url)
-        item = data.get('data') if isinstance(data.get('data'), dict) else (
-            data['list'][0] if isinstance(data.get('list'), list) and data['list'] else data)
+            if candidates and any(row.get('vod_id', row.get('id')) is not None for row in candidates):
+                mismatched_identity = True
+                continue
+            if len(candidates) == 1:
+                item = candidates[0]
+                break
+        if item is None and mismatched_identity:
+            raise ValueError('所选站点返回了其他影片的详情，已停止播放以避免错片')
         if not isinstance(item, dict) or not item.get('vod_name'):
             item = {'vod_id': vid, 'vod_name': '影片'}
         else:
@@ -1106,8 +1088,6 @@ class AppVideoEngine:
                 break
         else:
             data = {}
-            if not self._is_test_host() and self.fallback_cms_url and self.fallback_cms_url != self.base_url:
-                data = self._request_json('api.php/provide/vod/', params={'ac': 'detail', 'wd': str(key), 'pg': str(pg)}, base_override=self.fallback_cms_url)
         raw_list = data.get('list') or data.get('data') or []
         if isinstance(raw_list, dict):
             raw_list = raw_list.get('list') or []
@@ -1165,10 +1145,8 @@ class AppVideoEngine:
                         return {'parse': 0, 'url': sniffed, 'header': self.headers}
                 except Exception:
                     pass
-            if self._last_vod_name:
-                resolved = resolve_maccms_stream_by_title(self._last_vod_name)
-                if resolved:
-                    return {'parse': 0, 'url': resolved, 'header': self.headers}
+            # Leave unresolved pages with the selected provider. A catalog
+            # title match can refer to another edition, episode or work.
         return {'parse': 0 if is_direct else 1, 'url': final_url, 'header': self.headers}
 
 

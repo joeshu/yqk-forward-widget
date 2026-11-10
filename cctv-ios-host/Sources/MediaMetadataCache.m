@@ -11,6 +11,37 @@ static const NSUInteger MediaMetadataCacheSingleEntryLimit = 1024 * 1024;
 static const NSUInteger MediaMetadataPersistentEntryLimit = 32;
 static const NSUInteger MediaMetadataPersistentByteLimit = 4 * 1024 * 1024;
 static const NSTimeInterval MediaMetadataFreshLifetime = 5 * 60;
+static const NSTimeInterval MediaDetailFreshLifetime = 60;
+
+// Detail is memory-only and short-lived. Do not keep signed episode URLs,
+// localhost proxy tokens or credentials across page visits.
+static BOOL MediaDetailContainsTransientAddress(id value, NSUInteger depth) {
+    if(depth>24)return YES;
+    if([value isKindOfClass:NSDictionary.class]){
+        for(id key in value){
+            if(![key isKindOfClass:NSString.class])return YES;
+            NSString *lower=[key lowercaseString];
+            if([@[@"cookie",@"authorization",@"header",@"headers",@"customheaders",@"drmkey",@"token"] containsObject:lower])return YES;
+            if(MediaDetailContainsTransientAddress(value[key],depth+1))return YES;
+        }
+    }else if([value isKindOfClass:NSArray.class]){
+        for(id child in value)if(MediaDetailContainsTransientAddress(child,depth+1))return YES;
+    }else if([value isKindOfClass:NSString.class]){
+        NSString *lower=[value lowercaseString];
+        if([lower containsString:@"token="]||[lower containsString:@"sign="]||[lower containsString:@"signature="]||[lower containsString:@"auth="])return YES;
+        NSURLComponents *url=[NSURLComponents componentsWithString:value];
+        if(url.user.length||url.password.length)return YES;
+        NSString *host=url.host.lowercaseString;
+        if([@[@"127.0.0.1",@"localhost",@"::1"] containsObject:host])return YES;
+        for(NSURLQueryItem *item in url.queryItems){
+            NSString *name=item.name.lowercaseString;
+            for(NSString *marker in @[@"token",@"sign",@"auth",@"secret",@"credential",@"password",@"expire"])
+                if([name containsString:marker])return YES;
+            if([name isEqual:@"key"]||[name isEqual:@"policy"])return YES;
+        }
+    }
+    return NO;
+}
 
 static BOOL MediaMetadataKeyIsSensitive(NSString *key) {
     NSString *lower=key.lowercaseString;
@@ -91,7 +122,7 @@ static id MediaMetadataPersistentSafeValue(id value, NSString *key, NSUInteger d
         _persistentRecords=[NSMutableDictionary dictionary];
         NSURL *support=[NSFileManager.defaultManager URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask].firstObject;
         NSURL *directory=[support URLByAppendingPathComponent:@"CCTVHost" isDirectory:YES];
-        if(directory){[NSFileManager.defaultManager createDirectoryAtURL:directory withIntermediateDirectories:YES attributes:nil error:NULL];[NSFileManager.defaultManager removeItemAtURL:[directory URLByAppendingPathComponent:@"MediaMetadataCache-v1.json"] error:NULL];_persistentPath=[[directory URLByAppendingPathComponent:@"MediaMetadataCache-v2.json"] path];}
+        if(directory){[NSFileManager.defaultManager createDirectoryAtURL:directory withIntermediateDirectories:YES attributes:nil error:NULL];[NSFileManager.defaultManager removeItemAtURL:[directory URLByAppendingPathComponent:@"MediaMetadataCache-v1.json"] error:NULL];[NSFileManager.defaultManager removeItemAtURL:[directory URLByAppendingPathComponent:@"MediaMetadataCache-v2.json"] error:NULL];_persistentPath=[[directory URLByAppendingPathComponent:@"MediaMetadataCache-v3.json"] path];}
         [self loadPersistentRecords];
 #if TARGET_OS_IOS
         [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(evictMemoryCache) name:UIApplicationDidReceiveMemoryWarningNotification object:nil];
@@ -143,7 +174,7 @@ static id MediaMetadataPersistentSafeValue(id value, NSString *key, NSUInteger d
         @"protocol":[source[@"protocol"] isKindOfClass:NSString.class]?source[@"protocol"]:@"",
         @"packageRoot":[source[@"packageRoot"] isKindOfClass:NSString.class]?source[@"packageRoot"]:@"",
         @"api":[source[@"api"] isKindOfClass:NSString.class]?source[@"api"]:@"",
-        @"header":source[@"header"]?:@{},@"playUrl":[source[@"playUrl"] isKindOfClass:NSString.class]?source[@"playUrl"]:@"",
+        @"header":source[@"header"]?:@{},@"headers":source[@"headers"]?:@{},@"manifest":source[@"manifest"]?:@{},@"playUrl":[source[@"playUrl"] isKindOfClass:NSString.class]?source[@"playUrl"]:@"",
         @"options":source[@"options"]?:@"",@"tvboxType":source[@"tvboxType"]?:@0,
         @"jar":[source[@"jar"] isKindOfClass:NSDictionary.class]?source[@"jar"]:@{},
         @"subscriptionURL":[source[@"subscriptionURL"] isKindOfClass:NSString.class]?source[@"subscriptionURL"]:@"",
@@ -157,7 +188,7 @@ static id MediaMetadataPersistentSafeValue(id value, NSString *key, NSUInteger d
 }
 - (id)resultForSource:(NSDictionary *)source operation:(NSString *)operation arguments:(NSDictionary *)arguments maximumAge:(NSTimeInterval)maximumAge isStale:(BOOL *)isStale {
     if(isStale)*isStale=NO;
-    if(![@[@"home",@"category",@"search"] containsObject:operation])return nil;
+    if(![@[@"home",@"category",@"search",@"detail"] containsObject:operation])return nil;
     NSString *key=[self keyForSource:source operation:operation arguments:arguments];if(!key.length)return nil;
     __block MediaMetadataCacheEntry *entry=nil;
     dispatch_sync(self.queue, ^{
@@ -168,14 +199,21 @@ static id MediaMetadataPersistentSafeValue(id value, NSString *key, NSUInteger d
     if(!entry)return nil;
     NSTimeInterval age=NSDate.date.timeIntervalSince1970-entry.storedAt;
     if(age<0||age>MAX(0,maximumAge))return nil;
-    if(isStale)*isStale=age>MediaMetadataFreshLifetime;
+    if(isStale)*isStale=age>([operation isEqual:@"detail"]?MediaDetailFreshLifetime:MediaMetadataFreshLifetime);
     return entry.result;
 }
 - (void)storeResult:(id)result forSource:(NSDictionary *)source operation:(NSString *)operation arguments:(NSDictionary *)arguments {
-    if(!result||![@[@"home",@"category",@"search"] containsObject:operation])return;
-    NSData *data=[NSJSONSerialization dataWithJSONObject:result options:0 error:NULL];
-    if(!data.length||data.length>MediaMetadataCacheSingleEntryLimit)return;
+    if(!result||![@[@"home",@"category",@"search",@"detail"] containsObject:operation])return;
     NSString *key=[self keyForSource:source operation:operation arguments:arguments];if(!key.length)return;
+    if([operation isEqual:@"detail"]&&MediaDetailContainsTransientAddress(result,0)){
+        dispatch_sync(self.queue,^{[self.entries removeObjectForKey:key];[self.order removeObjectForKey:key];});
+        return;
+    }
+    NSData *data=[NSJSONSerialization isValidJSONObject:result]?[NSJSONSerialization dataWithJSONObject:result options:0 error:NULL]:nil;
+    if(!data.length||data.length>MediaMetadataCacheSingleEntryLimit){
+        if([operation isEqual:@"detail"])dispatch_sync(self.queue,^{[self.entries removeObjectForKey:key];[self.order removeObjectForKey:key];});
+        return;
+    }
     MediaMetadataCacheEntry *entry=[MediaMetadataCacheEntry new];entry.result=result;entry.sourceID=[source[@"id"] isKindOfClass:NSString.class]?source[@"id"]:@"";entry.storedAt=NSDate.date.timeIntervalSince1970;entry.cost=data.length;
     BOOL persist=[@[@"home",@"category"] containsObject:operation];id persistentResult=persist?MediaMetadataPersistentSafeValue(result,@"",0):nil;NSData *persistentData=persistentResult?([persistentResult isEqual:result]?data:[NSJSONSerialization dataWithJSONObject:persistentResult options:0 error:NULL]):nil;persist=persist&&persistentData.length&&persistentData.length<=MediaMetadataCacheSingleEntryLimit;
     __block BOOL persistenceChanged=NO;

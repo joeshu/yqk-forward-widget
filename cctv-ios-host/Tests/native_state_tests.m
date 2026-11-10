@@ -7,6 +7,9 @@
 #import "MediaSourceHealthStore.h"
 #import <dispatch/dispatch.h>
 #import <Foundation/Foundation.h>
+@interface MediaMetadataCache (DetailCacheTesting)
+- (NSString *)keyForSource:(NSDictionary *)source operation:(NSString *)operation arguments:(NSDictionary *)arguments;
+@end
 static void check(BOOL ok, NSString *message) {
     if (!ok) {
         NSLog(@"FAILED: %@", message);
@@ -116,8 +119,34 @@ int main(void) {
         check([metadata resultForSource:mediaSource operation:@"play" arguments:searchArgs maximumAge:3600 isStale:NULL]==nil,@"resolved playback URLs are never cached");
         NSDictionary *detailWithSignedEpisode=@{@"lines":@[@{@"episodes":@[@{@"id":@"https://cdn.example/video.m3u8?token=secret"}]}]};
         NSDictionary *detailArguments=@{@"id":@"film-1"};
+        NSDictionary *unsignedDetail=@{@"name":@"Film",@"lines":@[@{@"id":@"line",@"episodes":@[@{@"id":@"episode-1",@"name":@"第1集"}]}]};
+        check([metadata resultForSource:mediaSource operation:@"detail" arguments:detailArguments maximumAge:300 isStale:NULL]==nil,@"cold detail lookup misses");
+        [metadata storeResult:unsignedDetail forSource:mediaSource operation:@"detail" arguments:detailArguments];
+        BOOL detailStale=YES;
+        check([[metadata resultForSource:mediaSource operation:@"detail" arguments:detailArguments maximumAge:300 isStale:&detailStale] isEqual:unsignedDetail]&&!detailStale,@"fresh unsigned detail can be reused in memory");
+        NSString *detailKey=[metadata keyForSource:mediaSource operation:@"detail" arguments:detailArguments];
+        id detailEntry=[[metadata valueForKey:@"entries"] objectForKey:detailKey];
+        [detailEntry setValue:@(NSDate.date.timeIntervalSince1970-90) forKey:@"storedAt"];
+        check([metadata resultForSource:mediaSource operation:@"detail" arguments:detailArguments maximumAge:300 isStale:&detailStale]!=nil&&detailStale,@"detail older than one minute is displayable but must revalidate");
+        [detailEntry setValue:@(NSDate.date.timeIntervalSince1970-301) forKey:@"storedAt"];
+        check([metadata resultForSource:mediaSource operation:@"detail" arguments:detailArguments maximumAge:300 isStale:NULL]==nil,@"detail older than maximum age is rejected");
+        [metadata storeResult:unsignedDetail forSource:mediaSource operation:@"detail" arguments:detailArguments];
+        NSMutableDictionary *configuredDetailSource=[mediaSource mutableCopy];configuredDetailSource[@"manifest"]=@{@"options":@{@"siteUrl":@"https://changed.example"}};
+        check([metadata resultForSource:configuredDetailSource operation:@"detail" arguments:detailArguments maximumAge:300 isStale:NULL]==nil,@"changed manifest options isolate detail cache identity");
+        configuredDetailSource=[mediaSource mutableCopy];configuredDetailSource[@"headers"]=@{@"Referer":@"https://changed.example"};
+        check([metadata resultForSource:configuredDetailSource operation:@"detail" arguments:detailArguments maximumAge:300 isStale:NULL]==nil,@"changed request headers isolate detail cache identity");
+        check([[MediaMetadataCache new] resultForSource:mediaSource operation:@"detail" arguments:detailArguments maximumAge:300 isStale:NULL]==nil,@"detail never survives a new cache instance via disk");
+        [metadata storeResult:@{@"description":[@"x" stringByPaddingToLength:1024*1024+1 withString:@"x" startingAtIndex:0]} forSource:mediaSource operation:@"detail" arguments:detailArguments];
+        check([metadata resultForSource:mediaSource operation:@"detail" arguments:detailArguments maximumAge:300 isStale:NULL]==nil,@"uncacheable replacement evicts the formerly fresh detail");
+        [metadata storeResult:unsignedDetail forSource:mediaSource operation:@"detail" arguments:detailArguments];
         [metadata storeResult:detailWithSignedEpisode forSource:mediaSource operation:@"detail" arguments:detailArguments];
         check([metadata resultForSource:mediaSource operation:@"detail" arguments:detailArguments maximumAge:3600 isStale:NULL]==nil,@"episode identifiers that may contain signed URLs are never cached");
+        for(NSString *transientURL in @[@"https://cdn.example/media?%74oken=secret",@"https://cdn.example/media?Expires=99999999",@"http://127.0.0.1:19800/proxy/session"]){
+            [metadata storeResult:@{@"lines":@[@{@"episodes":@[@{@"id":transientURL}]}]} forSource:mediaSource operation:@"detail" arguments:detailArguments];
+            check([metadata resultForSource:mediaSource operation:@"detail" arguments:detailArguments maximumAge:300 isStale:NULL]==nil,@"encoded token, expiry and loopback references are not retained");
+        }
+        [metadata storeResult:unsignedDetail forSource:mediaSource operation:@"detail" arguments:detailArguments];[metadata evictMemoryCache];
+        check([metadata resultForSource:mediaSource operation:@"detail" arguments:detailArguments maximumAge:300 isStale:NULL]==nil,@"memory warning clears all detail models");
         [metadata storeResult:@{@"value":[@"x" stringByPaddingToLength:1024*1024+1 withString:@"x" startingAtIndex:0]} forSource:mediaSource operation:@"detail" arguments:@{@"id":@"large"}];
         check([metadata resultForSource:mediaSource operation:@"detail" arguments:@{@"id":@"large"} maximumAge:3600 isStale:NULL]==nil,@"oversized metadata entries are rejected");
         NSMutableDictionary *persistentSource=[mediaSource mutableCopy];persistentSource[@"id"]=[NSString stringWithFormat:@"persistent-%@",NSUUID.UUID.UUIDString];

@@ -12,6 +12,41 @@
 @end
 
 static void check(BOOL condition,NSString *message){if(!condition){NSLog(@"FAILED: %@",message);exit(1);}}
+@interface MediaAPIClient (RequestIdentityProbe)
+- (NSURLSession *)sessionForOperation:(NSString *)operation;
+- (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task didReceiveData:(NSData *)data;
+- (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error;
+@end
+@interface MediaTaskIdentityFixture : NSObject
+@property(nonatomic,readonly) NSUInteger taskIdentifier;
+- (void)cancel;
+@end
+@implementation MediaTaskIdentityFixture
+- (NSUInteger)taskIdentifier {return 7;}
+- (void)cancel {}
+@end
+static void checkSessionTaskIsolation(void) {
+    MediaAPIClient *client=[[MediaAPIClient alloc] initWithPort:1];
+    NSURLSession *browse=[client valueForKey:@"session"],*play=[client sessionForOperation:@"play"];
+    // Force a collision without assuming a Foundation task-counter starting
+    // value or depending on the cancellation scheduling of real network tasks.
+    NSURLSessionDataTask *old=(id)[MediaTaskIdentityFixture new],*current=(id)[MediaTaskIdentityFixture new];
+    check(old!=current&&old.taskIdentifier==current.taskIdentifier,@"different API sessions can issue the same task identifier");
+    id oldContext=[NSClassFromString(@"MediaAPIRequestContext") new],newContext=[NSClassFromString(@"MediaAPIRequestContext") new];
+    [oldContext setValue:[NSMutableData data] forKey:@"data"];[newContext setValue:[NSMutableData data] forKey:@"data"];
+    __block NSUInteger oldCalls=0,newCalls=0;
+    [oldContext setValue:[^(NSData *data,NSURLResponse *response,NSError *error){oldCalls++;} copy] forKey:@"processor"];
+    [newContext setValue:[^(NSData *data,NSURLResponse *response,NSError *error){check([data isEqual:[@"ready" dataUsingEncoding:NSUTF8StringEncoding]],@"play response bytes remain attached to the play task");newCalls++;} copy] forKey:@"processor"];
+    NSMapTable *contexts=[client valueForKey:@"requestContexts"];
+    [contexts setObject:oldContext forKey:old];[client setValue:old forKey:@"task"];[client cancel];
+    [contexts setObject:newContext forKey:current];
+    [client URLSession:browse task:old didCompleteWithError:[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil]];
+    check(oldCalls==0&&newCalls==0&&[contexts objectForKey:current]==newContext,@"late browse cancellation cannot consume the new play context");
+    [client URLSession:play dataTask:current didReceiveData:[@"ready" dataUsingEncoding:NSUTF8StringEncoding]];
+    [client URLSession:play task:current didCompleteWithError:nil];
+    check(newCalls==1&&[contexts objectForKey:current]==nil,@"play completion is delivered once after a browse/play session switch");
+    [browse invalidateAndCancel];[play invalidateAndCancel];
+}
 static id call(MediaAPIClient *client,NSString *operation,NSDictionary *arguments,NSError **error){
     __block BOOL done=NO;__block id result=nil;__block NSError *failure=nil;
     [client call:operation arguments:arguments completion:^(id value,NSError *requestError){result=value;failure=requestError;done=YES;}];
@@ -19,6 +54,7 @@ static id call(MediaAPIClient *client,NSString *operation,NSDictionary *argument
     check(done,[NSString stringWithFormat:@"%@ callback completed",operation]);if(error)*error=failure;return result;
 }
 int main(int argc,const char **argv){@autoreleasepool{
+    checkSessionTaskIsolation();
     check(argc==2,@"server port supplied");NSString *base=[NSString stringWithFormat:@"http://127.0.0.1:%@/api.php?token=fixture&mode=tvbox",[NSString stringWithUTF8String:argv[1]]];
     NSDictionary *dashDescriptor=@{@"url":@"https://cdn.example/manifest.mpd?token=fixture",@"format":@"application/dash+xml"};NSDictionary *extensionlessDash=@{@"url":@"https://cdn.example/manifest?id=fixture",@"format":@"application/dash+xml"};check(MediaPlaybackResultSupportsCicada(dashDescriptor)&&MediaPlaybackResultSupportsNativePlayback(dashDescriptor)&&!MediaPlaybackResultSupportsAVPlayer(dashDescriptor)&&MediaPlaybackResultSupportsCicada(extensionlessDash),@"MPEG-DASH manifests, including extensionless MIME-declared manifests, route to Cicada instead of AVPlayer");
     MediaAPIClient *timeoutClient=[[MediaAPIClient alloc] initWithPort:1];check(timeoutClient.playTimeoutMilliseconds==15000,@"play API timeout defaults to 15 seconds");timeoutClient.playTimeoutMilliseconds=20000;check(timeoutClient.playTimeoutMilliseconds==20000,@"play API accepts a configured timeout");timeoutClient.playTimeoutMilliseconds=500000;check(timeoutClient.playTimeoutMilliseconds==120000,@"play API timeout is capped at 120 seconds");timeoutClient.playTimeoutMilliseconds=10;check(timeoutClient.playTimeoutMilliseconds==1000,@"play API timeout has a safe 1 second lower bound");timeoutClient.playTimeoutMilliseconds=0;check(timeoutClient.playTimeoutMilliseconds==15000,@"invalid play timeout returns to the 15 second default");
