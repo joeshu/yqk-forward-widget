@@ -5,24 +5,46 @@ import copy
 import hashlib
 import json
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import zipfile
 import zlib
 
 ORIGINAL_LINK = '"$HOST/bin/jlink" --module-path "$MODULE_PATH" --add-modules "$MODULES" --output "$LINK/image"'
-OPTIMIZED_LINK = ORIGINAL_LINK.replace('$LINK/image', '$LINK/image-baseline') + '\n' + ORIGINAL_LINK.replace(
+V1_LINK = ORIGINAL_LINK.replace('$LINK/image', '$LINK/image-baseline') + '\n' + ORIGINAL_LINK.replace(
     '--output', '--strip-debug --compress=zip-0 --no-header-files --no-man-pages --output')
+OPTIMIZED_LINK = V1_LINK.replace('--strip-debug', "--exclude-resources='glob:/*/_the.*' --strip-debug")
 SDK_JAR = 'android-4.1.1.4.jar'
+COMPILE_METADATA_JARS = (
+    'kotlin-stdlib-common-1.9.10.jar', 'okio-3.6.0.jar',
+    'listenablefuture-9999.0-empty-to-avoid-conflict-with-guava.jar',
+)
+BUILD_SUFFIXES = ('-javacserver.conf', '.config_vardeps', '.vardeps', '_batch',
+                  '_batch.cmdline', '_batch.filelist', '_batch.log', '_batch.modfiles',
+                  '_batch.modfiles.fixed', '_internalapi', '_pubapi')
+NATIVE_START = 'if [ ! -f "$JDK/images/static-libs/lib/zero/libjvm.a" ] || [ ! -f "$JDK/images/static-libs/lib/libmanagement.a" ]; then Scripts/build-apple-jvm.sh "$TARGET"; fi'
+NATIVE_END = 'xcrun libtool -static -o "$OUT/lib/libTVAppleRuntime.a" "${ARCHIVES[@]}"'
+NATIVE_GUARD = 'if [ "${CCTV_JAR_REUSE_NATIVE:-0}" != 1 ]; then'
 
 
 def configure(script):
     text = script.read_text()
-    if OPTIMIZED_LINK in text:
-        return
-    if text.count(ORIGINAL_LINK) != 1:
-        raise ValueError('Pinned upstream jlink invocation changed; review packaging before building')
-    script.write_text(text.replace(ORIGINAL_LINK, OPTIMIZED_LINK))
+    if OPTIMIZED_LINK not in text:
+        if text.count(V1_LINK) == 1:
+            text = text.replace(V1_LINK, OPTIMIZED_LINK)
+        elif text.count(ORIGINAL_LINK) == 1:
+            text = text.replace(ORIGINAL_LINK, OPTIMIZED_LINK)
+        else:
+            raise ValueError('Pinned upstream jlink invocation changed; review packaging before building')
+    if NATIVE_GUARD not in text:
+        if text.count(NATIVE_START) != 1 or text.count(NATIVE_END) != 1:
+            raise ValueError('Pinned upstream native packaging changed; refusing cache reuse')
+        start, end = text.index(NATIVE_START), text.index(NATIVE_END) + len(NATIVE_END)
+        if end <= start:
+            raise ValueError('Invalid native packaging boundaries')
+        text = text[:start] + NATIVE_GUARD + '\n' + text[start:end] + '\nfi' + text[end:]
+    script.write_text(text)
 
 
 def digest(data):
@@ -91,23 +113,108 @@ def image_entries(jimage, image):
     return entries
 
 
+def compiler_metadata(module, name):
+    return name in {'_the.' + module + suffix for suffix in BUILD_SUFFIXES}
+
+
+def retained_image_entries(entries):
+    module = ''
+    retained, removed = [], []
+    for name in entries:
+        if name.startswith('Module: '):
+            module = name.removeprefix('Module: ')
+        if compiler_metadata(module, name):
+            removed.append('/' + module + '/' + name)
+        else:
+            retained.append(name)
+    return retained, removed
+
+
+def module_sizes(jimage, image):
+    result = subprocess.run([str(jimage), 'list', '--verbose', str(image)], check=True,
+                            text=True, capture_output=True)
+    modules, module = {}, ''
+    for line in result.stdout.splitlines():
+        if line.startswith('Module: '):
+            module = line.removeprefix('Module: ')
+            modules[module] = {'class_bytes': 0, 'runtime_resource_bytes': 0, 'compiler_metadata_bytes': 0}
+        row = re.fullmatch(r'\s*\d+\s+(\d+)\s+\d+\s+(.+)', line)
+        if not row or not module:
+            continue
+        size, name = row.groups()
+        key = ('compiler_metadata_bytes' if compiler_metadata(module, name) else
+               'class_bytes' if name.endswith('.class') else 'runtime_resource_bytes')
+        modules[module][key] += int(size)
+    return modules
+
+
+def verify_runtime_resources(jimage, baseline, image, entries):
+    """Hash all non-class runtime resources; only explicit compiler metadata may disappear."""
+    paths, module = [], ''
+    for name in entries:
+        if name.startswith('Module: '):
+            module = name.removeprefix('Module: ')
+        elif not name.endswith('.class'):
+            paths.append(module + '/' + name)
+    with tempfile.TemporaryDirectory(prefix='cctv-jimage-check-') as tmp:
+        roots = [Path(tmp) / 'before', Path(tmp) / 'after']
+        for source, root in zip((baseline, image), roots):
+            subprocess.run([str(jimage), 'extract', '--dir', str(root), str(source)], check=True, capture_output=True)
+        hashes = {}
+        for relative in paths:
+            a, b = (root / relative for root in roots)
+            value = digest(a.read_bytes())
+            if value != digest(b.read_bytes()):
+                raise ValueError('JDK runtime resource changed: ' + relative)
+            hashes[relative] = value
+        return hashes
+
+
+def metadata_archive_plan(libraries):
+    plan = {}
+    for name in COMPILE_METADATA_JARS:
+        path = libraries / name
+        with zipfile.ZipFile(path) as jar:
+            entries = [n for n in jar.namelist() if not n.endswith('/')]
+            for entry in entries:
+                allowed = (entry == 'META-INF/MANIFEST.MF' or entry.startswith('META-INF/maven/')
+                           or entry.endswith(('.kotlin_metadata', '.kotlin_module')))
+                runtime = entry.endswith(('.class', '.so', '.dll', '.dylib', '.jnilib')) or entry.startswith('META-INF/services/')
+                if runtime or not allowed:
+                    raise ValueError('Expected compile-only metadata, found runtime content: ' + name + ':' + entry)
+        plan[name] = {'sha256': digest(path.read_bytes()), 'size': sizes(path), 'entries': len(entries)}
+    return plan
+
+
 def optimize(runtime, baseline, jimage):
     resources = runtime / 'Resources'
     libraries = resources / 'JavaHost/lib'
     all_jars = list((resources / 'JavaHost').rglob('*.jar'))
     jar = libraries / SDK_JAR
-    untouched = {str(p.relative_to(resources)): digest(p.read_bytes()) for p in all_jars if p != jar}
+    metadata_jars = metadata_archive_plan(libraries)
+    untouched = {str(p.relative_to(resources)): digest(p.read_bytes()) for p in all_jars
+                 if p != jar and p.name not in metadata_jars}
     image = resources / 'lib/lib/modules'
     before_entries = image_entries(jimage, baseline)
     after_entries = image_entries(jimage, image)
-    if before_entries != after_entries:
-        raise ValueError('JDK module/class/resource set changed during debug stripping')
-    report = {'profile': 'preserve-classes-v1', 'jdk': {
+    expected_entries, removed_metadata = retained_image_entries(before_entries)
+    if expected_entries != after_entries:
+        raise ValueError('JDK class/runtime resource set changed outside the compiler metadata allowlist')
+    resource_hashes = verify_runtime_resources(jimage, baseline, image, expected_entries)
+    report = {'profile': 'preserve-classes-v2', 'jdk': {
         'before': sizes(baseline), 'after': sizes(image),
         'modules': [n.removeprefix('Module: ') for n in after_entries if n.startswith('Module: ')],
-        'entries': len(after_entries), 'entry_set_identical': True,
-        'options': ['--strip-debug', '--compress=zip-0', '--no-header-files', '--no-man-pages']},
-        'android_sdk': optimize_sdk(jar), 'unchanged_jars_sha256': untouched}
+        'entries': len(after_entries), 'runtime_entry_set_identical': True,
+        'preserved_classes': sum(n.endswith('.class') for n in after_entries),
+        'removed_compiler_metadata': removed_metadata,
+        'module_sizes_before': module_sizes(jimage, baseline),
+        'module_sizes_after': module_sizes(jimage, image),
+        'runtime_resources_sha256': resource_hashes,
+        'options': ['--exclude-resources=glob:/*/_the.*', '--strip-debug', '--compress=zip-0', '--no-header-files', '--no-man-pages']},
+        'android_sdk': optimize_sdk(jar), 'removed_compile_metadata_jars': metadata_jars,
+        'unchanged_jars_sha256': untouched}
+    for name in metadata_jars:
+        (libraries / name).unlink()
     for relative, expected in untouched.items():
         if digest((resources / relative).read_bytes()) != expected:
             raise ValueError('Runtime dependency changed: ' + relative)
