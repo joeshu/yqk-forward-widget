@@ -944,9 +944,21 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 }
 - (void)applicationDidEnterBackground:(NSNotification *)notification {
     [self persistPlaybackProgress];
+    if(!self.pictureInPictureActive){
+        [self pauseActiveEngine];
+        [RuntimeDiagnostics.shared recordEvent:@"playback_paused_when_app_backgrounded" category:@"playback" fields:@{@"playback_attempt_id":self.playbackAttemptID?:@"",@"correlation_id":self.diagnosticTraceID?:@"",@"engine":self.cicadaAdapter?@"cicada":@"avplayer"}];
+        return;
+    }
     [self activateBackgroundAudioSessionIfNeeded];
     if(self.player&&!self.pictureInPictureActive)self.playerController.player=nil;
     [self updateNowPlayingInfoCenter];
+}
+- (void)pauseForBackground {
+    if(!NSThread.isMainThread){dispatch_async(dispatch_get_main_queue(),^{[self pauseForBackground];});return;}
+    if(!self.embeddedMode||self.pictureInPictureActive)return;
+    [self persistPlaybackProgress];
+    [self pauseActiveEngine];
+    [RuntimeDiagnostics.shared recordEvent:@"inline_playback_paused_when_hidden" category:@"playback" fields:@{@"playback_attempt_id":self.playbackAttemptID?:@"",@"correlation_id":self.diagnosticTraceID?:@"",@"reason":@"detail_page_hidden_or_app_background"}];
 }
 - (void)applicationWillEnterForeground:(NSNotification *)notification {
     if(self.player&&!self.cicadaAdapter&&self.playerController.player!=self.player)self.playerController.player=self.player;
@@ -1684,9 +1696,9 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     // 已置位，prepare 即用软件解码重建（见 advanceFromCicadaFailureWithError:）。
     [adapter prepareWithHardwareDecoder:!self.cicadaAdapterSoftwareDecodeFallbackAttempted];
     if(!self.resumePromptPending&&!self.pendingPlaybackSeekTime)[adapter start];
-    // 首帧看门狗（VC 侧后备；适配器内部另有 20 秒看门狗，二者走同一幂等回退）。
+    // 视图控制器与适配器使用同一超时，避免短超时抢先结束网络准备。
     __weak typeof(self) weakSelf=self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,20*NSEC_PER_SEC),dispatch_get_main_queue(),^{MediaPlaybackViewController *owner=weakSelf;if(!owner||playerGeneration!=owner.playerGeneration||owner.cicadaAdapter!=adapter||owner.resumePromptPending||owner.pendingPlaybackSeekTime||owner.videoFrameReady)return;[owner handleCicadaFirstFrameTimeoutForAdapter:adapter];});
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(adapter.firstFrameTimeout*NSEC_PER_SEC)),dispatch_get_main_queue(),^{MediaPlaybackViewController *owner=weakSelf;if(!owner||playerGeneration!=owner.playerGeneration||owner.cicadaAdapter!=adapter||owner.resumePromptPending||owner.pendingPlaybackSeekTime||owner.videoFrameReady)return;[owner handleCicadaFirstFrameTimeoutForAdapter:adapter];});
 }
 - (BOOL)isCicadaEngineActive { return self.cicadaAdapter!=nil; }
 - (NSTimeInterval)activeEngineCurrentPosition {
@@ -1784,7 +1796,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 }
 - (void)handleCicadaFirstFrameTimeoutForAdapter:(id)adapter {
     if(adapter!=self.cicadaAdapter)return;
-    NSError *error=[NSError errorWithDomain:MediaPlaybackCicadaAdapterErrorDomain code:-1001 userInfo:@{NSLocalizedDescriptionKey:@"CicadaPlayer 20 秒内未显示首帧"}];
+    NSError *error=[NSError errorWithDomain:MediaPlaybackCicadaAdapterErrorDomain code:-1001 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"CicadaPlayer %.0f 秒内未显示首帧",self.cicadaAdapter.firstFrameTimeout]}];
     [self advanceFromCicadaFailureWithError:error];
 }
 - (void)openWebPlaybackFallback {

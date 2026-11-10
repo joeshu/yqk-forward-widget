@@ -68,6 +68,7 @@ typedef NS_ENUM(NSInteger, MediaPlaybackCicadaAdapterState) {
 @property (nonatomic, readonly) NSTimeInterval bufferedPosition;
 @property (nonatomic, readonly) BOOL loading;
 @property (nonatomic, readonly) BOOL hasVideoTrack;
+@property (nonatomic, readonly) NSTimeInterval firstFrameTimeout;
 // 当前倍速（最近一次 setRate: 的值，未调用时为 1.0；供进度采样校验用）。
 @property (nonatomic, readonly) float rate;
 

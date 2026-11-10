@@ -10,6 +10,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic,copy) void (^onEpisodeSelectionChanged)(NSDictionary *context);
 @property(nonatomic,copy) void (^onVideoAspectRatioChanged)(CGFloat aspectRatio);
 - (void)playInlineResult:(NSDictionary *)result context:(NSDictionary *)context;
+- (void)pauseForBackground;
 - (void)installFloatingInlineSurfaceInHost:(UIView *)videoHost controlsStack:(UIStackView *)controlsStack;
 - (CGFloat)preferredInlineVideoHeightForWidth:(CGFloat)width maximumHeight:(CGFloat)maximumHeight;
 - (void)reloadThemeAppearance;
