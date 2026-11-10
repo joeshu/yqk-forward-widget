@@ -260,7 +260,7 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
     for(id row in [rows isKindOfClass:NSArray.class]?rows:@[])if([row isKindOfClass:NSDictionary.class]&&[row[@"id"] isKindOfClass:NSString.class]&&[row[@"id"] length])[mutable addObject:row];
     NSMutableSet *ids=[NSMutableSet set];
     for(NSDictionary *row in mutable) if([row[@"id"] isKindOfClass:NSString.class]) [ids addObject:row[@"id"]];
-    BOOL changed=NO;
+    BOOL changed=mutable.count!=rows.count;
     for(NSDictionary *spec in specs) {
         if([ids containsObject:spec[@"id"]]) continue;
         NSDictionary *site=@{@"key":spec[@"siteKey"],@"name":spec[@"name"],@"api":spec[@"api"],@"type":@"maccms",@"apiKind":@"maccms-api",@"supported":@YES,@"status":@"内置 · 选中后读取",@"maccmsFormat":@"auto"};
@@ -279,7 +279,7 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
     BOOL upgraded=NO;
     NSMutableArray *updatedCatalogs=[NSMutableArray arrayWithCapacity:rows.count];
     for(id rawCat in rows){
-        if(![rawCat isKindOfClass:NSDictionary.class]){continue;}
+        if(![rawCat isKindOfClass:NSDictionary.class]||![rawCat[@"id"] isKindOfClass:NSString.class]||![rawCat[@"id"] length]){continue;}
         NSDictionary *cat=(NSDictionary *)rawCat;
         NSArray *sites=[cat[@"sites"] isKindOfClass:NSArray.class]?cat[@"sites"]:nil;
         if(!sites.count){[updatedCatalogs addObject:cat];continue;}

@@ -12,6 +12,7 @@ int main(void){@autoreleasepool {
     [ProfileStore update:source values:@{@"recovered":@YES}];Check([[ProfileStore metadata:source][@"recovered"] boolValue]);
     [defaults setObject:@[@"invalid",@{@"id":@42}] forKey:@"pythonServices"];Check([ServiceStore services].count==2);
     [defaults setObject:@[@"invalid",@{@"id":@42}] forKey:@"tvboxCatalogs"];Check([TVBoxCatalogStore catalogs].count==4);
+    NSMutableArray *damaged=[[TVBoxCatalogStore catalogs] mutableCopy];[damaged addObject:@{@"id":@42}];[defaults setObject:damaged forKey:@"tvboxCatalogs"];Check([TVBoxCatalogStore catalogs].count==4);
     [ServiceStore save:(id)@"invalid"];[TVBoxCatalogStore saveCatalog:(id)@"invalid"];
     dispatch_apply(40,dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^(size_t i){@autoreleasepool{
         NSString *identifier=[NSString stringWithFormat:@"concurrent-%lu",(unsigned long)i];

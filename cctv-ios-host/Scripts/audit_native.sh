@@ -7,20 +7,26 @@ mkdir -p "$OUT"
 rm -f "$OUT/compile-failures.txt" "$OUT"/*.plist "$OUT"/*.skipped
 SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
 PYTHON_INCLUDE=/tmp/pyroot/Python.xcframework/ios-arm64/include/python3.13
-EXTRA=(-DCCTV_JAR_ENABLED=1)
-[ ! -d "$PYTHON_INCLUDE" ] || EXTRA+=(-I "$PYTHON_INCLUDE" -F build/CCTVHost.app/Frameworks)
-SOURCES=(Sources/*.m)
-if [ "${CCTV_AUDIT_ONLY:-}" = PyHost ]; then SOURCES=(Sources/PyHost.m); fi
-for source in "${SOURCES[@]}"; do
+analyze_source() {
+  local source="$1" name
   name="$(basename "$source" .m)"
   if [[ "$name" = PyHost ]] && [ ! -d "$PYTHON_INCLUDE" ]; then
     echo 'Python SDK unavailable: analysis deferred to full build' > "$OUT/$name.skipped"
-    continue
+    return
   fi
+  local extra=(-DCCTV_JAR_ENABLED=1)
+  [ ! -d "$PYTHON_INCLUDE" ] || extra+=(-I "$PYTHON_INCLUDE" -F build/CCTVHost.app/Frameworks)
+  echo "Analyzing $source"
   xcrun --sdk iphoneos clang --analyze -fobjc-arc -arch arm64 -isysroot "$SDK" -miphoneos-version-min=17.0 \
-    -I Sources -I Sources/Include -F Frameworks "${EXTRA[@]}" \
+    -I Sources -I Sources/Include -F Frameworks "${extra[@]}" \
     -Xanalyzer -analyzer-output=plist "$source" -o "$OUT/$name.plist" > "$OUT/$name.log" 2>&1 || echo "$source" >> "$OUT/compile-failures.txt"
-done
+}
+export -f analyze_source
+export SDK OUT PYTHON_INCLUDE
+SOURCES=(Sources/*.m)
+if [ "${CCTV_AUDIT_ONLY:-}" = PyHost ]; then SOURCES=(Sources/PyHost.m); fi
+# Two independent compiler processes keep memory bounded on Apple silicon runners.
+printf '%s\0' "${SOURCES[@]}" | xargs -0 -n 1 -P 2 bash -c 'analyze_source "$1"' _
 python3 - "$OUT" <<'PY'
 from pathlib import Path
 import json,plistlib,sys
