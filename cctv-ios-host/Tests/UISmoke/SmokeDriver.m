@@ -132,6 +132,17 @@
 - (AVPlayerTimeControlStatus)timeControlStatus {return AVPlayerTimeControlStatusWaitingToPlayAtSpecifiedRate;}
 - (void)replaceCurrentItemWithPlayerItem:(AVPlayerItem *)item {self.fixtureItem=item;}
 @end
+@interface SmokeStartupPendingItem : AVPlayerItem
+@end
+@implementation SmokeStartupPendingItem
+- (AVPlayerItemStatus)status {return AVPlayerItemStatusUnknown;}
+@end
+@interface SmokeStartupProbeController : MediaPlaybackViewController
+- (BOOL)isApplicationActiveForAVFirstFrameWatchdog;
+@end
+@implementation SmokeStartupProbeController
+- (BOOL)isApplicationActiveForAVFirstFrameWatchdog {return YES;}
+@end
 @interface RuntimeDiagnostics (SmokeMarker)
 - (NSDictionary *)readSessionMarker;
 @end
@@ -150,6 +161,7 @@
 - (void)prepareAssetForPrefetchedResult:(NSDictionary *)result identity:(NSString *)identity;
 - (AVURLAsset *)consumePrefetchedAssetForURL:(NSURL *)url headers:(NSDictionary *)headers;
 - (void)watchAVPlayerFirstFrameForItem:(AVPlayerItem *)item generation:(NSUInteger)generation url:(NSURL *)url sourceURL:(NSURL *)sourceURL;
+- (BOOL)isApplicationActiveForAVFirstFrameWatchdog;
 - (void)updatePlaybackLayoutForSize:(CGSize)size;
 - (void)setPlaybackRate:(double)rate;
 - (void)seekActiveEngineToTime:(NSTimeInterval)time completion:(nullable void (^)(BOOL finished))completion;
@@ -229,7 +241,9 @@ static void check(BOOL value, NSString *message) {
 static void SmokePlaybackPrefetchReuse(void) {
     NSString *decodeKey=@"cctv.mediaDecodeMode.v1";id previousDecode=[NSUserDefaults.standardUserDefaults objectForKey:decodeKey];[NSUserDefaults.standardUserDefaults setObject:@"auto" forKey:decodeKey];
     NSArray *episodes=@[@{@"id":@"ep-0",@"name":@"第1集"},@{@"id":@"ep-1",@"name":@"第2集"}];
-    NSDictionary *context=@{@"source":@{@"id":@"prefetch-fixture"},@"detail":@{@"id":@"fixture-show",@"lines":@[@{@"id":@"line-1",@"episodes":episodes}]}};
+    NSString *catalogID=@"smoke-prefetch-catalog";
+    [TVBoxCatalogStore saveCatalog:@{@"id":catalogID,@"name":@"Prefetch identity fixture",@"tvboxConfig":@{@"parses":@[@{@"name":@"Parser one",@"type":@1,@"url":@"https://resolver.fixture/one?url="},@{@"name":@"Parser two",@"type":@1,@"url":@"https://resolver.fixture/two?url="}]}}];
+    NSDictionary *context=@{@"source":@{@"id":@"prefetch-fixture",@"catalogID":catalogID},@"parserID":[catalogID stringByAppendingString:@":0"],@"detail":@{@"id":@"fixture-show",@"lines":@[@{@"id":@"line-1",@"episodes":episodes}]}};
     SmokePrefetchController *probe=[SmokePrefetchController new];probe.context=context;
     SmokePrefetchClient *background=[[SmokePrefetchClient alloc] initWithPort:1],*foreground=[[SmokePrefetchClient alloc] initWithPort:1];
     [probe setValue:background forKey:@"prefetchClient"];[probe setValue:foreground forKey:@"client"];
@@ -254,18 +268,20 @@ static void SmokePlaybackPrefetchReuse(void) {
     [probe setValue:@(CACurrentMediaTime()-121) forKey:@"prefetchedAssetAt"];
     check([probe consumePrefetchedAssetForURL:[NSURL URLWithString:result[@"url"]] headers:@{}]==nil&&prepared.cancellations==1,@"expired prepared URLs are cancelled instead of reused");
     [probe prepareAssetForPrefetchedResult:result identity:identity];prepared=[probe valueForKey:@"prefetchedAsset"];
-    NSMutableDictionary *changed=[context mutableCopy];changed[@"parserID"]=@"another-parser";probe.context=changed;
+    NSMutableDictionary *changed=[context mutableCopy];changed[@"parserID"]=[catalogID stringByAppendingString:@":1"];probe.context=changed;
     check([probe consumePrefetchedAssetForURL:[NSURL URLWithString:result[@"url"]] headers:@{}]==nil&&prepared.cancellations==1,@"a parser change invalidates the prepared episode identity");
     [probe clearCurrentPlayerItem];
+    [TVBoxCatalogStore removeCatalog:catalogID];
     if(previousDecode)[NSUserDefaults.standardUserDefaults setObject:previousDecode forKey:decodeKey];else[NSUserDefaults.standardUserDefaults removeObjectForKey:decodeKey];
 }
 static void SmokePlaybackStartupLifecycle(void) {
-    MediaPlaybackViewController *probe=[MediaPlaybackViewController new];[probe loadViewIfNeeded];
-    NSURL *url=[NSURL fileURLWithPath:@"/nonexistent-startup-fixture.mp4"];
-    AVPlayerItem *item=[AVPlayerItem playerItemWithURL:url];
+    MediaPlaybackViewController *probe=[SmokeStartupProbeController new];[probe loadViewIfNeeded];
+    NSURL *url=[NSURL fileURLWithPath:@"/startup-fixture.mp4"];
+    AVPlayerItem *item=[[SmokeStartupPendingItem alloc] initWithAsset:[AVURLAsset URLAssetWithURL:url options:nil] automaticallyLoadedAssetKeys:nil];
     SmokeWaitingAVPlayer *player=[SmokeWaitingAVPlayer new];player.fixtureItem=item;
     [probe setValue:player forKey:@"player"];[probe setValue:item forKey:@"observedItem"];
     [probe setValue:@0 forKey:@"playerGeneration"];
+    [probe setValue:nil forKey:@"pendingPlaybackSeekTime"];[probe setValue:@NO forKey:@"videoFrameReady"];[probe setValue:@NO forKey:@"confirmedAudioOnly"];
     [probe setValue:@YES forKey:@"resumePromptPending"];
     [probe watchAVPlayerFirstFrameForItem:item generation:0 url:url sourceURL:url];
     NSTimer *timer=[probe valueForKey:@"avFirstFrameTimer"];
@@ -1205,7 +1221,7 @@ static void next(NSArray *steps, NSUInteger index) {
             stalePlaybackDeadline=[NSDate dateWithTimeIntervalSinceNow:4.0];
           }},
           @{ @"timeout":@12,@"until":^BOOL{AVPlayer *player=[mediaPlayback valueForKey:@"player"];AVURLAsset *asset=(AVURLAsset *)player.currentItem.asset;return player.currentItem.status==AVPlayerItemStatusReadyToPlay&&[asset.URL.absoluteString containsString:@"play=fast"]&&[stalePlaybackDeadline timeIntervalSinceNow]<=0;},@"run":^{
-            AVPlayer *player=[mediaPlayback valueForKey:@"player"];AVURLAsset *asset=(AVURLAsset *)player.currentItem.asset;check([asset.URL.absoluteString containsString:@"play=fast"],@"late slow parse cannot replace the latest selected episode");UILabel *playingEpisode=(id)[mediaPlayback valueForKey:@"episodeTitle"];check([playingEpisode.text containsString:@"正在播放"]&&[playingEpisode.text containsString:@"快速切换"],@"player episode label follows the latest selected episode after rapid switching");UILabel *floatingEpisodeLabel=(id)[mediaPlayback valueForKey:@"inlineNowPlayingLabel"];check([floatingEpisodeLabel.text containsString:@"快速切换"],@"floating now-playing badge follows rapid episode changes");capture(self.window,@"20-media-fast-switch");UIStackView *routes=[mediaPlayback valueForKey:@"lineButtons"];if(routes.arrangedSubviews.count>1)[(UIButton *)routes.arrangedSubviews[1] sendActionsForControlEvents:UIControlEventTouchUpInside];else check(NO,@"film player offers the second source route for HLS compatibility check");
+            AVPlayer *player=[mediaPlayback valueForKey:@"player"];AVURLAsset *asset=(AVURLAsset *)player.currentItem.asset;check([asset.URL.absoluteString containsString:@"play=fast"],@"late slow parse cannot replace the latest selected episode");UILabel *playingEpisode=(id)[mediaPlayback valueForKey:@"episodeTitle"];check([playingEpisode.text containsString:@"正在播放"]&&[playingEpisode.text containsString:@"快速切换"],@"player episode label follows the latest selected episode after rapid switching");UILabel *floatingEpisodeLabel=(id)[mediaPlayback valueForKey:@"inlineNowPlayingLabel"];check([floatingEpisodeLabel.text containsString:@"快速切换"],@"floating now-playing badge follows rapid episode changes");capture(self.window,@"20-media-fast-switch");UIStackView *routes=[mediaPlayback valueForKey:@"lineButtons"];if(routes.arrangedSubviews.count>1){[(UIButton *)routes.arrangedSubviews[1] sendActionsForControlEvents:UIControlEventTouchUpInside];UILabel *lineStatus=[mediaPlayback valueForKey:@"status"];check([[mediaPlayback valueForKey:@"episodeIndex"] integerValue]==-1&&[mediaPlayback valueForKey:@"result"]==nil&&[lineStatus.text containsString:@"无法确认对应分集"],@"switching to a line without the current episode stops playback instead of selecting an unrelated episode");[mediaPlayback openEpisodeSelection];UIViewController *picker=nav.topViewController;if([picker isKindOfClass:MediaEpisodeSelectionViewController.class]){[picker loadViewIfNeeded];NSArray *lineEpisodes=[picker valueForKey:@"episodeButtons"];if(lineEpisodes.count)[(UIButton *)lineEpisodes[0] sendActionsForControlEvents:UIControlEventTouchUpInside];else check(NO,@"the user can explicitly choose an episode from the newly selected route");}else check(NO,@"an unmatched route offers the shared episode selector");}else check(NO,@"film player offers the second source route for HLS compatibility check");
           }},
           @{ @"timeout":@16,@"until":^BOOL{AVPlayer *player=[mediaPlayback valueForKey:@"player"];UILabel *status=[mediaPlayback valueForKey:@"status"];AVURLAsset *asset=(AVURLAsset *)player.currentItem.asset;return player.currentItem.status==AVPlayerItemStatusReadyToPlay&&[asset.URL.pathExtension.lowercaseString isEqual:@"m3u8"]&&[status.text containsString:@"视频首帧已就绪"];},@"run":^{
             AVPlayer *player=[mediaPlayback valueForKey:@"player"];UILabel *status=[mediaPlayback valueForKey:@"status"];AVURLAsset *asset=(AVURLAsset *)player.currentItem.asset;NSDictionary *result=[mediaPlayback valueForKey:@"result"];check([result[@"parse"] boolValue]&&[result[@"format"] isEqual:@"hls"],@"legacy parse=1 HLS media result is routed to AVPlayer when the returned URL is a real HLS manifest");check([asset.URL.pathExtension.lowercaseString isEqual:@"m3u8"],@"plugin HLS route remains a native HLS asset");check([status.text containsString:@"视频首帧已就绪"],@"AVPlayer decodes and displays a real frame from the imported-source HLS fixture");[mediaPlayback seekActiveEngineToTime:0 completion:nil];check(player.currentItem.status==AVPlayerItemStatusReadyToPlay,@"the native player accepts seeking without a caller completion block");capture(self.window,@"20b-media-hls-first-frame");[nav popToViewController:mediaPage animated:NO];

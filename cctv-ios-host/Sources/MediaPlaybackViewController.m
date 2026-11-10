@@ -428,6 +428,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 - (void)recordPlaybackFailureForItem:(AVPlayerItem *)item error:(NSError *)error stage:(NSString *)stage;
 - (void)startCicadaPlaybackWithResult:(NSDictionary *)result url:(NSURL *)url sourceURL:(NSURL *)sourceURL playerGeneration:(NSUInteger)playerGeneration;
 - (void)watchAVPlayerFirstFrameForItem:(AVPlayerItem *)item generation:(NSUInteger)playerGeneration url:(NSURL *)url sourceURL:(NSURL *)sourceURL;
+- (BOOL)isApplicationActiveForAVFirstFrameWatchdog;
 - (void)teardownCicadaAdapter;
 - (void)advanceFromCicadaFailureWithError:(NSError *)error;
 - (void)handleCicadaFirstFrameTimeoutForAdapter:(id)adapter;
@@ -1582,7 +1583,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
         CFTimeInterval now=CACurrentMediaTime(),delta=MAX(0,now-owner.avFirstFrameLastCheck);owner.avFirstFrameLastCheck=now;
         // A user deciding whether to resume, a seek, or an intentional pause does
         // not consume the startup budget. The same timer continues after resume.
-        if(owner.playbackSuspendedForVisibility||owner.resumePromptPending||owner.pendingPlaybackSeekTime||owner.player.timeControlStatus==AVPlayerTimeControlStatusPaused||UIApplication.sharedApplication.applicationState!=UIApplicationStateActive)return;
+        if(owner.playbackSuspendedForVisibility||owner.resumePromptPending||owner.pendingPlaybackSeekTime||owner.player.timeControlStatus==AVPlayerTimeControlStatusPaused||![owner isApplicationActiveForAVFirstFrameWatchdog])return;
         owner.avFirstFrameActiveWait+=MIN(delta,2.0);
         if(owner.avFirstFrameActiveWait<timeout)return;
         [timer invalidate];owner.avFirstFrameTimer=nil;
@@ -1590,6 +1591,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     }];
     self.avFirstFrameTimer.tolerance=0.2;
 }
+- (BOOL)isApplicationActiveForAVFirstFrameWatchdog {return UIApplication.sharedApplication.applicationState==UIApplicationStateActive;}
 
 - (void)startCicadaPlaybackWithResult:(NSDictionary *)result url:(NSURL *)url sourceURL:(NSURL *)sourceURL playerGeneration:(NSUInteger)playerGeneration {
     if(self.playbackSuspendedForVisibility)return;
