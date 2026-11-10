@@ -2950,7 +2950,7 @@ configureCatalogNavigation;
     page.onOpenLog = ^{[weakSelf openDiagnosticLogForIdentifier:builtinID name:builtinName];};
     page.onRestart=^(void (^completion)(NSError *)){RootViewController *owner=weakSelf;if(!owner){if(completion)completion([NSError errorWithDomain:@"CCTVHostService" code:10 userInfo:@{NSLocalizedDescriptionKey:@"服务页面已关闭，重启未完成。"}]);return;}NSDictionary *current=nil;for(NSDictionary *service in [ServiceStore services])if([service[@"id"] isEqual:builtinID]){current=service;break;}if(!current){if(completion)completion([NSError errorWithDomain:@"CCTVHostService" code:1 userInfo:@{NSLocalizedDescriptionKey:@"找不到 YSP Live 服务，请从资源页重新导入。"}]);return;}[owner restartMediaService:current completion:completion];};
     page.subscriptionCountProvider=^{return weakSelf.subscriptionURLs.count;};
-    [page updateRunning:[PyHost isRunningServiceIdentifier:builtinID] subscriptionCount:self.subscriptionURLs.count];
+    [page updateRunning:(builtinID.length&&[PyHost isRunningServiceIdentifier:builtinID]) subscriptionCount:self.subscriptionURLs.count];
     [self.navigationController pushViewController:page animated:YES];
 }
 
@@ -4918,7 +4918,7 @@ configureCatalogNavigation;
             owner.playerTabs.selectedSegmentIndex=1;[owner selectPlayerPanel];
             if(![owner.channelID isEqualToString:cid] || !owner.currentPlayer || owner.avPlayer || !owner.firstRender){
                 owner.pendingNativeReplayProgram=@{@"channelID":cid?:@"",@"start":@([program[@"start"] doubleValue]),@"end":@([program[@"end"] doubleValue])};
-                if(![owner.channelID isEqualToString:cid] || !owner.currentPlayer || owner.avPlayer)[owner selectChannel:channel];
+                if(channel&&(![owner.channelID isEqualToString:cid] || !owner.currentPlayer || owner.avPlayer))[owner selectChannel:channel];
                 return;
             }
             [owner seekNativeStart:[program[@"start"] doubleValue] end:[program[@"end"] doubleValue]];
@@ -5178,7 +5178,7 @@ configureCatalogNavigation;
     if(![self importPlaylistData:data name:name metadata:@{}])[self showServiceError:@"文件须为 UTF-8 M3U 播放列表，包含有效 HTTP/HTTPS 频道，且不超过 10MB。"];
 }
 - (NSString *)importPlaylistData:(NSData *)data name:(NSString *)name metadata:(NSDictionary *)metadata {
-    NSString *text=data.length<=10*1024*1024?[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]:nil;NSArray *channels=text.length?[M3UParser parse:text baseURL:nil]:@[];if(!channels.count)return nil;
+    NSString *text=data.length<=10*1024*1024?[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]:nil;if(!text.length)return nil;NSArray *channels=[M3UParser parse:text baseURL:nil];if(!channels.count)return nil;
     NSString *source=[@"local-playlist:" stringByAppendingString:NSUUID.UUID.UUIDString];NSArray *snapshot=CCTVPlaylistSnapshotRows(channels,source);NSMutableDictionary *values=[@{@"name":name?:@"本地播放列表",@"text":text,@"cachedChannels":snapshot} mutableCopy];if([metadata isKindOfClass:NSDictionary.class])[values addEntriesFromDictionary:metadata];[ProfileStore update:source values:values];[self.subscriptionURLs addObject:source];[NSUserDefaults.standardUserDefaults setObject:[ProfileStore orderedSources:self.subscriptionURLs.allObjects] forKey:@"subscriptions"];[self applyPlaylistText:text source:source];return source;
 }
 - (void)replaceSubscription:(NSString *)source URL:(NSString *)url values:(NSDictionary *)values disabled:(BOOL)disabled completion:(void (^)(NSError *error))completion {

@@ -1701,7 +1701,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 }
 - (void)seekActiveEngineToTime:(NSTimeInterval)time completion:(nullable void (^)(BOOL finished))completion {
     if(self.cicadaAdapter){[self.cicadaAdapter seekToTime:time completion:completion];return;}
-    [self.player seekToTime:CMTimeMakeWithSeconds(time,600) toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero completionHandler:completion];
+    [self.player seekToTime:CMTimeMakeWithSeconds(time,600) toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero completionHandler:completion?:^(BOOL finished){}];
 }
 - (void)setActiveEngineRate:(float)rate {
     if(self.cicadaAdapter){[self.cicadaAdapter setRate:rate];return;}

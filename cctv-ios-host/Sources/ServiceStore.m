@@ -68,7 +68,7 @@ static NSString *ServiceCodeWithoutComments(NSString *source){
                 if(range.location!=NSNotFound)relative=[stored substringFromIndex:NSMaxRange(range)];
             }
         }
-        if(ServiceRelativePath(relative)){resolved[relativeKey]=relative;resolved[key]=[base stringByAppendingPathComponent:relative];}
+        if(relative.length&&ServiceRelativePath(relative)){resolved[relativeKey]=relative;resolved[key]=[base stringByAppendingPathComponent:relative];}
     }
     return resolved;
 }

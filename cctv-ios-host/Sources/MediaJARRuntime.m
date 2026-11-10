@@ -113,14 +113,14 @@ static void JARThread(void (^work)(void)) {
     return ticket;
 }
 + (id)perform:(NSDictionary *)source operation:(NSString *)operation arguments:(NSDictionary *)arguments ticket:(MediaJARRequest *)ticket error:(NSError **)error {
-    if(!self.available){*error=JARError(4,@"此构建未包含 JAR 运行时，请安装完整版本");return nil;}
+    if(!self.available){if(error)*error=JARError(4,@"此构建未包含 JAR 运行时，请安装完整版本");return nil;}
     NSDictionary *params=MediaJARParameters(operation,arguments);
-    if(!params){*error=JARError(5,@"JAR 操作不受支持");return nil;}
+    if(!params){if(error)*error=JARError(5,@"JAR 操作不受支持");return nil;}
     NSDictionary *reference=source[@"jar"];
     NSString *rawURL=[reference[@"url"] isKindOfClass:NSString.class]?reference[@"url"]:@"";
     NSString *fingerprint=[reference[@"md5"] isKindOfClass:NSString.class]?reference[@"md5"]:@"";
     NSDictionary *validated=MediaJARReference(fingerprint.length?[rawURL stringByAppendingFormat:@";md5;%@",fingerprint]:rawURL,nil);
-    if(!validated||!MediaJARClass(source[@"api"]).length){*error=JARError(6,@"订阅缺少有效 JAR 地址或爬虫类名");return nil;}
+    if(!validated||!MediaJARClass(source[@"api"]).length){if(error)*error=JARError(6,@"订阅缺少有效 JAR 地址或爬虫类名");return nil;}
     NSString *root=JARRoot(),*url=validated[@"url"];
     // Include headers and fingerprint in download identity; never reuse another account's archive.
     NSDictionary *headers=[source[@"header"] isKindOfClass:NSDictionary.class]?source[@"header"]:@{};
@@ -140,13 +140,13 @@ static void JARThread(void (^work)(void)) {
         NSURLSession *session=[NSURLSession sessionWithConfiguration:configuration delegate:ticket delegateQueue:nil];
         ticket.download=[session dataTaskWithRequest:request];if(!ticket.cancelled)[ticket.download resume];else[ticket.download cancel];
         dispatch_semaphore_wait(ticket.downloaded,DISPATCH_TIME_FOREVER);[session invalidateAndCancel];ticket.download=nil;
-        if(ticket.downloadError||ticket.cancelled){*error=ticket.downloadError?:JARError(NSURLErrorCancelled,@"请求已取消");return nil;}
+        if(ticket.downloadError||ticket.cancelled){if(error)*error=ticket.downloadError?:JARError(NSURLErrorCancelled,@"请求已取消");return nil;}
         data=ticket.bytes;ticket.bytes=nil;
-        if(data.length<4||memcmp(data.bytes,"PK\003\004",4)!=0){*error=JARError(7,@"JAR 下载未返回 ZIP/JAR 文件，可能是登录页或访问限制");return nil;}
+        if(data.length<4||memcmp(data.bytes,"PK\003\004",4)!=0){if(error)*error=JARError(7,@"JAR 下载未返回 ZIP/JAR 文件，可能是登录页或访问限制");return nil;}
         digest=JARHash(data,NO);jar=[root stringByAppendingPathComponent:[digest stringByAppendingString:@".jar"]];
     }
     NSString *md5=[reference[@"md5"] isKindOfClass:NSString.class]?reference[@"md5"]:@"";
-    if(md5.length&&![JARHash(data,YES) isEqual:md5.lowercaseString]){*error=JARError(8,@"JAR 的 MD5 与订阅不符，请刷新订阅");return nil;}
+    if(md5.length&&![JARHash(data,YES) isEqual:md5.lowercaseString]){if(error)*error=JARError(8,@"JAR 的 MD5 与订阅不符，请刷新订阅");return nil;}
     if(!cached){if(![data writeToFile:jar options:NSDataWritingAtomic error:error])return nil;
         [[NSJSONSerialization dataWithJSONObject:@{@"digest":digest,@"time":@(NSDate.date.timeIntervalSince1970)} options:0 error:NULL] writeToFile:recordPath atomically:YES];}
     if(ticket.cancelled)return nil;
@@ -163,11 +163,11 @@ static void JARThread(void (^work)(void)) {
         // Plugin errors may contain signed URLs or ext secrets. Export only a stable category.
         NSString *code=[envelope[@"errorCode"] isKindOfClass:NSString.class]?envelope[@"errorCode"]:@"plugin_failure";
         if(code.length>80||[code rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:@"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"].invertedSet].location!=NSNotFound)code=@"plugin_failure";
-        *error=JARError(9,[NSString stringWithFormat:@"JAR 爬虫执行失败（%@）。首次准备可能较慢；需要 Android 界面或未适配依赖的站点仍不可用。",code]);return nil;
+        if(error)*error=JARError(9,[NSString stringWithFormat:@"JAR 爬虫执行失败（%@）。首次准备可能较慢；需要 Android 界面或未适配依赖的站点仍不可用。",code]);return nil;
     }
     id raw=envelope[@"result"];
     if([raw isKindOfClass:NSString.class])raw=[NSJSONSerialization JSONObjectWithData:[raw dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL];
-    if(![raw isKindOfClass:NSDictionary.class]){*error=JARError(10,@"JAR 爬虫未返回有效 JSON 对象");return nil;}
+    if(![raw isKindOfClass:NSDictionary.class]){if(error)*error=JARError(10,@"JAR 爬虫未返回有效 JSON 对象");return nil;}
     return raw;
 }
 @end
