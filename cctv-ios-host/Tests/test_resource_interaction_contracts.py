@@ -1460,6 +1460,7 @@ class ResourceInteractionContracts(unittest.TestCase):
     def test_for_adm_signed_sources_follow_the_working_native_client_contract(self):
         downloader = self.package_downloader
         self.assertIn('PackageAdaptForADMSignedSource', downloader)
+        self.assertIn('PackageAdaptForADMPlaybackAlternates', downloader)
         self.assertIn('raw.githubusercontent.com', downloader)
         for source in ('kkapp', 'ncat', 'happ'):
             self.assertIn(f'/joeshu/for-adm/master/cctvhost/{source}.js', downloader)
@@ -1490,6 +1491,25 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('probe=siteImageDomains[String(row.imageGroup||\'\')]', downloader)
         self.assertIn('resolverOccurrences==1&&![text containsString:@"async function dylProbeHls(url,headers)"]', downloader)
         self.assertIn('function yqkRequestTimeout(budget,fallback)', downloader)
+
+    def test_for_adm_keeps_same_episode_playback_alternates_for_native_retry(self):
+        downloader = self.package_downloader
+        catalog = json.loads((ROOT / 'Resources/BuiltinMedia/for-adm.json').read_text())
+        adapter = downloader[downloader.index('static NSData *PackageAdaptForADMPlaybackAlternates'):
+                             downloader.index('static NSData *PackageAdaptForADMYqkSource')]
+        for site in catalog['sites']:
+            source = site['api'].split('?', 1)[0].rsplit('/', 1)[-1]
+            path = f'@"/joeshu/for-adm/master/cctvhost/{source}"'
+            if source in ('souju.js', 'kanju.js'):
+                self.assertIn(path, adapter)
+            else:
+                self.assertNotIn(path, adapter)
+        self.assertIn("rows=Array.isArray(result)?result.slice(0,5):[result]", downloader)
+        self.assertIn("if(choices.length>1)playback.alternates=choices", downloader)
+        self.assertIn('choices.length>=5', downloader)
+        self.assertIn('seen[address]', downloader)
+        self.assertIn('row.url||row.playUrl', downloader)
+        self.assertIn("var result=await resolveResource({link:String(id||'')}),media=Array.isArray(result)?result[0]:result;", downloader)
 
     def test_explicit_maccms_web_pages_keep_the_web_playback_handoff(self):
         api = (ROOT / 'Sources/MediaAPIClient.m').read_text()

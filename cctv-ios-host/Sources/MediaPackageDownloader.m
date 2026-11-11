@@ -69,6 +69,29 @@ static NSString *PackageApplyYqkPlaybackFixes(NSString *text) {
     if([text containsString:oldProbe])text=[text stringByReplacingOccurrencesOfString:oldProbe withString:newProbe];
     return text;
 }
+static NSData *PackageAdaptForADMPlaybackAlternates(NSData *data,NSURL *sourceURL,NSError **error) {
+    // Souju/Kanju candidates are bound to the verified current_episode ID;
+    // other For-ADM adapters may internally retry a different source line.
+    NSSet *paths=[NSSet setWithArray:@[
+        @"/joeshu/for-adm/master/cctvhost/souju.js",@"/joeshu/for-adm/master/cctvhost/kanju.js"
+    ]];
+    if(![paths containsObject:sourceURL.path.lowercaseString])return data;
+    NSString *text=[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    if(!text){if(error)*error=[NSError errorWithDomain:@"CCTVHostImport" code:31 userInfo:@{NSLocalizedDescriptionKey:@"For-ADM 播放脚本不是有效的 UTF-8 文本。"}];return nil;}
+    NSString *already=@"rows=Array.isArray(result)?result.slice(0,5):[result]";
+    if([text containsString:already]&&[text containsString:@"playback.alternates=choices"])return data;
+    NSString *oldRows=@"var result=await resolveResource({link:String(id||'')}),media=Array.isArray(result)?result[0]:result;";
+    NSString *newRows=@"var result=await resolveResource({link:String(id||'')}),rows=Array.isArray(result)?result.slice(0,5):[result],media=rows[0];";
+    NSString *oldReturn=@"return {parse:0,url:url,header:media.customHeaders||media.headers||media.header||{}};";
+    NSString *newReturn=
+    @"var playback={parse:0,url:url,header:media.customHeaders||media.headers||media.header||{}},choices=[],seen=Object.create(null);"
+    @"rows.forEach(function(row,index){if(!row||choices.length>=5)return;var address=String(row.url||row.playUrl||'').trim();if(!/^https?:\\/\\//i.test(address)||seen[address])return;seen[address]=true;var choice={name:String(row.name||('线路 '+(index+1))).slice(0,80),url:address},headers=row.customHeaders||row.headers||row.header||{};if(headers&&typeof headers==='object'&&Object.keys(headers).length)choice.headers=headers;['format','contentType','mimeType','mediaType','playbackEngine'].forEach(function(key){if(typeof row[key]==='string')choice[key]=row[key];});choices.push(choice);});"
+    @"if(choices.length>1)playback.alternates=choices;return playback;";
+    NSUInteger rowCount=[[text componentsSeparatedByString:oldRows] count]-1,returnCount=[[text componentsSeparatedByString:oldReturn] count]-1;
+    if(rowCount==1&&returnCount==1){text=[text stringByReplacingOccurrencesOfString:oldRows withString:newRows];text=[text stringByReplacingOccurrencesOfString:oldReturn withString:newReturn];}
+    else if(![text containsString:already]||![text containsString:@"playback.alternates=choices"]){if(error)*error=[NSError errorWithDomain:@"CCTVHostImport" code:32 userInfo:@{NSLocalizedDescriptionKey:@"For-ADM 播放候选协议已变化，未导入不兼容版本。"}];return nil;}
+    return [text dataUsingEncoding:NSUTF8StringEncoding];
+}
 static NSData *PackageAdaptForADMYqkSource(NSData *data,NSError **error) {
     NSString *text=[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
     if(!text||![text containsString:@"id: \"joeshu.yqk\""]||![text containsString:@"async function apiRequest(path, params, budget)"]){
@@ -100,6 +123,7 @@ static NSData *PackageAdaptForADMSignedSource(NSData *data,NSURL *sourceURL,NSEr
     NSData *bundledWeBox=PackageBundledWeBoxScriptForURL(sourceURL);
     if(bundledWeBox.length)return bundledWeBox;
     if(![sourceURL.host.lowercaseString isEqual:@"raw.githubusercontent.com"])return data;
+    data=PackageAdaptForADMPlaybackAlternates(data,sourceURL,error);if(!data)return nil;
     if(PackageIsForADMYqkSourceURL(sourceURL))return PackageAdaptForADMYqkSource(data,error);
     if([sourceURL.path.lowercaseString isEqual:@"/joeshu/for-adm/master/cctvhost/dyls.js"]){
         NSString *text=[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
