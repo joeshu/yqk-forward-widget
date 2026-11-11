@@ -1147,12 +1147,13 @@ static void next(NSArray *steps, NSUInteger index) {
             check(hasCatalog&&hasParser&&unboundSummary&&[ServiceStore playbackParserCatalogIDForSource:standalone].length==0,@"standalone Python resource exposes explicit parser settings without borrowing an unrelated catalog");
             NSDictionary *explicitBinding=@{@"id":standalone[@"id"],@"catalogID":@"content-catalog",@"parserCatalogID":@"chosen-parser-catalog"};
             check([[ServiceStore playbackParserCatalogIDForSource:explicitBinding] isEqual:@"chosen-parser-catalog"]&&[explicitBinding[@"catalogID"] isEqual:@"content-catalog"],@"parser catalog binding overrides resolver scope without changing the content catalog identity");
-            nativeResolverSmoke=[@{@"done":@NO,@"staleSuccesses":@0,@"newCompletions":@0,@"webViewBaseline":@(SmokeDescendantWebViewCount(root.view))} mutableCopy];
+            UIView *nativeResolverHostView=nav.topViewController.view;
+            nativeResolverSmoke=[@{@"done":@NO,@"staleSuccesses":@0,@"newCompletions":@0,@"webViewBaseline":@(SmokeDescendantWebViewCount(nativeResolverHostView))} mutableCopy];
             nativeResolverSmoke[@"previousDecodeMode"]=[NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaDecodeMode.v1"]?:NSNull.null;
             nativeResolverSmoke[@"previousWatchHistory"]=[NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaWatchHistory.v1"]?:NSNull.null;
             [NSUserDefaults.standardUserDefaults setObject:@"auto" forKey:@"cctv.mediaDecodeMode.v1"];
             nativeResolverPresented=SmokePresentedController(@[nav,root]);
-            nativeResolver=[[MediaNativePlaybackResolver alloc] initWithHostView:root.view];
+            nativeResolver=[[MediaNativePlaybackResolver alloc] initWithHostView:nativeResolverHostView];
             NSString *page=[SmokeResolverFixtureBaseURL() stringByAppendingString:@"/native-resolver-dynamic"];
             NSDictionary *identity=@{@"sourceID":@"resolver-smoke",@"catalogID":@"fixture-catalog",@"provider":@"fixture",@"detailID":@"fixture-show",@"lineID":@"fixture-line",@"episodeID":@"episode-dynamic",@"generation":@1};
             [nativeResolver resolveResult:@{@"url":page,@"parse":@1,@"jx":@1} identity:identity progress:nil completion:^(NSDictionary *result,NSError *error){
@@ -1168,7 +1169,7 @@ static void next(NSArray *steps, NSUInteger index) {
             check([resolved.path isEqual:@"/native-resolver-video.mp4"]&&[resolved.query isEqual:@"case=dynamic"],@"background WebKit executes delayed DOM creation and preserves the media query");
             check([result[@"pageURL"] hasSuffix:@"/native-resolver-dynamic"]&&[result[@"resolutionIdentity"][@"episodeID"] isEqual:@"episode-dynamic"],@"native resolver preserves the original page and exact episode identity");
             check(SmokePresentedController(@[nav,root])==nativeResolverPresented,@"background extraction never presents a webpage controller");
-            check(SmokeDescendantWebViewCount(root.view)==[nativeResolverSmoke[@"webViewBaseline"] unsignedIntegerValue],@"validated native handoff removes the temporary background WebView");
+            check(SmokeDescendantWebViewCount(nav.topViewController.view)==[nativeResolverSmoke[@"webViewBaseline"] unsignedIntegerValue],@"validated native handoff removes the temporary background WebView");
             nativeResolverPlayback=[MediaPlaybackViewController new];nativeResolverPlayback.result=result?:@{};
             nativeResolverPlayback.context=@{@"source":@{@"id":@"resolver-smoke",@"name":@"后台解析测试",@"catalogID":@"fixture-catalog"},@"provider":@"fixture",@"parserID":@"",@"item":@{@"id":@"fixture-show",@"name":@"后台解析测试"},@"detail":@{@"id":@"fixture-show",@"name":@"后台解析测试",@"lines":@[@{@"id":@"fixture-line",@"name":@"原生线路",@"episodes":@[@{@"id":@"episode-dynamic",@"name":@"动态图像"}]}]},@"lineIndex":@0,@"episodeIndex":@0};
             [nav pushViewController:nativeResolverPlayback animated:NO];

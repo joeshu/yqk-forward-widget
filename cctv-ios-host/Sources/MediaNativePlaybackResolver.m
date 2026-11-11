@@ -3,6 +3,8 @@
 #import <TargetConditionals.h>
 #import <WebKit/WebKit.h>
 #import <AVFoundation/AVFoundation.h>
+#include <stdint.h>
+#include <string.h>
 #if TARGET_OS_IPHONE
 #import <UIKit/UIKit.h>
 #endif
@@ -36,6 +38,43 @@ static NSString *MNRText(NSData *data) {
     NSString *text=[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
     if(!text)text=[[NSString alloc] initWithData:data encoding:NSISOLatin1StringEncoding];
     return text?:@"";
+}
+// A media playlist often has no master-playlist CODECS/RESOLUTION metadata.
+// Inspect its first MPEG-TS segment so ordinary video HLS is not rejected when
+// AVFoundation cannot expose tracks from a short, local playlist probe.
+// Returns 1 for video, 0 for a positively identified audio-only PMT, and -1
+// when the segment format or PSI is not conclusive (for example fMP4/encrypted).
+static NSInteger MNRTransportStreamVideoState(NSData *data) {
+    const uint8_t *bytes=data.bytes;NSUInteger length=data.length;if(!bytes||length<188)return -1;
+    NSUInteger start=NSNotFound;NSUInteger scan=MIN((NSUInteger)188,length-188);
+    for(NSUInteger i=0;i<=scan;i++)if(bytes[i]==0x47&&(i+188>=length||bytes[i+188]==0x47)){start=i;break;}
+    if(start==NSNotFound)return -1;
+    NSInteger pmtPID=-1;BOOL foundPMT=NO,hasVideo=NO,hasUnknownStream=NO;
+    for(NSUInteger offset=start;offset+188<=length;offset+=188){
+        const uint8_t *packet=bytes+offset;if(packet[0]!=0x47)break;
+        uint16_t pid=(uint16_t)(((packet[1]&0x1f)<<8)|packet[2]);
+        if(pid!=0&&(pmtPID<0||pid!=(uint16_t)pmtPID))continue;
+        uint8_t adaptation=(packet[3]>>4)&0x03;if(!(adaptation&0x01))continue;
+        NSUInteger payload=4;if(adaptation&0x02){payload+=1+packet[payload];if(payload>=188)continue;}
+        if(!(packet[1]&0x40)||payload>=188)continue;
+        payload+=1+packet[payload];if(payload+3>188)continue;
+        const uint8_t *section=packet+payload;NSUInteger sectionLength=((section[1]&0x0f)<<8)|section[2],total=3+sectionLength;
+        if(total>188-payload||total<12)continue;
+        if(pid==0&&section[0]==0x00){
+            for(NSUInteger i=8;i+4<=total-4;i+=4){NSUInteger program=((NSUInteger)section[i]<<8)|section[i+1];if(program){pmtPID=(NSInteger)(((section[i+2]&0x1f)<<8)|section[i+3]);break;}}
+            continue;
+        }
+        if(pmtPID<0||pid!=(uint16_t)pmtPID||section[0]!=0x02||total<16)continue;
+        foundPMT=YES;NSUInteger infoLength=((NSUInteger)(section[10]&0x0f)<<8)|section[11];NSUInteger i=12+infoLength,end=total-4;
+        while(i+5<=end){
+            uint8_t type=section[i];NSUInteger descriptorLength=((NSUInteger)(section[i+3]&0x0f)<<8)|section[i+4];
+            if([@[@(0x01),@(0x02),@(0x10),@(0x1b),@(0x24),@(0x42),@(0xd1),@(0xea)] containsObject:@(type)])hasVideo=YES;
+            else if(![@[@(0x03),@(0x04),@(0x0f),@(0x11),@(0x81),@(0x87)] containsObject:@(type)])hasUnknownStream=YES;
+            if(hasVideo)return 1;
+            if(i+5+descriptorLength>end)break;i+=5+descriptorLength;
+        }
+    }
+    return foundPMT&&!hasVideo&&!hasUnknownStream?0:-1;
 }
 static BOOL MNRLooksHTML(NSString *text,NSString *mime) {
     NSString *trim=[[text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] lowercaseString];
@@ -301,10 +340,14 @@ static NSString *MNRCaptureScript(void) {
         [self failed:MNRError(@"NO_MEDIA",@"媒体清单形成循环或没有可用分支")];return;
     }
     BOOL media=[text containsString:@"#EXTINF:"]||[text containsString:@"#EXT-X-PART:"];
-    BOOL segments=NO;for(NSString *line in lines){NSString *s=[line stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];if(s.length&&![s hasPrefix:@"#"]&&MNRResolvedString(s,url).length){segments=YES;break;}}
+    BOOL segments=NO;NSString *firstSegment=nil;for(NSString *line in lines){NSString *s=[line stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];if(s.length&&![s hasPrefix:@"#"]){NSString *resolved=MNRResolvedString(s,url);if(resolved.length){segments=YES;if(!firstSegment)firstSegment=s;}}}
     if(audioOnlyDeclaration&&!videoDeclaration){[self failed:MNRError(@"NO_MEDIA",@"候选清单仅包含音频，不是视频正片")];return;}
     if(!media||!segments){[self failed:MNRError(@"NO_MEDIA",@"HLS 清单没有有效的媒体分片")];return;}
     if([node[@"videoDeclared"] boolValue]){[self acceptURL:url format:@"hls" mime:@"application/vnd.apple.mpegurl" headers:headers evidence:@"hls_video_variant" node:node];return;}
+    NSUInteger depth=[node[@"depth"] unsignedIntegerValue];
+    if(firstSegment.length&&depth<3&&[self enqueueURL:firstSegment base:url headers:headers depth:depth+1 role:@"hls_segment"]){
+        NSMutableDictionary *segment=[self.queue.lastObject mutableCopy];segment[@"validationReturnURL"]=node[@"validationReturnURL"]?:url.absoluteString;segment[@"validationReturnHeaders"]=node[@"validationReturnHeaders"]?:headers;self.queue[self.queue.count-1]=segment.copy;[self pump];return;
+    }
     [self probeVideoURL:url format:@"hls" mime:@"application/vnd.apple.mpegurl" headers:headers node:node];
 }
 
@@ -320,6 +363,13 @@ static NSString *MNRCaptureScript(void) {
 }
 - (void)processData:(NSData *)data response:(NSHTTPURLResponse *)response node:(NSDictionary *)node {
     NSURL *url=response.URL;NSString *mime=response.MIMEType.lowercaseString?:@"";NSDictionary *headers=[self headers:node[@"headers"]?:@{} fromURL:[NSURL URLWithString:MNRString(node[@"scopeURL"])] toURL:url];
+    if([MNRString(node[@"role"]) isEqual:@"hls_segment"]){
+        NSInteger videoState=MNRTransportStreamVideoState(data);NSURL *manifestURL=[NSURL URLWithString:MNRString(node[@"validationReturnURL"])];NSDictionary *manifestHeaders=[node[@"validationReturnHeaders"] isKindOfClass:NSDictionary.class]?node[@"validationReturnHeaders"]:headers;
+        if(videoState>0){[self acceptURL:manifestURL format:@"hls" mime:@"application/vnd.apple.mpegurl" headers:manifestHeaders evidence:@"hls_transport_stream_video" node:node];return;}
+        if(videoState==0){[self failed:MNRError(@"NO_MEDIA",@"HLS 分片确认只包含音频，没有视频轨道")];return;}
+        if(manifestURL){[self probeVideoURL:manifestURL format:@"hls" mime:@"application/vnd.apple.mpegurl" headers:manifestHeaders node:node];return;}
+        [self failed:MNRError(@"NO_MEDIA",@"HLS 分片无法确认并且缺少原始媒体清单")];return;
+    }
     NSString *text=MNRText(data),*trim=[text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     if([trim hasPrefix:@"#EXTM3U"]){[self processHLS:trim url:url headers:headers node:node];return;}
     if([trim containsString:@"<MPD"]||[mime containsString:@"dash+xml"]){
