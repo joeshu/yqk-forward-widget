@@ -92,6 +92,8 @@ class NativeMediaAPITests(unittest.TestCase):
                     payload = {"code": 0, "msg": "ok", "page": 1, "list": []}
                 elif query.get("play") == ["web-episode"]:
                     payload = {"code": 1, "url": "https://resolver.example/watch?id=fixture", "parse": 1, "jx": 1}
+                elif query.get("play") == ["official-watch-page"]:
+                    payload = {"code": 1, "url": "https://v.qq.com/x/cover/fixture/episode.html", "parse": 1, "jx": 1}
                 elif query.get("play") == ["web-episode-mpd"]:
                     payload = {"code": 1, "url": "https://resolver.example/watch?id=mpd", "parse": 1, "jx": 1}
                 elif query.get("play") == ["quality-specific"]:
@@ -145,14 +147,15 @@ class NativeMediaAPITests(unittest.TestCase):
             self.assertTrue(any(query.get("ac") == ["detail"] and query.get("ids") == ["film-1"] for query, _, _ in requests))
             self.assertTrue(any(query.get("play") == ["episode-1"] and query.get("flag") == ["线路一"] for query, _, _ in requests))
             self.assertTrue(any(query.get("play") == ["web-episode"] and query.get("flag") == ["线路一"] for query, _, _ in requests))
+            self.assertTrue(any(query.get("play") == ["official-watch-page"] for query, _, _ in requests))
             self.assertTrue(all(header == "header" for _, header, _ in requests), "source headers reach each API request")
             self.assertTrue(all(host.startswith("127.0.0.1:") for _, _, host in requests), "untrusted Host headers cannot override the API host")
             self.assertTrue(all(query.get("token") == ["fixture"] and query.get("extend") == ['{"region":"cn"}'] for query, _, _ in requests))
             self.assertTrue(all(value == "Basic fixture" for value in auth_headers), "source authorization reaches its own API origin")
             self.assertTrue(all(value == "fixture-key" for value in api_key_headers), "source API-key headers reach their own origin")
             self.assertEqual(redirected_headers, [(None, None, None)], "credential headers are stripped when an API redirects to another origin")
-            self.assertGreaterEqual(len(requests), 12, "TVBox and unscoped package play requests reach the expected APIs")
-            self.assertLessEqual(len(requests), 13, "TVBox and unscoped package play requests stay bounded")
+            self.assertGreaterEqual(len(requests), 13, "TVBox and unscoped package play requests reach the expected APIs")
+            self.assertLessEqual(len(requests), 14, "TVBox and unscoped package play requests stay bounded")
             self.assertEqual(len(parser_requests), 2, "selected TVBox JSON parser receives both page URLs once")
             self.assertEqual(parser_requests[0][0].get("url"), ["https://resolver.example/watch?id=fixture"])
             self.assertEqual(parser_requests[0][1], "parser-fixture", "parser-specific headers reach the parser endpoint")

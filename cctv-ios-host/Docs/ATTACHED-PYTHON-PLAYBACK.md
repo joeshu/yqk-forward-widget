@@ -47,3 +47,11 @@ python -m unittest discover -s cctv-ios-host/Tests -p test_attachment_playback_a
 14 项测试使用真实 PythonSpider 加载清单，覆盖重定向、签名地址、完整 HLS 时间线、重复播放的请求头、跨域 Cookie 隔离、初始化无网络请求及宿主请求头合并。仅使用本机 HTTP fixture，没有访问内容站点。
 
 这些测试证明协议适配与传输参数正确；远程域名存活、内容授权、真实编码/画面/音轨和 iOS 真机播放仍需在目标设备验证。
+
+## 2026-11-11 优酷 / 腾讯视频补充检查
+
+本次附件的 `playerContent()` 都没有返回可供 AVPlayer/CicadaPlayer 解码的 HLS、DASH 或 MP4 媒体地址。优酷直接返回官方 `/video?vid=…` 页面；腾讯原脚本把官方分集页包装到第三方 `jx.xmflv.com`，这仍然是网页解析，不是媒体直链。
+
+为避免黑屏等待，`MediaPlaybackDecodeRouter` 对 `parse/jx/requiresWebPlayback` 页面直接选择应用内网页播放，不再先让两个原生播放器尝试读取 HTML。优酷和腾讯官方 HTTPS 播放页不会提交给合集解析 API。附件适配版 `Tencent-官方网页播放适配版.py` 返回腾讯官方分集页，由官方网页执行登录、订阅及播放授权。
+
+这条路径用于通过官方页面显示画面，不会保证或尝试从会员/DRM 页面提取原生流。要使用 AVPlayer/CicadaPlayer，来源必须通过官方授权接口提供可播放媒体地址及合法请求头；上述附件本身不具备该能力。

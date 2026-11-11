@@ -598,7 +598,14 @@ static NSDictionary *MediaParserCleanHeaders(id value,NSURL *mediaURL,NSURL *par
     if(generation!=self.generation)return;
     NSDictionary *dictionary=[result isKindOfClass:NSDictionary.class]?result:nil;
     BOOL manualSelection=self.selectedParserID.length>0;
-    BOOL asksForParser=[operation isEqual:@"play"]&&dictionary&&(manualSelection||[dictionary[@"requiresWebPlayback"] boolValue]||[dictionary[@"webPlayback"] boolValue]||[dictionary[@"parse"] boolValue]||[dictionary[@"jx"] boolValue])&&!MediaPlaybackResultSupportsNativePlayback(dictionary);
+    NSString *playURL=[dictionary[@"originalURL"] isKindOfClass:NSString.class]?dictionary[@"originalURL"]:([dictionary[@"url"] isKindOfClass:NSString.class]?dictionary[@"url"]:@"");
+    NSURLComponents *playComponents=[NSURLComponents componentsWithString:playURL];
+    NSString *playHost=playComponents.host.lowercaseString?:@"";
+    // Keep these services' watch pages under their own login/subscription policy;
+    // only a media URL from an authorized API should enter native playback.
+    BOOL officialWatchPage=[playComponents.scheme.lowercaseString isEqual:@"https"]&&
+        [@[@"youku.com",@"www.youku.com",@"v.youku.com",@"m.youku.com",@"v.qq.com",@"m.v.qq.com"] containsObject:playHost];
+    BOOL asksForParser=[operation isEqual:@"play"]&&dictionary&&!officialWatchPage&&(manualSelection||[dictionary[@"requiresWebPlayback"] boolValue]||[dictionary[@"webPlayback"] boolValue]||[dictionary[@"parse"] boolValue]||[dictionary[@"jx"] boolValue])&&!MediaPlaybackResultSupportsNativePlayback(dictionary);
     if(!error&&asksForParser){[self resolveParserResult:dictionary generation:generation correlationID:correlationID completion:completion];return;}
     if(completion)completion(result,error);
 }

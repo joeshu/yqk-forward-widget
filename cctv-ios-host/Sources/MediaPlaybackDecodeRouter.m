@@ -112,7 +112,16 @@ MediaPlaybackDecodeRoute MediaPlaybackDecodeRouteNextForResult(NSDictionary *res
     NSString *decodeMode = MediaPlaybackDecodeLowerString([[NSUserDefaults standardUserDefaults] stringForKey:@"cctv.mediaDecodeMode.v1"] ?: @"auto");
     BOOL preferCicada = [decodeMode isEqualToString:@"cicada"] || [decodeMode isEqualToString:@"cicada_soft"] || [MediaPlaybackDecodeLowerString(result[@"playbackEngine"]) isEqualToString:@"cicada"];
 
-    // 完全剔除网页播放：统一走 App 原生 AVPlayer 与 CicadaPlayer（硬解 -> ffmpeg 软解 cc）。
+    // Parser and platform watch pages are documents, not media resources. Send
+    // them straight to the in-app browser instead of making both native players
+    // probe an HTML page before the browser fallback can appear.
+    if (requiresWebPlayback) {
+        return (attemptedRoutes & MediaPlaybackDecodeRouteAttemptedWebView)
+            ? MediaPlaybackDecodeRouteNone : MediaPlaybackDecodeRouteWebView;
+    }
+
+    // Direct media continues through the native AVPlayer/CicadaPlayer routes.
+    // Web documents have already been handed to WebView above.
     MediaPlaybackDecodeRoute candidates[4];
     NSUInteger count = 0;
     if (preferCicada || webOnly || requiresWebPlayback || (cicadaSupported && !avSupported)) {

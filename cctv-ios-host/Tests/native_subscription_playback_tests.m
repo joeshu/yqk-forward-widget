@@ -42,5 +42,8 @@ int main(void){@autoreleasepool{
     check(MediaPlaybackResultSupportsAVPlayer(dash)&&!MediaPlaybackResultSupportsCicadaPlayer(dash),@"converted HLS uses its effective format");
     check(MediaPlaybackDecodeRouteNextForResult(dash,0)==MediaPlaybackDecodeRouteAVPlayer,@"converted DASH starts with AVPlayer");
     check(MediaPlaybackDecodeRouteNextForResult(dash,MediaPlaybackDecodeRouteAttemptedAVPlayer)==MediaPlaybackDecodeRouteCicadaPlayer,@"original DASH fallback stays available");
+    NSDictionary *officialPage=@{@"url":@"https://v.qq.com/x/cover/fixture/episode.html",@"parse":@1,@"requiresWebPlayback":@YES};
+    check(MediaPlaybackDecodeRouteNextForResult(officialPage,0)==MediaPlaybackDecodeRouteWebView,@"official watch pages go directly to the browser instead of probing media decoders");
+    check(MediaPlaybackDecodeRouteNextForResult(officialPage,MediaPlaybackDecodeRouteAttemptedWebView)==MediaPlaybackDecodeRouteNone,@"failed browser playback does not retry the same document as native media");
     puts("PASS: source-specific 360 normalization, URL encoding, decoder retry and DASH route behavior");
 }}
