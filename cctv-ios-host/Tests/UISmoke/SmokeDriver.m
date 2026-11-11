@@ -24,6 +24,7 @@
 #import "LocalServiceReadiness.h"
 #import "RuntimeDiagnostics.h"
 #import "MediaPlaybackViewController.h"
+#import "MediaNativePlaybackResolver.h"
 #import "MediaWebViewController.h"
 #import <WebKit/WebKit.h>
 #import "MediaEpisodeSelectionViewController.h"
@@ -32,6 +33,7 @@
 #import "CNPlayerCrashGuard.h"
 #import "LogCenterViewController.h"
 #import "PluginRunHistoryViewController.h"
+#import "PluginResourceDetailViewController.h"
 #import "PluginLogStore.h"
 #import "HostLogRedactor.h"
 #import "HostTheme.h"
@@ -348,6 +350,16 @@ static UIViewController *SmokePresentedController(NSArray<UIViewController *> *o
     }
     return nil;
 }
+static NSUInteger SmokeDescendantWebViewCount(UIView *view) {
+    NSUInteger count=[view isKindOfClass:WKWebView.class]?1:0;
+    for(UIView *child in view.subviews)count+=SmokeDescendantWebViewCount(child);
+    return count;
+}
+static NSString *SmokeResolverFixtureBaseURL(void) {
+    NSArray<NSString *> *arguments=NSProcessInfo.processInfo.arguments;
+    NSUInteger index=[arguments indexOfObject:@"--smoke-port"];
+    return index!=NSNotFound&&index+1<arguments.count?[NSString stringWithFormat:@"http://127.0.0.1:%@",arguments[index+1]]:@"";
+}
 static UINavigationController *SmokePresentedNavigation(NSArray<UIViewController *> *owners, NSString *context) {
     UIViewController *presented=SmokePresentedController(owners);
     if([presented isKindOfClass:UINavigationController.class])return (UINavigationController *)presented;
@@ -458,6 +470,11 @@ static void next(NSArray *steps, NSUInteger index) {
       __block NSArray<NSDictionary *> *(^resourceProfilesProvider)(void);
       __block MediaEpisodeSelectionViewController *mediaEpisodes;
       __block MediaPlaybackViewController *mediaPlayback;
+      __block MediaNativePlaybackResolver *nativeResolver;
+      __block MediaPlaybackViewController *nativeResolverPlayback;
+      __block NSMutableDictionary *nativeResolverSmoke;
+      __block UIViewController *nativeResolverPresented;
+      __block NSDate *nativeResolverStaleDeadline;
       __block NSDate *stalePlaybackDeadline;
       __block ResourceImportWorkflowViewController *importProbe;
       __block NSUInteger importSaveCount=0;
@@ -1121,6 +1138,89 @@ static void next(NSArray *steps, NSUInteger index) {
                 check([pythonCrypto[@"port"] integerValue]>0&&[pythonCrypto[@"listening"] boolValue]&&[nodeChecks[@"pythonStopped"] boolValue],[NSString stringWithFormat:@"Python smoke listener uses port 0 and stops cleanly (stop=%@)",nodeChecks[@"pythonStopError"]?:@""]);
             }else check(![nodeChecks[@"pythonStarted"] boolValue],@"UI-only simulator target omits CPython; the embedded-Python AES probe is not run here");
             NSData *diagnostic=[NSJSONSerialization dataWithJSONObject:nodeChecks options:NSJSONWritingPrettyPrinted error:NULL];[diagnostic writeToFile:[outputDir stringByAppendingPathComponent:@"node-runtime.json"] atomically:YES];
+          }},
+          ^{
+            NSDictionary *standalone=@{@"id":@"native-resolver-standalone-smoke",@"name":@"独立 Python 影视",@"engine":@"python",@"protocol":@"python-spider",@"manifest":@{@"entry":@"spider.py",@"capabilities":@[@"home",@"detail",@"play"]}};
+            PluginResourceDetailViewController *parserSettings=[PluginResourceDetailViewController new];parserSettings.service=standalone;[parserSettings loadViewIfNeeded];
+            NSArray<NSDictionary *> *parserRows=[parserSettings valueForKey:@"resourceRows"];BOOL hasCatalog=NO,hasParser=NO,unboundSummary=NO;
+            for(NSDictionary *row in parserRows){if([row[@"action"] isEqual:@"parserCatalog"]){hasCatalog=[row[@"title"] isEqual:@"解析合集"];unboundSummary=[row[@"value"] containsString:@"未绑定"];}if([row[@"action"] isEqual:@"parserSelection"])hasParser=[row[@"title"] isEqual:@"默认解析器"];}
+            check(hasCatalog&&hasParser&&unboundSummary&&[ServiceStore playbackParserCatalogIDForSource:standalone].length==0,@"standalone Python resource exposes explicit parser settings without borrowing an unrelated catalog");
+            NSDictionary *explicitBinding=@{@"id":standalone[@"id"],@"catalogID":@"content-catalog",@"parserCatalogID":@"chosen-parser-catalog"};
+            check([[ServiceStore playbackParserCatalogIDForSource:explicitBinding] isEqual:@"chosen-parser-catalog"]&&[explicitBinding[@"catalogID"] isEqual:@"content-catalog"],@"parser catalog binding overrides resolver scope without changing the content catalog identity");
+            nativeResolverSmoke=[@{@"done":@NO,@"staleSuccesses":@0,@"newCompletions":@0,@"webViewBaseline":@(SmokeDescendantWebViewCount(root.view))} mutableCopy];
+            nativeResolverSmoke[@"previousDecodeMode"]=[NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaDecodeMode.v1"]?:NSNull.null;
+            nativeResolverSmoke[@"previousWatchHistory"]=[NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaWatchHistory.v1"]?:NSNull.null;
+            [NSUserDefaults.standardUserDefaults setObject:@"auto" forKey:@"cctv.mediaDecodeMode.v1"];
+            nativeResolverPresented=SmokePresentedController(@[nav,root]);
+            nativeResolver=[[MediaNativePlaybackResolver alloc] initWithHostView:root.view];
+            NSString *page=[SmokeResolverFixtureBaseURL() stringByAppendingString:@"/native-resolver-dynamic"];
+            NSDictionary *identity=@{@"sourceID":@"resolver-smoke",@"catalogID":@"fixture-catalog",@"provider":@"fixture",@"detailID":@"fixture-show",@"lineID":@"fixture-line",@"episodeID":@"episode-dynamic",@"generation":@1};
+            [nativeResolver resolveResult:@{@"url":page,@"parse":@1,@"jx":@1} identity:identity progress:nil completion:^(NSDictionary *result,NSError *error){
+                if(result)nativeResolverSmoke[@"result"]=result;
+                if(error)nativeResolverSmoke[@"error"]=error;
+                nativeResolverSmoke[@"done"]=@YES;
+            }];
+          },
+          @{@"until":^BOOL{return [nativeResolverSmoke[@"done"] boolValue];},@"timeout":@18,@"run":^{
+            NSDictionary *result=nativeResolverSmoke[@"result"];NSError *error=nativeResolverSmoke[@"error"];
+            NSURLComponents *resolved=[NSURLComponents componentsWithString:[result[@"url"] isKindOfClass:NSString.class]?result[@"url"]:@""];
+            check([nativeResolverSmoke[@"done"] boolValue]&&!error&&[result[@"_nativeValidated"] boolValue],[NSString stringWithFormat:@"background dynamic page resolves to validated native media (error=%@)",error.localizedDescription?:@"none"]);
+            check([resolved.path isEqual:@"/native-resolver-video.mp4"]&&[resolved.query isEqual:@"case=dynamic"],@"background WebKit executes delayed DOM creation and preserves the media query");
+            check([result[@"pageURL"] hasSuffix:@"/native-resolver-dynamic"]&&[result[@"resolutionIdentity"][@"episodeID"] isEqual:@"episode-dynamic"],@"native resolver preserves the original page and exact episode identity");
+            check(SmokePresentedController(@[nav,root])==nativeResolverPresented,@"background extraction never presents a webpage controller");
+            check(SmokeDescendantWebViewCount(root.view)==[nativeResolverSmoke[@"webViewBaseline"] unsignedIntegerValue],@"validated native handoff removes the temporary background WebView");
+            nativeResolverPlayback=[MediaPlaybackViewController new];nativeResolverPlayback.result=result?:@{};
+            nativeResolverPlayback.context=@{@"source":@{@"id":@"resolver-smoke",@"name":@"后台解析测试",@"catalogID":@"fixture-catalog"},@"provider":@"fixture",@"parserID":@"",@"item":@{@"id":@"fixture-show",@"name":@"后台解析测试"},@"detail":@{@"id":@"fixture-show",@"name":@"后台解析测试",@"lines":@[@{@"id":@"fixture-line",@"name":@"原生线路",@"episodes":@[@{@"id":@"episode-dynamic",@"name":@"动态图像"}]}]},@"lineIndex":@0,@"episodeIndex":@0};
+            [nav pushViewController:nativeResolverPlayback animated:NO];
+          }},
+          @{@"until":^BOOL{return [[nativeResolverPlayback valueForKey:@"videoFrameReady"] boolValue];},@"timeout":@15,@"run":^{
+            AVPlayer *player=[nativeResolverPlayback valueForKey:@"player"];AVPlayerViewController *nativeController=[nativeResolverPlayback valueForKey:@"playerController"];
+            check([[nativeResolverPlayback valueForKey:@"videoFrameReady"] boolValue]&&player.currentItem.status==AVPlayerItemStatusReadyToPlay&&nativeController.player==player,@"a background-resolved episode renders an actual frame through the native AVPlayer");
+            check([nativeResolverPlayback valueForKey:@"episodeButton"]&&[nativeResolverPlayback valueForKey:@"playbackSpeedButton"]&&SmokePresentedController(@[nav,root])==nativeResolverPresented,@"background-resolved playback retains native episode/speed controls without webpage presentation");
+            capture(self.window,@"16-native-background-resolution");
+            [nav popViewControllerAnimated:NO];nativeResolverPlayback=nil;
+            id previousDecodeMode=nativeResolverSmoke[@"previousDecodeMode"];if(previousDecodeMode!=NSNull.null)[NSUserDefaults.standardUserDefaults setObject:previousDecodeMode forKey:@"cctv.mediaDecodeMode.v1"];else[NSUserDefaults.standardUserDefaults removeObjectForKey:@"cctv.mediaDecodeMode.v1"];
+            id previousWatchHistory=nativeResolverSmoke[@"previousWatchHistory"];if(previousWatchHistory!=NSNull.null)[NSUserDefaults.standardUserDefaults setObject:previousWatchHistory forKey:@"cctv.mediaWatchHistory.v1"];else[NSUserDefaults.standardUserDefaults removeObjectForKey:@"cctv.mediaWatchHistory.v1"];
+            [nativeResolverSmoke removeObjectForKey:@"result"];[nativeResolverSmoke removeObjectForKey:@"error"];nativeResolverSmoke[@"done"]=@NO;
+            NSString *fake=[SmokeResolverFixtureBaseURL() stringByAppendingString:@"/native-resolver-fake.m3u8"];
+            [nativeResolver resolveResult:@{@"url":fake,@"format":@"hls",@"directMedia":@YES,@"nativePlayable":@YES} identity:@{@"sourceID":@"resolver-smoke",@"episodeID":@"episode-fake",@"generation":@2} progress:nil completion:^(NSDictionary *candidate,NSError *failure){
+                if(candidate)nativeResolverSmoke[@"result"]=candidate;
+                if(failure)nativeResolverSmoke[@"error"]=failure;
+                nativeResolverSmoke[@"done"]=@YES;
+            }];
+          }},
+          @{@"until":^BOOL{return [nativeResolverSmoke[@"done"] boolValue];},@"timeout":@18,@"run":^{
+            NSDictionary *result=nativeResolverSmoke[@"result"];NSError *error=nativeResolverSmoke[@"error"];
+            check([nativeResolverSmoke[@"done"] boolValue]&&error&&![result[@"_nativeValidated"] boolValue],@"HTTP 200 HTML masquerading as m3u8 is rejected despite source-declared native flags");
+            check(SmokePresentedController(@[nav,root])==nativeResolverPresented,@"a failed media verification stays in the original native interface");
+            [nativeResolverSmoke removeObjectForKey:@"result"];[nativeResolverSmoke removeObjectForKey:@"error"];nativeResolverSmoke[@"done"]=@NO;
+            NSString *slow=[SmokeResolverFixtureBaseURL() stringByAppendingString:@"/native-resolver-slow"];
+            [nativeResolver resolveResult:@{@"url":slow,@"parse":@1} identity:@{@"sourceID":@"resolver-smoke",@"episodeID":@"episode-old",@"generation":@3} progress:nil completion:^(NSDictionary *candidate,__unused NSError *failure){
+                if([candidate[@"_nativeValidated"] boolValue])nativeResolverSmoke[@"staleSuccesses"]=@([nativeResolverSmoke[@"staleSuccesses"] unsignedIntegerValue]+1);
+            }];
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,100*NSEC_PER_MSEC),dispatch_get_main_queue(),^{
+                [nativeResolver cancel];
+                NSString *replacement=[SmokeResolverFixtureBaseURL() stringByAppendingString:@"/native-resolver-video.mp4?case=replacement"];
+                [nativeResolver resolveResult:@{@"url":replacement,@"format":@"mp4"} identity:@{@"sourceID":@"resolver-smoke",@"episodeID":@"episode-new",@"generation":@4} progress:nil completion:^(NSDictionary *candidate,NSError *failure){
+                    nativeResolverSmoke[@"newCompletions"]=@([nativeResolverSmoke[@"newCompletions"] unsignedIntegerValue]+1);
+                    if(candidate)nativeResolverSmoke[@"result"]=candidate;
+                    if(failure)nativeResolverSmoke[@"error"]=failure;
+                    nativeResolverSmoke[@"done"]=@YES;
+                }];
+            });
+          }},
+          @{@"until":^BOOL{return [nativeResolverSmoke[@"done"] boolValue];},@"timeout":@18,@"run":^{
+            NSDictionary *result=nativeResolverSmoke[@"result"];NSError *error=nativeResolverSmoke[@"error"];
+            check([nativeResolverSmoke[@"done"] boolValue]&&!error&&[result[@"_nativeValidated"] boolValue]&&[result[@"resolutionIdentity"][@"episodeID"] isEqual:@"episode-new"],@"cancelling one episode permits a new episode to resolve under its own identity");
+            check([result[@"url"] hasSuffix:@"?case=replacement"],@"the replacement episode retains its exact media address");
+            nativeResolverStaleDeadline=[NSDate dateWithTimeIntervalSinceNow:3.0];
+          }},
+          @{@"until":^BOOL{return [nativeResolverStaleDeadline timeIntervalSinceNow]<=0;},@"timeout":@5,@"run":^{
+            check([nativeResolverSmoke[@"staleSuccesses"] unsignedIntegerValue]==0&&[nativeResolverSmoke[@"newCompletions"] unsignedIntegerValue]==1,@"late cancelled-page responses cannot publish a stale episode or duplicate the current handoff");
+            check(SmokePresentedController(@[nav,root])==nativeResolverPresented&&SmokeDescendantWebViewCount(root.view)==[nativeResolverSmoke[@"webViewBaseline"] unsignedIntegerValue],@"cancel and replacement leave no webpage presentation or background WebView behind");
+            [nativeResolver cancel];nativeResolver=nil;
+          }},
+          ^{
             mediaPage=[MediaBrowserViewController new];
             NSInteger port=[NSProcessInfo.processInfo.arguments[([NSProcessInfo.processInfo.arguments indexOfObject:@"--smoke-port"]+1)] integerValue];
             mediaSourceID=[NSString stringWithFormat:@"media-ui-%@",NSUUID.UUID.UUIDString];
@@ -1130,7 +1230,7 @@ static void next(NSArray *steps, NSUInteger index) {
             mediaPage.onActivateService=^(NSDictionary *service,void (^done)(NSError *)){done(nil);};
             mediaPage.onPlay=^(NSDictionary *result,NSDictionary *context){mediaPlayback=[MediaPlaybackViewController new];mediaPlayback.result=result;mediaPlayback.context=context;[nav pushViewController:mediaPlayback animated:NO];};
             [nav pushViewController:mediaPage animated:NO];
-          }},
+          },
           @{ @"until":^BOOL{return mediaPage&&mediaPage.isHomeMode&&![[mediaPage valueForKey:@"loading"] boolValue]&&[[mediaPage valueForKey:@"items"] count]==4;},@"timeout":@100,@"run":^{
             MediaFeedView *feed=[mediaPage valueForKey:@"grid"];UIStackView *selectors=[mediaPage valueForKey:@"selectionRow"];UIButton *source=[mediaPage valueForKey:@"sourceSelectButton"],*provider=[mediaPage valueForKey:@"providerSelectButton"],*my=[mediaPage valueForKey:@"homeMenuButton"];[mediaPage.view layoutIfNeeded];
             check(feed==[mediaPage valueForKey:@"homeScroll"]&&feed.sections.count>0,@"media automatically loads only its selected site into one vertical feed");

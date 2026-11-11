@@ -36,7 +36,8 @@ class MediaPlaybackRouteFallbackTests(unittest.TestCase):
         line_body = method_body("- (BOOL)tryNextLineForAutomaticFallback:(NSString *)reason")
         self.assertIn("if([self tryNextAlternateForAutomaticFallback:reason])return YES;", line_body)
         resolve_body = method_body("- (void)resolveAndPlay")
-        self.assertIn('tryNextLineForAutomaticFallback:@"episode_resolve_failed"', resolve_body)
+        self.assertIn('MediaPlaybackEpisodePageFallbackURL(currentEpisode)', resolve_body)
+        self.assertIn('[owner playResult:sniffCandidate]', resolve_body)
 
     def test_fallback_preserves_the_same_episode_before_switching_routes(self):
         body = method_body("- (BOOL)tryNextLineForAutomaticFallback:(NSString *)reason")
@@ -73,12 +74,12 @@ class MediaPlaybackRouteFallbackTests(unittest.TestCase):
         self.assertNotIn('attemptedRoutes&MediaPlaybackDecodeRouteAttemptedAVPlayer', body)
 
     def test_failure_does_not_replace_content_from_unrelated_sites(self):
-        # The retained legacy implementation has no invocation site. Failure
-        # advances only among the source's own episode alternatives/lines.
+        # Parser failure stays attached to the selected source, line and episode.
         self.assertNotIn('resolveMacCMSStreamByTitleForResult:', SOURCE)
-        body = method_body("- (void)finishNativeStreamSniffFailureForGeneration:")
-        self.assertIn('tryNextLineForAutomaticFallback:', body)
+        body = method_body("- (void)resolveNativePlaybackResult:")
+        self.assertIn('native_resolution_failed', body)
         self.assertIn('setRetryAvailable:YES', body)
+        self.assertNotIn('tryNextLineForAutomaticFallback:', body)
 
     def test_manual_line_episode_and_retry_choices_reset_auto_attempts(self):
         for anchor in (

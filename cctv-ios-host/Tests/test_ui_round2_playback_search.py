@@ -48,7 +48,7 @@ class PlaybackSearchRound2Contracts(unittest.TestCase):
             "[self.playbackActionRow.heightAnchor constraintGreaterThanOrEqualToConstant:44]",
             "[self.inlineOptionsButton.heightAnchor constraintGreaterThanOrEqualToConstant:44]",
             "[self.inlineRetryButton.heightAnchor constraintGreaterThanOrEqualToConstant:44]",
-            "[self.inlineWebButton.heightAnchor constraintGreaterThanOrEqualToConstant:44]",
+            "[self.inlineParserButton.heightAnchor constraintGreaterThanOrEqualToConstant:44]",
         ):
             self.assertIn(fragment, PLAYBACK_SOURCE)
 
@@ -153,15 +153,14 @@ class PlaybackSearchRound2Contracts(unittest.TestCase):
         )
         self.assertIn("[self applyPendingPlaybackSeekForCicada]", cicada_body)
 
-    def test_web_fallback_does_not_present_over_an_existing_modal(self):
-        for signature in (
-            "- (void)openWebPlaybackFallback {",
-            "- (void)openEpisodePageWebFallback {",
-        ):
-            body = method_body(PLAYBACK_SOURCE, signature)
-            self.assertIn("if(self.presentedViewController)return;", body)
+    def test_episode_page_fallback_is_resolved_in_the_background_without_presenting_web_ui(self):
         play_body = method_body(PLAYBACK_SOURCE, "- (void)playResult:(NSDictionary *)result {")
-        self.assertIn("已有页面正在显示", play_body)
+        native_resolve = method_body(PLAYBACK_SOURCE, "- (void)resolveNativePlaybackResult:")
+        self.assertIn("MediaNativePlaybackResolver", PLAYBACK_SOURCE)
+        self.assertIn("resolveNativePlaybackResult:result?:@{}", play_body)
+        self.assertIn("[owner playResult:owner.validatedPlaybackResult]", native_resolve)
+        self.assertNotIn("openWebPlaybackFallback", PLAYBACK_SOURCE)
+        self.assertNotIn("openEpisodePageWebFallback", PLAYBACK_SOURCE)
 
     def test_web_navigation_policy_handles_missing_url_scheme(self):
         body = method_body(

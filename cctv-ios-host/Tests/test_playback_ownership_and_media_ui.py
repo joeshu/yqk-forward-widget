@@ -97,6 +97,16 @@ class PlaybackOwnershipAndMediaUIContracts(unittest.TestCase):
         self.assertIn("player.onPlaybackWillStart=", root_media)
         self.assertIn('recordEvent:@"playback_owner_acquired"', play_result)
 
+    def test_expired_native_vod_refresh_resolves_the_same_episode_without_stale_prefetch(self):
+        refresh = method_body(PLAYBACK_SOURCE, "- (BOOL)refreshNativeSessionForReason:(NSString *)reason httpStatus:(NSInteger)httpStatus error:(NSError *)error")
+        resolve = method_body(PLAYBACK_SOURCE, "- (void)resolveAndPlay")
+        timestamp = method_body(PLAYBACK_SOURCE, "static NSTimeInterval MediaPlaybackTimestamp(id value)")
+        self.assertIn("self.lineIndex<0||self.lineIndex>=self.lines.count", refresh)
+        self.assertIn("self.episodeIndex<0||self.episodeIndex>=self.episodes.count", refresh)
+        self.assertIn('self.pendingResolutionReason=@"native_session_refresh"', refresh)
+        self.assertIn('![reason isEqualToString:@"native_session_refresh"]', resolve)
+        self.assertIn("timestamp/=1000.0", timestamp)
+
     def test_legacy_vod_entry_is_removed_and_live_owner_still_notified(self):
         # 旧的 playMediaResult 入口已删除（无调用者）：VOD 统一走
         # MediaPlaybackViewController.playResult:，起播前仍通过

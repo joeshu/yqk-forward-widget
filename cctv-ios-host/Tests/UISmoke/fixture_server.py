@@ -99,6 +99,24 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if self.path == '/source-config':
             content_type='text/html; charset=utf-8'
             data=b'<html><head><title>Source configuration fixture</title></head><body>Account settings</body></html>'
+        elif self.path == '/native-resolver-dynamic':
+            # The media URL is deliberately absent as a literal so a regex-only
+            # HTTP reader cannot pass the background WebKit execution check.
+            content_type = 'text/html; charset=utf-8'
+            target = f'http://127.0.0.1:{self.server.server_port}/native-resolver-video.mp4?case=dynamic'
+            encoded = ','.join(str(ord(char)) for char in target)
+            data = ("<!doctype html><html><head><title>Dynamic native resolver fixture</title></head>"
+                    "<body><main id='episode'></main><script>setTimeout(function(){"
+                    "const video=document.createElement('video');video.id='main-video';video.muted=true;"
+                    f"video.src=String.fromCharCode({encoded});"
+                    "document.querySelector('main').appendChild(video);},350);</script></body></html>").encode()
+        elif self.path == '/native-resolver-fake.m3u8':
+            content_type = 'text/html; charset=utf-8'
+            data = b'<!doctype html><html><head><title>Unavailable fixture</title></head><body>No media is available.</body></html>'
+        elif self.path == '/native-resolver-slow':
+            time.sleep(2.0)
+            content_type = 'text/html; charset=utf-8'
+            data = b'<!doctype html><html><body>Cancelled episode fixture.</body></html>'
         elif self.path == '/image-stats':
             with type(self).segment_lock:
                 data = json.dumps(type(self).image_counts).encode()
@@ -136,8 +154,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 print("HLS segment delay begin", flush=True)
                 time.sleep(8)
                 print("HLS segment delay complete", flush=True)
-        elif self.path.split("?", 1)[0] == "/video.mp4":
-            if "?" in self.path and (self.headers.get("Referer") != "https://fixture.test/watch" or self.headers.get("X-Fixture-Playback") != "required"):
+        elif self.path.split("?", 1)[0] in ("/video.mp4", "/native-resolver-video.mp4"):
+            if self.path.startswith('/video.mp4?') and (self.headers.get("Referer") != "https://fixture.test/watch" or self.headers.get("X-Fixture-Playback") != "required"):
                 self.send_response(403)
                 self.send_header("Content-Length", "0")
                 self.end_headers()

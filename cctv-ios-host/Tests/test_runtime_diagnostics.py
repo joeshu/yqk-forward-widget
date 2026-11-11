@@ -128,8 +128,8 @@ class RuntimeDiagnosticsContractTests(unittest.TestCase):
         self.assertIn('@"playback_screen_closed"', PLAYBACK)
         self.assertIn('@"completed" failureKind:nil httpStatus:0 terminal:YES', PLAYBACK)
         self.assertIn('@"first_frame_ready" failureKind:nil httpStatus:0 terminal:NO', PLAYBACK)
-        self.assertIn('@"webview_handoff" failureKind:nil httpStatus:0 terminal:NO', PLAYBACK)
-        self.assertIn('@"webview_returned" failureKind:nil httpStatus:0 terminal:YES', PLAYBACK)
+        self.assertIn('@"native_resolution_succeeded"', PLAYBACK)
+        self.assertIn('@"native_resolution_failed"', PLAYBACK)
         self.assertIn('@"first_frame_timeout" failureKind:@"first_frame_timeout" httpStatus:0 terminal:NO', PLAYBACK)
 
     def test_process_footprint_is_omitted_when_diagnostics_or_task_info_is_unavailable(self):

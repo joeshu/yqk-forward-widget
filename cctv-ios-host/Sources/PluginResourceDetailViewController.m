@@ -7,6 +7,7 @@
 #import "ProfileStore.h"
 #import "M3UParser.h"
 #import "RuntimeDiagnostics.h"
+#import "TVBoxCatalogStore.h"
 
 @interface PluginResourceDetailViewController () <UITableViewDataSource,UITableViewDelegate,NSURLSessionDataDelegate,NSURLSessionTaskDelegate>
 @property(nonatomic,strong) UILabel *notice;
@@ -47,6 +48,54 @@
 - (NSString *)baseURL {NSInteger port=[self.service[@"port"] integerValue];return [NSString stringWithFormat:@"http://127.0.0.1:%ld",(long)port];}
 - (NSDictionary *)serviceManifest {NSDictionary *manifest=self.service[@"manifest"];return [manifest isKindOfClass:NSDictionary.class]?manifest:@{};}
 - (NSString *)serviceURLString {NSString *url=self.service[@"url"];return [url isKindOfClass:NSString.class]?url:@"";}
+- (NSString *)parserPreferenceKey {return [NSString stringWithFormat:@"cctv.media.parser.%@",self.service[@"id"]?:@""];}
+- (NSString *)parserCatalogSummary {
+    NSString *identifier=[ServiceStore playbackParserCatalogIDForSource:self.service];
+    if(!identifier.length)return @"未绑定 · 独立脚本可选择已导入合集";
+    NSDictionary *catalog=[TVBoxCatalogStore catalogForID:identifier];
+    if(!catalog)return @"绑定的合集已移除 · 请重新选择";
+    NSString *name=[catalog[@"name"] isKindOfClass:NSString.class]?catalog[@"name"]:@"资源合集";
+    return [NSString stringWithFormat:@"%@%@",name,[self.service[@"parserCatalogID"] isKindOfClass:NSString.class]&&[self.service[@"parserCatalogID"] length]?@"":@" · 继承来源合集"];
+}
+- (NSString *)defaultParserSummary {
+    NSString *catalogID=[ServiceStore playbackParserCatalogIDForSource:self.service];
+    if(!catalogID.length)return @"先选择解析合集";
+    NSString *selected=[NSUserDefaults.standardUserDefaults stringForKey:self.parserPreferenceKey]?:@"";
+    NSArray *parsers=[TVBoxCatalogStore playbackParsersForCatalogID:catalogID];
+    for(NSDictionary *parser in parsers)if([parser[@"id"] isEqual:selected])return [ServiceStore isSupportedPlaybackParser:parser]?(parser[@"name"]?:@"解析器"):@"所选类型暂不支持 · 请重新选择";
+    return selected.length?@"原解析器已移除 · 当前使用自动选择":@"自动 · 当前合集最多尝试两个";
+}
+- (void)presentParserChoices:(UIAlertController *)alert {
+    alert.popoverPresentationController.sourceView=self.view;
+    alert.popoverPresentationController.sourceRect=CGRectMake(CGRectGetMidX(self.view.bounds),CGRectGetMidY(self.view.bounds),1,1);
+    [self presentViewController:alert animated:YES completion:nil];
+}
+- (void)chooseParserCatalog {
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"解析合集" message:@"仅使用为此来源指定的解析器。画面由原生播放器显示，网页型解析器只在后台运行。" preferredStyle:UIAlertControllerStyleActionSheet];
+    __weak typeof(self) weakSelf=self;
+    void (^saveBinding)(NSString *)=^(NSString *identifier){PluginResourceDetailViewController *owner=weakSelf;if(!owner)return;NSMutableDictionary *updated=[owner.service mutableCopy];if(identifier.length)updated[@"parserCatalogID"]=identifier;else[updated removeObjectForKey:@"parserCatalogID"];[NSUserDefaults.standardUserDefaults removeObjectForKey:owner.parserPreferenceKey];[ServiceStore save:updated];owner.service=[ServiceStore resolvedService:updated];[owner.tableView reloadData];[owner showNotice:@"解析合集已保存"];};
+    [alert addAction:[UIAlertAction actionWithTitle:@"继承来源合集（独立脚本不绑定）" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action){saveBinding(@"");}]];
+    for(NSDictionary *catalog in [TVBoxCatalogStore catalogs]){
+        NSString *identifier=[catalog[@"id"] isKindOfClass:NSString.class]?catalog[@"id"]:@"";if(!identifier.length)continue;
+        NSUInteger supported=0;for(NSDictionary *parser in [TVBoxCatalogStore playbackParsersForCatalogID:identifier])if([ServiceStore isSupportedPlaybackParser:parser])supported++;
+        NSString *name=[catalog[@"name"] isKindOfClass:NSString.class]?catalog[@"name"]:@"资源合集";
+        NSString *title=[NSString stringWithFormat:@"%@ · %lu 个可用类型",name,(unsigned long)supported];
+        UIAlertAction *choice=[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action){if([TVBoxCatalogStore catalogForID:identifier])saveBinding(identifier);}];choice.enabled=supported>0;[alert addAction:choice];
+    }
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[self presentParserChoices:alert];
+}
+- (void)chooseDefaultParser {
+    NSString *catalogID=[ServiceStore playbackParserCatalogIDForSource:self.service];
+    if(!catalogID.length){[self chooseParserCatalog];return;}
+    NSArray *parsers=[TVBoxCatalogStore playbackParsersForCatalogID:catalogID];
+    if(!parsers.count){[self showNotice:@"当前合集没有可用解析器，请重新选择解析合集"];return;}
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"默认解析器" message:@"首选失败时，最多尝试同一合集中的一个备选；始终保留当前分集。" preferredStyle:UIAlertControllerStyleActionSheet];
+    __weak typeof(self) weakSelf=self;
+    void (^saveSelection)(NSString *)=^(NSString *identifier){PluginResourceDetailViewController *owner=weakSelf;if(!owner)return;[NSUserDefaults.standardUserDefaults setObject:identifier?:@"" forKey:owner.parserPreferenceKey];[owner.tableView reloadData];};
+    [alert addAction:[UIAlertAction actionWithTitle:@"自动选择" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action){saveSelection(@"");}]];
+    for(NSDictionary *parser in parsers){BOOL supported=[ServiceStore isSupportedPlaybackParser:parser];NSString *name=[parser[@"name"] isKindOfClass:NSString.class]?parser[@"name"]:@"解析器";NSString *type=[parser[@"type"] description].lowercaseString;BOOL web=[@[@"0",@"web",@"html"] containsObject:type];NSString *label=supported?(web?@"后台网页解析":@"JSON 解析"):@"暂不支持此类型";UIAlertAction *choice=[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"%@ · %@",name,label] style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action){saveSelection(parser[@"id"]);}];choice.enabled=supported;[alert addAction:choice];}
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[self presentParserChoices:alert];
+}
 - (void)viewDidLoad {
     [super viewDidLoad];self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();self.title=self.service[@"name"]?:@"资源详情";self.tableView.backgroundColor=HostBackground();self.tableView.rowHeight=UITableViewAutomaticDimension;self.tableView.estimatedRowHeight=58;
     self.notice=[UILabel new];self.notice.textColor=HostSecondaryText();self.notice.numberOfLines=0;self.notice.textAlignment=NSTextAlignmentCenter;self.tableView.backgroundView=self.notice;
@@ -182,6 +231,7 @@
     NSString *version=[[self serviceManifest][@"pluginVersion"] isKindOfClass:NSString.class]?[self serviceManifest][@"pluginVersion"]:@"";if(version.length)[rows addObject:@{@"title":@"资源版本",@"value":version}];
     NSString *entry=[[self serviceManifest][@"entry"] isKindOfClass:NSString.class]?[self serviceManifest][@"entry"]:@"";if(entry.length)[rows addObject:@{@"title":@"入口文件",@"value":entry}];
     if(self.mediaCapable)[rows addObject:@{@"title":@"进入媒体",@"action":@"use",@"value":@"资源 → 站点 → 详情选集 → 播放"}];
+    if(self.mediaCapable){[rows addObject:@{@"title":@"解析合集",@"action":@"parserCatalog",@"value":self.parserCatalogSummary}];[rows addObject:@{@"title":@"默认解析器",@"action":@"parserSelection",@"value":self.defaultParserSummary}];}
     if(self.liveCapable)[rows addObject:@{@"title":@"打开直播频道",@"action":@"use",@"value":@"读取下方显示的本机订阅地址后进入频道页"}];
     if([self.service[@"protocol"] isEqual:@"catpaw-http"]){[rows addObject:@{@"title":@"源配置与账号",@"value":@"管理此源的站点、网盘与登录信息",@"action":@"configuration"}];
         NSDictionary *states=@{@"verified":@"已下载并通过 MD5 校验",@"downloaded_without_checksum":@"已下载 · 来源未提供配置校验",@"missing_using_defaults":@"未提供配套配置 · 启动时使用脚本默认值"};
@@ -218,7 +268,7 @@
     BOOL isProcessRow=(ip.section==1&&ip.row==0);
     cell.detailTextLabel.textColor=(isProcessRow&&self.running)?UIColor.systemGreenColor:HostSecondaryText();
     cell.detailTextLabel.font=HostMonospacedDigitFont(14,UIFontWeightRegular,UIFontTextStyleSubheadline);cell.detailTextLabel.adjustsFontForContentSizeCategory=YES;cell.detailTextLabel.numberOfLines=0;cell.detailTextLabel.textAlignment=(address||longValue)?NSTextAlignmentLeft:NSTextAlignmentNatural;
-    NSDictionary *icons=@{@"运行能力":@"cpu",@"能力探测":@"sparkles",@"资源版本":@"tag",@"入口文件":@"doc.text",@"进入媒体":@"play.circle.fill",@"打开直播频道":@"dot.radiowaves.left.and.right",@"源配置与账号":@"person.badge.key",@"配套配置":@"checkmark.seal",@"文件校验":@"lock.shield",@"资源来源":@"link",@"服务进程":@"bolt.horizontal.circle",@"启动服务":@"play.fill",@"停止服务":@"stop.fill",@"读取直播频道清单":@"list.bullet.rectangle",@"运行状态说明":@"info.circle",@"复制本机服务地址":@"network",@"服务订阅地址":@"antenna.radiowaves.left.and.right",@"节目单地址":@"calendar.badge.clock",@"播放列表路径":@"point.topleft.down.curvedto.point.bottomright.up",@"频道数量":@"number.square",@"订阅清单状态":@"checkmark.shield",@"最近成功刷新":@"clock.arrow.circlepath",@"查看此资源日志":@"doc.text.magnifyingglass",@"重启此服务":@"arrow.triangle.2.circlepath",@"导出单项资源文件":@"square.and.arrow.up",@"检查资源更新":@"arrow.down.circle",@"切回上一版代码":@"arrow.uturn.backward.circle",@"移除资源":@"trash"};
+    NSDictionary *icons=@{@"运行能力":@"cpu",@"能力探测":@"sparkles",@"资源版本":@"tag",@"入口文件":@"doc.text",@"进入媒体":@"play.circle.fill",@"打开直播频道":@"dot.radiowaves.left.and.right",@"源配置与账号":@"person.badge.key",@"解析合集":@"square.stack.3d.up",@"默认解析器":@"arrow.triangle.branch",@"配套配置":@"checkmark.seal",@"文件校验":@"lock.shield",@"资源来源":@"link",@"服务进程":@"bolt.horizontal.circle",@"启动服务":@"play.fill",@"停止服务":@"stop.fill",@"读取直播频道清单":@"list.bullet.rectangle",@"运行状态说明":@"info.circle",@"复制本机服务地址":@"network",@"服务订阅地址":@"antenna.radiowaves.left.and.right",@"节目单地址":@"calendar.badge.clock",@"播放列表路径":@"point.topleft.down.curvedto.point.bottomright.up",@"频道数量":@"number.square",@"订阅清单状态":@"checkmark.shield",@"最近成功刷新":@"clock.arrow.circlepath",@"查看此资源日志":@"doc.text.magnifyingglass",@"重启此服务":@"arrow.triangle.2.circlepath",@"导出单项资源文件":@"square.and.arrow.up",@"检查资源更新":@"arrow.down.circle",@"切回上一版代码":@"arrow.uturn.backward.circle",@"移除资源":@"trash"};
     NSString *iconName=icons[title];
     cell.imageView.image=iconName?[UIImage systemImageNamed:iconName]:nil;
     cell.imageView.tintColor=isRemove?UIColor.systemRedColor:(isPrimary?HostAccent():(isProcessRow&&self.running?UIColor.systemGreenColor:HostSecondaryText()));
@@ -247,7 +297,7 @@
     NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:url];request.HTTPMethod=@"GET";request.timeoutInterval=1.5;[request setValue:@"application/vnd.apple.mpegurl, application/x-mpegURL, text/plain" forHTTPHeaderField:@"Accept"];
     self.probeTask=[self.probeSession dataTaskWithRequest:request];[self.probeTask resume];
 }
-- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)ip {[tableView deselectRowAtIndexPath:ip animated:YES];NSDictionary *row=[self rowAt:ip];NSString *action=row[@"action"];if(ip.section==0 && [row[@"title"] isEqual:@"进入媒体"]){if(self.onUse)self.onUse(self.service,@"vod");return;}if(ip.section==0 && [row[@"title"] isEqual:@"打开直播频道"]){if(self.onUse)self.onUse(self.service,@"live");return;}if([action isEqual:@"configuration"]){if(self.onUse)self.onUse(self.service,@"configuration");return;}if([action isEqual:@"update"]){if(self.onUpdate)self.onUpdate(self.service);return;}if([action isEqual:@"rollback"]){UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"切回上一版代码？" message:@"会先停止此服务，再切换到保留的上一版代码。账号、日志和当前端口会保留。" preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[alert addAction:[UIAlertAction actionWithTitle:@"切换" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){if(self.onRollback)self.onRollback(self.service);}]];[self presentViewController:alert animated:YES completion:nil];return;}if([action isEqual:@"restart"]){if(self.operationPending)return;if(!self.running){[self showNotice:@"服务未运行 · 请先启动"];return;}if(!self.onRestart){[self showNotice:@"当前版本不支持重启此服务"];return;}self.operationPending=YES;[self showNotice:@"正在重启服务…"];[self.tableView reloadData];__weak typeof(self) weakSelf=self;self.onRestart(self.service,^(NSError *error){dispatch_async(dispatch_get_main_queue(),^{PluginResourceDetailViewController *owner=weakSelf;if(!owner)return;owner.operationPending=NO;if(error)[owner showError:error.localizedDescription?:@"重启服务失败，请查看此资源日志"];else[owner showNotice:@"服务已重新启动"];[owner.tableView reloadData];});});return;}if([action isEqual:@"toggle"]){if(self.operationPending)return;if(!self.onToggle){[self showError:@"服务控制暂不可用"];return;}self.operationPending=YES;[self.tableView reloadSections:[NSIndexSet indexSetWithIndex:1] withRowAnimation:UITableViewRowAnimationNone];__weak typeof(self) weakSelf=self;NSUInteger toggleGeneration=++self.toggleGeneration;self.onToggle(self.service,!self.running,^(NSError *error){dispatch_async(dispatch_get_main_queue(),^{PluginResourceDetailViewController *owner=weakSelf;if(!owner)return;owner.operationPending=NO;if(error)[owner showError:error.localizedDescription?:@"服务操作失败，请查看此资源日志"];[owner.tableView reloadData];});});
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)ip {[tableView deselectRowAtIndexPath:ip animated:YES];NSDictionary *row=[self rowAt:ip];NSString *action=row[@"action"];if([action isEqual:@"parserCatalog"]){[self chooseParserCatalog];return;}if([action isEqual:@"parserSelection"]){[self chooseDefaultParser];return;}if(ip.section==0 && [row[@"title"] isEqual:@"进入媒体"]){if(self.onUse)self.onUse(self.service,@"vod");return;}if(ip.section==0 && [row[@"title"] isEqual:@"打开直播频道"]){if(self.onUse)self.onUse(self.service,@"live");return;}if([action isEqual:@"configuration"]){if(self.onUse)self.onUse(self.service,@"configuration");return;}if([action isEqual:@"update"]){if(self.onUpdate)self.onUpdate(self.service);return;}if([action isEqual:@"rollback"]){UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"切回上一版代码？" message:@"会先停止此服务，再切换到保留的上一版代码。账号、日志和当前端口会保留。" preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[alert addAction:[UIAlertAction actionWithTitle:@"切换" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){if(self.onRollback)self.onRollback(self.service);}]];[self presentViewController:alert animated:YES completion:nil];return;}if([action isEqual:@"restart"]){if(self.operationPending)return;if(!self.running){[self showNotice:@"服务未运行 · 请先启动"];return;}if(!self.onRestart){[self showNotice:@"当前版本不支持重启此服务"];return;}self.operationPending=YES;[self showNotice:@"正在重启服务…"];[self.tableView reloadData];__weak typeof(self) weakSelf=self;self.onRestart(self.service,^(NSError *error){dispatch_async(dispatch_get_main_queue(),^{PluginResourceDetailViewController *owner=weakSelf;if(!owner)return;owner.operationPending=NO;if(error)[owner showError:error.localizedDescription?:@"重启服务失败，请查看此资源日志"];else[owner showNotice:@"服务已重新启动"];[owner.tableView reloadData];});});return;}if([action isEqual:@"toggle"]){if(self.operationPending)return;if(!self.onToggle){[self showError:@"服务控制暂不可用"];return;}self.operationPending=YES;[self.tableView reloadSections:[NSIndexSet indexSetWithIndex:1] withRowAnimation:UITableViewRowAnimationNone];__weak typeof(self) weakSelf=self;NSUInteger toggleGeneration=++self.toggleGeneration;self.onToggle(self.service,!self.running,^(NSError *error){dispatch_async(dispatch_get_main_queue(),^{PluginResourceDetailViewController *owner=weakSelf;if(!owner)return;owner.operationPending=NO;if(error)[owner showError:error.localizedDescription?:@"服务操作失败，请查看此资源日志"];[owner.tableView reloadData];});});
     // onToggle 回调若永不触发，operationPending 会永久锁死开关：30 秒看门狗兜底复位。
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,30*NSEC_PER_SEC),dispatch_get_main_queue(),^{PluginResourceDetailViewController *owner=weakSelf;if(!owner||toggleGeneration!=owner.toggleGeneration||!owner.operationPending)return;owner.operationPending=NO;[owner showError:@"服务操作超时，请查看此资源日志"];[owner.tableView reloadData];});return;}if([action isEqual:@"probe"]){[self probeInterface];return;}if([action isEqual:@"copy"]||[action isEqual:@"copySource"]){UIPasteboard.generalPasteboard.string=row[@"value"];NSString *message=[action isEqual:@"copySource"]?@"资源来源地址已复制（包含原查询参数）":([row[@"title"] isEqual:@"节目单地址"]?@"节目单地址已复制":([row[@"title"] isEqual:@"服务订阅地址"]?@"服务订阅地址已复制":@"本机服务地址已复制"));[self showNotice:message];return;}if([action isEqual:@"export"]){if(self.onExport)self.onExport(self.service);return;}if([action isEqual:@"log"]){if(self.onLog)self.onLog(self.service);return;}if([action isEqual:@"remove"]){UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"移除此资源？" message:@"会移除本机服务代码及配置。" preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[alert addAction:[UIAlertAction actionWithTitle:@"移除" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a){if(self.onRemove)self.onRemove(self.service);}]];[self presentViewController:alert animated:YES completion:nil];}}
 - (void)showNotice:(NSString *)message {if(!message.length)return;self.navigationItem.prompt=message;UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,message);__weak typeof(self) weakSelf=self;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,2*NSEC_PER_SEC),dispatch_get_main_queue(),^{PluginResourceDetailViewController *owner=weakSelf;if(owner&&[owner.navigationItem.prompt isEqual:message])owner.navigationItem.prompt=nil;});}

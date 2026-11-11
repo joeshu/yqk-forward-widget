@@ -305,7 +305,8 @@ class MediaRelay:
 
     def register(self, url, headers, origin=None, diagnostic_id=None, fallback_url=None,
                  refresh=None, refresh_after=0, refresh_interval=0, refresh_relative=None,
-                 expected_hls=False, segment=False, resource_kind="media", resource_scope=None):
+                 expected_hls=False, segment=False, resource_kind="media", resource_scope=None,
+                 refresh_children=True):
         url = http_url(url)
         if fallback_url:
             fallback_url = http_url(fallback_url)
@@ -350,12 +351,12 @@ class MediaRelay:
                 if record[0] == key:
                     self.targets[token] = (key, record[1], diagnostic_id,
                         refresh or record[3], refresh_after or record[4],
-                        refresh_interval or record[5], refresh_relative or record[6])
+                        refresh_interval or record[5], refresh_relative or record[6], bool(refresh_children))
                     self.targets.move_to_end(token)
                     return token
             token = uuid.uuid4().hex
             self.targets[token] = (key, time.monotonic(), diagnostic_id, refresh,
-                                   refresh_after, refresh_interval, refresh_relative)
+                                   refresh_after, refresh_interval, refresh_relative, bool(refresh_children))
             while len(self.targets) > self.limit:
                 removed, _ = self.targets.popitem(last=False)
                 self.refreshFailures.pop(removed, None)
@@ -539,7 +540,8 @@ class MediaRelay:
                  record[0][5] if len(record[0]) > 5 else False, record[0][6] if len(record[0]) > 6 else "media", record[0][7] if len(record[0]) > 7 else record[2])
             interval=max(0.0,min(float(value.get('refreshInterval') or record[5] or 0),3600.0))
             next_refresh=float(value.get('refreshAfter') or (time.time()+interval if interval else 0))
-            updated=(key,record[1],record[2],record[3],next_refresh,interval,relative)
+            updated=(key,record[1],record[2],record[3],next_refresh,interval,relative,
+                     record[7] if len(record) > 7 else True)
             with self.lock:
                 if token in self.targets and not self.stopping.is_set():
                     self.targets[token]=updated
@@ -899,7 +901,7 @@ class MediaRelay:
                         'elapsed_ms': max(0, int((time.perf_counter()-resource_started)*1000))}, separators=(',', ':')))
                 body = self.rewrite(text, final_url, dict(pairs), origin,
                                     f'http://127.0.0.1:{handler.server.server_port}', diagnostic_id,
-                                    refresh=record[3],refresh_after=record[4],
+                                    refresh=record[3] if len(record) < 8 or record[7] else None,refresh_after=record[4],
                                     refresh_interval=record[5],
                                     refresh_relative_base=record[6],resource_scope=resource_scope).encode()
                 self._finish_manifest_fetch(manifest_identity, manifest_flight, body=body)

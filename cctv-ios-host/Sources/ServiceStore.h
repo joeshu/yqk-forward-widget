@@ -2,6 +2,10 @@
 @interface ServiceStore : NSObject
 + (NSArray<NSDictionary *> *)services;
 + (NSDictionary *)resolvedService:(NSDictionary *)service;
+/// Explicit parser binding takes precedence over the content collection. A
+/// standalone source without a binding never inherits a global/latest catalog.
++ (NSString *)playbackParserCatalogIDForSource:(NSDictionary *)source;
++ (BOOL)isSupportedPlaybackParser:(NSDictionary *)parser;
 + (NSString *)directory;
 + (NSString *)scriptPath:(NSDictionary *)service;
 + (NSString *)codePath:(NSDictionary *)service;

@@ -7,12 +7,6 @@ import subprocess
 import unittest
 
 class WebMediaExtractionTests(unittest.TestCase):
-    def test_official_watch_pages_keep_playback_in_the_official_web_player(self):
-        source = (pathlib.Path(__file__).resolve().parents[1] / 'Sources/MediaWebViewController.m').read_text()
-        self.assertIn('MediaWebIsOfficialWatchPageURL', source)
-        self.assertIn('if(!officialWatchPage&&(self.onTryNativePlayback||self.onResolvedMedia))', source)
-        self.assertIn('请在官方网页播放器中观看', source)
-
     @unittest.skipUnless(shutil.which('node'), 'requires Node.js')
     def test_ten_media_and_frame_cases(self):
         source = (pathlib.Path(__file__).resolve().parents[1] / 'Sources/MediaWebViewController.m').read_text()

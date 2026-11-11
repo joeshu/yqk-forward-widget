@@ -316,7 +316,8 @@ const fn = {fn_code};
 
         api_src = (ROOT / "Sources/MediaAPIClient.m").read_text(encoding="utf-8")
         self.assertIn("configuration.HTTPMaximumConnectionsPerHost=6;", api_src)
-        self.assertIn("NSTimeInterval maxProbeTimeout=self.selectedParserID.length?8.0:3.2;", api_src)
+        self.assertIn('self.selectedParserID=[arguments[@"parserID"] isKindOfClass:NSString.class]?arguments[@"parserID"]:@"";', api_src)
+        self.assertIn('if(self.selectedParserID.length&&(!selected||!', api_src)
 
         relay_src = (ROOT / "Plugins/host_media_relay.py").read_text(encoding="utf-8")
         self.assertIn("self.remote_key_cache = collections.OrderedDict()", relay_src)

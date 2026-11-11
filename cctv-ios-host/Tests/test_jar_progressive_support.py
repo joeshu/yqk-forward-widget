@@ -298,15 +298,18 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
         self.assertIn('self.posterView.alpha=0.88;self.heroBlurView.alpha=0.22;', mb_code)
 
 
-    def test_native_playback_and_cicada_soft_decode_eliminate_web_playback(self):
-        """Verifies web playback is eliminated at runtime in favor of native AVPlayer, background stream sniffing, and CicadaPlayer software decode (cc)."""
+    def test_native_playback_and_cicada_soft_decode_eliminate_visible_web_playback(self):
+        """Pages are parsed offscreen, then validated media goes to AVPlayer or CicadaPlayer."""
         router_code = (SOURCES / 'MediaPlaybackDecodeRouter.m').read_text(encoding='utf-8')
         self.assertIn('cctv.mediaDecodeMode.v1', router_code)
         self.assertIn('[decodeMode isEqualToString:@"cicada_soft"]', router_code)
 
         mp_code = (SOURCES / 'MediaPlaybackViewController.m').read_text(encoding='utf-8')
-        self.assertIn('sniffNativeStreamFromPageResult:(NSDictionary *)result playerGeneration:(NSUInteger)playerGeneration', mp_code)
-        self.assertIn('teardownHiddenStreamSniffer', mp_code)
+        resolver = (SOURCES / 'MediaNativePlaybackResolver.m').read_text(encoding='utf-8')
+        self.assertIn('resolveNativePlaybackResult:', mp_code)
+        self.assertIn('initWithFrame:CGRectMake(-400,0,320,180)', resolver)
+        self.assertIn('web.accessibilityElementsHidden=YES', resolver)
+        self.assertIn('_nativeValidated', resolver)
         self.assertIn('解码模式 (原生 / 软解 cc)', mp_code)
         self.assertIn('强制 CicadaPlayer 软解码 (cc)', mp_code)
         self.assertIn('self.cicadaAdapterSoftwareDecodeFallbackAttempted=YES;', mp_code)
@@ -751,7 +754,7 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
         1. MediaMetadataCache avoids redundant double JSON serialization on storeResult and cold-start loadPersistentRecords.
         2. MediaBrowserViewController checks warm cache before clearing items in loadHome, caches unsigned detail payloads in safeDetailMemCache, reduces shelf pacing to 15ms, and prefetches visible posters.
         3. HostImageLoader tracks viewTargets to evict zombie requests from reused cells, promotes onscreen pending requests, persists L2 downsampled thumbnails on disk, and exposes prefetchPosterURLs:.
-        4. MediaPlaybackViewController triggers next-episode prefetch at 2s, warms the next episode's stream connection/manifest, and polls WebView DOM sniffer at 0.2s; MediaAPIClient ranks parsers by MediaParserSuccessScoreCache.
+        4. MediaPlaybackViewController triggers next-episode prefetch at 2s; offscreen native page extraction collects media candidates for validation; MediaAPIClient binds parser candidates to the source catalog and caps automatic attempts at two.
         """
         mc_m = (SOURCES / 'MediaMetadataCache.m').read_text(encoding='utf-8')
         self.assertIn('[persistentResult isEqual:result]?data:', mc_m)
@@ -774,11 +777,18 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
         self.assertIn('[self.prefetchedAsset loadValuesAsynchronouslyForKeys:@[@"playable"]', mp_m)
         self.assertIn('[owner prepareAssetForPrefetchedResult:result identity:targetIdentity]', mp_m)
         self.assertNotIn('[warmReq setValue:@"bytes=0-1023"', mp_m)
-        self.assertIn('@[@0.2,@0.45,@1.1,@2.0,@3.0]', mp_m)
+        resolver_m = (SOURCES / 'MediaNativePlaybackResolver.m').read_text(encoding='utf-8')
+        self.assertIn('observed>=2)[owner prefetchNextEpisodeIfNeeded];', mp_m)
+        self.assertIn('setTimeout(scan,500);setTimeout(scan,1500)', resolver_m)
+        self.assertIn('cctvNativeMedia.postMessage', resolver_m)
+        self.assertIn('MNRHTTP([NSURL URLWithString:address])', resolver_m)
+        self.assertIn('best.count!=1', resolver_m)
+        self.assertIn('AMBIGUOUS_MEDIA', resolver_m)
 
         api_m = (SOURCES / 'MediaAPIClient.m').read_text(encoding='utf-8')
-        self.assertIn('MediaParserSuccessScoreCache', api_m)
-        self.assertIn('MediaParserRecordOutcome(parser,resolved!=nil);', api_m)
+        self.assertIn('candidates.count>=2', api_m)
+        self.assertIn('catalogID.length?[TVBoxCatalogStore playbackParsersForCatalogID:catalogID]:@[]', api_m)
+        self.assertIn('if(candidates.count>=2)break;', api_m)
 
 
 

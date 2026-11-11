@@ -5,6 +5,7 @@
 #import "MediaEpisodeLayout.h"
 #import "RuntimeDiagnostics.h"
 #import "TVBoxCatalogStore.h"
+#import "ServiceStore.h"
 
 static UIColor *MediaSelectionBackground(void) { return HostBackground(); }
 static UIColor *MediaSelectionSurface(void) { return [UIColor colorWithWhite:1 alpha:0.075]; }
@@ -112,8 +113,8 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
 }
 - (NSString *)currentParserID {
     NSString *sourceID=[self.source[@"id"] isKindOfClass:NSString.class]?self.source[@"id"]:([self.source[@"api"] isKindOfClass:NSString.class]?self.source[@"api"]:@"default");
-    NSString *catalogID=[self.source[@"catalogID"] isKindOfClass:NSString.class]?self.source[@"catalogID"]:([self.source[@"tvboxCatalogID"] isKindOfClass:NSString.class]?self.source[@"tvboxCatalogID"]:@"");catalogID=[catalogID stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];if(!catalogID.length)return @"";
-    NSString *selected=self.parserID.length?self.parserID:([NSUserDefaults.standardUserDefaults stringForKey:[NSString stringWithFormat:@"cctv.media.parser.%@",sourceID]]?:@"");for(NSDictionary *parser in [TVBoxCatalogStore playbackParsersForCatalogID:catalogID])if([parser[@"id"] isEqual:selected])return selected;return @"";
+    NSString *catalogID=[ServiceStore playbackParserCatalogIDForSource:self.source];if(!catalogID.length)return @"";
+    NSString *selected=self.parserID.length?self.parserID:([NSUserDefaults.standardUserDefaults stringForKey:[NSString stringWithFormat:@"cctv.media.parser.%@",sourceID]]?:@"");for(NSDictionary *parser in [TVBoxCatalogStore playbackParsersForCatalogID:catalogID])if([parser[@"id"] isEqual:selected]&&[ServiceStore isSupportedPlaybackParser:parser])return selected;return @"";
 }
 - (NSString *)titleText {
     NSString *name=[self.detail[@"name"] isKindOfClass:NSString.class]?[self.detail[@"name"] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]:@"";
@@ -160,9 +161,9 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
     if(!self.correlationID.length)self.correlationID=NSUUID.UUID.UUIDString.lowercaseString;
     NSInteger episodeGroup=CCTVEpisodeGroupForSourceIndex((NSUInteger)self.selectedEpisodeIndex,[self episodesForLine:self.selectedLineIndex].count,self.episodeOrderReversed);self.page=episodeGroup==NSNotFound?0:episodeGroup;
     if(!self.client){
-        NSString *catalogID=[self.source[@"catalogID"] isKindOfClass:NSString.class]?self.source[@"catalogID"]:([self.source[@"tvboxCatalogID"] isKindOfClass:NSString.class]?self.source[@"tvboxCatalogID"]:@"");self.client=MediaSourceUsesNativeCatalogAPI(self.source)?[[MediaAPIClient alloc] initWithTVBoxSource:self.source?:@{}]:[[MediaAPIClient alloc] initWithPort:[self.source[@"port"] integerValue] catalogID:catalogID];
+        NSString *catalogID=[ServiceStore playbackParserCatalogIDForSource:self.source];self.client=MediaSourceUsesNativeCatalogAPI(self.source)?[[MediaAPIClient alloc] initWithTVBoxSource:self.source?:@{}]:[[MediaAPIClient alloc] initWithPort:[self.source[@"port"] integerValue] catalogID:catalogID];
     }
-    self.refreshClient=MediaSourceUsesNativeCatalogAPI(self.source)?[[MediaAPIClient alloc] initWithTVBoxSource:self.source?:@{}]:[[MediaAPIClient alloc] initWithPort:[self.source[@"port"] integerValue]];
+    self.refreshClient=MediaSourceUsesNativeCatalogAPI(self.source)?[[MediaAPIClient alloc] initWithTVBoxSource:self.source?:@{}]:[[MediaAPIClient alloc] initWithPort:[self.source[@"port"] integerValue] catalogID:[ServiceStore playbackParserCatalogIDForSource:self.source]];
     [self buildLayout];
     [self rebuildSelection];
     [self refreshBackdrop];

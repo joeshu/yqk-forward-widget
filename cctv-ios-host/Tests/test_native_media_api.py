@@ -94,6 +94,8 @@ class NativeMediaAPITests(unittest.TestCase):
                     payload = {"code": 1, "url": "https://resolver.example/watch?id=fixture", "parse": 1, "jx": 1}
                 elif query.get("play") == ["official-watch-page"]:
                     payload = {"code": 1, "url": "https://v.qq.com/x/cover/fixture/episode.html", "parse": 1, "jx": 1}
+                elif query.get("play") == ["canonical-page"]:
+                    payload = {"code": 1, "url": "https://old-parser.example/wrapper", "pageURL": "https://v.youku.com/video?vid=fixture%2Bepisode", "parse": 1, "jx": 1}
                 elif query.get("play") == ["web-episode-mpd"]:
                     payload = {"code": 1, "url": "https://resolver.example/watch?id=mpd", "parse": 1, "jx": 1}
                 elif query.get("play") == ["quality-specific"]:
@@ -154,12 +156,9 @@ class NativeMediaAPITests(unittest.TestCase):
             self.assertTrue(all(value == "Basic fixture" for value in auth_headers), "source authorization reaches its own API origin")
             self.assertTrue(all(value == "fixture-key" for value in api_key_headers), "source API-key headers reach their own origin")
             self.assertEqual(redirected_headers, [(None, None, None)], "credential headers are stripped when an API redirects to another origin")
-            self.assertGreaterEqual(len(requests), 13, "TVBox and unscoped package play requests reach the expected APIs")
-            self.assertLessEqual(len(requests), 14, "TVBox and unscoped package play requests stay bounded")
-            self.assertEqual(len(parser_requests), 2, "selected TVBox JSON parser receives both page URLs once")
-            self.assertEqual(parser_requests[0][0].get("url"), ["https://resolver.example/watch?id=fixture"])
-            self.assertEqual(parser_requests[0][1], "parser-fixture", "parser-specific headers reach the parser endpoint")
-            self.assertEqual(parser_requests[1][0].get("url"), ["https://resolver.example/watch?id=mpd"])
+            self.assertEqual(sum(query.get("play") == ["official-watch-page"] for query, _, _ in requests), 2, "official page and parser-catalog override each issue one source request")
+            self.assertEqual(sum(query.get("play") == ["web-episode"] for query, _, _ in requests), 5, "selection, automatic, and invalid-parser checks do not repeat source requests")
+            self.assertEqual(parser_requests, [], "MediaAPIClient only builds candidates; the native resolver owns parser requests and validation")
         finally:
             server.shutdown()
             server.server_close()

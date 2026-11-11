@@ -68,10 +68,6 @@ class DecodeRouterContracts(unittest.TestCase):
         self.assertIn('contentType', self.router_m)
         self.assertIn('mimeType', self.router_m)
 
-    def test_parser_pages_go_to_webview_without_native_probe(self):
-        self.assertIn('if (requiresWebPlayback) {', self.router_m)
-        self.assertIn('MediaPlaybackDecodeRouteAttemptedWebView', self.router_m)
-        self.assertIn('MediaPlaybackDecodeRouteWebView', self.router_m)
 
     # ---- 适配器：零链接依赖 ----
 

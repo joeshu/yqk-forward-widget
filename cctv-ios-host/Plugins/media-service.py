@@ -6,6 +6,7 @@ import builtins
 import collections
 import hmac
 import json
+import math
 import importlib.util
 import os
 import re
@@ -91,6 +92,115 @@ def is_extensionless_url(url):
     path = urllib.parse.urlsplit(str(url or '')).path
     name = path.rsplit('/', 1)[-1]
     return bool(name) and '.' not in name
+
+
+_VOD_REFRESH_SLOTS = threading.BoundedSemaphore(2)
+
+
+def _vod_epoch_seconds(value):
+    """Accept Unix seconds and JavaScript Date.now() milliseconds."""
+    try:
+        timestamp = float(value or 0)
+    except (TypeError, ValueError, OverflowError):
+        return 0.0
+    if not math.isfinite(timestamp) or timestamp <= 0:
+        return 0.0
+    return timestamp / 1000.0 if timestamp > 100000000000 else timestamp
+
+
+def vod_refresh_after(value):
+    """Schedule from source-authored expiry without guessing URL token fields."""
+    now = time.time()
+    expires = _vod_epoch_seconds(value.get('expiresAt'))
+    after = _vod_epoch_seconds(value.get('refreshAfter'))
+    if expires:
+        remaining = max(0, expires - now)
+        before_expiry = expires - min(30, max(1, remaining / 4))
+        after = min(after, before_expiry) if after else before_expiry
+    return max(now, after) if after else 0
+
+
+def vod_refresh_interval(value):
+    try:
+        interval = float(value.get('refreshInterval') or 0)
+        return max(0, min(interval, 3600)) if math.isfinite(interval) else 0
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
+def make_vod_refresh(runtime, args, initial, alternate_index=None, timeout=8):
+    """Re-run this exact source/episode. Never join an old path to a new token.
+
+    A bounded daemon worker keeps arbitrary plugin I/O from blocking relay HTTP
+    workers indefinitely. Late workers cannot modify a relay target, and no more
+    than two plugin refresh jobs may run across this process at once.
+    """
+    captured_args = json.loads(json.dumps(args, ensure_ascii=False))
+    selected_name = str(initial.get('name') or '') if alternate_index is not None else ''
+    lock = threading.Lock()
+    state = {'flight': None}
+
+    def refresh():
+        with lock:
+            flight = state['flight']
+            if flight is None or flight['event'].is_set():
+                if not _VOD_REFRESH_SLOTS.acquire(blocking=False):
+                    raise MediaError('MEDIA_REFRESH_BUSY', '媒体刷新任务繁忙，请重试', True)
+                flight = {'event': threading.Event(), 'value': None, 'error': None}
+                state['flight'] = flight
+                def run():
+                    try:
+                        flight['value'] = runtime.call('play', json.loads(json.dumps(captured_args)))
+                    except BaseException as error:
+                        flight['error'] = error
+                    finally:
+                        _VOD_REFRESH_SLOTS.release()
+                        flight['event'].set()
+                threading.Thread(target=run, daemon=True, name='CCTVHostVODRefresh').start()
+        if not flight['event'].wait(max(0.01, min(float(timeout), 8))):
+            raise MediaError('MEDIA_REFRESH_TIMEOUT', '来源媒体刷新超时，请重新解析本集', True)
+        if flight['error'] is not None:
+            raise MediaError('MEDIA_REFRESH_FAILED', '来源未能刷新本集媒体，请重新解析', True) from flight['error']
+        value = flight['value']
+        if not isinstance(value, dict):
+            raise MediaError('MEDIA_REFRESH_FAILED', '来源没有返回本集媒体', True)
+        for key in ('provider', 'episodeID', 'detailID'):
+            if initial.get(key) and value.get(key) and str(initial[key]) != str(value[key]):
+                raise MediaError('MEDIA_REFRESH_IDENTITY_CHANGED', '来源刷新结果与当前分集不符', True)
+        candidate = value
+        if alternate_index is not None:
+            # Reordering quality choices is legal. Only a unique source-authored
+            # name establishes the same choice; an index alone does not.
+            alternates = value.get('alternates') or []
+            matches = [item for item in alternates if isinstance(item, dict) and
+                       selected_name and str(item.get('name') or '') == selected_name]
+            if len(matches) != 1:
+                raise MediaError('MEDIA_REFRESH_REQUIRED', '清晰度身份已变化，请重新解析本集', True)
+            candidate = matches[0]
+        address = candidate.get('url')
+        if (not isinstance(address, str) or not address or candidate.get('proxy') or
+                candidate.get('requiresWebPlayback') or candidate.get('webPlayback') or
+                candidate.get('parse') or candidate.get('jx') or is_dash_media(candidate, address)):
+            raise MediaError('MEDIA_REFRESH_REQUIRED', '来源需要重新完成媒体解析', True)
+        parts = urllib.parse.urlsplit(address)
+        if (parts.scheme.lower() not in ('http', 'https') or not parts.hostname or
+                parts.username or parts.password or parts.path.lower().endswith(('.html', '.htm', '.php'))):
+            raise MediaError('MEDIA_REFRESH_FAILED', '来源刷新结果不是媒体地址', True)
+        headers = dict(value.get('baseHeaders') or value.get('headers') or {})
+        headers.update(candidate.get('headers') or {})
+        metadata = dict(value)
+        metadata.update({key: candidate[key] for key in ('expiresAt', 'refreshAfter', 'refreshInterval') if key in candidate})
+        expires = _vod_epoch_seconds(metadata.get('expiresAt'))
+        if expires and (not math.isfinite(expires) or expires <= time.time()):
+            raise MediaError('MEDIA_REFRESH_EXPIRED', '来源返回的媒体已经过期', True)
+        after = vod_refresh_after(metadata)
+        # A provider can repeat an overdue refreshAfter. Back off rather than
+        # re-running the same play operation for every playlist request.
+        if after and after <= time.time():
+            after = time.time() + 5
+        return {'url': address, 'headers': headers, 'expiresAt': expires,
+                'refreshAfter': after, 'refreshInterval': vod_refresh_interval(metadata)}
+    return refresh
 
 
 class Server(ThreadingHTTPServer):
@@ -854,9 +964,17 @@ class Handler(BaseHTTPRequestHandler):
                 headers = result.get('headers') or {}
                 base_headers = result.get('baseHeaders') if isinstance(result.get('baseHeaders'), dict) else headers
                 diagnostic_id = correlation_id or request_id
-                def relay_media_url(address, request_headers, expected_hls=False):
+                def relay_media_url(address, request_headers, expected_hls=False, candidate=None, alternate_index=None):
+                    source_result = candidate if isinstance(candidate, dict) else result
                     token = self.server.relay.register(address, request_headers,
-                        diagnostic_id=diagnostic_id, expected_hls=expected_hls, resource_scope=request_id)
+                        diagnostic_id=diagnostic_id, expected_hls=expected_hls, resource_scope=request_id,
+                        refresh=make_vod_refresh(runtime, args, source_result, alternate_index),
+                        refresh_after=vod_refresh_after(source_result),
+                        refresh_interval=vod_refresh_interval(source_result),
+                        # A fresh VOD manifest may use entirely different variant
+                        # paths. Reload the root instead of splicing old child
+                        # paths onto a newly issued token/base URL.
+                        refresh_children=False)
                     return f'http://127.0.0.1:{self.server.server_port}/media/{token}'
                 result = dict(result)
                 def adapt_dash(candidate, request_headers, validate=True):
@@ -928,7 +1046,7 @@ class Handler(BaseHTTPRequestHandler):
                 alternates = result.get('alternates')
                 if isinstance(alternates, list):
                     relayed = []
-                    for alternate in alternates:
+                    for alternate_index, alternate in enumerate(alternates):
                         if not isinstance(alternate, dict) or not isinstance(alternate.get('url'), str):
                             continue
                         alternate = dict(alternate)
@@ -956,7 +1074,8 @@ class Handler(BaseHTTPRequestHandler):
                                 and (not alternate_media.get('parse') or alternate_direct)):
                             alternate['originalURL'] = address
                             alternate['url'] = relay_media_url(address, alternate_headers,
-                                expected_hls=is_declared_hls(alternate_media, address))
+                                expected_hls=is_declared_hls(alternate_media, address),
+                                candidate=alternate_media, alternate_index=alternate_index)
                         relayed.append(alternate)
                     result['alternates'] = relayed
             self.send(200, {'ok': True, 'data': result})

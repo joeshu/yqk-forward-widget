@@ -24,6 +24,27 @@ static NSString *ServiceCodeWithoutComments(NSString *source){
     return routeSource;
 }
 @implementation ServiceStore
++ (NSString *)playbackParserCatalogIDForSource:(NSDictionary *)source {
+    if(![source isKindOfClass:NSDictionary.class])return @"";
+    for(NSString *key in @[@"parserCatalogID",@"catalogID",@"tvboxCatalogID"]){
+        id value=source[key];if(![value isKindOfClass:NSString.class])continue;
+        NSString *identifier=[value stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        if(identifier.length&&identifier.length<=256&&[identifier rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location==NSNotFound)return identifier;
+    }
+    return @"";
+}
++ (BOOL)isSupportedPlaybackParser:(NSDictionary *)parser {
+    if(![parser isKindOfClass:NSDictionary.class])return NO;
+    id rawType=parser[@"type"];
+    NSString *type=[rawType isKindOfClass:NSNumber.class]?[rawType stringValue]:([rawType isKindOfClass:NSString.class]?rawType:@"0");
+    type=[[type stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] lowercaseString];
+    if(!type.length)type=@"0";
+    if(![@[@"0",@"web",@"html",@"1",@"json",@"api"] containsObject:type])return NO;
+    NSString *address=[parser[@"url"] isKindOfClass:NSString.class]?parser[@"url"]:@"";
+    for(NSString *placeholder in @[@"{url}",@"$url",@"%s"])address=[address stringByReplacingOccurrencesOfString:placeholder withString:@"fixture"];
+    NSURLComponents *url=address.length<=8192?[NSURLComponents componentsWithString:address]:nil;
+    return [@[@"http",@"https"] containsObject:url.scheme.lowercaseString?:@""]&&url.host.length&&!url.user.length&&!url.password.length;
+}
 + (NSString *)directory {
     NSString *d =
         [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject
@@ -433,6 +454,8 @@ static NSString *ServiceCodeWithoutComments(NSString *source){
     @synchronized(self){
     if(![service isKindOfClass:NSDictionary.class]||!ServiceRelativePath(service[@"id"])||[service[@"id"] pathComponents].count!=1)return;
     NSMutableDictionary *mutableService=[[self resolvedService:service] mutableCopy];
+    id parserBinding=mutableService[@"parserCatalogID"];
+    if(parserBinding){NSString *clean=[parserBinding isKindOfClass:NSString.class]?[parserBinding stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]:@"";if(clean.length&&clean.length<=256&&[clean rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location==NSNotFound)mutableService[@"parserCatalogID"]=clean;else[mutableService removeObjectForKey:@"parserCatalogID"];}
     NSMutableArray *rows = [[self services] mutableCopy];
     NSIndexSet *matches =
         [rows indexesOfObjectsPassingTest:^BOOL(NSDictionary *row, NSUInteger index, BOOL *stop) {
@@ -503,6 +526,7 @@ static NSString *ServiceCodeWithoutComments(NSString *source){
     // Keep user changes made after updating; detected values belong to the
     // imported version and must roll back together with its code.
     for(NSString *key in @[@"name",@"port",@"lan",@"url"])if(service[key])restored[key]=service[key];
+    if(service[@"parserCatalogID"])restored[@"parserCatalogID"]=service[@"parserCatalogID"];else[restored removeObjectForKey:@"parserCatalogID"];
     if(![service[@"argumentsSource"] isEqual:@"inferred"]){if(service[@"arguments"])restored[@"arguments"]=service[@"arguments"];if(service[@"argumentsSource"])restored[@"argumentsSource"]=service[@"argumentsSource"];}
     if([service[@"playlistPath"] isKindOfClass:NSString.class]&&[service[@"playlistPath"] length]&&![service[@"playlistPathSource"] isEqual:@"inferred"]&&![service[@"playlistPathSource"] isEqual:@"detected"]){restored[@"playlistPath"]=service[@"playlistPath"];restored[@"playlistPathSource"]=service[@"playlistPathSource"]?:@"manual";}
     if([service[@"epgPath"] isKindOfClass:NSString.class]&&[service[@"epgPath"] length]&&![service[@"epgPathSource"] isEqual:@"inferred"]&&![service[@"epgPathSource"] isEqual:@"detected"]){restored[@"epgPath"]=service[@"epgPath"];restored[@"epgPathSource"]=service[@"epgPathSource"]?:@"manual";}

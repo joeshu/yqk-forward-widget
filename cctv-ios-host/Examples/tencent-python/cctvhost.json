@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "name": "腾讯视频（原生解析适配）",
+  "runtime": "python",
+  "protocol": "python-spider",
+  "entry": "spider.py"
+}

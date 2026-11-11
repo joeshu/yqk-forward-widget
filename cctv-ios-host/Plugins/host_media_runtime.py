@@ -850,6 +850,17 @@ def playback(value, _depth=0):
               'parse': parse, 'jx': jx, 'playUrl': value.get('playUrl', '') if isinstance(value.get('playUrl', ''), str) else '',
               'directMedia': direct_media, 'nativePlayable': native_media,
               'requiresWebPlayback': requires_web}
+    # A watch page is provenance, not the transport URL. Keep it separate while
+    # native resolution and the relay replace url/originalURL with real media.
+    page_url = value.get('pageURL')
+    if isinstance(page_url, str):
+        page_url = normalize_media_address(page_url)
+        if valid_media_url(page_url) and urllib.parse.urlsplit(page_url).scheme.lower() in ('http', 'https'):
+            result['pageURL'] = page_url
+    for key in ('provider', 'episodeID', 'detailID'):
+        identity = value.get(key)
+        if isinstance(identity, str) and 0 < len(identity) <= 2048 and not any(ord(char) < 32 for char in identity):
+            result[key] = identity
     if proxy_requested:
         result['proxy'] = True
     if declared_format:

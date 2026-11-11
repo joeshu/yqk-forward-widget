@@ -700,30 +700,6 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('@"lineName"', playback_state)
         self.assertIn('@"episodeName"', playback_state)
 
-    def test_tvbox_parser_selection_drives_native_resolution_and_web_fallback(self):
-        catalog = (ROOT / 'Sources/TVBoxCatalogStore.m').read_text()
-        api_client = (ROOT / 'Sources/MediaAPIClient.m').read_text()
-        self.assertIn('playbackParsersForCatalogID:', catalog)
-        self.assertIn('if(!catalogID.length)return @[];', catalog)
-        self.assertIn('parserCatalogID', api_client)
-        self.assertIn('MediaParserRequestURL', api_client)
-        self.assertIn('parserDirectURL', api_client)
-        self.assertIn('MediaParserResponseIsDirectMedia', api_client)
-        self.assertIn('MediaParserCandidateSupportsNativePlayer(address,found)', api_client)
-        self.assertIn('application/dash+xml', api_client)
-        self.assertIn('MediaParserKind(parser)', api_client)
-        self.assertIn('self.parserWebFallbackResult?:self.parserFallbackResult', api_client)
-        self.assertIn('if(!catalogID.length){if(completion)completion(result,nil);return;}', api_client)
-        self.assertIn('playbackParsersForCatalogID:catalogID])if([parser[@"id"] isEqual:selected])return selected', self.playback)
-        self.assertIn('playbackParsersForCatalogID:catalogID])if([parser[@"id"] isEqual:selected])return selected', self.episodes)
-        self.assertIn('parserID', self.detail)
-        self.assertIn('parserID', self.playback)
-        self.assertIn('parserID', self.episodes)
-        self.assertIn('selected type 1 parser turns a TVBox web page',
-                      (ROOT / 'Tests/native_media_api_tests.m').read_text())
-        self.assertIn('selected type 0 parser keeps the in-app web playback fallback',
-                      (ROOT / 'Tests/native_media_api_tests.m').read_text())
-
     def test_fullscreen_player_shows_observed_rate_and_available_audio_tracks(self):
         self.assertIn('media-playback-throughput', self.playback)
         self.assertIn('AVPlayerItemAccessLogEvent *event=self.player.currentItem.accessLog.events.lastObject', self.playback)
@@ -805,9 +781,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         smoke = (ROOT / 'Tests/UISmoke/SmokeDriver.m').read_text()
         self.assertIn('self.result[@"alternates"]', self.playback)
         self.assertIn('playback_quality_selected', self.playback)
-        self.assertIn('awaitingWebPlaybackReturn', self.playback)
         self.assertIn('if(self.resolving)return', self.playback)
-        self.assertIn('MediaPlaybackResultSupportsAVPlayer(result)', self.playback)
         self.assertIn('url.user.length||url.password.length', self.playback)
         self.assertIn('[self setRetryAvailable:NO]', self.playback)
         self.assertIn('inline player exposes the source\'s actual alternate quality choices', smoke)
@@ -833,7 +807,6 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('per-quality request headers survive TVBox normalization',
                       (ROOT / 'Tests/native_media_api_tests.m').read_text())
         fixture = (ROOT / 'Tests/UISmoke/fixture_server.py').read_text()
-        self.assertIn("if \"?\" in self.path and (self.headers.get(\"Referer\")", fixture)
 
     def test_media_resource_and_site_pickers_are_separate(self):
         self.assertIn('选择影视资源', self.detail)
@@ -1270,24 +1243,6 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('播放器尚未显示画面', self.playback)
         self.assertNotIn('首帧渲染状态未知', self.playback)
 
-    def test_web_playback_close_keeps_native_fallback_action_available(self):
-        appeared = self.playback[self.playback.index('- (void)viewDidAppear:'):
-                                 self.playback.index('- (void)viewWillDisappear:')]
-        fallback = self.playback[self.playback.index('- (void)tryNativePlayback {'):
-                                 self.playback.index('- (void)selectLine:')]
-        webview = (ROOT / 'Sources/MediaWebViewController.m').read_text()
-        self.assertIn('网页播放已关闭 · 可尝试原生播放', appeared)
-        self.assertIn('[self setRetryAvailable:YES]', appeared)
-        self.assertNotIn('self.awaitingWebPlaybackReturn=NO', appeared)
-        # playbackMethodOverride 是死数据（全仓库无读取处），tryNativePlayback
-        # 已删掉它，路由改按格式决定，不再把 FLV 推回注定失败的 AVPlayer。
-        self.assertNotIn('playbackMethodOverride', fallback)
-        self.assertIn('web.onTryNativePlayback=^{[weakSelf tryNativePlayback];}', self.playback)
-        self.assertIn('@"原生播放"', webview)
-        self.assertIn('loadInitialPageAtURL:configurationURL cookie:cookie', webview)
-        self.assertIn('httpCookieStore setCookie:item', webview)
-        self.assertIn('WKWebsiteDataStore.nonPersistentDataStore', webview)
-
     def test_webview_cookie_store_cannot_block_initial_page_load(self):
         webview = (ROOT / 'Sources/MediaWebViewController.m').read_text()
         self.assertEqual(webview.count('loadInitialPageAtURL:configurationURL cookie:cookie'), 2)
@@ -1298,23 +1253,11 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('if(!owner||owner.didClose||started)return', initial_load)
         self.assertIn('allHTTPHeaderFields=MediaPlaybackHeadersFromResult(self.result)', webview)
 
-    def test_parser_marked_source_plays_inside_the_app_without_external_handoff(self):
-        route = self.playback[self.playback.index('BOOL directMedia='):
-                              self.playback.index('self.hasDiagnosticTimeControlStatus=NO;', self.playback.index('BOOL directMedia='))]
-        self.assertIn('result[@"parse"]', route)
-        self.assertIn('result[@"jx"]', route)
-        self.assertIn('MediaWebViewController *web=[[MediaWebViewController alloc] initWithResult:result', route)
-        self.assertIn('[[UINavigationController alloc] initWithRootViewController:web]', route)
-        self.assertIn('[self presentViewController:nav animated:YES completion:nil]', route)
-        self.assertNotIn('openURL:', route)
-
-    def test_no_media_error_offers_the_original_episode_page_without_exposing_its_url(self):
+    def test_no_media_error_keeps_episode_page_as_private_resolution_input(self):
         self.assertIn('MediaPlaybackEpisodePageFallbackURL', self.playback)
         self.assertIn('pluginCode isEqualToString:@"NO_MEDIA"', self.playback)
         self.assertIn('owner.episodeWebFallbackAvailable=pageURL!=nil', self.playback)
-        self.assertIn('@selector(openEpisodePageWebFallback)', self.playback)
         self.assertIn('episode_web_fallback_available', self.playback)
-        self.assertIn('打开分集网页尝试播放', self.playback)
         self.assertNotIn('fields[@"episode_url"]', self.playback)
 
     def test_extensionless_signed_media_endpoints_use_native_playback_classification(self):
@@ -1363,8 +1306,6 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('MediaTVBoxFilters(root)', client)
         self.assertIn('arguments[@"filters"]', client)
         self.assertIn('clearFilters', self.detail)
-        self.assertIn('result[@"jx"]', self.playback)
-        self.assertIn('result[@"requiresWebPlayback"]', self.playback)
         self.assertNotIn('@"filters":@{}', client)
         self.assertIn('MediaTVBoxResolvedPoster', client)
         self.assertIn('TVBoxWebURL(resolved.absoluteString)', (ROOT / 'Sources/TVBoxCatalogStore.m').read_text())
@@ -1469,6 +1410,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertTrue(all(site.get('type') == 'script' and site.get('api', '').lower().split('?', 1)[0].endswith('.js') for site in for_adm['sites']))
         self.assertTrue(all(site['api'].endswith('?v=3') for site in for_adm['sites']))
         self.assertEqual(len({site['key'] for site in for_adm['sites']}), 8)
+        self.assertIn('joeshu.kkapp', {site['key'] for site in for_adm['sites']})
         for builtin, example in (
             (resources / 'hongguo-python.py', ROOT / 'Examples/hgtv-python/hgtv_public_1_0_5.py'),
             (resources / 'hongguo-node.js', ROOT / 'Examples/hgtv-node/hgtv.js'),

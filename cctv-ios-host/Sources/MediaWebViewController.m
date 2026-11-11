@@ -3,11 +3,6 @@
 #import "RuntimeDiagnostics.h"
 #import "MediaPlaybackHeaders.h"
 #import <WebKit/WebKit.h>
-static BOOL MediaWebIsOfficialWatchPageURL(NSURL *url) {
-    if (![url.scheme.lowercaseString isEqual:@"https"]) return NO;
-    NSString *host=url.host.lowercaseString?:@"";
-    return [@[@"youku.com",@"www.youku.com",@"v.youku.com",@"m.youku.com",@"v.qq.com",@"m.v.qq.com"] containsObject:host];
-}
 @interface MediaWebViewController () <WKNavigationDelegate>
 @property(nonatomic, copy) NSDictionary *result;
 @property(nonatomic) BOOL configurationPage;
@@ -37,8 +32,7 @@ static BOOL MediaWebIsOfficialWatchPageURL(NSURL *url) {
     UIBarButtonItem *more=[[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"] menu:[UIMenu menuWithTitle:@"网页操作" children:@[backAction,forwardAction,copyURLAction]]];
     more.accessibilityIdentifier=@"media.web.more";
     more.accessibilityLabel=@"更多网页操作";
-    BOOL officialWatchPage=MediaWebIsOfficialWatchPageURL([NSURL URLWithString:self.result[@"url"]]);
-    if(!officialWatchPage&&(self.onTryNativePlayback||self.onResolvedMedia)){UIBarButtonItem *native=[[UIBarButtonItem alloc] initWithTitle:@"原生播放" style:UIBarButtonItemStylePlain target:self action:@selector(tryNativePlayback)];self.nativeButton=native;self.navigationItem.rightBarButtonItems=@[native,more,refresh];}else self.navigationItem.rightBarButtonItems=@[more,refresh];
+    if(self.onTryNativePlayback||self.onResolvedMedia){UIBarButtonItem *native=[[UIBarButtonItem alloc] initWithTitle:@"原生播放" style:UIBarButtonItemStylePlain target:self action:@selector(tryNativePlayback)];self.nativeButton=native;self.navigationItem.rightBarButtonItems=@[native,more,refresh];}else self.navigationItem.rightBarButtonItems=@[more,refresh];
     WKWebViewConfiguration *configuration=[WKWebViewConfiguration new];configuration.websiteDataStore=WKWebsiteDataStore.nonPersistentDataStore;configuration.allowsInlineMediaPlayback=YES;configuration.mediaTypesRequiringUserActionForPlayback=WKAudiovisualMediaTypeNone;
     self.web=[[WKWebView alloc] initWithFrame:self.view.bounds configuration:configuration];self.web.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;self.web.navigationDelegate=self;self.web.allowsBackForwardNavigationGestures=YES;[self.view addSubview:self.web];
     self.webProgressView=[[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleBar];self.webProgressView.translatesAutoresizingMaskIntoConstraints=NO;self.webProgressView.progressTintColor=HostAccent();self.webProgressView.trackTintColor=UIColor.clearColor;self.webProgressView.accessibilityIdentifier=@"media.web.progress";[self.view addSubview:self.webProgressView];
@@ -114,7 +108,6 @@ static BOOL MediaWebIsOfficialWatchPageURL(NSURL *url) {
 }
 - (void)tryNativePlayback {
     if(self.didClose||self.resolvingMedia)return;
-    if(MediaWebIsOfficialWatchPageURL([NSURL URLWithString:self.result[@"url"]])){self.navigationItem.prompt=@"请在官方网页播放器中观看";return;}
     if(!self.onResolvedMedia){if(self.onTryNativePlayback){self.didClose=YES;[self.web stopLoading];dispatch_block_t callback=self.onTryNativePlayback;self.onTryNativePlayback=nil;self.onClose=nil;[self dismissViewControllerAnimated:YES completion:callback];}return;}
     self.resolvingMedia=YES;self.nativeButton.enabled=NO;NSUInteger generation=++self.mediaGeneration;self.navigationItem.prompt=@"正在读取网页媒体地址…";
     [self recordMediaEvent:@"web_media_extraction_started" fields:nil];

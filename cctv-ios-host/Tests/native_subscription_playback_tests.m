@@ -43,7 +43,7 @@ int main(void){@autoreleasepool{
     check(MediaPlaybackDecodeRouteNextForResult(dash,0)==MediaPlaybackDecodeRouteAVPlayer,@"converted DASH starts with AVPlayer");
     check(MediaPlaybackDecodeRouteNextForResult(dash,MediaPlaybackDecodeRouteAttemptedAVPlayer)==MediaPlaybackDecodeRouteCicadaPlayer,@"original DASH fallback stays available");
     NSDictionary *officialPage=@{@"url":@"https://v.qq.com/x/cover/fixture/episode.html",@"parse":@1,@"requiresWebPlayback":@YES};
-    check(MediaPlaybackDecodeRouteNextForResult(officialPage,0)==MediaPlaybackDecodeRouteWebView,@"official watch pages go directly to the browser instead of probing media decoders");
-    check(MediaPlaybackDecodeRouteNextForResult(officialPage,MediaPlaybackDecodeRouteAttemptedWebView)==MediaPlaybackDecodeRouteNone,@"failed browser playback does not retry the same document as native media");
+    check(MediaPlaybackDecodeRouteNextForResult(officialPage,0)==MediaPlaybackDecodeRouteNone,@"pending pages have no decoder route until media has been resolved");
+    check(MediaPlaybackDecodeRouteNextForResult(officialPage,MediaPlaybackDecodeRouteAttemptedWebView)==MediaPlaybackDecodeRouteNone,@"pending documents never become native media by exhausting routes");
     puts("PASS: source-specific 360 normalization, URL encoding, decoder retry and DASH route behavior");
 }}
