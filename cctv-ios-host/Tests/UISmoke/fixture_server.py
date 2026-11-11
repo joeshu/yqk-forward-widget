@@ -113,6 +113,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif self.path == '/native-resolver-fake.m3u8':
             content_type = 'text/html; charset=utf-8'
             data = b'<!doctype html><html><head><title>Unavailable fixture</title></head><body>No media is available.</body></html>'
+        elif self.path == '/native-resolver-unavailable':
+            status = 503
+            content_type = 'text/plain; charset=utf-8'
+            data = b'fixture unavailable'
+        elif self.path == '/native-resolver-unauthorized':
+            status = 401
+            content_type = 'text/plain; charset=utf-8'
+            data = b'fixture login required'
+        elif self.path == '/native-resolver-json':
+            content_type = 'application/json'
+            target = f'http://localhost:{self.server.server_port}/native-resolver-header-video.mp4'
+            data = json.dumps({'url': target, 'headers': {
+                'Referer': 'https://provider.example/watch',
+                'Authorization': 'Bearer media-token'}}).encode()
         elif self.path == '/native-resolver-slow':
             time.sleep(2.0)
             content_type = 'text/html; charset=utf-8'
@@ -154,6 +168,28 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 print("HLS segment delay begin", flush=True)
                 time.sleep(8)
                 print("HLS segment delay complete", flush=True)
+        elif self.path.split("?", 1)[0] == "/native-resolver-header-video.mp4":
+            if (self.headers.get("Referer") != "https://provider.example/watch" or
+                    self.headers.get("Authorization") != "Bearer media-token" or
+                    self.headers.get("X-Page-Authorization") is not None):
+                self.send_response(403)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            content_type = "video/mp4"
+            data = VIDEO
+            requested = self.headers.get("Range")
+            if requested and requested.startswith("bytes="):
+                start, _, end = requested[6:].partition("-")
+                first = int(start or 0)
+                last = min(int(end) if end else len(VIDEO) - 1, len(VIDEO) - 1)
+                if first >= len(VIDEO):
+                    self.send_error(416)
+                    return
+                data = VIDEO[first:last + 1]
+                status = 206
+            else:
+                first, last = 0, len(VIDEO) - 1
         elif self.path.split("?", 1)[0] in ("/video.mp4", "/native-resolver-video.mp4"):
             if self.path.startswith('/video.mp4?') and (self.headers.get("Referer") != "https://fixture.test/watch" or self.headers.get("X-Fixture-Playback") != "required"):
                 self.send_response(403)

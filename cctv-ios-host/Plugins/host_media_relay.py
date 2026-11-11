@@ -134,6 +134,7 @@ class MediaRelay:
         self.stream_media = bool(stream_media)
         self.targets = collections.OrderedDict()
         self.segments = collections.OrderedDict()
+        self.mime_overrides = collections.OrderedDict()
         self.segment_index = {}
         self.segment_limit = max(1, min(int(segment_limit), 16384))
         self.lock = threading.Lock()
@@ -346,6 +347,7 @@ class MediaRelay:
                 while len(self.segments) > self.segment_limit:
                     removed, old = self.segments.popitem(last=False)
                     self.segment_index.pop(old[0], None)
+                    self.mime_overrides.pop(removed, None)
                 return token
             for token, record in self.targets.items():
                 if record[0] == key:
@@ -359,6 +361,7 @@ class MediaRelay:
                                    refresh_after, refresh_interval, refresh_relative, bool(refresh_children))
             while len(self.targets) > self.limit:
                 removed, _ = self.targets.popitem(last=False)
+                self.mime_overrides.pop(removed, None)
                 self.refreshFailures.pop(removed, None)
                 self.diagnosed_manifests.discard(removed)
             return token
@@ -544,6 +547,8 @@ class MediaRelay:
                      record[7] if len(record) > 7 else True)
             with self.lock:
                 if token in self.targets and not self.stopping.is_set():
+                    if record[0] != updated[0]:
+                        self.mime_overrides.pop(token, None)
                     self.targets[token]=updated
                     self.targets.move_to_end(token)
                     self.refreshFailures.pop(token,None)
@@ -863,21 +868,48 @@ class MediaRelay:
                 self.responses.add(response)
             resource_event('headers')
             mime = response.headers.get('Content-Type', 'application/octet-stream')
+            with self.lock:
+                cached_mime = self.mime_overrides.get(token)
+                if cached_mime:
+                    self.mime_overrides.move_to_end(token)
+            if cached_mime:
+                mime = cached_mime
+            override_ct = cached_mime
             raw_length = response.headers.get('Content-Length', '')
             expected_bytes = int(raw_length) if re.fullmatch(r'[0-9]{1,18}', raw_length) else None
             final_url = response.geturl()
             is_hls = 'mpegurl' in mime.lower() or urllib.parse.urlsplit(final_url).path.lower().endswith(('.m3u8', '.m3u'))
             prefix = b''
-            # Some providers serve HLS from extensionless/PHP endpoints or
-            # return a generic MIME type. Honor declared HLS and sniff those
-            # responses before returning opaque bytes to AVPlayer.
             mime_type = mime.split(';', 1)[0].strip().lower()
             generic_mime = mime_type in ('', 'application/octet-stream', 'binary/octet-stream', 'text/plain')
-            extensionless = not urllib.parse.urlsplit(final_url).path.rsplit('/', 1)[-1].count('.') or '.m3u8' in final_url.lower()
-            is_segment_resource = (token in self.segments and resource_kind in ('media', 'key', 'map') and not expected_hls)
-            if not head and not is_hls and not is_segment_resource and (expected_hls or generic_mime or extensionless):
-                prefix = response.read(64)
+            extensionless = not urllib.parse.urlsplit(final_url).path.rsplit('/', 1)[-1].count('.')
+            is_segment_resource = token in self.segments and resource_kind in ('media', 'map')
+            # Inspect generic, image-disguised, and declared HLS responses. A
+            # known video MIME can stream immediately; segment bootstrap below
+            # uses read1() directly so it never waits for a probe-sized body.
+            should_sniff = expected_hls or generic_mime or extensionless or mime_type.startswith('image/')
+            if not head and not is_hls and resource_kind != 'key' and not is_segment_resource and should_sniff:
+                # One read1() probes up to three MPEG-TS sync positions but
+                # returns early when a live origin has sent only a small first
+                # chunk. Filling the requested length here would delay playback.
+                if callable(getattr(type(response), 'read1', None)):
+                    prefix = response.read1(377)
+                else:
+                    prefix = response.read(64)
                 is_hls = prefix.lstrip(b'\xef\xbb\xbf \t\r\n').startswith(b'#EXTM3U')
+                if not is_hls:
+                    if len(prefix) >= 8 and prefix[4:8] in (b'ftyp', b'styp', b'moof', b'moov'):
+                        override_ct = 'video/mp4'
+                    elif len(prefix) >= 9 and prefix[:3] == b'FLV' and prefix[4] & 1:
+                        override_ct = 'video/x-flv'
+                    elif len(prefix) >= 377 and prefix[0] == prefix[188] == prefix[376] == 0x47:
+                        override_ct = 'video/mp2t'
+                    if override_ct:
+                        with self.lock:
+                            self.mime_overrides[token] = override_ct
+                            self.mime_overrides.move_to_end(token)
+                            while len(self.mime_overrides) > self.limit + self.segment_limit:
+                                self.mime_overrides.popitem(last=False)
                 if expected_hls and not is_hls:
                     raise RelayFailure('manifest_invalid')
             if is_hls and not head:
@@ -946,12 +978,11 @@ class MediaRelay:
             first_chunk = b''
             received_bytes = len(prefix)
             stripped_diff = 0
-            override_ct = None
             # A partial response is already a selection of source bytes. Any
             # prefix removal/unwrapping would corrupt BYTERANGE offsets and
             # contradict Content-Range; transformations apply only to full GETs.
             if not head and token in self.segments and resource_kind == 'media' and response.status == 200:
-                first_chunk = prefix + read_stream_chunk(65536) if not prefix else prefix
+                first_chunk = prefix + read_stream_chunk(max(0, 65536-len(prefix)))
                 prefix = b''
                 received_bytes = len(first_chunk)
                 if first_chunk.startswith(b'\x89PNG\r\n\x1a\n') and (b'roUd' in first_chunk[:256] or 'rou.video' in final_url.lower()):
@@ -1094,6 +1125,7 @@ class MediaRelay:
             self.manifest_flights.clear()
             self.targets.clear()
             self.segments.clear()
+            self.mime_overrides.clear()
             self.segment_index.clear()
             self.diagnosed_manifests.clear()
             self.diagnosed_resources.clear()

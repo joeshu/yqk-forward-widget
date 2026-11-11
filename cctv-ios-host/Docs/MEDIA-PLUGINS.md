@@ -176,11 +176,11 @@ MacCMS JSON/XML 接口可在「资源 → ＋ → MacCMS 影视接口」单独�
 
 跨来源搜索每次最多并行检查 3 个独立来源；同一个 Python、Node.js 或 JavaScriptCore 服务中的站点仍按顺序请求，避免争用它自己的会话。结果按来源即时追加，显示当前站点、失败信息和进度。搜索不会自动启动停用的插件；用户点按某个来源后才会启动该服务，其他插件不受影响。搜索结果最多保留 100 条，失败来源可单独重试。
 
-CatPaw Spider 的常用 `util/req.js`、`util/htmlParser.js`、缓存、并发、通用工具及运行时配置导入映射到本机兼容模块；`req.js` 提供域名隔离 Cookie、保存/恢复/清除接口。`axios`、`cheerio`、`crypto-js`、`iconv-lite`、`jpeg-js`、`http2`、`stream`、`qs` 等通过应用内的 JS 依赖注册表提供。`node:stream` 当前提供 `Readable.from`、`data/end` 事件和 `pipe` 常用能力；`fs` 只读 ZIP 文件，临时写入留在内存中，不会访问 iPhone 其它目录。ZIP 自带的其它 JS 依赖仍须保持在 ZIP 中。Fastify 标准 `get/post` 路由可在本机服务下调用；`/spider/<key>/3/...` 私有路由同样可从 AVPlayer 请求，适合返回重写后的 HLS 清单。`parse: 1` 会交给应用的网页播放页，`parse: 0` 则交给 AVPlayer；本机播放器不会把解析页面冒充媒体流。
+CatPaw Spider 的常用 `util/req.js`、`util/htmlParser.js`、缓存、并发、通用工具及运行时配置导入映射到本机兼容模块；`req.js` 提供域名隔离 Cookie、保存/恢复/清除接口。`axios`、`cheerio`、`crypto-js`、`iconv-lite`、`jpeg-js`、`http2`、`stream`、`qs` 等通过应用内的 JS 依赖注册表提供。`node:stream` 当前提供 `Readable.from`、`data/end` 事件和 `pipe` 常用能力；`fs` 只读 ZIP 文件，临时写入留在内存中，不会访问 iPhone 其它目录。ZIP 自带的其它 JS 依赖仍须保持在 ZIP 中。Fastify 标准 `get/post` 路由可在本机服务下调用；`/spider/<key>/3/...` 私有路由同样可从 AVPlayer 请求，适合返回重写后的 HLS 清单。`parse: 1` 表示来源返回的仍是待解析页面：宿主会按绑定的解析接口顺序尝试，再以隐藏 WebKit 提取媒体元数据；验证出有效视频轨道后交给 AVPlayer/CicadaPlayer，解析失败时留在原生播放界面显示错误和重试入口。
 
-TVBox 合集的 `parses` 配置会按当前合集载入详情页的「解析接口」选择器。自动模式最多依次尝试 3 个 type 1 JSON 接口；type 1 返回 HTTP(S) 媒体地址后交给 AVPlayer，type 0 则在应用内网页播放器中打开。也可以逐个手动选择，失败时回到合集的网页解析器或站点原页。解析请求只向已导入配置中声明的接口发送影片网页 URL；跨域跳转会移除敏感请求头。TVBox 解析配置能否成功仍取决于接口本身及媒体授权。
+TVBox 合集的 `parses` 配置会按当前合集载入详情页的「解析接口」选择器。自动模式最多依次尝试 2 个已配置 JSON 接口；返回 HTTP(S) 媒体地址后先验证，再交给 AVPlayer/CicadaPlayer。声明为网页解析的候选由隐藏 WebKit 执行并提取媒体元数据，不会呈现应用内网页播放器。也可以逐个手动选择；失败时留在当前原生播放界面，并可重试或手动换解析器。解析请求只向已导入配置中声明的接口发送当前分集网页 URL；跨域跳转会移除敏感请求头。TVBox 解析配置能否成功仍取决于接口本身及媒体授权。
 
-优酷 Python Spider 示例的 `playerContent()` 返回 `https://v.youku.com/video?vid=…` 网页，并标记 `jx: 1`、`parse: 1`；它没有返回媒体直链，也没有实现 `localProxy()`。如果当前合集有可用 `parses`，详情页可以选择其解析接口；否则宿主会在应用自己的 `WKWebView` 中打开这个网页，不会调用系统浏览器或外部解析 App。只有取得真实的 HLS/MP4 地址和所需请求头后，才能由 AVPlayer 独立播放；受保护或无法提取的媒体仍由网页播放器处理。仅设置 `jx/parse` 代表网页播放请求，不代表已经解析出媒体。
+优酷 Python Spider 示例的 `playerContent()` 返回 `https://v.youku.com/video?vid=…` 网页，并标记 `jx: 1`、`parse: 1`；它没有返回媒体直链，也没有实现 `localProxy()`。如果当前合集有可用 `parses`，详情页按其顺序最多尝试两个解析接口；未得到媒体地址时，宿主可在隐藏 `WKWebView` 中执行当前页面并提取单一媒体地址。通过视频轨道验证后才交给原生播放器；提取不到、页面返回多个候选或媒体受 DRM 保护时会显示原生错误和重试入口。仅设置 `jx/parse` 代表需要解析，不代表已经取得媒体。
 
 手动声明 CatPaw Spider 时使用：
 
@@ -201,7 +201,7 @@ Python Spider 示例只需将 runtime 改为 `python`、protocol 改为 `python-
 
 ## 播放与资源限制
 
-直接 HTTP/HTTPS 媒体交给 AVPlayer，携带请求头的播放使用本机流式代理，HLS 子清单、分片、密钥与初始化段继承所需请求头；跨来源跳转移除 Cookie/Authorization。`parse=1` 的网页交给按需创建的 WebKit 页面，保留网页原始地址，不假装成 HLS，也不保证网页一定提供可播放内容。
+直接 HTTP/HTTPS 媒体先由原生解析器验证；携带请求头的播放使用本机流式代理，HLS 子清单、分片、密钥与初始化段继承所需请求头；跨来源跳转移除 Cookie/Authorization。`parse=1` 的网页只会在隐藏 WebKit 中执行并提取媒体元数据，页面本身不会作为播放器呈现，也不会被假装成 HLS。无法验证媒体时保持原生错误、重试和手动换解析器入口。
 
 ZIP 上限 24 MB、单文件 8 MB、解压总量 64 MB、文件数 2048。拒绝路径越界、符号链接、损坏校验、加密 ZIP 和 ZIP64。JS/API/缓存、并发连接和日志均有上限。
 

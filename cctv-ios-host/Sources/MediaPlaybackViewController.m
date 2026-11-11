@@ -1496,7 +1496,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
             owner.nativeSessionRefreshInFlight=NO;
             if([code isEqual:@"AUTH_REQUIRED"]&&[owner refreshNativeSessionForReason:@"native_auth_required" httpStatus:MediaPlaybackExplicitHTTPStatus(error) error:error])return;
             owner.status.text=error.localizedDescription?:@"来源未返回可验证的视频 · 可重试或切换解析器";owner.status.accessibilityLabel=owner.status.text;[owner setRetryAvailable:YES];
-            [RuntimeDiagnostics.shared recordEvent:@"native_resolution_failed" category:@"playback" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"",@"service_id":identity[@"sourceID"],@"failure_code":code,@"request_generation":@(generation)}];
+            [RuntimeDiagnostics.shared recordEvent:@"native_resolution_failed" category:@"playback" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"",@"service_id":identity[@"sourceID"],@"failure_code":code,@"http_status":@(MediaPlaybackExplicitHTTPStatus(error)),@"request_generation":@(generation)}];
             [owner endBackgroundAutoAdvanceTaskIfNeeded];return;
         }
         owner.nativeSessionRefreshInFlight=NO;

@@ -1195,6 +1195,41 @@ static void next(NSArray *steps, NSUInteger index) {
             check([nativeResolverSmoke[@"done"] boolValue]&&error&&![result[@"_nativeValidated"] boolValue],@"HTTP 200 HTML masquerading as m3u8 is rejected despite source-declared native flags");
             check(SmokePresentedController(@[nav,root])==nativeResolverPresented,@"a failed media verification stays in the original native interface");
             [nativeResolverSmoke removeObjectForKey:@"result"];[nativeResolverSmoke removeObjectForKey:@"error"];nativeResolverSmoke[@"done"]=@NO;
+            NSString *unavailable=[SmokeResolverFixtureBaseURL() stringByAppendingString:@"/native-resolver-unavailable"];
+            NSString *alternate=[SmokeResolverFixtureBaseURL() stringByAppendingString:@"/native-resolver-video.mp4?case=alternate"];
+            [nativeResolver resolveResult:@{@"url":unavailable,@"alternates":@[@{@"name":@"同集备选",@"url":alternate}]} identity:@{@"sourceID":@"resolver-smoke",@"detailID":@"fixture-show",@"lineID":@"fixture-line",@"episodeID":@"episode-alternate",@"generation":@5} progress:nil completion:^(NSDictionary *candidate,NSError *failure){
+                if(candidate)nativeResolverSmoke[@"result"]=candidate;
+                if(failure)nativeResolverSmoke[@"error"]=failure;
+                nativeResolverSmoke[@"done"]=@YES;
+            }];
+          }},
+          @{ @"until":^BOOL{return [nativeResolverSmoke[@"done"] boolValue];},@"timeout":@18,@"run":^{
+            NSDictionary *result=nativeResolverSmoke[@"result"];NSError *error=nativeResolverSmoke[@"error"];
+            check([nativeResolverSmoke[@"done"] boolValue]&&!error&&[result[@"_nativeValidated"] boolValue]&&[result[@"url"] hasSuffix:@"?case=alternate"],@"a failed primary media URL falls back to a validated alternate from the same episode");
+            check([result[@"resolutionIdentity"][@"episodeID"] isEqual:@"episode-alternate"],@"same-source fallback retains the selected episode identity");
+            [nativeResolverSmoke removeObjectForKey:@"result"];[nativeResolverSmoke removeObjectForKey:@"error"];nativeResolverSmoke[@"done"]=@NO;
+            NSString *json=[SmokeResolverFixtureBaseURL() stringByAppendingString:@"/native-resolver-json"];
+            [nativeResolver resolveResult:@{@"url":json,@"headers":@{@"Referer":@"https://provider.example/page",@"Authorization":@"Bearer page"}} identity:@{@"sourceID":@"resolver-smoke",@"episodeID":@"episode-headers",@"generation":@6} progress:nil completion:^(NSDictionary *candidate,NSError *failure){
+                if(candidate)nativeResolverSmoke[@"result"]=candidate;
+                if(failure)nativeResolverSmoke[@"error"]=failure;
+                nativeResolverSmoke[@"done"]=@YES;
+            }];
+          }},
+          @{ @"until":^BOOL{return [nativeResolverSmoke[@"done"] boolValue];},@"timeout":@18,@"run":^{
+            NSDictionary *result=nativeResolverSmoke[@"result"];NSError *error=nativeResolverSmoke[@"error"];
+            check([nativeResolverSmoke[@"done"] boolValue]&&!error&&[result[@"_nativeValidated"] boolValue]&&[[NSURL URLWithString:result[@"url"]].path isEqual:@"/native-resolver-header-video.mp4"],@"JSON media candidates retain their explicitly scoped Referer and Authorization headers");
+            [nativeResolverSmoke removeObjectForKey:@"result"];[nativeResolverSmoke removeObjectForKey:@"error"];nativeResolverSmoke[@"done"]=@NO;
+            NSString *unauthorized=[SmokeResolverFixtureBaseURL() stringByAppendingString:@"/native-resolver-unauthorized"];
+            NSString *unavailable=[SmokeResolverFixtureBaseURL() stringByAppendingString:@"/native-resolver-unavailable"];
+            [nativeResolver resolveResult:@{@"url":unauthorized,@"alternates":@[@{@"url":unavailable}]} identity:@{@"sourceID":@"resolver-smoke",@"episodeID":@"episode-auth",@"generation":@7} progress:nil completion:^(__unused NSDictionary *candidate,NSError *failure){
+                if(failure)nativeResolverSmoke[@"error"]=failure;
+                nativeResolverSmoke[@"done"]=@YES;
+            }];
+          }},
+          @{ @"until":^BOOL{return [nativeResolverSmoke[@"done"] boolValue];},@"timeout":@18,@"run":^{
+            NSError *error=nativeResolverSmoke[@"error"];
+            check([nativeResolverSmoke[@"done"] boolValue]&&[error.userInfo[@"resolutionCode"] isEqual:@"AUTH_REQUIRED"]&&[error.userInfo[@"httpStatus"] integerValue]==401,@"authorization status survives same-episode candidate retries for the existing session refresh");
+            [nativeResolverSmoke removeObjectForKey:@"result"];[nativeResolverSmoke removeObjectForKey:@"error"];nativeResolverSmoke[@"done"]=@NO;
             NSString *slow=[SmokeResolverFixtureBaseURL() stringByAppendingString:@"/native-resolver-slow"];
             [nativeResolver resolveResult:@{@"url":slow,@"parse":@1} identity:@{@"sourceID":@"resolver-smoke",@"episodeID":@"episode-old",@"generation":@3} progress:nil completion:^(NSDictionary *candidate,__unused NSError *failure){
                 if([candidate[@"_nativeValidated"] boolValue])nativeResolverSmoke[@"staleSuccesses"]=@([nativeResolverSmoke[@"staleSuccesses"] unsignedIntegerValue]+1);

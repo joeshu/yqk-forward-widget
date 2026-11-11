@@ -2014,6 +2014,58 @@ class Spider:
             server.server_close()
             thread.join(2)
 
+    def test_headerless_mp4_and_quality_alternate_use_normalizing_media_relay(self):
+        mp4 = (b'\x00\x00\x00\x18ftypisom\x00\x00\x02\x00isomiso2' +
+               b'\x00\x00\x00\x10mdat' + b'fixture!')
+        class Upstream(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *_): pass
+            def do_GET(self):
+                if self.path not in ('/primary.mp4', '/alternate.mp4'):
+                    self.send_error(404)
+                    return
+                self.send_response(200)
+                self.send_header('Content-Type', 'image/jpeg')
+                self.send_header('Content-Length', str(len(mp4)))
+                self.end_headers()
+                self.wfile.write(mp4)
+
+        upstream = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Upstream)
+        upstream_thread = threading.Thread(target=upstream.serve_forever, daemon=True)
+        upstream_thread.start()
+        base = f'http://127.0.0.1:{upstream.server_port}'
+        self.engine.spider.playerContent = lambda *_: {
+            'url': base + '/primary.mp4',
+            'alternates': [{'name': '备用清晰度', 'url': base + '/alternate.mp4'}],
+        }
+        server = transport.Server(('127.0.0.1', 0), self.runtime)
+        service_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        service_thread.start()
+        def request(method, path, data=None):
+            client = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=3)
+            try:
+                body = json.dumps(data).encode() if data is not None else None
+                client.request(method, path, body, {'Content-Type': 'application/json'} if body is not None else {})
+                response = client.getresponse()
+                return response.status, dict(response.getheaders()), response.read()
+            finally:
+                client.close()
+        try:
+            status, _, payload = request('POST', '/api/v1/play', {'id': 'episode-1'})
+            self.assertEqual(status, 200)
+            result = json.loads(payload)['data']
+            self.assertEqual(result['originalURL'], base + '/primary.mp4')
+            urls = [result['url'], result['alternates'][0]['url']]
+            self.assertTrue(all(url.startswith(f'http://127.0.0.1:{server.server_port}/media/') for url in urls))
+            self.assertEqual([result['originalURL'], result['alternates'][0]['originalURL']],
+                             [base + '/primary.mp4', base + '/alternate.mp4'])
+            for url in urls:
+                with self.subTest(url=url):
+                    status, headers, body = request('GET', urllib.parse.urlsplit(url).path)
+                    self.assertEqual((status, headers['Content-Type'], body), (200, 'video/mp4', mp4))
+        finally:
+            server.shutdown();server.server_close();service_thread.join(2)
+            upstream.shutdown();upstream.server_close();upstream_thread.join(2)
+
     def test_extensionless_signed_hls_is_mime_sniffed_and_preserves_child_signature(self):
         received = []
         class Upstream(http.server.BaseHTTPRequestHandler):

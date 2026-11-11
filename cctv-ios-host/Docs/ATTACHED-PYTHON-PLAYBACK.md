@@ -27,7 +27,7 @@
 | 附件 | 检查结果 |
 | --- | --- |
 | `guaziAPP.py` | 详情使用 `resolution||720@1080` 一类的分集 ID，宿主能够保留并回传参数；播放接口返回 HLS 地址。该脚本需要 RSA PKCS#1 v1.5 私钥解密接口响应密钥，兼容层此前只有 RSA 公钥加密，因此所有加密 API 响应都会变成空数据。本轮增加 PKCS#1/PKCS#8 私钥导入与 v1.5 解密后，附件的详情选集和 HLS 播放在离线夹具中通过。 |
-| `youkushipin1.py` | 详情能生成分集 ID；`playerContent()` 返回 `/video?vid=…` 页面并标记 `parse/jx`，它没有解析出 HLS/MP4 直链。宿主会尝试合集内明确配置的解析接口，再尝试后台提取；只拿到网页时会保留为待解析页面，不会误标成原生媒体。需要从原合集导入以保留其解析接口；若接口未返回真实媒体地址，则仍不能原生播放。 |
+| `youkushipin1.py` | 详情能生成分集 ID；`playerContent()` 返回 `/video?vid=…` 页面并标记 `parse/jx`，它没有解析出 HLS/MP4 直链。宿主会先按合集顺序尝试最多两个已配置解析接口，再用隐藏 WebKit 执行页面并只提取媒体元数据；通过视频轨道验证后才交给 AVPlayer/CicadaPlayer。需要从原合集导入以保留解析接口；页面若依赖授权 DRM 或无法提取媒体，原生播放仍不可用。 |
 | `3E7E0C8A023B624CEC6BDCC200F06F02.js` | 文件实现 DRPY 通用运行时，内部没有站点 `host`、首页/详情规则或媒体地址，不能单独作为影视站点导入；它需要对应的站点规则配置。 |
 
 本批附件验证只使用离线响应和播放夹具，没有请求上述站点，也没有把附件中的密钥或 Cookie 复制进应用源码。
@@ -36,7 +36,7 @@
 
 `Plugins/host_media_runtime.py` 现在按第一个 `:` 或 `$` 分隔文本请求头，允许 Referer URL 自身包含 `$`。头名按大小写无关方式合并；同一个结果的 `header` 覆盖 `headers`，`customHeaders` 最后覆盖，具体清晰度头覆盖公共头。非法控制字符会被过滤。
 
-PythonSpider 对声明 `format: hls`、HLS MIME 或直接媒体能力的 `.png` / 无后缀地址直接交给播放器，避免多余的网页请求。运行时、PythonSpider 兼容升级和 AppVideoEngine 均不再仅按片名到其他目录替换选中的播放地址：原始网页地址交给宿主网页解析，源返回的直接媒体地址保留。
+PythonSpider 对声明 `format: hls`、HLS MIME 或直接媒体能力的 `.png` / 无后缀地址直接进入原生媒体验证，避免多余的网页请求。运行时、PythonSpider 兼容升级和 AppVideoEngine 均不再仅按片名到其他目录替换选中的播放地址：解析结果必须与当前来源、线路和分集绑定，通过视频内容验证后才交给原生播放器。隐藏 WebKit 只用于执行页面并读取媒体元数据，不展示网页播放器。
 
 ## 离线验证
 
@@ -52,6 +52,6 @@ python -m unittest discover -s cctv-ios-host/Tests -p test_attachment_playback_a
 
 本次附件的 `playerContent()` 都没有返回可供 AVPlayer/CicadaPlayer 解码的 HLS、DASH 或 MP4 媒体地址。优酷直接返回官方 `/video?vid=…` 页面；腾讯原脚本把官方分集页包装到第三方 `jx.xmflv.com`，这仍然是网页解析，不是媒体直链。
 
-为避免黑屏等待，`MediaPlaybackDecodeRouter` 对 `parse/jx/requiresWebPlayback` 页面直接选择应用内网页播放，不再先让两个原生播放器尝试读取 HTML。优酷和腾讯官方 HTTPS 播放页不会提交给合集解析 API。附件适配版 `Tencent-官方网页播放适配版.py` 返回腾讯官方分集页，由官方网页执行登录、订阅及播放授权。
+`parse/jx/requiresWebPlayback` 页面进入本机原生解析流程：只请求当前来源明确绑定的解析接口，随后可在隐藏 WebKit 中执行页面并提取单一媒体地址；HTML、图片、音频和伪造的 HLS 均不会交给播放器。解析媒体需先通过 AVPlayer 视频轨道检查，HLS 则验证清单及分片。附件适配版 `Tencent-官方网页播放适配版.py` 仍只返回腾讯官方分集页，没有媒体 URL；其登录、订阅和会员授权不会自动转换为原生流。
 
-这条路径用于通过官方页面显示画面，不会保证或尝试从会员/DRM 页面提取原生流。要使用 AVPlayer/CicadaPlayer，来源必须通过官方授权接口提供可播放媒体地址及合法请求头；上述附件本身不具备该能力。
+当前附件本身没有证明能产出原生流。需要官方授权接口返回可播放媒体地址及合法请求头；受 DRM 保护、需要许可证或无法从页面安全提取的媒体仍不能由 AVPlayer/CicadaPlayer 播放。

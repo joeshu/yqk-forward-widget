@@ -17,6 +17,38 @@ static NSString *MNRString(id value) {return [value isKindOfClass:NSString.class
 static NSError *MNRError(NSString *code,NSString *message) {
     return [NSError errorWithDomain:@"CCTVHostNativeResolver" code:1 userInfo:@{NSLocalizedDescriptionKey:message?:@"未取得可播放媒体",@"resolutionCode":code?:@"NO_MEDIA"}];
 }
+static NSError *MNRErrorWithHTTPStatus(NSString *code,NSString *message,NSInteger status) {
+    NSMutableDictionary *info=[@{NSLocalizedDescriptionKey:message?:@"未取得可播放媒体",@"resolutionCode":code?:@"NO_MEDIA"} mutableCopy];
+    if(status>=100&&status<=599)info[@"httpStatus"]=@(status);
+    return [NSError errorWithDomain:@"CCTVHostNativeResolver" code:1 userInfo:info.copy];
+}
+static void MNRSetHeader(NSMutableDictionary *headers,NSString *name,NSString *value) {
+    if(!headers||!name.length||!value.length)return;
+    NSString *needle=name.lowercaseString;
+    NSArray *old=[headers.allKeys filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(id key,NSDictionary *bindings){return [key isKindOfClass:NSString.class]&&[[key lowercaseString] isEqual:needle];}]];
+    [headers removeObjectsForKeys:old];headers[name]=value;
+}
+static NSDictionary *MNRResultHeaders(NSDictionary *result) {
+    NSMutableDictionary *headers=[NSMutableDictionary dictionary];
+    NSDictionary *base=[result[@"baseHeaders"] isKindOfClass:NSDictionary.class]?result[@"baseHeaders"]:@{};
+    for(id key in base)if([key isKindOfClass:NSString.class]&&[base[key] isKindOfClass:NSString.class])MNRSetHeader(headers,key,base[key]);
+    NSDictionary *declared=MediaPlaybackHeadersFromResult(result);
+    for(id key in declared)if([key isKindOfClass:NSString.class]&&[declared[key] isKindOfClass:NSString.class])MNRSetHeader(headers,key,declared[key]);
+    return headers.copy;
+}
+static NSString *MNRVisitKey(NSString *url,NSDictionary *headers) {
+    NSMutableString *key=[NSMutableString stringWithString:url?:@""];
+    NSArray *names=[[headers allKeys] sortedArrayUsingSelector:@selector(compare:)];
+    for(id name in names)if([name isKindOfClass:NSString.class])[key appendFormat:@"\n%@:%@",[name lowercaseString],MNRString(headers[name])];
+    return key.copy;
+}
+static NSString *MNRDetectedBinaryFormat(NSData *data) {
+    const uint8_t *bytes=data.bytes;NSUInteger length=data.length;if(!bytes)return @"";
+    if(length>=8&&(!memcmp(bytes+4,"ftyp",4)||!memcmp(bytes+4,"styp",4)||!memcmp(bytes+4,"moof",4)||!memcmp(bytes+4,"moov",4)))return @"mp4";
+    if(length>=9&&!memcmp(bytes,"FLV",3)&&(bytes[4]&1))return @"flv";
+    if(length>=377&&bytes[0]==0x47&&bytes[188]==0x47&&bytes[376]==0x47)return @"ts";
+    return @"";
+}
 static BOOL MNRHTTP(NSURL *url) {
     return url.host.length&&[@[@"http",@"https"] containsObject:url.scheme.lowercaseString]&&!url.user.length&&!url.password.length&&url.absoluteString.length<=16384&&[url.absoluteString rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location==NSNotFound;
 }
@@ -151,6 +183,7 @@ static NSString *MNRCaptureScript(void) {
 - (void)nextEntry;
 - (void)pump;
 - (void)startWebForNode:(NSDictionary *)node;
+- (BOOL)enqueueURL:(NSString *)raw base:(NSURL *)base headers:(NSDictionary *)headers explicitHeaders:(NSDictionary * _Nullable)explicitHeaders depth:(NSUInteger)depth role:(NSString *)role;
 - (void)processData:(NSData *)data response:(NSHTTPURLResponse *)response node:(NSDictionary *)node;
 - (void)finish:(NSDictionary *)media error:(NSError *)error;
 @end
@@ -161,10 +194,13 @@ static NSString *MNRCaptureScript(void) {
     if(!NSThread.isMainThread){dispatch_async(dispatch_get_main_queue(),^{[self resolveResult:result identity:identity progress:progress completion:completion];});return;}
     [self cancel];self.generation++;self.input=[result copy]?:@{};self.identity=[identity copy]?:@{};self.progressBlock=[progress copy];self.completionBlock=[completion copy];self.startedAt=NSDate.timeIntervalSinceReferenceDate;
     self.queue=[NSMutableArray array];self.visited=[NSMutableSet set];self.cookies=[NSMutableArray array];self.observed=[NSMutableDictionary dictionary];self.candidateCount=0;self.entryIndex=0;self.lastError=nil;
-    NSMutableArray *entries=[NSMutableArray array];
+    NSMutableArray *entries=[NSMutableArray array];NSMutableSet *sourceURLs=[NSMutableSet set];NSUInteger sourceCandidateCount=0;
     NSArray *declared=[result[@"resolutionCandidates"] isKindOfClass:NSArray.class]?result[@"resolutionCandidates"]:@[];
-    for(id raw in declared){if(entries.count>=2)break;if(![raw isKindOfClass:NSDictionary.class])continue;NSURL *url=[NSURL URLWithString:MNRString(raw[@"url"])];if(MNRHTTP(url))[entries addObject:raw];}
-    if(!entries.count){NSURL *url=[NSURL URLWithString:MNRString(result[@"url"])];if(MNRHTTP(url))[entries addObject:@{@"url":url.absoluteString,@"headers":MediaPlaybackHeadersFromResult(result),@"kind":@"source"}];}
+    for(id raw in declared){if(entries.count>=2)break;if(![raw isKindOfClass:NSDictionary.class])continue;NSURL *url=[NSURL URLWithString:MNRString(raw[@"url"])];if(MNRHTTP(url)){[entries addObject:raw];[sourceURLs addObject:url.absoluteString];}}
+    if(!entries.count){NSURL *url=[NSURL URLWithString:MNRString(result[@"url"])];if(MNRHTTP(url)){[entries addObject:@{@"url":url.absoluteString,@"headers":MNRResultHeaders(result),@"kind":@"source"}];[sourceURLs addObject:url.absoluteString];sourceCandidateCount++;}}
+    NSUInteger maximumSourceCandidates=sourceCandidateCount?5:4;
+    NSArray *alternates=[result[@"alternates"] isKindOfClass:NSArray.class]?result[@"alternates"]:@[];NSUInteger alternateIndex=0;
+    for(id raw in alternates){NSUInteger index=alternateIndex++;if(sourceCandidateCount>=maximumSourceCandidates)break;if(![raw isKindOfClass:NSDictionary.class])continue;NSDictionary *alternate=raw;NSURL *url=[NSURL URLWithString:MNRString(alternate[@"url"])];if(!MNRHTTP(url)||[sourceURLs containsObject:url.absoluteString])continue;NSMutableDictionary *candidate=[alternate mutableCopy];candidate[@"url"]=url.absoluteString;candidate[@"headers"]=MNRResultHeaders(alternate);candidate[@"kind"]=@"source_alternate";candidate[@"alternateIndex"]=@(index);[entries addObject:candidate.copy];[sourceURLs addObject:url.absoluteString];sourceCandidateCount++;}
     self.entries=entries.copy;
     NSURLSessionConfiguration *config=NSURLSessionConfiguration.ephemeralSessionConfiguration;config.timeoutIntervalForRequest=MNRHTTPTimeout;config.timeoutIntervalForResource=MNRDeadline;config.HTTPShouldSetCookies=NO;config.HTTPCookieStorage=nil;config.URLCache=nil;
     self.session=[NSURLSession sessionWithConfiguration:config delegate:self delegateQueue:NSOperationQueue.mainQueue];
@@ -199,14 +235,24 @@ static NSString *MNRCaptureScript(void) {
     [self.http.task cancel];self.http=nil;[self.probeAsset cancelLoading];self.probeAsset=nil;[self teardownWeb];self.working=NO;self.webStarted=NO;[self.queue removeAllObjects];[self.observed removeAllObjects];
     if(self.entryIndex>=self.entries.count){[self finish:nil error:self.lastError?:MNRError(@"NO_MEDIA",@"来源和所选解析器未返回有效的视频媒体")];return;}
     self.pendingWebNode=nil;self.entry=self.entries[self.entryIndex++];NSURL *url=[NSURL URLWithString:MNRString(self.entry[@"url"])];
-    NSDictionary *headers=MediaPlaybackHeadersFromResult(self.entry);
+    NSDictionary *headers=MNRResultHeaders(self.entry);
+    NSString *kind=MNRString(self.entry[@"kind"]);
+    if([kind isEqual:@"source"]||[kind isEqual:@"source_alternate"]){
+        NSURL *sourceURL=[NSURL URLWithString:MNRString(self.input[@"url"])];
+        NSDictionary *parent=MNRResultHeaders(self.input);
+        NSMutableDictionary *scoped=[[self headers:parent fromURL:sourceURL toURL:url] mutableCopy];
+        if([kind isEqual:@"source_alternate"]){
+            NSDictionary *explicit=[self headers:headers fromURL:url toURL:url];
+            for(id key in explicit)if([key isKindOfClass:NSString.class]&&[explicit[key] isKindOfClass:NSString.class])MNRSetHeader(scoped,key,explicit[key]);
+        }
+        headers=scoped.copy;
+    }
     [self installHeaderCookies:headers forURL:url];
     [self.queue addObject:@{@"url":url.absoluteString,@"headers":headers,@"depth":@0,@"role":@"root",@"scopeURL":url.absoluteString}];[self progress:@"resolving"];[self pump];
 }
 - (void)failed:(NSError *)error {
-    self.lastError=error;
-    NSString *code=MNRString(error.userInfo[@"resolutionCode"]);
-    if([@[@"DRM_UNSUPPORTED",@"AUTH_REQUIRED"] containsObject:code]){[self finish:nil error:error];return;}
+    NSString *code=MNRString(error.userInfo[@"resolutionCode"]),*previous=MNRString(self.lastError.userInfo[@"resolutionCode"]);
+    if(!self.lastError||[code isEqual:@"AUTH_REQUIRED"]||![previous isEqual:@"AUTH_REQUIRED"])self.lastError=error;
     self.working=NO;[self pump];
 }
 - (void)installHeaderCookies:(NSDictionary *)headers forURL:(NSURL *)url {
@@ -227,15 +273,22 @@ static NSString *MNRCaptureScript(void) {
     return clean.copy;
 }
 - (BOOL)enqueueURL:(NSString *)raw base:(NSURL *)base headers:(NSDictionary *)headers depth:(NSUInteger)depth role:(NSString *)role {
-    NSString *address=MNRResolvedString(raw,base);if(!address.length||depth>3||self.candidateCount>=8||[self.visited containsObject:address])return NO;
-    for(NSDictionary *queued in self.queue)if([queued[@"url"] isEqual:address])return NO;
-    NSMutableDictionary *h=[[self headers:headers fromURL:base toURL:[NSURL URLWithString:address]] mutableCopy];
-    if(base.absoluteString.length)h[@"Referer"]=base.absoluteString;
+    return [self enqueueURL:raw base:base headers:headers explicitHeaders:nil depth:depth role:role];
+}
+- (BOOL)enqueueURL:(NSString *)raw base:(NSURL *)base headers:(NSDictionary *)headers explicitHeaders:(NSDictionary *)explicitHeaders depth:(NSUInteger)depth role:(NSString *)role {
+    NSString *address=MNRResolvedString(raw,base);NSURL *target=[NSURL URLWithString:address];if(!address.length||depth>3||self.candidateCount>=8)return NO;
+    NSMutableDictionary *h=[[self headers:headers fromURL:base toURL:target] mutableCopy];
+    NSDictionary *scoped=[self headers:explicitHeaders?:@{} fromURL:target toURL:target];
+    for(id key in scoped)if([key isKindOfClass:NSString.class]&&[scoped[key] isKindOfClass:NSString.class])MNRSetHeader(h,key,scoped[key]);
+    BOOL hasReferer=NO;for(NSString *key in h)if([key.lowercaseString isEqual:@"referer"]){hasReferer=YES;break;}
+    if(!hasReferer&&base.absoluteString.length)MNRSetHeader(h,@"Referer",base.absoluteString);
+    NSString *visitKey=MNRVisitKey(address,h);if([self.visited containsObject:visitKey])return NO;
+    for(NSDictionary *queued in self.queue)if([queued[@"url"] isEqual:address]&&[queued[@"headers"] isEqual:h.copy])return NO;
     [self.queue addObject:@{@"url":address,@"headers":h.copy,@"scopeURL":address,@"depth":@(depth),@"role":role?:@"candidate"}];return YES;
 }
 - (void)pump {
     if(!self.completionBlock||self.working)return;
-    while(self.queue.count){NSDictionary *node=self.queue.firstObject;[self.queue removeObjectAtIndex:0];NSString *address=node[@"url"];if([self.visited containsObject:address])continue;[self.visited addObject:address];self.candidateCount++;if(self.candidateCount>8)break;
+    while(self.queue.count){NSDictionary *node=self.queue.firstObject;[self.queue removeObjectAtIndex:0];NSString *address=node[@"url"];NSString *visitKey=MNRVisitKey(address,node[@"headers"]?:@{});if([self.visited containsObject:visitKey])continue;[self.visited addObject:visitKey];self.candidateCount++;if(self.candidateCount>8)break;
         NSURL *url=[NSURL URLWithString:address];if(!MNRHTTP(url))continue;
         self.working=YES;MNRHTTPContext *context=[MNRHTTPContext new];context.node=node;context.data=[NSMutableData data];context.limit=MNRPageLimit;context.scopeURL=url;context.headers=[[self headers:node[@"headers"]?:@{} fromURL:url toURL:url] mutableCopy];
         NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:MIN(MNRHTTPTimeout,MAX(0.1,MNRDeadline-(NSDate.timeIntervalSinceReferenceDate-self.startedAt)))];request.allHTTPHeaderFields=context.headers;
@@ -251,7 +304,7 @@ static NSString *MNRCaptureScript(void) {
     if(task!=context.task||![response isKindOfClass:NSHTTPURLResponse.class]||!self.completionBlock){completionHandler(NSURLSessionResponseCancel);return;}
     context.response=(NSHTTPURLResponse *)response;
     NSInteger status=context.response.statusCode;
-    if(status<200||status>=300){context.failure=MNRError(status==401||status==403?@"AUTH_REQUIRED":@"RESOLVER_UNAVAILABLE",status==401||status==403?@"媒体或解析接口要求有效登录/授权":@"来源或解析接口返回了错误状态");completionHandler(NSURLSessionResponseCancel);return;}
+    if(status<200||status>=300){context.failure=MNRErrorWithHTTPStatus(status==401||status==403?@"AUTH_REQUIRED":@"RESOLVER_UNAVAILABLE",status==401||status==403?@"媒体或解析接口要求有效登录/授权":@"来源或解析接口返回了错误状态",status);completionHandler(NSURLSessionResponseCancel);return;}
     for(NSHTTPCookie *cookie in [NSHTTPCookie cookiesWithResponseHeaderFields:context.response.allHeaderFields forURL:response.URL])[self mergeCookie:cookie];
     NSString *mime=response.MIMEType.lowercaseString?:@"";
     context.limit=([mime hasPrefix:@"video/"]||[mime hasPrefix:@"audio/"]||[mime containsString:@"octet-stream"])?MNRBinaryLimit:MNRPageLimit;
@@ -260,7 +313,7 @@ static NSString *MNRCaptureScript(void) {
 }
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task didReceiveData:(NSData *)data {
     MNRHTTPContext *context=self.http;if(task!=context.task||!self.completionBlock)return;
-    if(!context.data.length&&data.length){NSString *prefix=MNRText([data subdataWithRange:NSMakeRange(0,MIN((NSUInteger)256,data.length))]);if([prefix containsString:@"#EXTM3U"]||[prefix containsString:@"<MPD"]||[prefix hasPrefix:@"<?xml"])context.limit=MNRPageLimit;}
+    if(data.length){NSMutableData *probe=[context.data mutableCopy];[probe appendData:[data subdataWithRange:NSMakeRange(0,MIN((NSUInteger)4096,data.length))]];NSString *prefix=MNRText([probe subdataWithRange:NSMakeRange(0,MIN((NSUInteger)4096,probe.length))]);NSString *trim=[prefix stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];if([trim hasPrefix:@"#EXTM3U"]||[trim containsString:@"<MPD"]||[trim hasPrefix:@"<?xml"])context.limit=MNRPageLimit;else if(MNRDetectedBinaryFormat(probe).length)context.limit=MNRBinaryLimit;}
     NSUInteger remain=context.limit>context.data.length?context.limit-context.data.length:0;
     if(remain)[context.data appendData:data.length>remain?[data subdataWithRange:NSMakeRange(0,remain)]:data];
     if(data.length>remain||context.data.length>=context.limit){
@@ -383,9 +436,9 @@ static NSString *MNRCaptureScript(void) {
     if(data.length>=9&&memcmp(data.bytes,"FLV",3)==0){const uint8_t *bytes=data.bytes;if(bytes[4]&1){[self acceptURL:url format:@"flv" mime:@"video/x-flv" headers:headers evidence:@"flv_video_flag" node:node];return;}[self failed:MNRError(@"NO_MEDIA",@"FLV 候选只包含音频")];return;}
     if([trim hasPrefix:@"{"]||[trim hasPrefix:@"["]||[mime containsString:@"json"]){
         id payload=[NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingFragmentsAllowed error:NULL];
-        if([payload isKindOfClass:NSDictionary.class]){id code=payload[@"code"];NSString *codeString=[code respondsToSelector:@selector(description)]?[code description]:@"";if([@[@"401",@"403",@"AUTH_REQUIRED",@"LOGIN_REQUIRED"] containsObject:codeString]){[self failed:MNRError(@"AUTH_REQUIRED",@"解析接口要求有效登录或授权")];return;}}
+        if([payload isKindOfClass:NSDictionary.class]){id code=payload[@"code"];NSString *codeString=[code respondsToSelector:@selector(description)]?[code description]:@"";if([@[@"401",@"403",@"AUTH_REQUIRED",@"LOGIN_REQUIRED"] containsObject:codeString]){NSInteger status=[@[@"401",@"403"] containsObject:codeString]?codeString.integerValue:0;[self failed:MNRErrorWithHTTPStatus(@"AUTH_REQUIRED",@"解析接口要求有效登录或授权",status)];return;}}
         NSArray *candidates=[self JSONCandidates:payload depth:0];
-        for(NSDictionary *candidate in candidates){NSString *address=MNRResolvedString(MNRString(candidate[@"url"]),url);if(!address.length)continue;NSMutableDictionary *h=[[self headers:headers fromURL:url toURL:[NSURL URLWithString:address]] mutableCopy];NSDictionary *explicit=MediaPlaybackHeadersFromResult(candidate);[self installHeaderCookies:explicit forURL:[NSURL URLWithString:address]];[h addEntriesFromDictionary:[self headers:explicit fromURL:[NSURL URLWithString:address] toURL:[NSURL URLWithString:address]]];[self enqueueURL:address base:url headers:h depth:[node[@"depth"] unsignedIntegerValue]+1 role:@"json"];}
+        for(NSDictionary *candidate in candidates){NSString *address=MNRResolvedString(MNRString(candidate[@"url"]),url);if(!address.length)continue;NSDictionary *explicit=MNRResultHeaders(candidate);[self installHeaderCookies:explicit forURL:[NSURL URLWithString:address]];[self enqueueURL:address base:url headers:headers explicitHeaders:explicit depth:[node[@"depth"] unsignedIntegerValue]+1 role:@"json"];}
         if(self.queue.count){[self pump];return;}[self failed:MNRError(@"NO_MEDIA",@"解析接口没有返回可验证的媒体地址")];return;
     }
     if(MNRHTTP([NSURL URLWithString:trim])&&trim.length<16384){if([self enqueueURL:trim base:url headers:headers depth:[node[@"depth"] unsignedIntegerValue]+1 role:@"text"]){[self pump];return;}}

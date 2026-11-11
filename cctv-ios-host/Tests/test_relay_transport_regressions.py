@@ -21,6 +21,9 @@ class RelayTransportTests(unittest.TestCase):
         self.seen = []
         # Plausible image disguise followed by three or more aligned TS packets.
         self.payload = b'\x89PNG\r\n\x1a\n' + b'prefix' * 7 + (b'\x47' + b'x' * 187) * 32
+        ftyp = struct.pack('>I4s', 24, b'ftyp') + b'isom\x00\x00\x02\x00isomiso2'
+        self.mp4_payload = ftyp + struct.pack('>I4s', 70008, b'mdat') + b'x' * 70000
+        self.jpeg_payload = b'\xff\xd8\xff\xe0' + b'ordinary image bytes' * 32 + b'\xff\xd9'
         owner = self
 
         class Upstream(http.server.BaseHTTPRequestHandler):
@@ -43,18 +46,26 @@ class RelayTransportTests(unittest.TestCase):
                     self.end_headers()
                     return
                 selected = owner.payload
+                content_type = 'application/octet-stream'
+                if self.path == '/mislabelled.mp4':
+                    selected = owner.mp4_payload
+                    content_type = 'image/jpeg'
+                elif self.path == '/photo.jpg':
+                    selected = owner.jpeg_payload
+                    content_type = 'image/jpeg'
+                whole = selected
                 status = 200
                 if self.headers.get('Range'):
                     first, last = self.headers['Range'].removeprefix('bytes=').split('-', 1)
                     start, end = int(first), int(last)
-                    selected = owner.payload[start:end + 1]
+                    selected = whole[start:end + 1]
                     status = 206
                 self.send_response(status)
-                self.send_header('Content-Type', 'application/octet-stream')
+                self.send_header('Content-Type', content_type)
                 self.send_header('Content-Length', str(len(selected)))
                 self.send_header('Accept-Ranges', 'bytes')
                 if status == 206:
-                    self.send_header('Content-Range', f'bytes {start}-{end}/{len(owner.payload)}')
+                    self.send_header('Content-Range', f'bytes {start}-{end}/{len(whole)}')
                 self.end_headers()
                 if not head:
                     self.wfile.write(selected)
@@ -125,6 +136,28 @@ class RelayTransportTests(unittest.TestCase):
         self.assertEqual((status, body), (200, (b'\x47' + b'x' * 187) * 32))
         self.assertEqual(int(headers['Content-Length']), len(body))
         self.assertEqual(headers['Content-Type'], 'video/mp2t')
+
+    def test_root_mp4_with_image_mime_is_normalized_and_keeps_ranges(self):
+        token = self.relay.register(f'http://127.0.0.1:{self.upstream.server_port}/mislabelled.mp4', {})
+        status, headers, body = self.fetch(token)
+        self.assertEqual((status, headers['Content-Type'], body), (200, 'video/mp4', self.mp4_payload))
+
+        status, headers, body = self.fetch(token, method='HEAD')
+        self.assertEqual((status, headers['Content-Type'], body), (200, 'video/mp4', b''))
+        self.assertEqual(headers['Content-Length'], str(len(self.mp4_payload)))
+
+        for start, end in ((0, 63), (128, 255)):
+            with self.subTest(start=start):
+                status, headers, body = self.fetch(token, headers={'Range': f'bytes={start}-{end}'})
+                self.assertEqual(status, 206)
+                self.assertEqual(headers['Content-Type'], 'video/mp4')
+                self.assertEqual(headers['Content-Range'], f'bytes {start}-{end}/{len(self.mp4_payload)}')
+                self.assertEqual(body, self.mp4_payload[start:end + 1])
+
+    def test_real_jpeg_is_not_mislabeled_as_video(self):
+        token = self.relay.register(f'http://127.0.0.1:{self.upstream.server_port}/photo.jpg', {})
+        status, headers, body = self.fetch(token)
+        self.assertEqual((status, headers['Content-Type'], body), (200, 'image/jpeg', self.jpeg_payload))
 
 
 class RelayTLSVerificationTests(unittest.TestCase):

@@ -1036,7 +1036,7 @@ class Handler(BaseHTTPRequestHandler):
                     result['directMedia'] = True
                     result['nativePlayable'] = True
                 adapt_dash(result, headers)
-                can_relay_primary = (not result.get('proxy') and not result.get('dashRemuxed') and not is_dash_media(result, result.get('url')) and (headers or is_declared_hls(result, result.get('url'))
+                can_relay_primary = (not result.get('proxy') and not result.get('dashRemuxed') and not is_dash_media(result, result.get('url')) and (headers or direct_media or is_declared_hls(result, result.get('url'))
                                      or is_extensionless_url(result.get('url')))
                                      and (not result.get('parse') or direct_media))
                 if can_relay_primary:
@@ -1069,7 +1069,7 @@ class Handler(BaseHTTPRequestHandler):
                                                 is_direct_media_url(address) or
                                                 is_declared_hls(alternate_media, address))
                         if (not is_dash_media(alternate_media, address) and
-                                (alternate_headers or is_declared_hls(alternate_media, address)
+                                (alternate_headers or is_declared_hls(alternate_media, address) or alternate_direct
                              or is_extensionless_url(address))
                                 and (not alternate_media.get('parse') or alternate_direct)):
                             alternate['originalURL'] = address
