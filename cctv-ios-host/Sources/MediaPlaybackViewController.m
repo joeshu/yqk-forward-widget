@@ -1214,7 +1214,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(delay*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
         MediaPlaybackViewController *owner=weakSelf;
         if(!owner)return;
-        NSString *currentURL=[owner.result[@"url"] isKindOfClass:NSString.class]?owner.result[@"url"]:@""];
+        NSString *currentURL=[owner.result[@"url"] isKindOfClass:NSString.class]?owner.result[@"url"]:@"";
         if(lease!=owner.nativeLeaseGeneration||owner.result!=result||![url isEqual:currentURL]||![identity isEqual:[owner nativePlaybackResolutionIdentity]])return;
         [owner refreshNativeSessionForReason:@"native_expiry" httpStatus:0 error:nil];
     });
