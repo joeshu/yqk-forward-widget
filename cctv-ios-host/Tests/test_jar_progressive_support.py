@@ -331,7 +331,7 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
         self.assertFalse(spider.isVideoFormat('https://cdn.test/play/1.html'))
 
         # Verify player_aaaa encrypt=0, 1 (URL-encoded), 2 (Base64 + URL-encoded)
-        html_enc0 = '<script>var player_aaaa={"url":"https:\/\/cdn.test\/stream0.m3u8","encrypt":0}</script>'
+        html_enc0 = r'<script>var player_aaaa={"url":"https:\/\/cdn.test\/stream0.m3u8","encrypt":0}</script>'
         self.assertEqual(_extract_stream_from_html(html_enc0), 'https://cdn.test/stream0.m3u8')
 
         html_enc1 = '<script>var player_aaaa={"url":"https%3A%2F%2Fcdn.test%2Fstream1.m3u8","encrypt":1}</script>'

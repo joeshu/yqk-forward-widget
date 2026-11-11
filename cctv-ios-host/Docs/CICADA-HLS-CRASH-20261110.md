@@ -11,3 +11,7 @@ The public Alibaba CicadaPlayer `framework/demuxer/demuxer_service.cpp` open cal
 The adapter and view controller previously both imposed a fixed 20 second first-frame deadline even when the configured network timeout was up to 40 seconds. The local change makes both use the same max(20 seconds, network timeout + 10 seconds) deadline. This addresses a separate premature-timeout issue and is not a fix for the native crash.
 
 Next validation requires the triggering HLS playlist and headers or a reproducible local HLS fixture, the exact vendor SDK build/source or a supported replacement, and iOS device tests including opening failing/disconnected segments and concurrent stop/destroy. The currently bundled framework must be tested directly; the simulator SDK fixture alone cannot prove the native HLS worker is fixed.
+
+## Status as of 2026-11-11
+
+CCTVHost 1.40 (build 517) passed the iOS build and simulator UI fixture checks in Actions run `43017975409`. Those checks do not exercise the vendor HLS demuxer on a physical device. Commit `d31a377` changed host-side resolution and relay behavior, not the CicadaPlayerSDK binary; the null dereference described above therefore remains an open device risk until reproduced and tested against the exact bundled SDK.

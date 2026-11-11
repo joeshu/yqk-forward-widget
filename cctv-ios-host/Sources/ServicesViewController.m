@@ -423,8 +423,14 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
         } else if (ip.row == 3) {
             if([self opensMedia]){if(self.onBrowseService)self.onBrowseService(self.service);return;}
             NSString *u = [ServiceStore subscriptionURLForService:self.service];
-            if (self.onSubscribe)
-                if(u.length)self.onSubscribe(u);else{UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"未配置直播列表" message:@"请编辑服务，填写或修复播放列表路径后再添加频道。" preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"编辑服务" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self edit];}]];[alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[self presentViewController:alert animated:YES completion:nil];}
+            if (u.length) {
+                if (self.onSubscribe) self.onSubscribe(u);
+            } else {
+                UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"未配置直播列表" message:@"请编辑服务，填写或修复播放列表路径后再添加频道。" preferredStyle:UIAlertControllerStyleAlert];
+                [alert addAction:[UIAlertAction actionWithTitle:@"编辑服务" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self edit];}]];
+                [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+                [self presentViewController:alert animated:YES completion:nil];
+            }
         } else if (ip.row == 4) {
             [self restart];
         }
