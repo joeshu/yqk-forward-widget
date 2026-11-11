@@ -99,7 +99,7 @@ def validate(path):
                     'Crypto/Protocol/__init__.py', 'Crypto/Protocol/KDF.py', 'Crypto/Random/__init__.py'):
                 assert root + 'python/lib/python3.13/site-packages/' + member in z.namelist(), 'missing pure-Python crypto compatibility module: ' + member
             assert root + 'python/lib/python3.13/site-packages/Cryptodome/__init__.py' in z.namelist(), 'missing Cryptodome namespace alias'
-            result['python_crypto_compat'] = ['ARC4', 'AES ECB/CBC/CFB/OFB/CTR/GCM/EAX', 'RSA public-key PKCS#1 v1.5/OAEP', 'MD5/Hash/HMAC/CMAC', 'PBKDF2/HKDF', 'Padding/Counter/number/strxor']
+            result['python_crypto_compat'] = ['ARC4', 'AES ECB/CBC/CFB/OFB/CTR/GCM/EAX', 'RSA PKCS#1 v1.5 public/private import and encrypt/decrypt, OAEP public-key encryption', 'MD5/Hash/HMAC/CMAC', 'PBKDF2/HKDF', 'Padding/Counter/number/strxor']
             result['local_media_runtimes'] = ['Python Spider', 'JavaScriptCore', 'drpy', 'Node.js Mobile']
         if variant == 'full':
             # A JavaHost resource alone is insufficient: require the statically linked JNI bridge too.

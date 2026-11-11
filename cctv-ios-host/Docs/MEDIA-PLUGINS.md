@@ -43,9 +43,9 @@ FFmpeg 版本和解码器能力，并用 `cctvhost_ffmpeg.probe(url, headers={},
 
 Python 同时内置纯 Python `Crypto` 与 `Cryptodome` 兼容包，常见 PyCryptodome
 脚本可直接导入，无需安装桌面 wheel 或加载原生扩展。覆盖 AES ECB/CBC/CFB/OFB/CTR/GCM/EAX、
-MD5/SHA-1/SHA-2/SHA-3/SHAKE、HMAC/CMAC、PBKDF2/HKDF/scrypt、公钥 RSA PKCS#1 v1.5/OAEP
-加密、PKCS#7/X9.23/ISO7816 填充、随机字节和常用 `Crypto.Util` 辅助接口。它不包含完整
-PyCryptodome：RSA 私钥运算与签名、ECC、DES/3DES、ChaCha20、CCM 和原生内部模块仍不支持；
+MD5/SHA-1/SHA-2/SHA-3/SHAKE、HMAC/CMAC、PBKDF2/HKDF/scrypt、RSA PKCS#1 v1.5 公私钥
+导入与加解密、OAEP 公钥加密、PKCS#7/X9.23/ISO7816 填充、随机字节和常用 `Crypto.Util`
+辅助接口。它不包含完整 PyCryptodome：RSA 签名和 OAEP 私钥解密、ECC、DES/3DES、ChaCha20、CCM 和原生内部模块仍不支持；
 依赖这些功能的脚本需要自行适配。
 
 需要高速逐块 AES-CTR 时，Python 还可直接使用宿主内建的 `hostcrypto`，无需 `ctypes`、

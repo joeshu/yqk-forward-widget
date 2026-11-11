@@ -1,6 +1,7 @@
-"""DER/PEM RSA public-key import and PKCS#1 v1.5 encryption."""
+"""DER/PEM RSA key import with PKCS#1 v1.5 encryption and decryption."""
 
 import base64
+import math
 import re
 import secrets
 
@@ -86,10 +87,15 @@ def _parse_der(data):
 
 
 class RsaKey:
-    def __init__(self, n, e):
+    def __init__(self, n, e, d=None, p=None, q=None, dmp1=None, dmq1=None, iqmp=None):
         if not isinstance(n, int) or not isinstance(e, int) or n <= 1 or e <= 1 or not e & 1:
             raise ValueError("invalid RSA public modulus or exponent")
+        if d is not None and (not isinstance(d, int) or d <= 1):
+            raise ValueError("invalid RSA private exponent")
         self.n, self.e = n, e
+        self.d = d
+        self.p, self.q = p, q
+        self.dmp1, self.dmq1, self.iqmp = dmp1, dmq1, iqmp
         self._size = (n.bit_length() + 7) // 8
 
     def size_in_bytes(self):
@@ -109,6 +115,66 @@ class RsaKey:
         encrypted = pow(int.from_bytes(encoded, "big"), self.e, self.n)
         return encrypted.to_bytes(self._size, "big")
 
+    def decrypt(self, ciphertext):
+        if self.d is None:
+            raise TypeError("RSA private-key decryption requires a private key")
+        if not isinstance(ciphertext, (bytes, bytearray, memoryview)):
+            raise TypeError("RSA ciphertext must be bytes-like")
+        ciphertext = bytes(ciphertext)
+        if len(ciphertext) != self._size:
+            raise ValueError("RSA ciphertext has an invalid length")
+        value = int.from_bytes(ciphertext, "big")
+        if value >= self.n:
+            raise ValueError("RSA ciphertext representative is out of range")
+        if (self.p and self.q and self.dmp1 and self.dmq1 and self.iqmp):
+            # PKCS#1 private-key files include CRT parameters. Using them keeps
+            # the pure-Python compatibility path quick for embedded spiders.
+            first = pow(value, self.dmp1, self.p)
+            second = pow(value, self.dmq1, self.q)
+            correction = (self.iqmp * (first - second)) % self.p
+            plain = (second + correction * self.q) % self.n
+        else:
+            plain = pow(value, self.d, self.n)
+        return plain.to_bytes(self._size, "big")
+
+
+def _sequence_fields(data):
+    sequence = _sequence(data)
+    fields = []
+    offset = 0
+    while offset < len(sequence):
+        tag, start, end = _tlv(sequence, offset)
+        fields.append((tag, sequence[start:end]))
+        offset = end
+    return fields
+
+
+def _der_integer(value):
+    if not value or value[0] & 0x80:
+        raise ValueError("invalid RSA private-key integer")
+    return int.from_bytes(value, "big")
+
+
+def _parse_private_der(data):
+    fields = _sequence_fields(data)
+    # PKCS#8 PrivateKeyInfo wraps PKCS#1 RSAPrivateKey in an OCTET STRING.
+    if (len(fields) == 3 and fields[0][0] == 0x02 and fields[1][0] == 0x30
+            and fields[2][0] == 0x04):
+        fields = _sequence_fields(fields[2][1])
+    if len(fields) < 9 or any(tag != 0x02 for tag, _value in fields[:9]):
+        raise ValueError("unsupported RSA private-key encoding")
+    values = [_der_integer(value) for _tag, value in fields[:9]]
+    if values[0] != 0:
+        raise ValueError("multi-prime RSA private keys are not supported")
+    _version, n, e, d, p, q, dmp1, dmq1, iqmp = values
+    if min(n, e, d, p, q, dmp1, dmq1, iqmp) <= 1 or p * q != n:
+        raise ValueError("invalid RSA private-key parameters")
+    if d * e % math.lcm(p - 1, q - 1) != 1:
+        raise ValueError("inconsistent RSA private exponent")
+    if dmp1 != d % (p - 1) or dmq1 != d % (q - 1) or (iqmp * q) % p != 1:
+        raise ValueError("inconsistent RSA CRT parameters")
+    return RsaKey(n, e, d, p, q, dmp1, dmq1, iqmp)
+
 
 def import_key(extern_key, passphrase=None, **kwargs):
     if passphrase is not None or kwargs:
@@ -123,5 +189,9 @@ def import_key(extern_key, passphrase=None, **kwargs):
         if not match:
             raise ValueError("invalid RSA PEM data")
         data = base64.b64decode(re.sub(rb"\s+", b"", match.group(1)), validate=True)
+    try:
+        return _parse_private_der(data)
+    except ValueError:
+        pass
     n, e = _parse_der(data)
     return RsaKey(n, e)

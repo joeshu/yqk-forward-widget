@@ -1477,7 +1477,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         lytvs_python = [site for site in lytvs['sites'] if site['api'].split('?', 1)[0].lower().endswith('.py')]
         self.assertEqual(len(lytvs_python), 223)
         self.assertEqual(sum(site['api'].count('__LYTVS_SUBSCRIPTION_TOKEN__') for site in lytvs['sites']), 218)
-        self.assertTrue((resources / 'zen-keke-stream.js').is_file())
+        self.assertFalse((resources / 'zen-keke-stream.js').exists())
         self.assertIn('installBundledMediaResourcesIfNeeded', self.root)
         self.assertIn('builtin-lytvs-ios', self.root)
         self.assertIn('builtin-for-adm', self.root)

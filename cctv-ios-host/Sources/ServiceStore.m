@@ -148,7 +148,7 @@ static NSString *ServiceCodeWithoutComments(NSString *source){
         NSString *entry=service[@"manifest"][@"entry"];if(!ServiceRelativePath(entry))return nil;
         NSString *target=[service[@"packageRoot"] stringByAppendingPathComponent:entry];
         NSString *bundledID=[service[@"bundledResourceID"] isKindOfClass:NSString.class]?service[@"bundledResourceID"]:@"";
-        NSDictionary *bundleMap=@{@"builtin-hongguo-python":@[@"hongguo-python",@"py"],@"builtin-hongguo-node":@[@"hongguo-node",@"js"],@"zen.keke.rex.stream":@[@"zen-keke-stream",@"js"],@"builtin-webox-4kvm":@[@"webox-4kvm",@"js"],@"builtin-webox-hstream":@[@"webox-hstream",@"js"],@"builtin-webox-guazi":@[@"webox-guazi",@"js"],@"builtin-webox-rou":@[@"webox-rou",@"js"],@"builtin-webox-one":@[@"webox-one",@"js"]};
+        NSDictionary *bundleMap=@{@"builtin-hongguo-python":@[@"hongguo-python",@"py"],@"builtin-hongguo-node":@[@"hongguo-node",@"js"],@"builtin-webox-4kvm":@[@"webox-4kvm",@"js"],@"builtin-webox-hstream":@[@"webox-hstream",@"js"],@"builtin-webox-guazi":@[@"webox-guazi",@"js"],@"builtin-webox-rou":@[@"webox-rou",@"js"],@"builtin-webox-one":@[@"webox-one",@"js"]};
         NSArray *bundleSpec=bundleMap[bundledID];
         if(bundleSpec.count==2&&target.length){
             static NSMutableSet<NSString *> *syncedTargets;

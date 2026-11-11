@@ -5,6 +5,7 @@ credentials are copied into the repository. Media fixtures prove the transport
 contract, not availability or decoding of a remote source.
 """
 import contextlib
+import base64
 import http.client
 import http.server
 import io
@@ -20,6 +21,7 @@ import struct
 import tempfile
 import threading
 import time
+import types
 import unittest
 import urllib.error
 import urllib.parse
@@ -69,6 +71,89 @@ class ImportedSamples(unittest.TestCase):
                 self.assertTrue(loaded._CRYPTO_OK, loaded._CRYPTO_ERR)
                 self.assertIsNotNone(engine.spider._rsa1)
                 self.assertTrue(engine.spider._secure('offline-fixture'))
+            finally:
+                if engine is not None:
+                    engine.close()
+
+    def test_guazi_private_rsa_response_keys_and_direct_hls_playback(self):
+        bridge=sys.modules.get('test_media_runtime') or importlib.import_module('Tests.test_media_runtime')
+        base_spider=importlib.import_module('base.spider')
+        class OfflineResponse:
+            status_code=503
+        with tempfile.TemporaryDirectory() as root, bundled_crypto_compatibility():
+            shutil.copyfile(self.sample('guaziAPP.py'),Path(root)/'source.py')
+            engine=None
+            try:
+                with patch.object(base_spider.Spider,'post',return_value=OfflineResponse()):
+                    engine=bridge.media.PythonSpider(root,'source.py')
+                spider=engine.spider
+                from Crypto.Cipher import PKCS1_v1_5
+                from Crypto.PublicKey import RSA
+                private=RSA.import_key(spider.RSA_PRIVATE_KEY)
+                encrypted=base64.b64encode(PKCS1_v1_5.new(private).encrypt(
+                    b'local encrypted response fixture')).decode('ascii')
+                self.assertEqual(spider.rsa_decrypt(encrypted,spider.RSA_PRIVATE_KEY),
+                                 'local encrypted response fixture')
+
+                signed='https://cdn.fixture.invalid/master.m3u8?sig=a%2Fb'
+                def fixture_data(_params,path,use_cache=True):
+                    if path=='/App/IndexPlay/playInfo':
+                        return {'vodInfo':{'vod_id':'fixture-id','vod_name':'本地回归片'}}
+                    if path=='/App/Resource/Vurl/show':
+                        return {'list':[{'play':{
+                            '720':{'param':'resourceId=fixture'},
+                            '1080':{'param':'resourceId=fixture'}}}]}
+                    return {'url':signed}
+                with patch.object(spider,'get_data',side_effect=fixture_data) as resolve:
+                    detail_raw=engine.call('detail',{'id':'fixture-id'})
+                    detail=bridge.media.detail(detail_raw,'fixture-id')
+                    episode=detail['lines'][0]['episodes'][0]
+                    self.assertEqual(episode['id'],'resourceId=fixture||720@1080')
+                    raw=engine.call('play',{'lineId':detail['lines'][0]['id'],'id':episode['id']})
+                play_resolve=resolve.call_args
+                self.assertEqual(play_resolve.args[0]['resolution'],'1080')
+                self.assertEqual(play_resolve.args[1],'/App/Resource/VurlDetail/showOne')
+                result=bridge.media.playback(raw)
+                self.assertEqual(result['url'],signed)
+                self.assertTrue(result['nativePlayable'])
+                self.assertEqual(result['headers']['User-Agent'],'Lavf/57.83.100')
+            finally:
+                if engine is not None:
+                    engine.close()
+
+    def test_youku_attachment_stays_a_parse_page_until_a_stream_is_extracted(self):
+        bridge=sys.modules.get('test_media_runtime') or importlib.import_module('Tests.test_media_runtime')
+        class Session:
+            def __init__(self):
+                self.headers={}
+                self.cookies={}
+            def get(self,*_args,**_kwargs):
+                return object()
+        session=Session()
+        requests_stub=types.SimpleNamespace(Session=lambda:session)
+        with tempfile.TemporaryDirectory() as root, bundled_crypto_compatibility():
+            shutil.copyfile(self.sample('youkushipin1.py'),Path(root)/'source.py')
+            engine=None
+            try:
+                with patch.dict(sys.modules,{'requests':requests_stub}):
+                    engine=bridge.media.PythonSpider(root,'source.py')
+                class DetailResponse:
+                    def json(self):
+                        return {'data':{'showVideotype':'电视剧','vid':'fixture-video'}}
+                engine.spider.session.get=lambda *_args,**_kwargs:DetailResponse()
+                engine.spider.getinfo=lambda _params:({'nodes':[{'data':{
+                    'title':'第 1 集','action':{'value':'fixture-episode-id'}}}]},1)
+                detail_raw=engine.call('detail',{'id':'fixture-show-id'})
+                detail=bridge.media.detail(detail_raw,'fixture-show-id')
+                episode=detail['lines'][0]['episodes'][0]
+                self.assertEqual(episode['id'],'fixture-episode-id')
+                raw=engine.call('play',{'lineId':detail['lines'][0]['id'],'id':episode['id']})
+                result=bridge.media.playback(raw)
+                self.assertTrue(result['requiresWebPlayback'])
+                self.assertFalse(result['nativePlayable'])
+                self.assertEqual(result['parse'],1)
+                self.assertEqual(result['jx'],1)
+                self.assertIn('/video?vid=fixture-episode-id',result['url'])
             finally:
                 if engine is not None:
                     engine.close()

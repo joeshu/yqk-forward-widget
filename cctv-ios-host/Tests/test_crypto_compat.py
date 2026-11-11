@@ -28,6 +28,38 @@ CMAC = importlib.import_module(PACKAGE_NAME + '.Hash.CMAC')
 KDF = importlib.import_module(PACKAGE_NAME + '.Protocol.KDF')
 PKCS1_OAEP = importlib.import_module(PACKAGE_NAME + '.Cipher.PKCS1_OAEP')
 
+
+def der(tag, payload):
+    size = len(payload)
+    if size < 0x80:
+        length = bytes([size])
+    else:
+        raw = size.to_bytes((size.bit_length() + 7) // 8, 'big')
+        length = bytes([0x80 | len(raw)]) + raw
+    return bytes([tag]) + length + payload
+
+
+def der_integer(value):
+    raw = value.to_bytes((value.bit_length() + 7) // 8 or 1, 'big')
+    if raw[0] & 0x80:
+        raw = b'\x00' + raw
+    return der(0x02, raw)
+
+
+def rsa_private_fixture():
+    # Mersenne primes make a deterministic, dependency-free test key. This is
+    # test-only material and is unrelated to any attached provider key.
+    p, q = (1 << 521) - 1, (1 << 607) - 1
+    n, e = p * q, 65537
+    lam = __import__('math').lcm(p - 1, q - 1)
+    d = pow(e, -1, lam)
+    dmp1, dmq1, iqmp = d % (p - 1), d % (q - 1), pow(q, -1, p)
+    fields = (0, n, e, d, p, q, dmp1, dmq1, iqmp)
+    pkcs1 = der(0x30, b''.join(der_integer(value) for value in fields))
+    algorithm = der(0x30, bytes.fromhex('06092a864886f70d0101010500'))
+    pkcs8 = der(0x30, der_integer(0) + algorithm + der(0x04, pkcs1))
+    return pkcs1, pkcs8
+
 cryptodomex_spec = importlib.util.spec_from_file_location(
     'Cryptodome', COMPAT_PARENT / 'Cryptodome' / '__init__.py',
     submodule_search_locations=[str(COMPAT_PARENT / 'Cryptodome')])
@@ -193,6 +225,24 @@ class CryptoCompatibilityTests(unittest.TestCase):
         self.assertNotEqual(first, second, 'PKCS#1 v1.5 encryption needs fresh non-zero padding')
         with self.assertRaises(ValueError):
             encryptor.encrypt(b'x' * 118)
+
+    def test_rsa_pkcs1_v15_private_import_and_decryption(self):
+        pkcs1, pkcs8 = rsa_private_fixture()
+        for encoded in (pkcs1, pkcs8):
+            with self.subTest(encoding='PKCS#1' if encoded is pkcs1 else 'PKCS#8'):
+                private_key = RSA.import_key(encoded)
+                cipher = PKCS1_v1_5.new(private_key)
+                encrypted = cipher.encrypt(b'local provider fixture')
+                self.assertEqual(cipher.decrypt(encrypted), b'local provider fixture')
+                sentinel = object()
+                self.assertIs(cipher.decrypt(bytes(private_key.size_in_bytes()), sentinel), sentinel)
+
+        public = RSA.import_key(base64.b64decode(
+            'MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCr8SzZhjYy+rsya1K09t8d2K50pWFoBkgUqMpKOiW+'
+            '3IEVKd4eTdvg9RSOjQ82kypL6R9BnsmrS1V8s4PVDwjQbUtYhTPPC9Hz16qY7rpD6m0d2vr09/UpWQ5u'
+            'Oy9PR0QTrsioveZ+DIe9jc3C+zBCu/kZSY/R8stwJoiitki3gwIDAQAB'))
+        with self.assertRaises(TypeError):
+            PKCS1_v1_5.new(public).decrypt(bytes(public.size_in_bytes()))
 
     def test_malformed_rsa_der_is_rejected(self):
         with self.assertRaises(ValueError):
