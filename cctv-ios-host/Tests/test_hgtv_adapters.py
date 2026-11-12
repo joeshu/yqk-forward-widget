@@ -1,3 +1,4 @@
+import gzip
 import json
 import importlib.util
 import os
@@ -242,8 +243,7 @@ class HgtvAdapterTests(unittest.TestCase):
         }
         for module in (hgtv,):
             with self.subTest(version=module.VERSION):
-                # 当前唯一 Python 适配使用签名 multi_video_model 与 ttEncrypt 注册。
-                is_new = hasattr(module, '_post_bytes')
+                # r6：主路 video_tab GET（551 签名），空响应时回退 gzip 正文的 multi POST。
                 calls = []
                 prev_dir = module._DEC_DIR
                 module._DEC_DIR = os.path.join(self.tmp.name, f'cache-{module.VERSION}')
@@ -251,16 +251,27 @@ class HgtvAdapterTests(unittest.TestCase):
                 for vid in episodes:
                     module._SIGN_CACHE.pop(vid, None)
 
-                class Response:
-                    def __init__(self, payload):
-                        self.payload = payload
-                    def __enter__(self): return self
-                    def __exit__(self, *_args): return False
-                    def read(self, _limit=-1): return self.payload
-
                 def reg_ids():
                     reg_index = sum(1 for c in calls if urlsplit(c['url']).path.endswith('/device_register/'))
                     return f'770199887766550{reg_index}', f'770199887766990{reg_index}'
+
+                def model_payload():
+                    return json.dumps({
+                        'code': 0,
+                        'data': {
+                            'video_model': json.dumps(five_tier_model),
+                        }
+                    }).encode('utf-8')
+
+                def fake_get(url, headers, timeout, max_bytes=8 * 1024 * 1024):
+                    calls.append({
+                        'url': url,
+                        'method': 'GET',
+                        'body': None,
+                        'headers': {key.lower(): value for key, value in headers.items()},
+                        'timeout': timeout,
+                    })
+                    return model_payload()
 
                 def fake_post(url, body, headers, timeout, max_bytes=8 * 1024 * 1024):
                     calls.append({
@@ -279,43 +290,12 @@ class HgtvAdapterTests(unittest.TestCase):
                             'device_id': int(did),
                             'install_id': int(iid),
                         }).encode('utf-8')
-                    return json.dumps({
-                        'code': 0,
-                        'data': {
-                            'video_model': json.dumps(five_tier_model),
-                        }
-                    }).encode('utf-8')
-
-                def fake_urlopen(request, timeout):
-                    calls.append({
-                        'url': request.full_url,
-                        'method': request.get_method(),
-                        'body': request.data,
-                        'headers': {key.lower(): value for key, value in request.header_items()},
-                        'timeout': timeout,
-                    })
-                    parsed = urlsplit(request.full_url)
-                    if parsed.path.endswith('/device_register/'):
-                        did, iid = reg_ids()
-                        return Response(json.dumps({
-                            'device_id_str': did,
-                            'install_id_str': iid,
-                            'device_id': int(did),
-                            'install_id': int(iid),
-                        }).encode('utf-8'))
-                    return Response(json.dumps({
-                        'code': 0,
-                        'data': {
-                            'video_model': json.dumps(five_tier_model),
-                        }
-                    }).encode('utf-8'))
+                    return model_payload()
 
                 try:
                     with ExitStack() as stack:
-                        if is_new:
-                            stack.enter_context(mock.patch.object(module, '_post_bytes', side_effect=fake_post))
-                        else:
-                            stack.enter_context(mock.patch.object(module._ureq, 'urlopen', side_effect=fake_urlopen))
+                        stack.enter_context(mock.patch.object(module, '_get_bytes', side_effect=fake_get))
+                        stack.enter_context(mock.patch.object(module, '_post_bytes', side_effect=fake_post))
                         for vid in episodes:
                             model = module._signed_model(vid)
                             self.assertIsNotNone(model)
@@ -325,78 +305,95 @@ class HgtvAdapterTests(unittest.TestCase):
                                 self.assertEqual(picked[1], q)
                             self.assertEqual(module._pick_best(model, None)[1], '1080p')
 
-                    # 1 anonymous device_register + 3 episode video_model requests (reusing registered device)
+                    # 1 anonymous device_register + 3 episode video_tab GETs (reusing registered device)
                     self.assertEqual(len(calls), 4)
                     reg_call = calls[0]
                     reg_url = urlsplit(reg_call['url'])
                     self.assertEqual(reg_call['method'], 'POST')
                     self.assertEqual(reg_url.path, '/service/2/device_register/')
-                    if is_new:
-                        self.assertEqual(reg_url.hostname, 'log5-applog-lf.fqnovel.com')
-                        self.assertEqual(parse_qs(reg_url.query).get('tt_data'), ['a'])
-                        # ttEncrypt 体：746305100000 + 32 字节随机数 + AES-CBC 密文
-                        self.assertIsInstance(reg_call['body'], bytes)
-                        self.assertTrue(reg_call['body'].startswith(bytes.fromhex('746305100000')))
-                        self.assertEqual(reg_call['headers'].get('content-type'),
-                                         'application/octet-stream;tt-data=a')
-                        self.assertEqual(reg_call['headers'].get('log-encode-type'), 'gzip')
-                        self.assertEqual(reg_call['headers'].get('accept-encoding'), 'identity')
-                    else:
-                        self.assertEqual(reg_url.hostname, 'log5-applog.fqnovel.com')
-                        reg_body = json.loads(reg_call['body'].decode('utf-8'))
-                        self.assertEqual(reg_body['magic_tag'], 'ss_app_log')
-                        self.assertEqual(reg_body['header']['aid'], 8662)
-                        self.assertEqual(reg_body['header']['package'], 'com.phoenix.read')
-                        self.assertNotEqual(module._branch_of(reg_call['url'], reg_call['body'],
-                                                              int(reg_call['headers']['x-khronos'])), 1)
-
+                    self.assertEqual(reg_url.hostname, 'log5-applog-lf.fqnovel.com')
+                    self.assertEqual(parse_qs(reg_url.query).get('tt_data'), ['a'])
+                    # ttEncrypt 体：746305100000 + 32 字节随机数 + AES-CBC 密文
+                    self.assertIsInstance(reg_call['body'], bytes)
+                    self.assertTrue(reg_call['body'].startswith(bytes.fromhex('746305100000')))
+                    self.assertEqual(reg_call['headers'].get('content-type'),
+                                     'application/octet-stream;tt-data=a')
+                    self.assertEqual(reg_call['headers'].get('log-encode-type'), 'gzip')
+                    self.assertEqual(reg_call['headers'].get('accept-encoding'), 'identity')
                     for idx, vid in enumerate(episodes):
                         play_call = calls[idx + 1]
                         play_url = urlsplit(play_call['url'])
-                        self.assertEqual(play_call['method'], 'POST')
+                        self.assertEqual(play_call['method'], 'GET')
                         self.assertEqual(play_url.hostname, 'api5-normal-sinfonlineb.fqnovel.com')
+                        self.assertEqual(play_url.path, '/reading/bookapi/video_tab/multi_video_model/v1/')
                         query = parse_qs(play_url.query)
                         self.assertEqual(query['device_id'], ['7701998877665501'])
                         self.assertEqual(query['iid'], ['7701998877669901'])
-                        body_json = json.loads(play_call['body'].decode('utf-8'))
-                        self.assertTrue(body_json['biz_param']['need_all_video_definition'])
-                        self.assertTrue(play_call['headers'].get('x-gorgon'))
-                        self.assertTrue(play_call['headers'].get('x-helios'))
-                        branch = module._branch_of(play_call['url'], play_call['body'],
-                                                   int(play_call['headers']['x-khronos']))
-                        if is_new:
-                            self.assertEqual(play_url.path, '/novel/player/multi_video_model/v1/')
-                            self.assertEqual(query['version_code'], ['71332'])
-                            self.assertTrue(query.get('cdid'))
-                            self.assertNotIn('openudid', query)
-                            self.assertNotIn('key_register_ts', query)
-                            self.assertNotIn('req_type', query)
-                            self.assertEqual(body_json['mixed_video_id_map'], {'1004': [vid]})
-                            self.assertNotIn('video_id', body_json)
-                            self.assertNotIn('content_type', body_json)
-                            self.assertEqual(body_json['biz_param']['video_platform'], 1024)
-                            self.assertEqual(body_json['biz_param']['detail_page_version'], 0)
-                            self.assertEqual(play_call['headers'].get('user-agent'), module._PLAYBACK_UA)
-                            self.assertTrue(play_call['headers'].get('x-medusa'))
-                            self.assertEqual(play_call['headers'].get('x-tt-store-region'), 'cn')
-                            self.assertNotIn('cookie', play_call['headers'])
-                            self.assertNotIn('x-ss-stub', play_call['headers'])
-                            self.assertNotIn('x-tt-request-tag', play_call['headers'])
-                            self.assertEqual(branch, 0)
-                        else:
-                            self.assertEqual(play_url.path, '/novel/player/video_model/v1/')
-                            self.assertEqual(query['version_code'], ['73532'])
-                            self.assertTrue(query.get('cdid'))
-                            self.assertTrue(query.get('openudid'))
-                            self.assertTrue(query.get('rom_version'))
-                            self.assertTrue(query.get('key_register_ts'))
-                            self.assertEqual(query.get('req_type'), ['1'])
-                            self.assertEqual(body_json['video_id'], vid)
-                            self.assertEqual(body_json['content_type'], 1)
-                            self.assertEqual(body_json['biz_param']['video_platform'], 3)
-                            self.assertTrue(play_call['headers'].get('x-ss-stub'))
-                            self.assertIn('install_id=7701998877669901', play_call['headers'].get('cookie', ''))
-                            self.assertNotEqual(branch, 1)
+                        self.assertEqual(query['version_code'], ['73932'])
+                        self.assertEqual(query['version_name'], ['7.3.9.32'])
+                        self.assertEqual(query['video_id'], [vid])
+                        self.assertTrue(query.get('cdid'))
+                        self.assertNotIn('openudid', query)
+                        headers = play_call['headers']
+                        self.assertTrue(headers.get('x-argus'))
+                        self.assertTrue(headers.get('x-ladon'))
+                        self.assertEqual(headers.get('x-tt-request-tag'), 't=0;n=0')
+                        self.assertEqual(headers.get('passport-sdk-version'), '50561')
+                        self.assertEqual(headers.get('user-agent'),
+                                         module._VIDEO_UA_TMPL % '73932')
+                        self.assertEqual(headers.get('x-tt-store-region'), 'cn')
+                        self.assertNotIn('x-gorgon', headers)
+                        self.assertNotIn('x-medusa', headers)
+                        self.assertNotIn('x-ss-stub', headers)
+                        self.assertNotIn('cookie', headers)
+
+                    # GET 空响应 → 重新注册 → gzip 正文 multi POST 回退（单集场景）
+                    calls.clear()
+                    module._DEVICE_SESSION = None
+                    module._SIGN_CACHE.pop(episodes[0], None)
+
+                    def fake_get_empty(url, headers, timeout, max_bytes=8 * 1024 * 1024):
+                        calls.append({
+                            'url': url,
+                            'method': 'GET',
+                            'body': None,
+                            'headers': {key.lower(): value for key, value in headers.items()},
+                            'timeout': timeout,
+                        })
+                        return b''
+
+                    with ExitStack() as stack:
+                        stack.enter_context(mock.patch.object(module, '_get_bytes', side_effect=fake_get_empty))
+                        stack.enter_context(mock.patch.object(module, '_post_bytes', side_effect=fake_post))
+                        model = module._signed_model(episodes[0])
+                    self.assertIsNotNone(model)
+                    self.assertEqual(module._pick_best(model, None)[1], '1080p')
+                    # 调用顺序：注册 → GET（空）→ 重新注册 → POST（回退，取回模型）
+                    self.assertEqual([c['method'] for c in calls], ['POST', 'GET', 'POST', 'POST'])
+                    post_call = calls[3]
+                    post_url = urlsplit(post_call['url'])
+                    self.assertEqual(post_url.hostname, 'api5-normal-sinfonlineb.fqnovel.com')
+                    self.assertEqual(post_url.path, '/novel/player/multi_video_model/v1/')
+                    post_query = parse_qs(post_url.query)
+                    self.assertEqual(post_query['version_code'], ['74332'])
+                    self.assertEqual(post_query['version_name'], ['7.4.3.32'])
+                    self.assertEqual(post_query['device_id'], ['7701998877665502'])
+                    body_json = json.loads(gzip.decompress(post_call['body']).decode('utf-8'))
+                    self.assertTrue(body_json['biz_param']['need_all_video_definition'])
+                    self.assertEqual(body_json['mixed_video_id_map'], {'1004': [episodes[0]]})
+                    self.assertEqual(body_json['biz_param']['video_platform'], 1024)
+                    post_headers = post_call['headers']
+                    self.assertEqual(post_headers.get('content-encoding'), 'gzip')
+                    self.assertEqual(post_headers.get('passport-sdk-version'), '5051452')
+                    self.assertTrue(post_headers.get('x-argus'))
+                    self.assertTrue(post_headers.get('x-ladon'))
+                    self.assertTrue(post_headers.get('x-ss-stub'))
+                    self.assertEqual(post_headers.get('user-agent'),
+                                     module._VIDEO_UA_TMPL % '74332')
+                    self.assertEqual(post_headers.get('x-tt-store-region'), 'cn')
+                    self.assertNotIn('x-gorgon', post_headers)
+                    self.assertNotIn('x-medusa', post_headers)
+                    self.assertNotIn('cookie', post_headers)
                 finally:
                     module._DEC_DIR = prev_dir
                     module._DEVICE_SESSION = None
@@ -503,6 +500,13 @@ class HgtvAdapterTests(unittest.TestCase):
                         'data': {'key_seed': seed_b64, 'video_model': json.dumps({'key_seed': seed_b64, 'video_list': vlist})},
                     }).encode('utf-8')
 
+                def fake_get(url, headers, timeout, max_bytes=8 * 1024 * 1024):
+                    u = urlsplit(url)
+                    if u.path == '/reading/bookapi/video_tab/multi_video_model/v1/':
+                        vid = parse_qs(u.query)['video_id'][0]
+                        return model_response(vid)
+                    raise AssertionError(f'unexpected URL {url}')
+
                 def fake_post(url, body, headers, timeout, max_bytes=8 * 1024 * 1024):
                     u = urlsplit(url)
                     if u.path.endswith('/device_register/'):
@@ -511,7 +515,7 @@ class HgtvAdapterTests(unittest.TestCase):
                             'install_id_str': '7701998877669988',
                         }).encode('utf-8')
                     if u.path == '/novel/player/multi_video_model/v1/':
-                        req_body = json.loads(body.decode('utf-8'))
+                        req_body = json.loads(gzip.decompress(body).decode('utf-8'))
                         return model_response(req_body['mixed_video_id_map']['1004'][0])
                     raise AssertionError(f'unexpected URL {url}')
 
@@ -540,6 +544,7 @@ class HgtvAdapterTests(unittest.TestCase):
                     with ExitStack() as stack:
                         stack.enter_context(mock.patch.object(module, '_ffmpeg_path', return_value=''))
                         if hasattr(module, '_post_bytes'):
+                            stack.enter_context(mock.patch.object(module, '_get_bytes', side_effect=fake_get))
                             stack.enter_context(mock.patch.object(module, '_post_bytes', side_effect=fake_post))
                             stack.enter_context(mock.patch.object(module._ureq, 'urlopen', side_effect=fake_urlopen))
                         else:

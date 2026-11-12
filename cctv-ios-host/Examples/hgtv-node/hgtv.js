@@ -27,12 +27,15 @@ const path = require('node:path');
 const zlib = require('node:zlib');
 
 // ---------------- 配置 ----------------
-const VERSION = '1.0.5-cctvhost-r5';
+const VERSION = '1.0.5-cctvhost-r6';
 const SITE = 'https://hongguoduanju.com';
 const DEVICE_REGISTER_API = 'https://log5-applog-lf.fqnovel.com/service/2/device_register/?tt_data=a&cronet_version=8d40f833_2026-03-03&ttnet_version=4.2.243.31-douyin&use_store_region_cookie=1';
 const VIDEO_MODEL_API = 'https://api5-normal-sinfonlineb.fqnovel.com/novel/player/multi_video_model/v1/';
+const VIDEO_TAB_API = 'https://api5-normal-sinfonlineb.fqnovel.com/reading/bookapi/video_tab/multi_video_model/v1/';
 const VIDEO_MODEL_ALT_HOST = 'api5-normal-hl.fqnovel.com';
 const VIDEO_MODEL_MULTI_API = 'https://reading.snssdk.com/reading/bookapi/video_tab/multi_video_model/v1/';
+// r6：播放模型 UA 与设备画像（主路 video_tab 用 73932，POST 回退用 74332）
+const VIDEO_UA_TMPL = 'com.phoenix.read/%s (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)';
 const UA_WEB = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148';
 const UA_APP = 'com.phoenix.read/71532 (Linux; U; Android 9; SM-N9860; Build/PQ3A.190705.10241111;tt-ok/3.12.13.20)';
 
@@ -50,6 +53,12 @@ const DEVICE = {
 const SPADE_CONST = Buffer.from(
   '4dd4c2e6b83162090e52b3c7a6733ba41cb2462b829ab58a196b39db57177524' +
   'f49baf7f08e8d68d26a72e37c1a95a2f1f05a51892aef2949732b62a38aadd58', 'hex');
+
+// r6 设备画像：主路 video_tab 用 73932，POST 回退用 74332
+const TAB_DEVICE = Object.assign({}, DEVICE, { version_code: '73932', version_name: '7.3.9.32',
+  manifest_version_code: '73932', update_version_code: '73932', pv_player: '73932' });
+const POST_DEVICE = Object.assign({}, DEVICE, { version_code: '74332', version_name: '7.4.3.32',
+  manifest_version_code: '74332', update_version_code: '74332', pv_player: '74332' });
 
 let CACHE_DIR = path.join(process.cwd(), 'hgtv-js-cache');
 
@@ -549,7 +558,147 @@ async function fetchFallbackVideoModel(fbUrl, seedHint) {
   };
 }
 
+// ---------------- 551 真实播放签名（r6） ----------------
+// Argus/Ladon 签名，移植自上游 GPL-3.0 实现（N3urda/hongguoTV 的 Argus.kt，
+// 经 jackotom/hongguo-drama 的 playback-signature.js；协议常量非账号凭据）。
+// 旧的 x-ladon/x-argus 只是时间戳的 base64，服务端自 2026-11-12 起静默丢弃
+// 这类请求（200 + 空体）；只有真实 551 签名能取回模型。
+const LICENSE_ID_551 = 1611921764n;
+const SIGN_KEY_551 = Buffer.from('fc78e0a9657a0c748ce51559903ccf03510e51d3cff232d71343e88a321c5304', 'hex');
+const AES_KEY_551 = Buffer.from('d31e3718288a1027baab59f146a09a9c', 'hex');
+const AES_IV_551 = Buffer.from('ea180a0336ed352fcd24e4d50018ae54', 'hex');
+const MAGIC8_551 = Buffer.from('f2f7fcfff2f7fcff', 'hex');
+const TAIL9_551 = Buffer.from('eafb2cfe8568519154', 'hex');
+const u64_551 = value => BigInt.asUintN(64, value);
+const rol64_551 = (value, bits) => u64_551((u64_551(value) << BigInt(bits)) | (u64_551(value) >> BigInt(64 - bits)));
+const ror64_551 = (value, bits) => rol64_551(value, 64 - bits);
+const integer551 = value => {
+  if (typeof value === 'bigint') return value;
+  if (!Number.isSafeInteger(value)) throw new TypeError('Safe integer or BigInt required');
+  return BigInt(value);
+};
+const le64_551 = value => { const out = Buffer.alloc(8); out.writeBigUInt64LE(u64_551(value)); return out; };
+function varint551(value) {
+  let n = BigInt.asUintN(32, integer551(value));
+  const out = [];
+  while (n >= 128n) { out.push(Number(n & 127n) | 128); n >>= 7n; }
+  out.push(Number(n));
+  return Buffer.from(out);
+}
+class ProtoBuf551 {
+  constructor() { this.parts = []; }
+  putVarint(tag, value) { this.parts.push(varint551(BigInt(tag) << 3n), varint551(value)); return this; }
+  putBytes(tag, bytes) { const value = Buffer.from(bytes); this.parts.push(varint551((BigInt(tag) << 3n) | 2n), varint551(value.length), value); return this; }
+  putUtf8(tag, value) { return this.putBytes(tag, Buffer.from(value, 'utf8')); }
+  putProtobuf(tag, value) { return this.putBytes(tag, value.toBuf()); }
+  toBuf() { return Buffer.concat(this.parts); }
+}
+const Simon551 = {
+  keyExpansion(key) {
+    if (!Array.isArray(key) || key.length !== 4) throw new TypeError('Four Simon key words required');
+    const expanded = key.map(value => u64_551(integer551(value)));
+    for (let i = 4; i < 72; i++) {
+      let tmp = ror64_551(expanded[i - 1], 3) ^ expanded[i - 3];
+      tmp ^= ror64_551(tmp, 1);
+      const bit = (0x3dc94c3a046d678bn >> BigInt((i - 4) % 62)) & 1n;
+      expanded.push(u64_551(~expanded[i - 4] ^ tmp ^ bit ^ 3n));
+    }
+    return expanded;
+  },
+  encrypt(left, right, key) {
+    let x = u64_551(integer551(left)), y = u64_551(integer551(right));
+    for (const roundKey of Simon551.keyExpansion(key)) {
+      const previous = y;
+      y = u64_551(x ^ (rol64_551(y, 1) & rol64_551(y, 8)) ^ rol64_551(y, 2) ^ roundKey);
+      x = previous;
+    }
+    return [x, y];
+  },
+};
+const pad16_551 = data => Buffer.concat([data, Buffer.alloc(16 - data.length % 16, 16 - data.length % 16)]);
+function queryParam551(query, name) {
+  const decode = value => { try { return decodeURIComponent(value.replace(/\+/g, ' ')); } catch { return value; } };
+  for (const part of query.split('&')) {
+    const at = part.indexOf('='), key = at < 0 ? part : part.slice(0, at);
+    if (decode(key) === name) return decode(at < 0 ? '' : part.slice(at + 1));
+  }
+  return null;
+}
+const Argus551 = {
+  bodyHash(stubHex) {
+    if (!stubHex) return sm3(Buffer.alloc(16)).subarray(0, 6);
+    const bytes = /^(?:[a-f\d]{2})+$/i.test(stubHex) ? Buffer.from(stubHex, 'hex') : Buffer.alloc(0);
+    return sm3(bytes).subarray(0, 6);
+  },
+  queryHash(query) { return sm3(query ? Buffer.from(query, 'utf8') : Buffer.alloc(16)).subarray(0, 6); },
+  sign(query, stubHex, ts, aid, licenseId, deviceId, installId, randField) {
+    if (typeof query !== 'string' || typeof stubHex !== 'string' || typeof deviceId !== 'string' || typeof installId !== 'string') throw new TypeError('String protocol fields required');
+    const bean = new ProtoBuf551().putVarint(1, 1077940818).putVarint(2, 2).putVarint(3, randField)
+      .putUtf8(4, String(integer551(aid) === 0n ? 1967n : integer551(aid))).putUtf8(5, deviceId)
+      .putUtf8(6, String(integer551(licenseId) === 0n ? LICENSE_ID_551 : integer551(licenseId)))
+      .putUtf8(7, queryParam551(query, 'version_name') || '').putUtf8(8, 'v04.04.05-ov-android')
+      .putVarint(9, 134744640).putBytes(10, Buffer.alloc(8)).putVarint(11, 0).putVarint(12, integer551(ts) << 1n)
+      .putBytes(13, Argus551.bodyHash(stubHex)).putBytes(14, Argus551.queryHash(query))
+      .putProtobuf(15, new ProtoBuf551().putVarint(1, 1).putVarint(2, 1).putVarint(3, 1).putVarint(7, 0xc792eccc))
+      .putUtf8(16, installId).putUtf8(20, 'none').putVarint(21, 738)
+      .putProtobuf(23, new ProtoBuf551().putUtf8(1, 'NX551J').putVarint(2, 8196).putVarint(4, 0x80e0d800)).putVarint(25, 2);
+    const protobuf = pad16_551(bean.toBuf()), key = Array.from({ length: 4 }, (_, i) => SIGN_KEY_551.readBigUInt64LE(i * 8));
+    const blocks = [];
+    for (let at = 0; at < protobuf.length; at += 16) {
+      const encrypted = Simon551.encrypt(protobuf.readBigUInt64LE(at), protobuf.readBigUInt64LE(at + 8), key);
+      blocks.push(le64_551(encrypted[0]), le64_551(encrypted[1]));
+    }
+    const framed = Buffer.concat([MAGIC8_551, ...blocks, TAIL9_551]);
+    for (let i = 8; i < framed.length; i++) framed[i] ^= MAGIC8_551[i % 8];
+    const padded = pad16_551(Buffer.concat([framed.reverse(), Buffer.from('ao', 'ascii')]));
+    const cipher = crypto.createCipheriv('aes-128-cbc', AES_KEY_551, AES_IV_551);
+    cipher.setAutoPadding(false);
+    return Buffer.concat([Buffer.from('f281', 'hex'), cipher.update(padded), cipher.final()]).toString('base64');
+  },
+};
+const Ladon551 = {
+  encrypt(ts, licenseId, aid, randomBytes) {
+    if (!Buffer.isBuffer(randomBytes) || randomBytes.length !== 4) throw new TypeError('Four Ladon random bytes required');
+    const aidText = integer551(aid).toString();
+    const digest = crypto.createHash('md5').update(Buffer.concat([randomBytes, Buffer.from(aidText)])).digest('hex');
+    const ascii = Buffer.from(digest, 'ascii'), words = Array.from({ length: 4 }, (_, i) => ascii.readBigUInt64LE(i * 8));
+    const table = [words[0]], queue = words.slice(2);
+    let b0 = words[0], b8 = words[1];
+    for (let i = 0; i < 34; i++) {
+      let x8 = u64_551(ror64_551(b8, 8) + b0) ^ BigInt(i);
+      queue.push(x8);
+      x8 ^= rol64_551(b0, 3);
+      table.push(u64_551(x8)); b0 = u64_551(x8); b8 = queue.shift();
+    }
+    const input = pad16_551(Buffer.from(`${integer551(ts)}-${integer551(licenseId)}-${aidText}`, 'ascii')), out = Buffer.alloc(input.length);
+    for (let at = 0; at < input.length; at += 16) {
+      let a = input.readBigUInt64LE(at), b = input.readBigUInt64LE(at + 8);
+      for (let i = 0; i < 34; i++) { b = table[i] ^ u64_551(a + ror64_551(b, 8)); a = b ^ rol64_551(a, 3); }
+      out.writeBigUInt64LE(u64_551(a), at); out.writeBigUInt64LE(u64_551(b), at + 8);
+    }
+    return Buffer.concat([randomBytes, out]).toString('base64');
+  },
+};
+function signPlayer551({ query, body = null, ts, randField, ladonRandom }) {
+  if (typeof query !== 'string' || body !== null && !Buffer.isBuffer(body)) throw new TypeError('Final query string and raw Buffer body required');
+  const aidValue = queryParam551(query, 'aid');
+  let aid = 1967n;
+  if (/^[+-]?\d+$/.test(aidValue || '')) {
+    const candidate = BigInt(aidValue);
+    if (candidate >= -(1n << 63n) && candidate < 1n << 63n) aid = candidate;
+  }
+  const timestamp = integer551(ts), stub = body?.length ? crypto.createHash('md5').update(body).digest('hex') : '';
+  if (randField === undefined) randField = crypto.randomBytes(4).readInt32LE();
+  if (ladonRandom === undefined) ladonRandom = crypto.randomBytes(4);
+  const headers = { 'x-ss-req-ticket': String(timestamp * 1000n), 'x-khronos': String(timestamp),
+    'x-ladon': Ladon551.encrypt(timestamp, LICENSE_ID_551, aid, ladonRandom),
+    'x-argus': Argus551.sign(query, stub, timestamp, aid, LICENSE_ID_551, queryParam551(query, 'device_id') || '', '', randField) };
+  if (stub) headers['x-ss-stub'] = stub;
+  return headers;
+}
+
 function signedRequest(vid, device, host, extraHeaders) {
+  // r6：gzip 正文 + 551 真实签名（7.4.3.32）；旧的明文正文 + 占位 x-ladon/x-argus 已被服务端丢弃。
   const ts = Math.floor(Date.now() / 1000);
   const dev = validDeviceIdentity(device) ? device : (validDeviceIdentity(deviceSession) ? deviceSession : null);
   if (!dev) throw Error('registered device identity is required before signing playback request');
@@ -566,20 +715,74 @@ function signedRequest(vid, device, host, extraHeaders) {
     },
     mixed_video_id_map: { '1004': [String(vid)] },
   };
-  const body = Buffer.from(JSON.stringify(payload), 'utf8');
-  const merged = Object.assign({}, DEVICE, {
+  const body = zlib.gzipSync(Buffer.from(JSON.stringify(payload), 'utf8'));
+  const merged = Object.assign({}, POST_DEVICE, {
     iid: String(dev.iid),
     device_id: String(dev.device_id),
     cdid: String(dev.cdid || randomUuid()),
   });
-  const vals = Object.assign({}, merged, { ts: String(ts) });
+  const vals = Object.assign({}, merged, { ts: String(ts), _rticket: String(Date.now()) });
+  const query = Object.entries(vals).map(([k, v]) => `${pct(k)}=${pct(v)}`).join('&');
   const baseUrl = 'https://' + (host || new URL(VIDEO_MODEL_API).hostname) + '/novel/player/multi_video_model/v1/';
-  const { url, query, rticket } = selectSignedUrl(baseUrl, vals, body, ts);
-  const headers = buildSignedHeaders(query, body, ts, rticket, merged, Object.assign({
+  const url = baseUrl + '?' + query;
+  const sig = signPlayer551({ query, body, ts });
+  const headers = Object.assign({
+    'User-Agent': VIDEO_UA_TMPL.replace('%s', POST_DEVICE.version_code),
+    Accept: 'application/json; charset=utf-8,application/x-protobuf',
+    'Content-Type': 'application/json; charset=UTF-8',
+    'Content-Encoding': 'gzip',
+    'x-ss-req-ticket': sig['x-ss-req-ticket'],
+    'sdk-version': '2',
+    'x-xs-from-web': '0',
+    'passport-sdk-version': '5051452',
+    'x-ss-dp': '8662',
+    'x-khronos': sig['x-khronos'],
+    'x-ladon': sig['x-ladon'],
+    'x-argus': sig['x-argus'],
+    'x-ss-stub': sig['x-ss-stub'],
+    'x-tt-dt': '',
     'x-tt-store-region': 'cn',
     'x-tt-store-region-src': 'did',
-  }, extraHeaders));
+  }, extraHeaders);
   return { url, method: 'POST', headers, body, device: dev };
+}
+
+function signedTabRequest(vid, device, extraHeaders) {
+  // r6 主路：video_tab GET，无正文（7.3.9.32），551 真实签名。
+  const ts = Math.floor(Date.now() / 1000);
+  const dev = validDeviceIdentity(device) ? device : (validDeviceIdentity(deviceSession) ? deviceSession : null);
+  if (!dev) throw Error('registered device identity is required before signing playback request');
+  const merged = Object.assign({}, TAB_DEVICE, {
+    iid: String(dev.iid),
+    device_id: String(dev.device_id),
+    cdid: String(dev.cdid || randomUuid()),
+  });
+  const vals = Object.assign({}, merged, {
+    video_id: String(vid), video_id_type: '0', device_level: '1',
+    need_all_video_definition: '1', need_mp4_align: '0', use_os_player: '0',
+    video_platform: '1024', source: '0', from_video_id: '',
+    ts: String(ts), _rticket: String(Date.now()),
+  });
+  const query = Object.entries(vals).map(([k, v]) => `${pct(k)}=${pct(v)}`).join('&');
+  const url = VIDEO_TAB_API + '?' + query;
+  const sig = signPlayer551({ query, body: null, ts });
+  const headers = Object.assign({
+    'User-Agent': VIDEO_UA_TMPL.replace('%s', TAB_DEVICE.version_code),
+    Accept: 'application/json; charset=utf-8,application/x-protobuf',
+    'x-ss-req-ticket': sig['x-ss-req-ticket'],
+    'sdk-version': '2',
+    'x-xs-from-web': '0',
+    'passport-sdk-version': '50561',
+    'x-ss-dp': '8662',
+    'x-khronos': sig['x-khronos'],
+    'x-ladon': sig['x-ladon'],
+    'x-argus': sig['x-argus'],
+    'x-tt-dt': '',
+    'x-tt-store-region': 'cn',
+    'x-tt-store-region-src': 'did',
+    'x-tt-request-tag': 't=0;n=0',
+  }, extraHeaders);
+  return { url, method: 'GET', headers, body: null, device: dev };
 }
 
 // ---------------- HTTP 客户端 ----------------
@@ -880,13 +1083,19 @@ async function fetchModel(vid) {
   const hit = modelCache.get(String(vid));
   if (hit && Date.now() - hit.t < MODEL_TTL) return hit.vm;
   let dev = null;
-  // 最多两次：主域名一次；失败（空响应、解析失败或模型缺失）则重新注册设备，
-  // 再到备用域名 api5-normal-hl.fqnovel.com 重试一次。
-  for (let attempt = 0; attempt < 2; attempt++) {
+  // r6：最多三次：video_tab GET 主路；失败（空响应、解析失败或模型缺失）则重新注册设备，
+  // 再到 multi POST（gzip 正文）重试，仍失败则换备用域名 api5-normal-hl.fqnovel.com。
+  // 旧的 video_model/v1 单数端点已下线（恒回空体），不再作为回退。
+  for (let attempt = 0; attempt < 3; attempt++) {
     try {
       if (!dev) dev = await ensureDeviceSession(false);
-      const host = attempt === 0 ? new URL(VIDEO_MODEL_API).hostname : VIDEO_MODEL_ALT_HOST;
-      const s = signedRequest(vid, dev, host, attempt === 0 ? null : { 'Connection': 'close' });
+      let s;
+      if (attempt === 0) {
+        s = signedTabRequest(vid, dev, null);
+      } else {
+        const host = attempt === 1 ? new URL(VIDEO_MODEL_API).hostname : VIDEO_MODEL_ALT_HOST;
+        s = signedRequest(vid, dev, host, attempt === 1 ? { 'Connection': 'close' } : null);
+      }
       const r = await httpText(s.url, {
         method: s.method,
         headers: s.headers,
@@ -908,33 +1117,12 @@ async function fetchModel(vid) {
       modelCache.set(String(vid), { t: Date.now(), vm });
       return vm;
     } catch (error) {
-      if (attempt === 0) {
-        try { dev = await ensureDeviceSession(true); } catch (e) { dev = null; }
-        await new Promise(resolve => setTimeout(resolve, 400));
-        continue;
-      }
-      break;
+      if (attempt === 2) break;
+      try { dev = await ensureDeviceSession(true); } catch (e) { dev = null; }
+      await new Promise(resolve => setTimeout(resolve, 400));
     }
   }
-  if (validDeviceIdentity(dev)) {
-    for (const ct of [1, 1001]) {
-      try {
-        const s = signedSingleRequest(vid, ct, dev, new URL(VIDEO_MODEL_API).hostname, null);
-        const r = await httpText(s.url, { method: s.method, headers: s.headers, body: s.body, timeout: 15000 });
-        if (r.status >= 200 && r.status < 300 && r.body.length) {
-          let vm = parseVideoModelResponse(JSON.parse(r.body.toString('utf8')), vid);
-          if ((!vm.video_list || !Object.keys(vm.video_list).length) && vm._fallback_api) {
-            vm = await fetchFallbackVideoModel(vm._fallback_api, vm.key_seed);
-          }
-          if (vm && vm.video_list && Object.keys(vm.video_list).length) {
-            modelCache.set(String(vid), { t: Date.now(), vm });
-            return vm;
-          }
-        }
-      } catch (e) {}
-    }
-  }
-  // 两次都失败：本次用的设备身份可能已被服务端静默丢弃，丢弃缓存，
+  // 三次都失败：本次用的设备身份可能已被服务端静默丢弃，丢弃缓存，
   // 让下一次播放重新注册新设备，而不是反复用同一个失效身份请求。
   deviceSession = null;
   return null;

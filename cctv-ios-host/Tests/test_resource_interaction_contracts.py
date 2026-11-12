@@ -1459,8 +1459,8 @@ class ResourceInteractionContracts(unittest.TestCase):
             self.assertFalse((resources / retired).exists())
         self.assertEqual({p.name for p in resources.glob('hongguo-*')},
                          {'hongguo-python.py', 'hongguo-node.js'})
-        self.assertIn("VERSION = '1.0.5-cctvhost-r5'", (resources / 'hongguo-python.py').read_text())
-        self.assertIn("const VERSION = '1.0.5-cctvhost-r5';", (resources / 'hongguo-node.js').read_text())
+        self.assertIn("VERSION = '1.0.5-cctvhost-r6'", (resources / 'hongguo-python.py').read_text())
+        self.assertIn("const VERSION = '1.0.5-cctvhost-r6';", (resources / 'hongguo-node.js').read_text())
         self.assertEqual(len(lytvs['sites']), 324)
         self.assertEqual(len(lytvs['lives']), 40)
         self.assertEqual(for_adm['name'], 'For-ADM CCTVHost 影视资源合集')

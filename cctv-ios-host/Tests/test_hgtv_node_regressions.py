@@ -198,8 +198,8 @@ const assert = require('node:assert/strict');
             assert.deepEqual(api.qualityCandidates(model).map(c=>c.q), ['1080p','720p','540p','480p','360p']);
             assert.equal(api.pickBest(model).q,'1080p');
           }
-          // Episode 1: register (#1) -> play primary (#1 empty) -> re-register (#2) -> play alt host (#2 ok)
-          // Episode 2 (middle) & Episode 3 (late): reuse registered device (#2) directly!
+          // Episode 1: register (#1) -> video_tab GET (#1 empty) -> re-register (#2) -> multi POST (#2 ok)
+          // Episode 2 (middle) & Episode 3 (late): video_tab GET reuses registered device (#2) directly!
           assert.equal(regCount,2);
           assert.equal(playCount,4);
           const regCalls=calls.filter(c=>new URL(c.url).pathname.endsWith('/device_register/'));
@@ -214,41 +214,68 @@ const assert = require('node:assert/strict');
             assert.equal(call.options.body.subarray(0,6).toString('hex'),'746305100000');
             assert.equal(call.options.body.length>38,true);
           }
-          const playCalls=calls.filter(c=>new URL(c.url).pathname==='/novel/player/multi_video_model/v1/');
-          assert.equal(playCalls.length,4);
-          assert.deepEqual(playCalls.map(c=>new URL(c.url).hostname),
-            ['api5-normal-sinfonlineb.fqnovel.com','api5-normal-hl.fqnovel.com',
-             'api5-normal-sinfonlineb.fqnovel.com','api5-normal-sinfonlineb.fqnovel.com']);
-          for(const call of playCalls){
+          const tabCalls=calls.filter(c=>new URL(c.url).pathname==='/reading/bookapi/video_tab/multi_video_model/v1/');
+          assert.equal(tabCalls.length,3);
+          assert.deepEqual(tabCalls.map(c=>new URL(c.url).hostname),
+            ['api5-normal-sinfonlineb.fqnovel.com','api5-normal-sinfonlineb.fqnovel.com',
+             'api5-normal-sinfonlineb.fqnovel.com']);
+          tabCalls.forEach((call, idx)=>{
             const u=new URL(call.url);
+            assert.equal(u.pathname,'/reading/bookapi/video_tab/multi_video_model/v1/');
+            assert.equal(u.searchParams.get('version_code'),'73932');
+            assert.equal(u.searchParams.get('version_name'),'7.3.9.32');
+            assert.equal(u.searchParams.get('video_id'),episodes[idx]);
+            assert.ok(u.searchParams.get('cdid'));
+            assert.equal(call.options.method,'GET');
+            assert.equal(call.options.body,null);
+            assert.equal(call.options.headers['User-Agent'],
+              'com.phoenix.read/73932 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)');
+            assert.equal(call.options.headers['x-tt-store-region'],'cn');
+            assert.equal(call.options.headers['passport-sdk-version'],'50561');
+            assert.equal(call.options.headers['x-tt-request-tag'],'t=0;n=0');
+            assert.ok(call.options.headers['x-argus']);
+            assert.ok(call.options.headers['x-ladon']);
+            assert.equal(call.options.headers['x-gorgon'],undefined);
+            assert.equal(call.options.headers['x-medusa'],undefined);
+            assert.equal(call.options.headers['x-ss-stub'],undefined);
+            assert.equal(call.options.headers['Cookie'],undefined);
+          });
+          const postCalls=calls.filter(c=>new URL(c.url).pathname==='/novel/player/multi_video_model/v1/');
+          assert.equal(postCalls.length,1);
+          for(const call of postCalls){
+            const u=new URL(call.url);
+            assert.equal(u.hostname,'api5-normal-sinfonlineb.fqnovel.com');
             assert.equal(u.pathname,'/novel/player/multi_video_model/v1/');
-            assert.equal(u.searchParams.get('version_code'),'71332');
-            assert.equal(u.searchParams.get('version_name'),'7.1.3.32');
+            assert.equal(u.searchParams.get('version_code'),'74332');
+            assert.equal(u.searchParams.get('version_name'),'7.4.3.32');
             assert.ok(u.searchParams.get('cdid'));
             assert.equal(call.options.method,'POST');
             assert.equal(call.options.headers['User-Agent'],
-              'com.phoenix.read/71532 (Linux; U; Android 9; SM-N9860; Build/PQ3A.190705.10241111;tt-ok/3.12.13.20)');
+              'com.phoenix.read/74332 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)');
             assert.equal(call.options.headers['x-tt-store-region'],'cn');
-            assert.ok(call.options.headers['x-gorgon']);
-            assert.ok(call.options.headers['x-helios']);
-            assert.ok(call.options.headers['x-medusa']);
-            assert.equal(call.options.headers['x-ss-stub'],undefined);
+            assert.equal(call.options.headers['passport-sdk-version'],'5051452');
+            assert.equal(call.options.headers['Content-Encoding'],'gzip');
+            assert.ok(call.options.headers['x-argus']);
+            assert.ok(call.options.headers['x-ladon']);
+            assert.ok(call.options.headers['x-ss-stub']);
+            assert.equal(call.options.headers['x-gorgon'],undefined);
+            assert.equal(call.options.headers['x-medusa'],undefined);
             assert.equal(call.options.headers['Cookie'],undefined);
-            assert.equal(api.branchOf(call.url,call.options.body,Number(call.options.headers['x-khronos'])),0);
-            const reqBody=JSON.parse(call.options.body.toString('utf8'));
+            assert.equal(call.options.headers['Connection'],'close');
+            const reqBody=JSON.parse(require('node:zlib').gunzipSync(call.options.body).toString('utf8'));
             assert.equal(reqBody.content_type,undefined);
             assert.equal(reqBody.video_id,undefined);
             assert.equal(reqBody.biz_param.video_platform,1024);
             assert.equal(reqBody.biz_param.need_all_video_definition,true);
             assert.ok(Array.isArray(reqBody.mixed_video_id_map['1004']));
             assert.equal(reqBody.mixed_video_id_map['1004'].length,1);
+            assert.equal(reqBody.mixed_video_id_map['1004'][0],episodes[0]);
           }
-          assert.equal(playCalls[1].options.headers['Connection'],'close');
           // Verify first failed attempt used device #1, and subsequent calls reused device #2 across episodes
-          assert.equal(new URL(playCalls[0].url).searchParams.get('device_id'),'7701998877665501');
-          assert.equal(new URL(playCalls[1].url).searchParams.get('device_id'),'7701998877665502');
-          assert.equal(new URL(playCalls[2].url).searchParams.get('device_id'),'7701998877665502');
-          assert.equal(new URL(playCalls[3].url).searchParams.get('device_id'),'7701998877665502');''')
+          assert.equal(new URL(tabCalls[0].url).searchParams.get('device_id'),'7701998877665501');
+          assert.equal(new URL(postCalls[0].url).searchParams.get('device_id'),'7701998877665502');
+          assert.equal(new URL(tabCalls[1].url).searchParams.get('device_id'),'7701998877665502');
+          assert.equal(new URL(tabCalls[2].url).searchParams.get('device_id'),'7701998877665502');''')
 
     def test_play_lists_all_actual_qualities_and_rejects_missing_quality(self):
         self.node('''const rows = {};
@@ -307,6 +334,25 @@ const assert = require('node:assert/strict');
           const qualities = ['360p', '480p', '540p', '720p', '1080p'];
           const episodes = ['7701820244146261016', '7701832903004556312'];
           let regCalls = 0;
+          function modelFor(vid) {
+            const vlist = {};
+            qualities.forEach((q, idx) => {
+              vlist['video_' + (idx + 1)] = {
+                definition: q,
+                main_url: encryptSpadeUrl('https://v3-reading.qznovelvod.com/' + vid + '/' + q + '.mp4'),
+                spade_a: spadeA,
+                encrypt_info: {encrypt: true, spade_a: spadeA},
+                gear_des_key: '1:encrypt|2:h265_hvc1|4:' + q + '|5:normal',
+                video_meta: JSON.stringify({definition: q, vtype: 'h265'})
+              };
+            });
+            const entry = {key_seed: seed.toString('base64'),
+              video_model: JSON.stringify({key_seed: seed.toString('base64'), video_list: vlist})};
+            return {status: 200, body: Buffer.from(JSON.stringify({
+              code: 0,
+              data: {[vid]: entry}
+            }))};
+          }
           api.setHttp(async (url, opts) => {
             const u = new URL(url);
             if (u.pathname.endsWith('/device_register/')) {
@@ -315,26 +361,13 @@ const assert = require('node:assert/strict');
                 device_id_str: '7701998877665588', install_id_str: '7701998877669988'
               }))};
             }
+            if (u.pathname === '/reading/bookapi/video_tab/multi_video_model/v1/') {
+              return modelFor(u.searchParams.get('video_id'));
+            }
             if (u.pathname === '/novel/player/multi_video_model/v1/') {
-              const reqBody = JSON.parse(opts.body.toString('utf8'));
+              const reqBody = JSON.parse(require('node:zlib').gunzipSync(opts.body).toString('utf8'));
               const vid = reqBody.mixed_video_id_map['1004'][0];
-              const vlist = {};
-              qualities.forEach((q, idx) => {
-                vlist['video_' + (idx + 1)] = {
-                  definition: q,
-                  main_url: encryptSpadeUrl('https://v3-reading.qznovelvod.com/' + vid + '/' + q + '.mp4'),
-                  spade_a: spadeA,
-                  encrypt_info: {encrypt: true, spade_a: spadeA},
-                  gear_des_key: '1:encrypt|2:h265_hvc1|4:' + q + '|5:normal',
-                  video_meta: JSON.stringify({definition: q, vtype: 'h265'})
-                };
-              });
-              const entry = {key_seed: seed.toString('base64'),
-                video_model: JSON.stringify({key_seed: seed.toString('base64'), video_list: vlist})};
-              return {status: 200, body: Buffer.from(JSON.stringify({
-                code: 0,
-                data: {[vid]: entry}
-              }))};
+              return modelFor(vid);
             }
             if (u.hostname === 'v3-reading.qznovelvod.com') {
               return {status: 200, body: encMedia};

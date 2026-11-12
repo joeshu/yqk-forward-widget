@@ -22,7 +22,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit, parse_qs, urlencode
 from urllib.request import Request, build_opener, HTTPCookieProcessor, HTTPRedirectHandler
 
-VERSION = '1.0.5-cctvhost-r5'
+VERSION = '1.0.5-cctvhost-r6'
 ORIGIN = 'https://hongguoduanju.com'
 COMPAT_PATH = '/api/video/protected/fallback-play-info'
 UA_WEB = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -1068,6 +1068,17 @@ _SPADE_CONST = _binascii.unhexlify(
     "4dd4c2e6b83162090e52b3c7a6733ba41cb2462b829ab58a196b39db57177524"
     "f49baf7f08e8d68d26a72e37c1a95a2f1f05a51892aef2949732b62a38aadd58"
 )
+# r6：服务端自 2026-11-12 起静默丢弃旧签名的模型请求（200 + 空体）。
+# 播放模型改走 551 真实签名（Argus/Ladon）：主路为 video_tab GET（7.3.9.32），
+# 空响应时回退到 gzip 正文的 multi POST（7.4.3.32），再空则换备用域名重试。
+_VIDEO_TAB_PATH = "/reading/bookapi/video_tab/multi_video_model/v1/"
+_VIDEO_UA_TMPL = ("com.phoenix.read/%s (Linux; U; Android 16; zh_CN; 25053RT47C; "
+                  "Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 "
+                  "QuicVersion:c67e9834 2025-09-08)")
+_TAB_DEVICE = dict(_PLAYBACK_DEVICE, version_code="73932", version_name="7.3.9.32",
+                   manifest_version_code="73932", update_version_code="73932", pv_player="73932")
+_POST_DEVICE = dict(_PLAYBACK_DEVICE, version_code="74332", version_name="7.4.3.32",
+                    manifest_version_code="74332", update_version_code="74332", pv_player="74332")
 _SIGN_CACHE = {}
 _SIGN_CACHE_TTL = 300
 _DEVICE_SESSION = None
@@ -1665,6 +1676,217 @@ def _new_device_seed():
     }
 
 
+# ---- 551 真实播放签名（r6）----
+# Argus/Ladon 签名，移植自上游 GPL-3.0 实现（N3urda/hongguoTV 的 Argus.kt，
+# 经 jackotom/hongguo-drama 的 playback-signature.js；协议常量非账号凭据）。
+# 旧的 x-ladon/x-argus 只是时间戳的 base64，服务端自 2026-11-12 起静默丢弃
+# 这类请求（200 + 空体）；只有真实 551 签名能取回模型。
+_LICENSE_ID_551 = 1611921764
+_SIGN_KEY_551 = bytes.fromhex('fc78e0a9657a0c748ce51559903ccf03510e51d3cff232d71343e88a321c5304')
+_AES_KEY_551 = bytes.fromhex('d31e3718288a1027baab59f146a09a9c')
+_AES_IV_551 = bytes.fromhex('ea180a0336ed352fcd24e4d50018ae54')
+_MAGIC8_551 = bytes.fromhex('f2f7fcfff2f7fcff')
+_TAIL9_551 = bytes.fromhex('eafb2cfe8568519154')
+
+
+def _u64_551(v):
+    return int(v) & 0xFFFFFFFFFFFFFFFF
+
+
+def _rol64_551(v, b):
+    v = _u64_551(v)
+    return _u64_551((v << b) | (v >> (64 - b)))
+
+
+def _ror64_551(v, b):
+    return _rol64_551(v, 64 - b)
+
+
+def _le64_551(v):
+    return _u64_551(v).to_bytes(8, 'little')
+
+
+def _pad16_551(data):
+    n = 16 - (len(data) % 16)
+    return bytes(data) + bytes([n]) * n
+
+
+def _varint551(value):
+    n = int(value) & 0xFFFFFFFF
+    out = bytearray()
+    while n >= 128:
+        out.append((n & 127) | 128)
+        n >>= 7
+    out.append(n)
+    return bytes(out)
+
+
+class _ProtoBuf551:
+    def __init__(self):
+        self.parts = []
+
+    def put_varint(self, tag, value):
+        self.parts.append(_varint551(tag << 3))
+        self.parts.append(_varint551(value))
+        return self
+
+    def put_bytes(self, tag, data):
+        data = bytes(data)
+        self.parts.append(_varint551((tag << 3) | 2))
+        self.parts.append(_varint551(len(data)))
+        self.parts.append(data)
+        return self
+
+    def put_utf8(self, tag, value):
+        return self.put_bytes(tag, str(value).encode('utf-8'))
+
+    def put_protobuf(self, tag, value):
+        return self.put_bytes(tag, value.to_buf())
+
+    def to_buf(self):
+        return b''.join(self.parts)
+
+
+def _simon_key_expansion_551(key):
+    expanded = [_u64_551(v) for v in key]
+    for i in range(4, 72):
+        tmp = _ror64_551(expanded[i - 1], 3) ^ expanded[i - 3]
+        tmp ^= _ror64_551(tmp, 1)
+        bit = (0x3dc94c3a046d678b >> ((i - 4) % 62)) & 1
+        expanded.append(_u64_551(~expanded[i - 4] ^ tmp ^ bit ^ 3))
+    return expanded
+
+
+def _simon_encrypt_551(left, right, key):
+    x = _u64_551(left)
+    y = _u64_551(right)
+    for round_key in _simon_key_expansion_551(key):
+        prev = y
+        y = _u64_551(x ^ (_rol64_551(y, 1) & _rol64_551(y, 8)) ^ _rol64_551(y, 2) ^ round_key)
+        x = prev
+    return x, y
+
+
+def _query_param_551(query, name):
+    def dec(v):
+        try:
+            from urllib.parse import unquote_plus as _up
+            return _up(v)
+        except Exception:
+            return v
+    for part in query.split('&'):
+        at = part.find('=')
+        key = part if at < 0 else part[:at]
+        if dec(key) == name:
+            return dec('' if at < 0 else part[at + 1:])
+    return None
+
+
+def _argus_body_hash_551(stub_hex):
+    if not stub_hex:
+        return _sm3(b'\x00' * 16)[:6]
+    data = bytes.fromhex(stub_hex) if _re.fullmatch(r'(?:[a-f\d]{2})+', stub_hex, _re.I) else b''
+    return _sm3(data)[:6]
+
+
+def _argus_query_hash_551(query):
+    return _sm3(query.encode('utf-8') if query else b'\x00' * 16)[:6]
+
+
+def _argus_551_sign(query, stub_hex, ts, aid, license_id, device_id, install_id, rand_field):
+    bean = (_ProtoBuf551()
+            .put_varint(1, 1077940818).put_varint(2, 2).put_varint(3, rand_field)
+            .put_utf8(4, str(1967 if int(aid) == 0 else int(aid)))
+            .put_utf8(5, device_id)
+            .put_utf8(6, str(_LICENSE_ID_551 if int(license_id) == 0 else int(license_id)))
+            .put_utf8(7, _query_param_551(query, 'version_name') or '')
+            .put_utf8(8, 'v04.04.05-ov-android')
+            .put_varint(9, 134744640)
+            .put_bytes(10, b'\x00' * 8)
+            .put_varint(11, 0)
+            .put_varint(12, int(ts) << 1)
+            .put_bytes(13, _argus_body_hash_551(stub_hex))
+            .put_bytes(14, _argus_query_hash_551(query))
+            .put_protobuf(15, _ProtoBuf551().put_varint(1, 1).put_varint(2, 1).put_varint(3, 1).put_varint(7, 0xc792eccc))
+            .put_utf8(16, install_id)
+            .put_utf8(20, 'none')
+            .put_varint(21, 738)
+            .put_protobuf(23, _ProtoBuf551().put_utf8(1, 'NX551J').put_varint(2, 8196).put_varint(4, 0x80e0d800))
+            .put_varint(25, 2))
+    protobuf = _pad16_551(bean.to_buf())
+    key = [int.from_bytes(_SIGN_KEY_551[i * 8:(i + 1) * 8], 'little') for i in range(4)]
+    blocks = []
+    for at in range(0, len(protobuf), 16):
+        l = int.from_bytes(protobuf[at:at + 8], 'little')
+        r = int.from_bytes(protobuf[at + 8:at + 16], 'little')
+        e0, e1 = _simon_encrypt_551(l, r, key)
+        blocks.append(_le64_551(e0))
+        blocks.append(_le64_551(e1))
+    framed = bytearray(b''.join([_MAGIC8_551] + blocks + [_TAIL9_551]))
+    for i in range(8, len(framed)):
+        framed[i] ^= _MAGIC8_551[i % 8]
+    padded = _pad16_551(bytes(framed)[::-1] + b'ao')
+    from Crypto.Cipher import AES
+    cipher = AES.new(_AES_KEY_551, AES.MODE_CBC, _AES_IV_551)
+    return _b64.b64encode(bytes.fromhex('f281') + cipher.encrypt(padded)).decode()
+
+
+def _ladon_551_encrypt(ts, license_id, aid, random_bytes):
+    aid_text = str(int(aid))
+    digest = _hashlib.md5(bytes(random_bytes) + aid_text.encode()).hexdigest()
+    ascii_b = digest.encode('ascii')
+    words = [int.from_bytes(ascii_b[i * 8:(i + 1) * 8], 'little') for i in range(4)]
+    table = [words[0]]
+    queue = words[2:]
+    b0 = words[0]
+    b8 = words[1]
+    for i in range(34):
+        x8 = _u64_551(_ror64_551(b8, 8) + b0) ^ i
+        queue.append(x8)
+        x8 ^= _rol64_551(b0, 3)
+        table.append(_u64_551(x8))
+        b0 = _u64_551(x8)
+        b8 = queue.pop(0)
+    text = ('%d-%d-%s' % (int(ts), int(license_id), aid_text)).encode('ascii')
+    inp = _pad16_551(text)
+    out = bytearray(len(inp))
+    for at in range(0, len(inp), 16):
+        a = int.from_bytes(inp[at:at + 8], 'little')
+        b = int.from_bytes(inp[at + 8:at + 16], 'little')
+        for i in range(34):
+            b = table[i] ^ _u64_551(a + _ror64_551(b, 8))
+            a = b ^ _rol64_551(a, 3)
+        out[at:at + 8] = _u64_551(a).to_bytes(8, 'little')
+        out[at + 8:at + 16] = _u64_551(b).to_bytes(8, 'little')
+    return _b64.b64encode(bytes(random_bytes) + bytes(out)).decode()
+
+
+def _sign_player_551(query, body, ts, rand_field=None, ladon_random=None):
+    """551 播放签名：返回 x-ss-req-ticket / x-khronos / x-ladon / x-argus（+ x-ss-stub）。"""
+    aid_value = _query_param_551(query, 'aid')
+    aid = 1967
+    if aid_value is not None and _re.fullmatch(r'[+-]?\d+', aid_value or ''):
+        cand = int(aid_value)
+        if -(1 << 63) <= cand < (1 << 63):
+            aid = cand
+    timestamp = int(ts)
+    stub = _hashlib.md5(body).hexdigest() if body else ''
+    if rand_field is None:
+        rand_field = int.from_bytes(_os.urandom(4), 'little', signed=True)
+    if ladon_random is None:
+        ladon_random = _os.urandom(4)
+    device_id = _query_param_551(query, 'device_id') or ''
+    headers = {
+        'x-ss-req-ticket': str(timestamp * 1000),
+        'x-khronos': str(timestamp),
+        'x-ladon': _ladon_551_encrypt(timestamp, _LICENSE_ID_551, aid, ladon_random),
+        'x-argus': _argus_551_sign(query, stub, timestamp, aid, _LICENSE_ID_551, device_id, '', rand_field),
+    }
+    if stub:
+        headers['x-ss-stub'] = stub
+    return headers
+
+
 def _select_signed_url(base_url, vals, body, ts):
     # hash 分支必须严格等于 0（128 次尝试）；分支 2 的签名与服务端期望不一致。
     base_ms = int(_time.time() * 1000)
@@ -1789,6 +2011,48 @@ def _device_register_request(seed=None):
         "x-ss-stub": _md5_bytes(data).hex().upper(),
     }
     return _DEVICE_REGISTER_API, headers, data, s
+
+
+def _get_bytes(url, headers, timeout, max_bytes=8 * 1024 * 1024):
+    """GET and return the (gzip-decoded) response body. Mirrors _post_bytes."""
+    try:
+        import requests as _requests
+    except Exception:
+        _requests = None
+    if _requests is not None:
+        try:
+            resp = _requests.get(url, headers=headers, timeout=timeout)
+            resp.raise_for_status()
+            raw_content = resp.content
+            if len(raw_content) > max_bytes:
+                raise ValueError("response exceeds size limit")
+            if raw_content[:2] == b"\x1f\x8b":
+                try:
+                    raw_content = _gzip.decompress(raw_content)
+                except Exception:
+                    pass
+            return raw_content
+        except Exception:
+            pass
+    req = _ureq.Request(url, headers=headers, method="GET")
+    try:
+        with _ureq.urlopen(req, timeout=timeout) as r:
+            raw = r.read(max_bytes + 1)
+            encoding = str(r.headers.get("Content-Encoding", "") or "").strip().lower()
+    except Exception:
+        _ctx = ssl._create_unverified_context()
+        with _ureq.urlopen(req, timeout=timeout, context=_ctx) as r:
+            raw = r.read(max_bytes + 1)
+            encoding = str(r.headers.get("Content-Encoding", "") or "").strip().lower()
+    if len(raw) > max_bytes:
+        raise ValueError("response exceeds size limit")
+    if encoding == "gzip" or raw[:2] == b"\x1f\x8b":
+        try:
+            return _gzip.decompress(raw)
+        except Exception:
+            if encoding == "gzip":
+                raise
+    return raw
 
 
 def _post_bytes(url, body, headers, timeout, max_bytes=8 * 1024 * 1024):
@@ -1990,7 +2254,11 @@ def _fetch_fallback_video_model(fb_url, seed_hint=""):
 
 
 def _signed_request(vid, device=None, host=_VIDEO_MODEL_HOST):
-    """Build a signed POST request to novel/player/multi_video_model/v1/ (JS playbackRequest)."""
+    """Build a 551-signed POST request to novel/player/multi_video_model/v1/.
+
+    r6：正文 gzip 压缩并对压缩字节签名（Content-Encoding: gzip + x-ss-stub），
+    设备画像 7.4.3.32 / 74332；旧的明文正文 + 占位 x-ladon/x-argus 已被服务端丢弃。
+    """
     ts = int(_time.time())
     dev = device if _valid_device_identity(device) else _ensure_device(False)
     payload = {
@@ -2006,21 +2274,84 @@ def _signed_request(vid, device=None, host=_VIDEO_MODEL_HOST):
         },
         "mixed_video_id_map": {"1004": [str(vid)]},
     }
-    body = _json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    vals = dict(_PLAYBACK_DEVICE)
+    body = _gzip.compress(_json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8"),
+                          compresslevel=6)
+    vals = dict(_POST_DEVICE)
     vals.update({
         "device_id": str(dev["device_id"]),
         "iid": str(dev["iid"]),
         "cdid": str(dev.get("cdid") or _random_uuid()),
         "ts": str(ts),
+        "_rticket": str(int(_time.time() * 1000)),
     })
-    base_url = "https://%s%s" % (host, _VIDEO_MODEL_PATH)
-    url, query, rticket = _select_signed_url(base_url, vals, body, ts)
-    headers = _build_signed_headers(query, body, ts, rticket, url, {
-        "device_id": str(dev["device_id"]),
-        "version_name": _PLAYBACK_DEVICE["version_name"],
-    })
+    query = "&".join("%s=%s" % (_pct(k), _pct(v)) for k, v in vals.items())
+    url = "https://%s%s?%s" % (host, _VIDEO_MODEL_PATH, query)
+    sig = _sign_player_551(query, body, ts)
+    headers = {
+        "User-Agent": _VIDEO_UA_TMPL % _POST_DEVICE["version_code"],
+        "Accept": "application/json; charset=utf-8,application/x-protobuf",
+        "Content-Type": "application/json; charset=UTF-8",
+        "Content-Encoding": "gzip",
+        "x-ss-req-ticket": sig["x-ss-req-ticket"],
+        "sdk-version": "2",
+        "x-xs-from-web": "0",
+        "passport-sdk-version": "5051452",
+        "x-ss-dp": "8662",
+        "x-khronos": sig["x-khronos"],
+        "x-ladon": sig["x-ladon"],
+        "x-argus": sig["x-argus"],
+        "x-ss-stub": sig["x-ss-stub"],
+        "x-tt-dt": "",
+        "x-tt-store-region": "cn",
+        "x-tt-store-region-src": "did",
+    }
     return url, headers, body
+
+
+def _signed_tab_request(vid, device=None):
+    """Build a 551-signed GET request to reading/bookapi/video_tab/multi_video_model/v1/.
+
+    r6 主路：无正文，设备画像 7.3.9.32 / 73932，passport-sdk-version 50561。
+    """
+    ts = int(_time.time())
+    dev = device if _valid_device_identity(device) else _ensure_device(False)
+    vals = dict(_TAB_DEVICE)
+    vals.update({
+        "device_id": str(dev["device_id"]),
+        "iid": str(dev["iid"]),
+        "cdid": str(dev.get("cdid") or _random_uuid()),
+        "video_id": str(vid),
+        "video_id_type": "0",
+        "device_level": "1",
+        "need_all_video_definition": "1",
+        "need_mp4_align": "0",
+        "use_os_player": "0",
+        "video_platform": "1024",
+        "source": "0",
+        "from_video_id": "",
+        "ts": str(ts),
+        "_rticket": str(int(_time.time() * 1000)),
+    })
+    query = "&".join("%s=%s" % (_pct(k), _pct(v)) for k, v in vals.items())
+    url = "https://%s%s?%s" % (_VIDEO_MODEL_HOST, _VIDEO_TAB_PATH, query)
+    sig = _sign_player_551(query, None, ts)
+    headers = {
+        "User-Agent": _VIDEO_UA_TMPL % _TAB_DEVICE["version_code"],
+        "Accept": "application/json; charset=utf-8,application/x-protobuf",
+        "x-ss-req-ticket": sig["x-ss-req-ticket"],
+        "sdk-version": "2",
+        "x-xs-from-web": "0",
+        "passport-sdk-version": "50561",
+        "x-ss-dp": "8662",
+        "x-khronos": sig["x-khronos"],
+        "x-ladon": sig["x-ladon"],
+        "x-argus": sig["x-argus"],
+        "x-tt-dt": "",
+        "x-tt-store-region": "cn",
+        "x-tt-store-region-src": "did",
+        "x-tt-request-tag": "t=0;n=0",
+    }
+    return url, headers
 
 
 def _decrypt_spade(value, seed):
@@ -2183,7 +2514,12 @@ def _parse_video_model_response(j, vid):
 
 
 def _signed_model(vid):
-    """Fetch a signed 5-tier video model using a registered anonymous device session."""
+    """Fetch a signed video model using a registered anonymous device session.
+
+    r6：主路 video_tab GET（551 签名，7.3.9.32）；空响应/解析失败时重新注册设备，
+    再走 gzip 正文的 multi POST（551 签名，7.4.3.32），仍空则换备用域名重试一次。
+    旧的 video_model/v1 单数端点已下线（恒回空体），不再作为回退。
+    """
     ent = _SIGN_CACHE.get(str(vid))
     if ent and _time.time() - ent[0] < _SIGN_CACHE_TTL:
         return ent[1]
@@ -2195,13 +2531,17 @@ def _signed_model(vid):
         try:
             if dev is None:
                 dev = _ensure_device(False)
-            host = _VIDEO_MODEL_HOST if attempt % 2 == 0 else _VIDEO_MODEL_ALT_HOST
-            payload_url, headers, body = _signed_request(vid, dev, host=host)
-            if attempt:
-                headers["Connection"] = "close"
-            # gzip 响应体更小，在海外中转链路上不易被截断；服务端支持 gzip。
-            headers["Accept-Encoding"] = "gzip"
-            raw = _post_bytes(payload_url, body, headers, 25)
+            if attempt == 0:
+                url, headers = _signed_tab_request(vid, dev)
+                raw = _get_bytes(url, headers, 25)
+            else:
+                host = _VIDEO_MODEL_HOST if attempt == 1 else _VIDEO_MODEL_ALT_HOST
+                payload_url, headers, body = _signed_request(vid, dev, host=host)
+                if attempt:
+                    headers["Connection"] = "close"
+                # gzip 响应体更小，在海外中转链路上不易被截断；服务端支持 gzip。
+                headers["Accept-Encoding"] = "gzip"
+                raw = _post_bytes(payload_url, body, headers, 25)
             if len(raw) > 8 * 1024 * 1024:
                 raise ValueError("video model response exceeds 8 MiB")
             if not raw:
@@ -2226,7 +2566,7 @@ def _signed_model(vid):
                     return vm
         if not retryable or attempt == 2:
             break
-        # 空响应/截断/损坏：预算充足时重新注册设备，换域名重试。
+        # 空响应/截断/损坏：预算充足时重新注册设备，换路重试。
         if deadline - _time.monotonic() >= 3:
             try:
                 dev = _ensure_device(force_refresh=True)
@@ -2235,20 +2575,6 @@ def _signed_model(vid):
         if deadline - _time.monotonic() < 0.5:
             break
         _time.sleep(0.3)
-    # Fallback to /novel/player/video_model/v1/ (content_type 1 / 1001) for comic-drama / comic episodes
-    if dev is not None and _valid_device_identity(dev):
-        for ct in (1, 1001):
-            try:
-                s_url, s_headers, s_body = _signed_single_request(vid, content_type=ct, device=dev, host=_VIDEO_MODEL_HOST)
-                s_headers["Accept-Encoding"] = "gzip"
-                raw = _post_bytes(s_url, s_body, s_headers, 15)
-                if raw:
-                    vm = _parse_video_model_response(_json.loads(raw.decode("utf-8", "replace")), vid)
-                    if vm and vm.get("video_list"):
-                        _SIGN_CACHE[str(vid)] = (_time.time(), vm)
-                        return vm
-            except Exception as e:
-                last_err = e
     global _DEVICE_SESSION
     with _DEVICE_LOCK:
         _DEVICE_SESSION = None
