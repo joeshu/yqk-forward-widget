@@ -23,6 +23,11 @@
 @property(nonatomic, copy) void (^onRefreshCatalogProfile)(NSString *source);
 @property(nonatomic, copy) void (^onSelectProfile)(NSString *source);
 @property(nonatomic, copy) void (^onToggleProfile)(NSString *source, BOOL enabled);
+@property(nonatomic, copy) void (^onToggleChannelLogo)(NSString *source, BOOL enabled);
+@property(nonatomic, copy) void (^onTogglePlayerCornerLogo)(NSString *source, BOOL enabled);
+@property(nonatomic, copy) void (^onToggleChannelPreview)(NSString *source, BOOL enabled);
+@property(nonatomic, copy) void (^onToggleChannelTelemetry)(NSString *source, BOOL enabled);
+@property(nonatomic, copy) void (^onMatchStationLogos)(NSString *source);
 @property(nonatomic, copy) void (^onEditProfile)(NSString *source);
 @property(nonatomic, copy) void (^onDeleteProfile)(NSString *source);
 @property(nonatomic, copy) void (^onOpenResource)(NSString *source);

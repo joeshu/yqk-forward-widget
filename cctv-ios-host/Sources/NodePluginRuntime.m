@@ -50,7 +50,7 @@
                 for(NSUInteger index=0;index<arguments.count;index++)free(argv[index]);free(argv);
                 self.bootError=[NSString stringWithFormat:@"Node 运行时已结束（%d），请重启 App",result];
             }}];
-            NSURLSessionConfiguration *configuration=NSURLSessionConfiguration.ephemeralSessionConfiguration;configuration.URLCache=nil;configuration.HTTPCookieStorage=nil;configuration.timeoutIntervalForRequest=30;configuration.timeoutIntervalForResource=35;configuration.HTTPMaximumConnectionsPerHost=8;
+            NSURLSessionConfiguration *configuration=NSURLSessionConfiguration.ephemeralSessionConfiguration;configuration.URLCache=nil;configuration.HTTPCookieStorage=nil;configuration.timeoutIntervalForRequest=95;configuration.timeoutIntervalForResource=120;configuration.HTTPMaximumConnectionsPerHost=16;
             self.session=[NSURLSession sessionWithConfiguration:configuration];
         }
     }
@@ -83,7 +83,7 @@
         body=nil;failure=nil;
         dispatch_semaphore_t done=dispatch_semaphore_create(0);
         NSURLSessionDataTask *task=[self.session dataTaskWithRequest:request completionHandler:^(NSData *data,NSURLResponse *response,NSError *networkError){body=data;failure=networkError;dispatch_semaphore_signal(done);}];[task resume];
-        if(dispatch_semaphore_wait(done,dispatch_time(DISPATCH_TIME_NOW,36*NSEC_PER_SEC))!=0){[task cancel];if([operation isEqual:@"start"]||[operation isEqual:@"stop"])[self markStartUncertain:session];if(error)*error=[self error:@"Node 操作超时；会话结果未知，可尝试停止后重试"];return nil;}
+        int64_t waitSec=([operation isEqual:@"play"]||[operation isEqual:@"proxy"])?95:36;if(dispatch_semaphore_wait(done,dispatch_time(DISPATCH_TIME_NOW,waitSec*NSEC_PER_SEC))!=0){[task cancel];if([operation isEqual:@"start"]||[operation isEqual:@"stop"])[self markStartUncertain:session];if(error)*error=[self error:@"Node 操作超时；会话结果未知，可尝试停止后重试"];return nil;}
         if(!failure || body.length)break;
         [NSThread sleepForTimeInterval:0.06];
     }

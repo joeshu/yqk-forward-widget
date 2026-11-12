@@ -1187,7 +1187,7 @@ process.on('unhandledRejection',error=>{
 process.on('uncaughtException',error=>failOwner(scope.getStore(),'插件回调异常：',error))
 const server=http.createServer(async(req,res)=>{
   if(req.headers['x-cctvhost-token']!==token){res.writeHead(403);res.end();return}
-  if(inflight>=8){res.writeHead(503);res.end();return}
+  if(inflight>=16){res.writeHead(503);res.end();return}
   inflight++
   let payload={};let operation=''
   try{
@@ -1203,5 +1203,5 @@ const server=http.createServer(async(req,res)=>{
   }catch(error){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({ok:false,error:error?.message||String(error),logs:drainLogs(payload?.session)}))}
   finally{inflight--}
 })
-server.requestTimeout=30000;server.headersTimeout=10000;server.maxConnections=12
+server.requestTimeout=120000;server.headersTimeout=15000;server.maxConnections=24
 server.listen(0,'127.0.0.1',()=>{fs.writeFileSync(infoPath+'.tmp',JSON.stringify({port:server.address().port}));fs.renameSync(infoPath+'.tmp',infoPath)})

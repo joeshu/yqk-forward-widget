@@ -49,14 +49,36 @@ static NSString *MediaPlaybackDecodeResultExtension(NSDictionary *result) {
     return components.path.pathExtension.lowercaseString ?: @"";
 }
 
+NSString *MediaPlaybackSniffContainerFormat(NSData *headerBytes) {
+    if (![headerBytes isKindOfClass:NSData.class] || headerBytes.length < 4) return nil;
+    const uint8_t *b = (const uint8_t *)headerBytes.bytes;
+    NSUInteger len = headerBytes.length;
+    if (b[0] == 'F' && b[1] == 'L' && b[2] == 'V' && b[3] == 0x01) return @"flv";
+    if (b[0] == 0x1A && b[1] == 0x45 && b[2] == 0xDF && b[3] == 0xA3) return @"mkv";
+    if (len >= 8 && (memcmp(b + 4, "ftyp", 4) == 0 || memcmp(b + 4, "styp", 4) == 0 ||
+                     memcmp(b + 4, "moof", 4) == 0 || memcmp(b + 4, "moov", 4) == 0)) return @"mp4";
+    if (b[0] == 0x47 && (len < 189 || b[188] == 0x47)) return @"ts";
+    NSUInteger offset = (len >= 3 && b[0] == 0xEF && b[1] == 0xBB && b[2] == 0xBF) ? 3 : 0;
+    while (offset < len && (b[offset] == ' ' || b[offset] == '\t' || b[offset] == '\r' || b[offset] == '\n')) offset++;
+    if (len - offset >= 7 && memcmp(b + offset, "#EXTM3U", 7) == 0) return @"hls";
+    if (len - offset >= 4 && (memcmp(b + offset, "<MPD", 4) == 0 || memcmp(b + offset, "<?xm", 4) == 0)) return @"dash";
+    return nil;
+}
+
 static NSString *MediaPlaybackDecodeResultMIME(NSDictionary *result) {
-    NSString *mime = MediaPlaybackDecodeLowerString(result[@"contentType"] ?: result[@"content_type"] ?: result[@"mimeType"] ?: result[@"mime"]);
+    NSString *mime = MediaPlaybackDecodeLowerString(result[@"probedMIME"] ?: result[@"contentType"] ?: result[@"content_type"] ?: result[@"mimeType"] ?: result[@"mime"]);
     NSRange semicolon = [mime rangeOfString:@";"];
     if (semicolon.location != NSNotFound) mime = [mime substringToIndex:semicolon.location];
     return [mime stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
 }
 
 static NSString *MediaPlaybackDecodeResultFormat(NSDictionary *result) {
+    NSString *probed = MediaPlaybackDecodeLowerString(result[@"probedContainer"]);
+    if (probed.length) return probed;
+    if ([result[@"headerBytes"] isKindOfClass:NSData.class]) {
+        NSString *sniffed = MediaPlaybackSniffContainerFormat(result[@"headerBytes"]);
+        if (sniffed.length) return sniffed;
+    }
     return MediaPlaybackDecodeLowerString(result[@"format"] ?: result[@"mediaType"] ?: result[@"playbackType"]);
 }
 
@@ -110,7 +132,12 @@ MediaPlaybackDecodeRoute MediaPlaybackDecodeRouteNextForResult(NSDictionary *res
     BOOL cicadaSupported = MediaPlaybackResultSupportsCicadaPlayer(result);
     BOOL requiresWebPlayback = ([result[@"requiresWebPlayback"] boolValue] || [result[@"parse"] integerValue] > 0 || [result[@"jx"] integerValue] > 0) && !directMedia;
     NSString *decodeMode = MediaPlaybackDecodeLowerString([[NSUserDefaults standardUserDefaults] stringForKey:@"cctv.mediaDecodeMode.v1"] ?: @"auto");
-    BOOL preferCicada = [decodeMode isEqualToString:@"cicada"] || [decodeMode isEqualToString:@"cicada_soft"] || [MediaPlaybackDecodeLowerString(result[@"playbackEngine"]) isEqualToString:@"cicada"];
+    NSString *probedContainer = MediaPlaybackDecodeLowerString(result[@"probedContainer"]);
+    if (!probedContainer.length && [result[@"headerBytes"] isKindOfClass:NSData.class]) {
+        probedContainer = MediaPlaybackSniffContainerFormat(result[@"headerBytes"]) ?: @"";
+    }
+    BOOL probedCicadaOnly = [@[@"flv", @"live_flv", @"mkv", @"matroska", @"webm", @"3gp", @"3gpp", @"rtmp"] containsObject:probedContainer];
+    BOOL preferCicada = probedCicadaOnly || [decodeMode isEqualToString:@"cicada"] || [decodeMode isEqualToString:@"cicada_soft"] || [MediaPlaybackDecodeLowerString(result[@"playbackEngine"]) isEqualToString:@"cicada"];
 
     // Parser and platform watch pages are documents, not media resources. Send
     // them straight to the in-app browser instead of making both native players

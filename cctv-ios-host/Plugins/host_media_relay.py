@@ -77,8 +77,219 @@ def _configure_tolerant_ssl_context(ctx):
 
 
 _DEFAULT_SSL_CONTEXT = _configure_tolerant_ssl_context(ssl.create_default_context())
+
+
+def _tune_raw_socket(sock):
+    if sock is None:
+        return
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 524288)
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    except (OSError, AttributeError):
+        pass
+
+
+class UpstreamConnectionPool:
+    """Thread-safe HTTP/1.1 Keep-Alive connection pool keyed by (scheme, host, timeout)."""
+
+    def __init__(self, max_per_host=6, idle_timeout=45.0):
+        self._lock = threading.Lock()
+        self._pools = collections.defaultdict(collections.deque)
+        self._max_per_host = max(1, int(max_per_host))
+        self._idle_timeout = float(idle_timeout)
+        self.reused_count = 0
+        self.created_count = 0
+
+    @staticmethod
+    def _is_socket_ready(conn):
+        sock = getattr(conn, 'sock', None)
+        if sock is None:
+            return False
+        try:
+            if sock.fileno() < 0:
+                return False
+        except Exception:
+            return False
+        return getattr(conn, '_HTTPConnection__response', None) is None
+
+    def acquire(self, scheme, host, http_class, timeout, http_conn_args):
+        ctx_id = id(http_conn_args.get('context')) if http_conn_args and 'context' in http_conn_args else 0
+        key = (scheme.lower(), host.lower(), ctx_id)
+        eff_timeout = None if timeout is socket._GLOBAL_DEFAULT_TIMEOUT else timeout
+        now = time.monotonic()
+        with self._lock:
+            bucket = self._pools.get(key)
+            while bucket:
+                conn, ts = bucket.pop()
+                if now - ts < self._idle_timeout and self._is_socket_ready(conn):
+                    conn.timeout = timeout
+                    if getattr(conn, 'sock', None) is not None:
+                        try:
+                            conn.sock.settimeout(eff_timeout)
+                        except Exception:
+                            pass
+                    self.reused_count += 1
+                    return conn, True, key
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+        conn = http_class(host, timeout=timeout, **http_conn_args)
+        self.created_count += 1
+        return conn, False, key
+
+    def release(self, key, conn):
+        if conn is None or not self._is_socket_ready(conn):
+            try:
+                if conn is not None:
+                    conn.close()
+            except Exception:
+                pass
+            return
+        with self._lock:
+            bucket = self._pools[key]
+            while len(bucket) >= self._max_per_host:
+                old, _ = bucket.popleft()
+                try:
+                    old.close()
+                except Exception:
+                    pass
+            bucket.append((conn, time.monotonic()))
+
+    def clear(self):
+        with self._lock:
+            pools = list(self._pools.values())
+            self._pools.clear()
+        for bucket in pools:
+            while bucket:
+                conn, _ = bucket.popleft()
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+
+_UPSTREAM_POOL = UpstreamConnectionPool()
+
+
+def _attach_pooled_lifecycle(response, conn, pool_key, pool, method):
+    orig_close_conn = response._close_conn
+    orig_close = response.close
+    state = {'released': False, 'aborted': False}
+
+    def pooled_close_conn():
+        can_reuse = (
+            not state['aborted']
+            and not getattr(response, 'will_close', True)
+            and (
+                method == 'HEAD'
+                or getattr(response, 'length', None) == 0
+                or (getattr(response, 'chunked', False) and getattr(response, 'chunk_left', None) == 0)
+            )
+        )
+        orig_close_conn()
+        if not state['released']:
+            state['released'] = True
+            if can_reuse:
+                # Clear http.client internal response pointer so the connection can send again.
+                try:
+                    conn._HTTPConnection__response = None
+                    conn._HTTPConnection__state = http.client._CS_IDLE
+                except Exception:
+                    pass
+                pool.release(pool_key, conn)
+            else:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+    def pooled_close():
+        if getattr(response, 'fp', None) is not None and getattr(response, 'length', None) not in (0, None):
+            state['aborted'] = True
+        try:
+            orig_close()
+        finally:
+            if not state['released']:
+                state['released'] = True
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+    response._close_conn = pooled_close_conn
+    response.close = pooled_close
+    return response
+
+
+class _KeepAliveHandlerMixin:
+    _scheme = 'http'
+
+    def do_open(self, http_class, req, **http_conn_args):
+        host = req.host
+        if not host:
+            raise urllib.error.URLError('no host given')
+        headers = dict(req.unredirected_hdrs)
+        headers.update({k: v for k, v in req.headers.items() if k not in headers})
+        headers['Connection'] = 'keep-alive'
+        headers = {name.title(): val for name, val in headers.items()}
+        method = req.get_method().upper()
+        for attempt in range(2):
+            conn, reused, pool_key = _UPSTREAM_POOL.acquire(
+                self._scheme, host, http_class, req.timeout, http_conn_args)
+            conn.set_debuglevel(self._debuglevel)
+            if req._tunnel_host:
+                tunnel_headers = {}
+                proxy_auth_hdr = 'Proxy-Authorization'
+                if proxy_auth_hdr in headers:
+                    tunnel_headers[proxy_auth_hdr] = headers.pop(proxy_auth_hdr)
+                conn.set_tunnel(req._tunnel_host, headers=tunnel_headers)
+            try:
+                conn.request(req.get_method(), req.selector, req.data, headers,
+                             encode_chunked=req.has_header('Transfer-encoding'))
+                r = conn.getresponse()
+                _tune_raw_socket(getattr(conn, 'sock', None))
+                break
+            except (http.client.RemoteDisconnected, BrokenPipeError, ConnectionResetError,
+                    http.client.CannotSendRequest, http.client.ResponseNotReady, OSError) as err:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                if reused and attempt == 0:
+                    continue
+                if isinstance(err, OSError):
+                    raise urllib.error.URLError(err) from err
+                raise
+            except BaseException:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                raise
+        _attach_pooled_lifecycle(r, conn, pool_key, _UPSTREAM_POOL, method)
+        r.url = req.get_full_url()
+        r.msg = r.reason
+        return r
+
+
+class KeepAliveHTTPHandler(_KeepAliveHandlerMixin, urllib.request.HTTPHandler):
+    _scheme = 'http'
+
+
+class KeepAliveHTTPSHandler(_KeepAliveHandlerMixin, urllib.request.HTTPSHandler):
+    _scheme = 'https'
+
+    def __init__(self, debuglevel=0, context=None, check_hostname=None):
+        super().__init__(debuglevel=debuglevel, context=context, check_hostname=check_hostname)
+
+
 _ORIG_BUILD_OPENER = urllib.request.build_opener
-_DEFAULT_OPENER = _ORIG_BUILD_OPENER(ScopedRedirect(), urllib.request.HTTPSHandler(context=_DEFAULT_SSL_CONTEXT))
+_DEFAULT_OPENER = _ORIG_BUILD_OPENER(
+    ScopedRedirect(),
+    KeepAliveHTTPHandler(),
+    KeepAliveHTTPSHandler(context=_DEFAULT_SSL_CONTEXT),
+)
 
 
 def _tune_response_socket(resp):
@@ -115,7 +326,7 @@ def _open_with_timeout_retry(request, diagnostic_id=''):
             'upstream_host': parsed.hostname or '',
         }, separators=(',', ':')))
         time.sleep(0.15)
-        retry_opener = urllib.request.build_opener(
+        retry_opener = _DEFAULT_OPENER if use_cached_opener else urllib.request.build_opener(
             ScopedRedirect(), urllib.request.HTTPSHandler(context=_DEFAULT_SSL_CONTEXT))
         return _tune_response_socket(retry_opener.open(_retry_request(request), timeout=2))
 
@@ -129,9 +340,10 @@ def safe_error_summary(error):
 
 
 class MediaRelay:
-    def __init__(self, limit=256, segment_limit=16384, stream_media=False):
+    def __init__(self, limit=256, segment_limit=16384, stream_media=False, speculative_warmup=None):
         self.limit = limit
         self.stream_media = bool(stream_media)
+        self.speculative_warmup = speculative_warmup
         self.targets = collections.OrderedDict()
         self.segments = collections.OrderedDict()
         self.segment_index = {}
@@ -146,6 +358,8 @@ class MediaRelay:
         self.diagnosed_resources = collections.OrderedDict()
         self.inline_keys = collections.OrderedDict()
         self.remote_key_cache = collections.OrderedDict()
+        self.remote_map_cache = collections.OrderedDict()
+        self.prefetched_segment_streams = collections.OrderedDict()
         self.inline_manifests = collections.OrderedDict()
         self.dash_playlists = collections.OrderedDict()
         self.responses = set()
@@ -423,9 +637,12 @@ class MediaRelay:
                 refresh_relative_base=None, resource_scope=None):
         parent = urllib.parse.urlsplit(url)
         segment_count = 0
+        warmup_key_token = None
+        warmup_map_token = None
+        warmup_segment_token = None
 
         def local(value, manifest=False, resource_kind="media"):
-            nonlocal segment_count
+            nonlocal segment_count, warmup_key_token, warmup_map_token, warmup_segment_token
             if isinstance(value, str):
                 value = re.sub(r'(?i)&(?:amp|#0*38|#x0*26);', '&', value.strip())
             if resource_kind == "key":
@@ -457,6 +674,13 @@ class MediaRelay:
                 refresh_after=refresh_after if is_manifest else 0,
                 refresh_interval=refresh_interval if is_manifest else 0,
                 refresh_relative=relative, expected_hls=is_manifest, segment=not is_manifest, resource_kind=resource_kind, resource_scope=resource_scope)
+            if not is_manifest:
+                if resource_kind == 'key' and warmup_key_token is None:
+                    warmup_key_token = token
+                elif resource_kind == 'map' and warmup_map_token is None:
+                    warmup_map_token = token
+                elif resource_kind == 'media' and warmup_segment_token is None:
+                    warmup_segment_token = token
             return base + '/media/' + token
         lines = []
         variant_pending = False
@@ -477,6 +701,13 @@ class MediaRelay:
                 line = local(line.strip(), variant_pending)
                 variant_pending = False
             lines.append(line)
+        if (warmup_key_token or warmup_map_token or warmup_segment_token) and self._should_speculative_warmup(parent.hostname):
+            threading.Thread(
+                target=self.warmup_manifest_assets,
+                args=(warmup_key_token, warmup_map_token, warmup_segment_token),
+                name='cctvhost-hls-warmup',
+                daemon=True,
+            ).start()
         return '\n'.join(lines) + '\n'
 
     @staticmethod
@@ -640,11 +871,136 @@ class MediaRelay:
             raise RelayClientDisconnected(type(error).__name__) from error
 
     @staticmethod
+    def sniff_container_magic(data):
+        if not data:
+            return None
+        if data[0] == 0x47 and (len(data) < 189 or data[188] == 0x47):
+            return 'video/mp2t'
+        if data.startswith(b'FLV\x01'):
+            return 'video/x-flv'
+        if data.startswith(b'\x1a\x45\xdf\xa3'):
+            return 'video/x-matroska'
+        if len(data) >= 8 and data[4:8] in (b'ftyp', b'styp', b'moof', b'moov', b'sidx', b'emsg'):
+            return 'video/mp4'
+        head = data.lstrip(b'\xef\xbb\xbf \t\r\n')[:256]
+        if head.startswith(b'#EXTM3U'):
+            return 'application/vnd.apple.mpegurl'
+        if head.startswith((b'<?xml', b'<MPD')) and b'<MPD' in head:
+            return 'application/dash+xml'
+        return None
+
+    @staticmethod
     def _is_clean_media_head(data):
         return (not data or data[0] == 0x47 or
+                data.startswith((b'FLV\x01', b'\x1a\x45\xdf\xa3')) or
                 (len(data) >= 8 and data[4:8] in
                  (b'ftyp', b'styp', b'moof', b'moov', b'sidx', b'emsg')) or
                 data[:3] == b'ID3' or data[:2] in (b'\xff\xf1', b'\xff\xf9'))
+
+    def _should_speculative_warmup(self, hostname):
+        if self.speculative_warmup is not None:
+            return bool(self.speculative_warmup)
+        host = (hostname or '').lower()
+        return bool(host) and host not in ('127.0.0.1', 'localhost', '::1')
+
+    def _evict_expired_prefetched_streams_locked(self, now=None):
+        now = time.monotonic() if now is None else now
+        expired = [k for k, v in self.prefetched_segment_streams.items() if now - v[2] >= 10.0]
+        for k in expired:
+            entry = self.prefetched_segment_streams.pop(k, None)
+            if entry and entry[0]:
+                try:
+                    entry[0].close()
+                except Exception:
+                    pass
+
+    def warmup_manifest_assets(self, key_token=None, map_token=None, segment_token=None):
+        if self.stopping.is_set():
+            return
+        for tok, kind in ((key_token, 'key'), (map_token, 'map'), (segment_token, 'media')):
+            if not tok or self.stopping.is_set():
+                continue
+            with self.lock:
+                record = self.segments.get(tok) or self.targets.get(tok)
+            if not record or record[3]:
+                continue
+            key = record[0]
+            url, pairs, origin = key[:3]
+            diagnostic_id = record[2]
+            cache_key = (url, pairs)
+            if kind == 'key':
+                with self.lock:
+                    if cache_key in self.remote_key_cache:
+                        continue
+            elif kind == 'map':
+                with self.lock:
+                    if cache_key in self.remote_map_cache:
+                        continue
+            elif kind == 'media':
+                with self.lock:
+                    self._evict_expired_prefetched_streams_locked()
+                    if cache_key in self.prefetched_segment_streams:
+                        continue
+            parsed = urllib.parse.urlsplit(url)
+            headers = dict(pairs)
+            if (parsed.scheme.lower(), parsed.netloc.lower()) != origin:
+                headers = {k: v for k, v in headers.items() if k.lower() not in ('authorization', 'cookie')}
+            headers['Accept-Encoding'] = 'identity'
+            req = urllib.request.Request(http_url(url), headers=headers, method='GET')
+            resp = None
+            try:
+                resp = _open_with_timeout_retry(req, diagnostic_id)
+                if getattr(resp, 'status', 0) != 200:
+                    resp.close()
+                    continue
+                if kind == 'key':
+                    raw_key = resp.read(4096)
+                    resp.close()
+                    norm_key = self._normalize_hls_key_bytes(raw_key)
+                    if len(norm_key) == 16:
+                        with self.lock:
+                            if not self.stopping.is_set():
+                                self.remote_key_cache[cache_key] = norm_key
+                                self.remote_key_cache.move_to_end(cache_key)
+                                while len(self.remote_key_cache) > 256:
+                                    self.remote_key_cache.popitem(last=False)
+                elif kind == 'map':
+                    raw_map = resp.read(262145)
+                    resp.close()
+                    if 0 < len(raw_map) <= 262144:
+                        mime = resp.headers.get('Content-Type', 'video/mp4')
+                        map_ct = 'video/mp4' if (len(raw_map) >= 8 and raw_map[4:8] in (b'ftyp', b'styp', b'moof', b'moov')) else mime
+                        with self.lock:
+                            if not self.stopping.is_set():
+                                self.remote_map_cache[cache_key] = (raw_map, map_ct)
+                                self.remote_map_cache.move_to_end(cache_key)
+                                while len(self.remote_map_cache) > 32:
+                                    self.remote_map_cache.popitem(last=False)
+                elif kind == 'media':
+                    reader = resp.read1 if callable(getattr(type(resp), 'read1', None)) else resp.read
+                    prefix_chunk = reader(65536)
+                    if not prefix_chunk:
+                        resp.close()
+                        continue
+                    with self.lock:
+                        if self.stopping.is_set() or cache_key in self.prefetched_segment_streams:
+                            resp.close()
+                        else:
+                            self._evict_expired_prefetched_streams_locked()
+                            while len(self.prefetched_segment_streams) >= 4:
+                                _, old_entry = self.prefetched_segment_streams.popitem(last=False)
+                                try:
+                                    old_entry[0].close()
+                                except Exception:
+                                    pass
+                            self.prefetched_segment_streams[cache_key] = (resp, prefix_chunk, time.monotonic())
+                            resp = None
+            except Exception:
+                if resp is not None:
+                    try:
+                        resp.close()
+                    except Exception:
+                        pass
 
     def serve(self, handler, token, head=False):
         with self.lock:
@@ -821,9 +1177,36 @@ class MediaRelay:
                     self._write_client(handler, cached_norm_key)
                     resource_event('completed', len(cached_norm_key))
                     return
+            if resource_kind == 'map' and not head and not record[3] and not handler.headers.get('Range'):
+                with self.lock:
+                    cached_map = self.remote_map_cache.get((url, pairs))
+                    if cached_map is not None:
+                        self.remote_map_cache.move_to_end((url, pairs))
+                if cached_map is not None:
+                    map_bytes, map_ct = cached_map
+                    resource_event('headers')
+                    resource_event('byte', len(map_bytes))
+                    handler.send_response(200)
+                    handler.send_header('Content-Type', map_ct)
+                    handler.send_header('Content-Length', str(len(map_bytes)))
+                    handler.send_header('Cache-Control', 'no-store')
+                    handler.send_header('Connection', 'close')
+                    handler.end_headers()
+                    sent = True
+                    self._write_client(handler, map_bytes)
+                    resource_event('completed', len(map_bytes))
+                    return
+            prefetched_prefix = b''
+            if resource_kind == 'media' and not head and not record[3] and not handler.headers.get('Range') and not expected_hls:
+                with self.lock:
+                    self._evict_expired_prefetched_streams_locked()
+                    warm_entry = self.prefetched_segment_streams.pop((url, pairs), None)
+                if warm_entry is not None:
+                    response, prefetched_prefix, _ = warm_entry
             request = urllib.request.Request(http_url(url), headers=headers, method='HEAD' if head else 'GET')
             try:
-                response = _open_with_timeout_retry(request, diagnostic_id)
+                if response is None:
+                    response = _open_with_timeout_retry(request, diagnostic_id)
             except urllib.error.HTTPError as upstream_error:
                 if fallback_url and upstream_error.code in (401, 403):
                     upstream_error.close()
@@ -865,7 +1248,7 @@ class MediaRelay:
             expected_bytes = int(raw_length) if re.fullmatch(r'[0-9]{1,18}', raw_length) else None
             final_url = response.geturl()
             is_hls = 'mpegurl' in mime.lower() or urllib.parse.urlsplit(final_url).path.lower().endswith(('.m3u8', '.m3u'))
-            prefix = b''
+            prefix = prefetched_prefix
             # Some providers serve HLS from extensionless/PHP endpoints or
             # return a generic MIME type. Honor declared HLS and sniff those
             # responses before returning opaque bytes to AVPlayer.
@@ -926,6 +1309,28 @@ class MediaRelay:
                 self._write_client(handler, norm_key)
                 resource_event('completed', len(norm_key))
                 return
+            if resource_kind == 'map' and not head and response.status == 200 and not handler.headers.get('Range') and (expected_bytes is None or expected_bytes <= 262144):
+                raw_map = prefix + response.read(262145 - len(prefix))
+                if len(raw_map) <= 262144 and (expected_bytes is None or len(raw_map) == expected_bytes):
+                    map_ct = 'video/mp4' if (len(raw_map) >= 8 and raw_map[4:8] in (b'ftyp', b'styp', b'moof', b'moov')) else mime
+                    if not record[3]:
+                        with self.lock:
+                            self.remote_map_cache[(url, pairs)] = (raw_map, map_ct)
+                            self.remote_map_cache.move_to_end((url, pairs))
+                            while len(self.remote_map_cache) > 32:
+                                self.remote_map_cache.popitem(last=False)
+                    resource_event('byte', len(raw_map))
+                    handler.send_response(200)
+                    handler.send_header('Content-Type', map_ct)
+                    handler.send_header('Content-Length', str(len(raw_map)))
+                    handler.send_header('Cache-Control', 'no-store')
+                    handler.send_header('Connection', 'close')
+                    handler.end_headers()
+                    sent = True
+                    self._write_client(handler, raw_map)
+                    resource_event('completed', len(raw_map))
+                    return
+                prefix = raw_map
             def read_stream_chunk(size=65536):
                 reader = response.read1 if callable(getattr(type(response), 'read1', None)) else response.read
                 thread = threading.current_thread()
@@ -996,6 +1401,10 @@ class MediaRelay:
                     first_chunk = stripped_chunk
                 if first_chunk and first_chunk[0] == 0x47:
                     override_ct = 'video/mp2t'
+                elif first_chunk and generic_mime:
+                    sniffed_ct = self.sniff_container_magic(first_chunk)
+                    if sniffed_ct:
+                        override_ct = sniffed_ct
             handler.send_response(response.status)
             for key in ('Content-Type', 'Content-Length', 'Content-Range', 'Accept-Ranges'):
                 val = response.headers.get(key)
@@ -1096,16 +1505,19 @@ class MediaRelay:
             self.diagnosed_manifests.clear()
             self.diagnosed_resources.clear()
             self.refreshFailures.clear()
+            warm_streams = [entry[0] for entry in self.prefetched_segment_streams.values() if entry and entry[0]]
+            self.prefetched_segment_streams.clear()
             self.inline_keys.clear()
             self.inline_manifests.clear()
             self.remote_key_cache.clear()
+            self.remote_map_cache.clear()
             self.dash_playlists.clear()
         for event in flights:
             event['event'].set()
         for flight in manifest_flights:
             flight['error'] = ('media_service_stopping', 503)
             flight['event'].set()
-        for response in responses:
+        for response in list(responses) + warm_streams:
             try:
                 response.close()
             except OSError:

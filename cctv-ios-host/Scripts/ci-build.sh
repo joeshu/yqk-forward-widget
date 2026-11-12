@@ -59,13 +59,12 @@ with open(base_path,'wb') as f: plistlib.dump(base,f,sort_keys=False)
 assert 'CFBundleIcons' in base and 'CFBundlePrimaryIcon' in base['CFBundleIcons']
 PY
 [ -s "$APP/Assets.car" ] || { echo "::error::AppIcon asset catalog did not produce Assets.car"; exit 1; }
-if [ -z "${PY_DISABLE:-}" ]; then cp Plugins/ysp-live.py "$APP/ysp-live.py"; cp Scripts/host_service_runtime.py "$APP/host_service_runtime.py"; cp Plugins/yangshipin-js.py "$APP/yangshipin-js.py"; cp GeneratedJS/* "$APP/"; mkdir -p "$APP/JSPlugins"; cp -R JSPlugins/yangshipin JSPlugins/compat "$APP/JSPlugins/"; cp JSPlugins/package.json JSPlugins/package-lock.json JSPlugins/build.mjs "$APP/JSPlugins/"; fi
+if [ -z "${PY_DISABLE:-}" ]; then cp Plugins/ysp-live.py "$APP/ysp-live.py"; cp Scripts/host_service_runtime.py "$APP/host_service_runtime.py"; cp Plugins/yangshipin-js.py "$APP/yangshipin-js.py"; cp GeneratedJS/* "$APP/"; mkdir -p "$APP/JSPlugins"; cp -R JSPlugins/yangshipin JSPlugins/compat "$APP/JSPlugins/"; fi
 if [ -z "${PY_DISABLE:-}" ]; then
   cp Plugins/media-service.py Plugins/host_media_runtime.py Plugins/host_media_relay.py Plugins/host_media_url.py Plugins/host_dash.py Plugins/csp_adapter.py Plugins/example-encrypted-media.py Plugins/node-plugin-host.cjs "$APP/"
   cp -R Plugins/base "$APP/base"
   cp -R Plugins/lxml "$APP/lxml"
   cp Plugins/pyquery.py "$APP/pyquery.py"
-  cp -R JSPlugins/generic JSPlugins/drpy "$APP/JSPlugins/"
   cp Resources/NodeMobile-LICENSE.txt "$APP/"
   python3 Scripts/prepare_node_runtime.py "$APP"
 fi
@@ -104,7 +103,9 @@ if [ -z "${PY_DISABLE:-}" ]; then
   cp Plugins/cctvhost_ffmpeg.py "$APP/python/lib/python${PY_VER}/site-packages/cctvhost_ffmpeg.py"
   rm -rf "$APP/python/lib/python${PY_VER}/test" "$APP/python/lib/python${PY_VER}/idlelib" \
          "$APP/python/lib/python${PY_VER}/tkinter" "$APP/python/lib/python${PY_VER}/ensurepip" \
-         "$APP/python/lib/python${PY_VER}/turtledemo" "$APP/python/lib/python${PY_VER}/distutils"
+         "$APP/python/lib/python${PY_VER}/turtledemo" "$APP/python/lib/python${PY_VER}/distutils" \
+         "$APP/python/lib/python${PY_VER}/pydoc_data" "$APP/python/lib/python${PY_VER}/lib2to3" \
+         "$APP/python/lib/python${PY_VER}"/config-* "$APP/python/lib/python${PY_VER}/site-packages"/*.dist-info
   rm -rf "$APP/python/lib/python${PY_VER}/__pycache__"
   find "$APP/python/lib/python${PY_VER}" -name '*.pyc' -delete
   for extension in "$APP/python/lib/python${PY_VER}/lib-dynload"/*.so; do
@@ -159,12 +160,19 @@ clang -arch arm64 \
   -o "$APP/CCTVHost"
 set +x
 
+xcrun strip -x "$APP/CCTVHost" 2>/dev/null || true
+for fw_bin in "$APP/Frameworks"/*.framework/*; do
+  if [ -f "$fw_bin" ] && [[ "$(basename "$fw_bin")" != *.plist ]] && [[ "$(basename "$fw_bin")" != *.json ]] && [[ "$(basename "$fw_bin")" != *.md ]]; then
+    xcrun strip -x "$fw_bin" 2>/dev/null || true
+  fi
+done
+
 file "$APP/CCTVHost"
 otool -L "$APP/CCTVHost" | head -12
 
 mkdir -p "$OUT/Payload"
 cp -R "$APP" "$OUT/Payload/"
 cd "$OUT"
-zip -qry CCTVHost-unsigned.ipa Payload
+zip -9 -qry CCTVHost-unsigned.ipa Payload
 unzip -l CCTVHost-unsigned.ipa | head -12
 shasum -a 256 CCTVHost-unsigned.ipa | tee CCTVHost-unsigned.ipa.sha256

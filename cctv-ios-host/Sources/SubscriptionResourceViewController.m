@@ -90,13 +90,34 @@
         nil];
     if(self.source.length&&self.onRecheckHealth)[rows addObject:@{@"title":@"重新检测健康",@"icon":@"checkmark.shield",@"action":@"recheck"}];
     if(self.source.length&&self.onRematchEPG)[rows addObject:@{@"title":@"重新匹配节目单（EPG）",@"icon":@"calendar.badge.clock",@"action":@"rematch"}];
+    [rows addObject:@{@"title":@"智能匹配官方高清台标与节目单",@"icon":@"sparkles.tv",@"action":@"matchLogos"}];
     [rows addObject:@{@"title":@"导出单项资源文件",@"icon":@"square.and.arrow.up",@"action":@"export"}];
     if(self.source.length)[rows addObject:@{@"title":@"复制订阅地址",@"icon":@"doc.on.doc",@"action":@"copy"}];
     if(self.source.length&&self.onDelete)[rows addObject:@{@"title":@"移除此订阅",@"icon":@"trash",@"action":@"delete",@"destructive":@YES}];
     return rows;
 }
+- (void)toggleChannelLogoSwitch:(UISwitch *)sender {
+    [ProfileStore setChannelLogoEnabled:sender.isOn forSource:self.source];
+    self.notice = sender.isOn ? @"已开启此资源的频道列表与播放器台标" : @"已关闭此资源的台标显示";
+    [self.tableView reloadData];
+}
+- (void)togglePlayerCornerLogoSwitch:(UISwitch *)sender {
+    [ProfileStore setPlayerCornerLogoEnabled:sender.isOn forSource:self.source];
+    self.notice = sender.isOn ? @"已开启此资源的播放器右上角台标" : @"已关闭此资源的播放器右上角台标";
+    [self.tableView reloadData];
+}
+- (void)toggleChannelPreviewSwitch:(UISwitch *)sender {
+    [ProfileStore setChannelPreviewEnabled:sender.isOn forSource:self.source];
+    self.notice = sender.isOn ? @"已开启此资源的频道实时预览图" : @"已关闭此资源的频道实时预览图";
+    [self.tableView reloadData];
+}
+- (void)toggleChannelTelemetrySwitch:(UISwitch *)sender {
+    [ProfileStore setChannelTelemetryEnabled:sender.isOn forSource:self.source];
+    self.notice = sender.isOn ? @"已开启此资源的频道速率与延迟显示" : @"已关闭此资源的频道速率与延迟显示";
+    [self.tableView reloadData];
+}
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {return 3;}
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {return section==0?3:(section==1?2:self.managementRows.count);}
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {return section==0?3:(section==1?6:self.managementRows.count);}
 - (void)tableView:(UITableView *)tableView willDisplayHeaderView:(UIView *)view forSection:(NSInteger)section { HostStyleSectionHeaderView(view); }
 - (void)tableView:(UITableView *)tableView willDisplayFooterView:(UIView *)view forSection:(NSInteger)section { HostStyleSectionFooterView(view); }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {return @[@"资源配置",@"内容状态",@"使用与管理"][section];}
@@ -157,20 +178,69 @@
         }
     }
     else if(ip.section==1){
-        cell.textLabel.text=ip.row==0?[NSString stringWithFormat:@"%@ 个缓存频道",profile[@"count"]?:@0]:(profile[@"status"]?:@"尚未检查");
         if(ip.row==0){
+            cell.textLabel.text=[NSString stringWithFormat:@"%@ 个缓存频道",profile[@"count"]?:@0];
             cell.detailTextLabel.text=profile[@"epgStatus"]?:@"EPG 自动匹配";
             cell.imageView.image=[UIImage systemImageNamed:@"tv"];
-        }else{
+        }else if(ip.row==1){
+            cell.textLabel.text=profile[@"status"]?:@"尚未检查";
             NSTimeInterval updated=[profile[@"updatedAt"] doubleValue];
             if(updated>0){
                 static NSDateFormatter *fmt;static dispatch_once_t once;
                 dispatch_once(&once,^{fmt=[NSDateFormatter new];fmt.locale=[NSLocale localeWithLocaleIdentifier:@"zh_CN"];fmt.dateFormat=@"yyyy-MM-dd HH:mm";});
                 cell.detailTextLabel.text=[NSString stringWithFormat:@"最近成功刷新：%@",[fmt stringFromDate:[NSDate dateWithTimeIntervalSince1970:updated]]];
             }else{
-                cell.detailTextLabel.text=@"尚无成功刷新时间记录";
+                cell.detailTextLabel.text=self.source.length?@"尚无成功刷新时间记录":@"内置官方频道 · 实时同步";
             }
             cell.imageView.image=[UIImage systemImageNamed:@"checkmark.shield"];
+        }else if(ip.row==2){
+            BOOL logoEnabled=[ProfileStore isChannelLogoEnabledForSource:self.source];
+            cell.textLabel.text=@"频道列表与网格台标";
+            cell.detailTextLabel.text=logoEnabled?@"已开启 · 在 CCTV 页与频道页显示该资源台标":@"已关闭 · 列表与网格仅显示文字台名";
+            cell.imageView.image=[UIImage systemImageNamed:logoEnabled?@"photo.fill":@"photo"];
+            UISwitch *toggle=[UISwitch new];
+            toggle.onTintColor=HostAccent();
+            toggle.on=logoEnabled;
+            toggle.accessibilityIdentifier=@"subscription.logo.switch";
+            toggle.accessibilityLabel=@"频道列表与网格台标";
+            [toggle addTarget:self action:@selector(toggleChannelLogoSwitch:) forControlEvents:UIControlEventValueChanged];
+            cell.accessoryView=toggle;
+        }else if(ip.row==3){
+            BOOL cornerEnabled=[ProfileStore isPlayerCornerLogoEnabledForSource:self.source];
+            cell.textLabel.text=@"播放器右上角台标";
+            cell.detailTextLabel.text=cornerEnabled?@"已开启 · 播放时在画面右上角显示当前频道台标":@"已关闭 · 播放画面右上角不显示台标水印";
+            cell.imageView.image=[UIImage systemImageNamed:cornerEnabled?@"tv.inset.filled":@"tv"];
+            UISwitch *toggle=[UISwitch new];
+            toggle.onTintColor=HostAccent();
+            toggle.on=cornerEnabled;
+            toggle.accessibilityIdentifier=@"subscription.corner-logo.switch";
+            toggle.accessibilityLabel=@"播放器右上角台标";
+            [toggle addTarget:self action:@selector(togglePlayerCornerLogoSwitch:) forControlEvents:UIControlEventValueChanged];
+            cell.accessoryView=toggle;
+        }else if(ip.row==4){
+            BOOL previewEnabled=[ProfileStore isChannelPreviewEnabledForSource:self.source];
+            cell.textLabel.text=@"频道实时预览图";
+            cell.detailTextLabel.text=previewEnabled?@"已开启 · 在 CCTV 页与频道页卡片/列表展示频道预览缩略图":@"已关闭 · 仅展示纯色卡片与台标";
+            cell.imageView.image=[UIImage systemImageNamed:previewEnabled?@"photo.on.rectangle.angled":@"rectangle.slash"];
+            UISwitch *toggle=[UISwitch new];
+            toggle.onTintColor=HostAccent();
+            toggle.on=previewEnabled;
+            toggle.accessibilityIdentifier=@"subscription.preview.switch";
+            toggle.accessibilityLabel=@"频道实时预览图";
+            [toggle addTarget:self action:@selector(toggleChannelPreviewSwitch:) forControlEvents:UIControlEventValueChanged];
+            cell.accessoryView=toggle;
+        }else{
+            BOOL telemetryEnabled=[ProfileStore isChannelTelemetryEnabledForSource:self.source];
+            cell.textLabel.text=@"频道速率与延迟";
+            cell.detailTextLabel.text=telemetryEnabled?@"已开启 · 在 CCTV 页与频道页展示每个台的实时速率与响应延迟":@"已关闭 · 不显示速率与延迟徽章";
+            cell.imageView.image=[UIImage systemImageNamed:@"speedometer"];
+            UISwitch *toggle=[UISwitch new];
+            toggle.onTintColor=HostAccent();
+            toggle.on=telemetryEnabled;
+            toggle.accessibilityIdentifier=@"subscription.telemetry.switch";
+            toggle.accessibilityLabel=@"频道速率与延迟";
+            [toggle addTarget:self action:@selector(toggleChannelTelemetrySwitch:) forControlEvents:UIControlEventValueChanged];
+            cell.accessoryView=toggle;
         }
         cell.imageView.tintColor=HostAccent();
         cell.selectionStyle=UITableViewCellSelectionStyleNone;
@@ -213,6 +283,7 @@
         else if([action isEqual:@"refresh"]){if(self.onRefresh){self.onRefresh();self.notice=@"刷新请求已发起";[self.tableView reloadData];}}
         else if([action isEqual:@"recheck"]){if(self.onRecheckHealth){self.onRecheckHealth();self.notice=@"正在重新检测订阅健康状态…";[self.tableView reloadData];}}
         else if([action isEqual:@"rematch"]){if(self.onRematchEPG){self.onRematchEPG();self.notice=@"已发起节目单（EPG）重新匹配";[self.tableView reloadData];}}
+        else if([action isEqual:@"matchLogos"]){if(self.onMatchStationLogos)self.onMatchStationLogos();self.notice=@"已完成官方高清台标与节目单归一匹配";[self.tableView reloadData];}
         else if([action isEqual:@"export"]){if(self.onExport)self.onExport();}
         else if([action isEqual:@"copy"]){if(self.source.length){UIPasteboard.generalPasteboard.string=self.source;self.notice=@"订阅地址已复制到剪贴板";[self.tableView reloadData];}}
         else if([action isEqual:@"delete"]){[self confirmDeleteSubscription];}

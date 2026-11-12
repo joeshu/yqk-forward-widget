@@ -394,6 +394,15 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
     [self finishPendingSeekWithFinished:NO];
 }
 
+static dispatch_queue_t MediaPlaybackCicadaQuarantineQueue(void) {
+    static dispatch_queue_t q;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        q = dispatch_queue_create("cctvhost.cicada.quarantine", DISPATCH_QUEUE_SERIAL);
+    });
+    return q;
+}
+
 - (void)destroy {
     if (self.destroyed && !self.player) return;
     self.destroyed = YES;
@@ -408,10 +417,17 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
     self.player = nil;
     self.config = nil;
     if (player) {
-        // 先摘 delegate 再停，避免拆解过程中的回调落到已释放的适配器。
+        // 先摘 delegate 与 playerView 再停，并将 reset/destroy 移入隔离队列延迟 350ms，
+        // 避免 HLSStream::openSegment 后台线程在 open_callback (0xd0e9c) 解引用空指针。
         CicadaCallVoidObject(player, NSSelectorFromString(@"setDelegate:"), nil);
+        CicadaCallVoidObject(player, NSSelectorFromString(@"setPlayerView:"), nil);
         CicadaCallVoid(player, NSSelectorFromString(@"stop"));
-        CicadaCallVoid(player, NSSelectorFromString(@"destroy"));
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(350 * NSEC_PER_MSEC)), MediaPlaybackCicadaQuarantineQueue(), ^{
+            @autoreleasepool {
+                CicadaCallVoid(player, NSSelectorFromString(@"reset"));
+                CicadaCallVoid(player, NSSelectorFromString(@"destroy"));
+            }
+        });
     }
     self.state = MediaPlaybackCicadaAdapterStateIdle;
     if (cancelledSeek) cancelledSeek(NO);

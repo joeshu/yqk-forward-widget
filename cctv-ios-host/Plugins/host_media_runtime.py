@@ -1253,6 +1253,17 @@ class PythonSpider:
                     self._record_vod_titles(res)
                 return res
             if operation == 'detail':
+                if args.get('refresh') or args.get('forceRefresh'):
+                    if callable(getattr(spider, 'clear_cache', None)):
+                        try:
+                            spider.clear_cache()
+                        except Exception:
+                            pass
+                    elif callable(getattr(getattr(spider, 'cache', None), 'clear', None)):
+                        try:
+                            spider.cache.clear()
+                        except Exception:
+                            pass
                 vid = str(args.get('id', ''))
                 hint_title = _clean_meta_text(args.get('vodName') or args.get('title') or '')
                 if hint_title and not _is_opaque_id_name(hint_title, vid):
@@ -1590,7 +1601,7 @@ class MediaRuntime:
                              '影视资源初始化失败（%s），请查看此资源日志' % (startup_error or '未知错误'))
         if state == 'starting' or engine is None:
             raise MediaError('BUSY', '影视资源脚本正在准备，请稍候', True)
-        args = args or {}
+        args = dict(args or {}) if isinstance(args, dict) else {}
         if operation == 'invalidate':
             with self.cache_lock:
                 self.cache_generation += 1
@@ -1601,17 +1612,35 @@ class MediaRuntime:
                 for pending in flights:
                     pending.error = ('REFRESHED', '资源配置已变更，请重新加载', True)
                     pending.ready.set()
+            spider_obj = getattr(engine, 'spider', None)
+            if callable(getattr(spider_obj, 'clear_cache', None)):
+                try:
+                    spider_obj.clear_cache()
+                except Exception:
+                    pass
+            elif callable(getattr(getattr(spider_obj, 'cache', None), 'clear', None)):
+                try:
+                    spider_obj.cache.clear()
+                except Exception:
+                    pass
             return {'invalidated': True}
         if operation == 'capabilities':
             return engine.capabilities()
-        key = json.dumps([operation, args], sort_keys=True, ensure_ascii=False)
+        force_refresh = bool(args.get('refresh') in (True, 1, '1', 'true', 'yes') or
+                             args.get('forceRefresh') in (True, 1, '1', 'true', 'yes'))
+        cache_args = {k: v for k, v in args.items() if k not in ('refresh', 'forceRefresh')}
+        key = json.dumps([operation, cache_args], sort_keys=True, ensure_ascii=False)
         ttl = {'home': 120, 'category': 30, 'search': 20, 'detail': 120, 'catalog': 60}.get(operation, 0)
         flight = None
         owner = False
         if ttl:
             with self.cache_lock:
                 cache_generation = self.cache_generation
-                entry = self.cache.get(key)
+                if force_refresh:
+                    removed = self.cache.pop(key, None)
+                    if removed:
+                        self.cache_bytes = max(0, self.cache_bytes - removed[2])
+                entry = None if force_refresh else self.cache.get(key)
                 if entry and entry[0] > time.monotonic():
                     self.cache.move_to_end(key)
                     return json.loads(entry[1])

@@ -639,13 +639,24 @@ function httpText(url, opts, redirects = 0) {
       res.on('data', c => {
         total += c.length;
         if (total > 32 * 1024 * 1024) {
-          res.destroy(Error('HTTP response exceeds 32 MB'));
+          res.destroy(Error('HTTP response exceeds 64 MB'));
           return;
         }
         chunks.push(c);
       });
       res.on('error', reject);
-      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks) }));
+      res.on('end', () => {
+        let buf = Buffer.concat(chunks);
+        const enc = String((res.headers && res.headers['content-encoding']) || '').toLowerCase();
+        try {
+          if (enc.includes('gzip') || (buf.length >= 2 && buf[0] === 0x1f && buf[1] === 0x8b)) {
+            buf = zlib.gunzipSync(buf);
+          } else if (enc.includes('deflate')) {
+            buf = zlib.inflateSync(buf);
+          }
+        } catch (_zerr) { }
+        resolve({ status: res.statusCode, headers: res.headers, body: buf });
+      });
     });
     req.on('timeout', () => { req.destroy(new Error('timeout')); });
     req.on('error', reject);
@@ -1132,6 +1143,10 @@ function parseTrack(moov, track) {
   moov = moov.subarray(track.offset, track.offset + track.size);
   const stbl = findBox(moov, 'stbl', track.header);
   if (!stbl) return null;
+  const stblSlice = moov.subarray(stbl.offset, stbl.offset + stbl.size);
+  if (stblSlice.indexOf('encv', 0, 'latin1') < 0 &&
+      stblSlice.indexOf('enca', 0, 'latin1') < 0 &&
+      stblSlice.indexOf('sinf', 0, 'latin1') < 0) return null;
   const stsz = boxBody(moov, 'stsz', stbl.body);
   const stsc = boxBody(moov, 'stsc', stbl.body);
   const chunk = findBox(moov, 'stco', stbl.body) || findBox(moov, 'co64', stbl.body);
@@ -1139,6 +1154,17 @@ function parseTrack(moov, track) {
   const saio = boxBody(moov, 'saio', stbl.body);
   if (!stsz || !stsc || !chunk || !saiz || !saio) return null;
   if (stsz.length < 12 || stsc.length < 8 || saiz.length < 9 || saio.length < 12) return null;
+  let ivSize = 8;
+  const tencPos = stblSlice.indexOf('tenc', 0, 'latin1');
+  if (tencPos >= 4 && tencPos + 11 <= stblSlice.length) {
+    const candIv = stblSlice[tencPos + 10];
+    if (candIv === 8 || candIv === 16) ivSize = candIv;
+  }
+  const sencBox = findBox(moov, 'senc', stbl.body);
+  let sencFlags = 0;
+  if (sencBox && sencBox.body + 4 <= sencBox.offset + sencBox.size) {
+    sencFlags = moov.readUInt32BE(sencBox.body) & 0xffffff;
+  }
   const dsize = stsz.readUInt32BE(4);
   const scount = stsz.readUInt32BE(8);
   const sizes = [];
@@ -1169,24 +1195,42 @@ function parseTrack(moov, track) {
   else { for (let i = 0; i < auxCount; i++) auxSizes.push(saiz[9 + i] || 0); }
   const sver = saio[0];
   const auxOffset = sver === 1 ? Number(saio.readBigUInt64BE(8)) : saio.readUInt32BE(8);
-  return { sizes, offsets: offs, spc, auxOffset, auxSizes, sampleCount: scount };
+  return { sizes, offsets: offs, spc, auxOffset, auxSizes, sampleCount: scount, ivSize, sencFlags };
 }
 
 function buildSamples(data, tracks) {
   const out = [];
   for (const tr of tracks) {
     let idx = 0, apos = 0;
-    const atotal = tr.auxSizes.reduce((s, x) => s + Math.max(x, 8), 0);
+    const ivSize = tr.ivSize || 8;
+    const sencFlags = tr.sencFlags || 0;
+    const atotal = tr.auxSizes.reduce((s, x) => s + Math.max(x, ivSize), 0);
     const aux = data.subarray(tr.auxOffset, tr.auxOffset + atotal);
     for (let ci = 0; ci < tr.offsets.length && idx < tr.sampleCount; ci++) {
       let off = tr.offsets[ci];
       const cnt = tr.spc[ci] || 0;
       for (let k = 0; k < cnt && idx < tr.sampleCount; k++) {
         const size = tr.sizes[idx];
-        const asz = Math.max(tr.auxSizes[idx] || 8, 8);
+        const asz = Math.max(tr.auxSizes[idx] || ivSize, ivSize);
         const iv = Buffer.alloc(16);
-        aux.copy(iv, 0, apos, apos + Math.min(8, asz));
-        out.push({ start: off, end: off + size, iv });
+        aux.copy(iv, 0, apos, apos + Math.min(ivSize, asz, 16));
+        let subsamples = null;
+        if ((sencFlags & 2) || (asz > ivSize && asz >= ivSize + 8 && (asz - ivSize - 2) % 6 === 0)) {
+          const subCount = aux.readUInt16BE(apos + ivSize);
+          if (subCount > 0 && subCount <= 4096 && ivSize + 2 + subCount * 6 === asz) {
+            const subs = [];
+            let subOff = apos + ivSize + 2, totalSub = 0;
+            for (let si = 0; si < subCount; si++) {
+              const clB = aux.readUInt16BE(subOff);
+              const encB = aux.readUInt32BE(subOff + 2);
+              subs.push([clB, encB]);
+              totalSub += clB + encB;
+              subOff += 6;
+            }
+            if (totalSub === size) subsamples = subs;
+          }
+        }
+        out.push({ start: off, end: off + size, iv, subsamples });
         off += size; idx += 1; apos += asz;
       }
     }
@@ -1235,8 +1279,8 @@ function clearAuxBoxes(header) {
 
 function decryptCenc(src, dst, key) {
   const data = fs.readFileSync(src);
-  const ftypSize = data.readUInt32BE(0);
-  const moov = readBox(data, ftypSize);
+  const topBoxes = boxesIn(data, 0, data.length);
+  const moov = (topBoxes && topBoxes.find(b => b.type === 'moov')) || readBox(data, data.length >= 8 ? data.readUInt32BE(0) : 0);
   if (!moov || moov.type !== 'moov') throw new Error('invalid moov');
   const mb = data.subarray(moov.body, moov.offset + moov.size);
   const tracks = [];
@@ -1251,17 +1295,32 @@ function decryptCenc(src, dst, key) {
   const samples = buildSamples(data, parsed);
   if (!samples.length) throw new Error('CENC sample table is empty');
   const out = Buffer.from(data);
-  const header = Buffer.from(data.subarray(0, moov.offset + moov.size));
-  restoreSampleFormats(header, moov);
-  replaceSinf(header);
-  clearAuxBoxes(header);
-  header.copy(out, 0);
+  const moovBuf = Buffer.from(data.subarray(moov.offset, moov.offset + moov.size));
+  const moovLocal = { offset: 0, size: moov.size, type: 'moov', header: moov.header, body: moov.header };
+  restoreSampleFormats(moovBuf, moovLocal);
+  replaceSinf(moovBuf);
+  clearAuxBoxes(moovBuf);
+  moovBuf.copy(out, moov.offset);
   for (const s of samples) {
     if (s.start >= out.length) continue;
     const end = Math.min(s.end, out.length);
     const dec = crypto.createDecipheriv('aes-128-ctr', key, s.iv);
-    const plain = Buffer.concat([dec.update(out.subarray(s.start, end)), dec.final()]);
-    plain.copy(out, s.start);
+    if (!s.subsamples) {
+      const plain = Buffer.concat([dec.update(out.subarray(s.start, end)), dec.final()]);
+      plain.copy(out, s.start);
+    } else {
+      let pos = s.start;
+      for (const [clearB, encB] of s.subsamples) {
+        pos += clearB;
+        const segEnd = Math.min(pos + encB, end);
+        if (encB > 0 && pos < segEnd) {
+          const decSeg = dec.update(out.subarray(pos, segEnd));
+          decSeg.copy(out, pos);
+        }
+        pos = segEnd;
+      }
+      dec.final();
+    }
   }
   fs.writeFileSync(dst, out);
   return dst;

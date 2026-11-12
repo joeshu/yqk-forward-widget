@@ -1,5 +1,41 @@
 #import "ResourceContentInspection.h"
 
+static NSRegularExpression *ResourcePythonRegex(void) {
+    static NSRegularExpression *re;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        re = [NSRegularExpression regularExpressionWithPattern:@"(?m)^\\s*(?:class\\s+Spider\\s*[:(]|from\\s+base\\.spider\\s+import|def\\s+(?:homeContent|playerContent)\\s*\\()" options:0 error:NULL];
+    });
+    return re;
+}
+
+static NSRegularExpression *ResourceScriptRegex(void) {
+    static NSRegularExpression *re;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        re = [NSRegularExpression regularExpressionWithPattern:@"(?m)(?:^|[;\\n])\\s*(?:export\\s+(?:default|const|function|class)|import\\s|(?:var|let|const)\\s+rule\\s*=|module\\.exports\\s*=|WeBox\\.define\\s*\\()" options:0 error:NULL];
+    });
+    return re;
+}
+
+static NSRegularExpression *ResourceAnchorsRegex(void) {
+    static NSRegularExpression *re;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        re = [NSRegularExpression regularExpressionWithPattern:@"<a\\b[^>]{0,4096}?\\s+href\\s*=\\s*(?:\"([^\"]{1,8192})\"|'([^']{1,8192})'|([^\\s>]{1,8192}))[^>]{0,4096}>([\\s\\S]{0,2048}?)</a\\s*>" options:NSRegularExpressionCaseInsensitive error:NULL];
+    });
+    return re;
+}
+
+static NSRegularExpression *ResourceTagsRegex(void) {
+    static NSRegularExpression *re;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        re = [NSRegularExpression regularExpressionWithPattern:@"<[^>]*>" options:0 error:NULL];
+    });
+    return re;
+}
+
 NSString *ResourceContentText(NSData *data) {
     if(![data isKindOfClass:NSData.class]||!data.length)return @"";
     NSUInteger count=MIN(data.length,(NSUInteger)512*1024);
@@ -20,12 +56,12 @@ NSString *ResourceContentExtension(NSData *data,NSString *suggestedFilename) {
     if(ResourceContentIsHTML(data))return @"html";
     NSString *text=ResourceContentText(data),*trim=[text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     if([trim hasPrefix:@"#EXTM3U"])return @"m3u";
-    NSRegularExpression *python=[NSRegularExpression regularExpressionWithPattern:@"(?m)^\\s*(?:class\\s+Spider\\s*[:(]|from\\s+base\\.spider\\s+import|def\\s+(?:homeContent|playerContent)\\s*\\()" options:0 error:NULL];
+    NSRegularExpression *python=ResourcePythonRegex();
     if([python firstMatchInString:text options:0 range:NSMakeRange(0,text.length)])return @"py";
     if([extension isEqual:@"hjs"])return extension;
     if([trim hasPrefix:@"{"]||[trim hasPrefix:@"["]){id json=[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];if([json isKindOfClass:NSDictionary.class]||[json isKindOfClass:NSArray.class])return @"json";}
     if([@[@"js",@"mjs",@"cjs",@"py",@"zip",@"jar",@"m3u",@"m3u8",@"json",@"xml",@"txt",@"hawk"] containsObject:extension])return extension;
-    NSRegularExpression *script=[NSRegularExpression regularExpressionWithPattern:@"(?m)(?:^|[;\\n])\\s*(?:export\\s+(?:default|const|function|class)|import\\s|(?:var|let|const)\\s+rule\\s*=|module\\.exports\\s*=|WeBox\\.define\\s*\\()" options:0 error:NULL];
+    NSRegularExpression *script=ResourceScriptRegex();
     return [script firstMatchInString:text options:0 range:NSMakeRange(0,text.length)]?@"js":@"txt";
 }
 static NSString *ResourceContentUnescape(NSString *value) {
@@ -43,9 +79,13 @@ static NSURL *ResourceContentLink(NSString *value,NSURL *origin) {
 NSArray<NSDictionary *> *ResourceContentPageLinks(NSData *data,NSURL *origin) {
     if(!ResourceContentIsHTML(data))return @[];
     NSString *text=ResourceContentText(data);
-    NSRegularExpression *anchors=[NSRegularExpression regularExpressionWithPattern:@"<a\\b[^>]{0,4096}?\\s+href\\s*=\\s*(?:\"([^\"]{1,8192})\"|'([^']{1,8192})'|([^\\s>]{1,8192}))[^>]{0,4096}>([\\s\\S]{0,2048}?)</a\\s*>" options:NSRegularExpressionCaseInsensitive error:NULL];
-    NSRegularExpression *tags=[NSRegularExpression regularExpressionWithPattern:@"<[^>]*>" options:0 error:NULL];
-    NSSet *extensions=[NSSet setWithArray:@[@"json",@"hawk",@"js",@"hjs",@"mjs",@"cjs",@"py",@"zip",@"jar",@"md5",@"m3u",@"m3u8",@"txt",@"xml"]];
+    NSRegularExpression *anchors=ResourceAnchorsRegex();
+    NSRegularExpression *tags=ResourceTagsRegex();
+    static NSSet *extensions;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        extensions=[NSSet setWithArray:@[@"json",@"hawk",@"js",@"hjs",@"mjs",@"cjs",@"py",@"zip",@"jar",@"md5",@"m3u",@"m3u8",@"txt",@"xml"]];
+    });
     NSMutableArray *links=[NSMutableArray array];NSMutableSet *seen=[NSMutableSet set];
     [anchors enumerateMatchesInString:text options:0 range:NSMakeRange(0,text.length) usingBlock:^(NSTextCheckingResult *match,NSMatchingFlags flags,BOOL *stop){
         NSString *href=nil;for(NSUInteger group=1;group<=3;group++)if([match rangeAtIndex:group].location!=NSNotFound){href=[text substringWithRange:[match rangeAtIndex:group]];break;}

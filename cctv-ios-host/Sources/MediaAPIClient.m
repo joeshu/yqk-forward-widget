@@ -6,6 +6,22 @@
 #import "MediaPlaybackHeaders.h"
 #import "RuntimeDiagnostics.h"
 #import "TVBoxCatalogStore.h"
+#import <objc/message.h>
+
+static void MediaAPIRecordAdaptationMonitor(NSString *operation, NSDictionary *source, NSString *provider, NSDictionary *arguments, id result, NSError *error, NSInteger elapsedMs) {
+    Class cls = NSClassFromString(@"MediaAdaptationMonitor");
+    if (!cls) return;
+    SEL sharedSel = NSSelectorFromString(@"shared");
+    if (![cls respondsToSelector:sharedSel]) return;
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+    id monitor = [cls performSelector:sharedSel];
+#pragma clang diagnostic pop
+    SEL recSel = NSSelectorFromString(@"recordAPICallWithOperation:source:provider:arguments:result:error:elapsedMs:");
+    if (monitor && [monitor respondsToSelector:recSel]) {
+        ((void (*)(id, SEL, NSString *, NSDictionary *, NSString *, NSDictionary *, id, NSError *, NSInteger))objc_msgSend)(monitor, recSel, operation ?: @"unknown", source, provider, arguments, result, error, elapsedMs);
+    }
+}
 #import <QuartzCore/QuartzCore.h>
 #import <CommonCrypto/CommonCryptor.h>
 #import <CommonCrypto/CommonDigest.h>
@@ -685,6 +701,68 @@ static void MediaParserRecordOutcome(NSDictionary *parser, BOOL succeeded) {
         });};
     self.task=[[self sessionForOperation:@"play"] dataTaskWithRequest:request];[self.contextLock lock];[self.requestContexts setObject:context forKey:self.task];[self.contextLock unlock];[self.task resume];
 }
+static NSDictionary *MediaJARBridgeDefaultConfigForAPI(NSString *api) {
+    if(![api isKindOfClass:NSString.class]||!api.length)return @{};
+    NSString *low=api.lowercaseString;
+    if([low hasPrefix:@"com.github.catvod.spider."]){
+        low=[@"csp_" stringByAppendingString:[low substringFromIndex:[@"com.github.catvod.spider." length]]];
+    }
+    static NSDictionary<NSString *,NSDictionary *> *defaults=nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken,^{
+        defaults=@{
+            @"csp_sikv4k":@{@"url":@"https://www.4kvm.net"},
+            @"csp_gz":@{@"url":@"https://api.cj7wq4.com",@"site":@[@"https://api.cj7wq4.com",@"https://apinew.uozvr.com",@"https://api.w32z7vtd.com"],@"dataKey":@"mvXBSW7ekreItNsT",@"dataIv":@"2U3IrJL8szAKp0Fj"},
+            @"csp_duoduo":@{@"url":@"https://dduotv01.top",@"dataKey":@"8f3d2a1c7b6e5d4c9a0b1f2e3d4c5b6a"},
+            @"csp_gulu":@{@"url":@"http://103.45.132.22:19987"},
+            @"csp_hetun":@{@"url":@"https://az1-1456692500.cos.ap-guangzhou.myqcloud.com/az1.txt",@"dataKey":@"ed5fdsgucxumegqa",@"dataIv":@"OC1A06E197EF10CF3F6058CA7A803B5E"},
+            @"csp_huayi":@{@"url":@"http://43.240.158.154:18004",@"dataKey":@"ed5fdsgucxumegqa",@"dataIv":@"OC1A06E197EF10CF3F6058CA7A803B5E"},
+            @"csp_juzhi":@{@"url":@"https://gdsaj.hzhcbkj.cn",@"dataKey":@"11GK2we32144LO&hilUITB)FMd1khdaF",@"dataIv":@"OC1A06E197EF10CF3F6058CA7A803B5E"},
+            @"csp_piandi":@{@"url":@"https://dongpian17.com"},
+            @"csp_yingtan":@{@"url":@"http://cms.lyyytv.cn",@"dataKey":@"wP5bvxoc3yv7FoBQENFZuAF0EUYr4LTy",@"dataIv":@"wP5bvxoc3yv7FoBQENFZuAF0EUYr4LTy"},
+            @"csp_kishuto":@{@"url":@"http://cms.lyyytv.cn",@"dataKey":@"wP5bvxoc3yv7FoBQENFZuAF0EUYr4LTy",@"dataIv":@"wP5bvxoc3yv7FoBQENFZuAF0EUYr4LTy"},
+            @"csp_fengye4k":@{@"url":@"https://www.cd-zj.com",@"site":@[@"https://www.cd-zj.com",@"https://maihaolian.com",@"https://fgsrg.hzqingshan.com",@"https://zzrs.mfdyvip.com"]},
+            @"csp_juxiafan":@{@"url":@"http://manian.juxiafan.com",@"site":@[@"http://manian.juxiafan.com",@"http://195.225.24.128:6213",@"http://jugaoqing.com",@"http://194.147.100.155:7744"],@"dataKey":@"kZ6fT8oF6oM8eX6lF7eH2rJ3pW7gW0kC"},
+            @"csp_shanzha4k":@{@"url":@"http://43.248.128.122:578"},
+            @"csp_daishu":@{@"url":@"https://dsystv.com"},
+            @"csp_dongmanbashi":@{@"url":@"https://dm845.com"},
+            @"csp_dbku":@{@"url":@"https://api.dbokutv.com",@"site":@[@"https://api.dbokutv.com",@"https://www.dbku.tv",@"https://w.duboku.io"]},
+            @"csp_fandazi":@{@"url":@"https://fdzys.com"},
+            @"csp_fourkmp":@{@"url":@"https://4k-av.com"},
+            @"csp_jbd":@{@"url":@"https://m.jiabaide.cn",@"dataKey":@"cb808529bae6b6be45ecfab29a4889bc"},
+            @"csp_jianpian":@{@"url":@"https://api.ztcgi.com",@"site":@[@"https://api.ztcgi.com",@"https://ev5356.970xw.com",@"https://api.ubj83.com"]},
+            @"csp_nongmin":@{@"url":@"https://vip.wwgz.cn:5200",@"site":@[@"https://vip.wwgz.cn:5200",@"https://www.wwgz.cn"]},
+            @"csp_nmvod":@{@"url":@"https://vip.wwgz.cn:5200",@"site":@[@"https://vip.wwgz.cn:5200",@"https://api.wwgz.cn:520"]},
+            @"csp_rejutv":@{@"url":@"https://www.rjtvw.com"},
+            @"csp_saohuo":@{@"url":@"http://shapp.us"},
+            @"csp_tegou":@{@"url":@"https://www.tegou.me"},
+            @"csp_yunbo":@{@"url":@"http://app.tuxianimg.com",@"dataKey":@"MickwrKuMickwrKu",@"dataIv":@"MickwrKuMickwrKu"},
+            @"csp_wftv":@{@"url":@"https://www.wangfei.tv"},
+            @"csp_yingxiang":@{@"url":@"https://www.yxxq51.cc",@"site":@[@"https://www.yxxq51.cc",@"https://www.yxxq52.cc",@"https://www.yxxq53.cc",@"https://www.yxxq.top"]},
+            @"csp_zjdr":@{@"url":@"https://cj.lziapi.com/api.php/provide/vod/at/json/",@"site":@[@"https://cj.lziapi.com/api.php/provide/vod/at/json/",@"https://cj.ffzyapi.com/api.php/provide/vod/at/json/",@"https://api.zuidapi.com/api.php/provide/vod/at/json/"]},
+            @"csp_zhuiying":@{@"url":@"https://zhuiying3.cc"},
+            @"csp_luoxuetv":@{@"url":@"https://tv.lxyy.club"},
+            @"csp_pansearch":@{@"url":@"https://www.wogg.net",@"site":@[@"https://www.wogg.net",@"https://wogg.xxooo.cf",@"https://123.666291.xyz"]},
+            @"csp_hongguo":@{@"url":@"https://hongguoduanju.com"},
+            @"csp_ddrk":@{@"url":@"https://ddys.mov"},
+            @"csp_kuaikan":@{@"url":@"https://www.kuaikanys.net"},
+            @"csp_auete":@{@"url":@"https://auete.pro"},
+            @"csp_dygang":@{@"url":@"https://www.dygangs.me"},
+            @"csp_ttian":@{@"url":@"http://tt.ysdqjs.cn"},
+            @"csp_xdai":@{@"url":@"http://111.180.198.40:1110",@"dataKey":@"asgcxhjkts124573",@"dataIv":@"asgcxhjkts124573"},
+            @"csp_qiji":@{@"url":@"http://172.83.156.150:1010"},
+            @"csp_qiao2":@{@"url":@"https://fs-im-kefu.7moor-fs1.com/ly/4d2c3f00-7d4c-11e5-af15-41bf63ae4ea0/1745208060258/cksp.txt"},
+            @"csp_muou":@{@"url":@"http://gw.mcyan.cn"},
+            @"csp_jpys":@{@"url":@"https://www.hskjjglo.com"},
+            @"csp_bdys01":@{@"url":@"https://v.xlys.ltd.ua"},
+            @"csp_lib":@{@"url":@"https://www.libvio.cc"},
+            @"csp_zxzj":@{@"url":@"https://www.zxzjys.com"},
+            @"csp_czsapp":@{@"url":@"https://www.czzy77.com"},
+            @"csp_ai":@{@"url":@"http://175.178.80.209/mb/api.php/provide/vod/"},
+        };
+    });
+    return defaults[low]?:@{};
+}
 static NSDictionary *MediaJARBridgeJSONDictionary(id raw) {
     if([raw isKindOfClass:NSDictionary.class])return raw;
     if([raw isKindOfClass:NSData.class]){
@@ -692,7 +770,22 @@ static NSDictionary *MediaJARBridgeJSONDictionary(id raw) {
         if([res isKindOfClass:NSDictionary.class])return res;
     }
     if([raw isKindOfClass:NSString.class]){
-        NSData *data=[(NSString *)raw dataUsingEncoding:NSUTF8StringEncoding];
+        NSString *str=[(NSString *)raw stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        if([str.lowercaseString hasPrefix:@"7lj763gg"]){
+            NSString *decoded=[TVBoxCatalogStore decodeQiaojiExtString:str];
+            if(decoded.length)str=decoded;
+        }
+        if([str containsString:@"|"]&&([str.lowercaseString hasPrefix:@"http://"]||[str.lowercaseString hasPrefix:@"https://"])){
+            NSArray<NSString *> *parts=[str componentsSeparatedByString:@"|"];
+            NSMutableDictionary *pipeDict=[NSMutableDictionary dictionary];
+            pipeDict[@"url"]=parts[0];
+            if(parts.count>=2&&[parts[1] length]>=8&&([parts[1] length]==16||[parts[1] length]==24||[parts[1] length]==32)){
+                pipeDict[@"dataKey"]=parts[1];
+                pipeDict[@"dataIv"]=(parts.count>=3&&([parts[2] length]==16||[parts[2] length]==24||[parts[2] length]==32))?parts[2]:parts[1];
+            }
+            return pipeDict.copy;
+        }
+        NSData *data=[str dataUsingEncoding:NSUTF8StringEncoding];
         id res=data?[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL]:nil;
         if([res isKindOfClass:NSDictionary.class])return res;
     }
@@ -729,8 +822,13 @@ static NSString *MediaJARBridgeExtractTxtMirrorURL(id candidate) {
         return MediaJARBridgeExtractTxtMirrorURL(@[dict[@"url"]?:@"",dict[@"host"]?:@"",dict[@"site"]?:@""]);
     }
     if(![candidate isKindOfClass:NSString.class])return @"";
-    NSCharacterSet *seps=[NSCharacterSet characterSetWithCharactersInString:@",; \t\r\n"];
-    for(NSString *part in [(NSString *)candidate componentsSeparatedByCharactersInSet:seps]){
+    NSString *rawStr=[(NSString *)candidate stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if([rawStr.lowercaseString hasPrefix:@"7lj763gg"]){
+        NSString *decoded=[TVBoxCatalogStore decodeQiaojiExtString:rawStr];
+        if(decoded.length)rawStr=decoded;
+    }
+    NSCharacterSet *seps=[NSCharacterSet characterSetWithCharactersInString:@",;| \t\r\n"];
+    for(NSString *part in [rawStr componentsSeparatedByCharactersInSet:seps]){
         NSString *trimmed=[part stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
         NSString *low=trimmed.lowercaseString;
         if(([low hasPrefix:@"http://"]||[low hasPrefix:@"https://"])&&![low containsString:@"127.0.0.1:9978"]&&[low hasSuffix:@".txt"]){
@@ -751,11 +849,15 @@ static NSArray<NSString *> *MediaJARBridgeCandidateURLs(id candidate) {
     }
     if([candidate isKindOfClass:NSDictionary.class]){
         NSDictionary *dict=(NSDictionary *)candidate;
-        return MediaJARBridgeCandidateURLs(@[dict[@"url"]?:@"",dict[@"host"]?:@"",dict[@"site"]?:@"",dict[@"api"]?:@"",dict[@"domain"]?:@"",dict[@"domains"]?:@""]);
+        return MediaJARBridgeCandidateURLs(@[dict[@"url"]?:@"",dict[@"host"]?:@"",dict[@"site"]?:@"",dict[@"sites"]?:@"",dict[@"api"]?:@"",dict[@"domain"]?:@"",dict[@"domains"]?:@""]);
     }
     if(![candidate isKindOfClass:NSString.class])return @[];
     NSString *rawStr=[(NSString *)candidate stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     if(!rawStr.length)return @[];
+    if([rawStr.lowercaseString hasPrefix:@"7lj763gg"]){
+        NSString *decoded=[TVBoxCatalogStore decodeQiaojiExtString:rawStr];
+        if(decoded.length)rawStr=decoded;
+    }
     if([rawStr hasPrefix:@"{"]||[rawStr hasPrefix:@"["]){
         NSData *jsonData=[rawStr dataUsingEncoding:NSUTF8StringEncoding];
         id jsonObj=jsonData?[NSJSONSerialization JSONObjectWithData:jsonData options:0 error:NULL]:nil;
@@ -774,13 +876,17 @@ static NSArray<NSString *> *MediaJARBridgeCandidateURLs(id candidate) {
         while([trimmed hasSuffix:@"/"])trimmed=[trimmed substringToIndex:trimmed.length-1];
         NSString *low=trimmed.lowercaseString;
         if(![low hasPrefix:@"http://"]&&![low hasPrefix:@"https://"])continue;
+        if([low hasSuffix:@"/static/js/playerconfig.js"]){
+            trimmed=[trimmed substringToIndex:trimmed.length-[@"/static/js/playerconfig.js" length]];
+            low=trimmed.lowercaseString;
+        }
         if([low containsString:@"127.0.0.1:9978"]||[low hasSuffix:@".json"]||[low hasSuffix:@".js"]||[low hasSuffix:@".py"]||[low hasSuffix:@".jar"]||[low hasSuffix:@".png"]||[low hasSuffix:@".jpg"])continue;
         if([low hasSuffix:@".txt"]){
             NSString *resolved=MediaJARBridgeLookupMirror(trimmed);
             if(resolved.length&&![results containsObject:resolved])[results addObject:resolved];
             continue;
         }
-        for(NSString *suffix in @[@"/api.php/app",@"/api.php/provide/vod",@"/api.php/v1.vod",@"/app/bn"]){
+        for(NSString *suffix in @[@"/api.php/app",@"/api.php/provide/vod",@"/api.php/v1.vod",@"/app/bn/v2",@"/app/bn",@"/webcloud/relay.php?url="]){
             if([low hasSuffix:suffix]){trimmed=[trimmed substringToIndex:trimmed.length-suffix.length];break;}
         }
         while([trimmed hasSuffix:@"/"])trimmed=[trimmed substringToIndex:trimmed.length-1];
@@ -815,11 +921,15 @@ static void MediaJARBridgeSaveWorkingBase(NSDictionary *source,NSString *base) {
 static NSArray<NSString *> *MediaJARBridgeCandidatesForSource(NSDictionary *source) {
     id rawOptions=source[@"options"];
     NSDictionary *cfg=MediaJARBridgeJSONDictionary(rawOptions);
+    NSDictionary *fallbackCfg=MediaJARBridgeDefaultConfigForAPI(source[@"api"]);
     NSMutableArray<NSString *> *list=[NSMutableArray array];
     NSString *key=MediaJARBridgeSourceCacheKey(source);
     NSString *cached=nil;
     @synchronized(MediaJARBridgeWorkingBaseMap()){cached=MediaJARBridgeWorkingBaseMap()[key];}
-    NSArray *configured=MediaJARBridgeCandidateURLs(@[cfg[@"url"]?:@"",cfg[@"host"]?:@"",cfg[@"site"]?:@"",rawOptions?:@""]);
+    NSArray *configured=MediaJARBridgeCandidateURLs(@[cfg[@"url"]?:@"",cfg[@"host"]?:@"",cfg[@"site"]?:@"",cfg[@"sites"]?:@"",rawOptions?:@""]);
+    if(!configured.count&&fallbackCfg.count){
+        configured=MediaJARBridgeCandidateURLs(fallbackCfg);
+    }
     if(cached.length&&[configured containsObject:cached])[list addObject:cached];
     for(NSString *u in configured){if(u.length&&![list containsObject:u])[list addObject:u];}
     return list.copy;
@@ -867,8 +977,11 @@ static NSURLRequest *MediaJARBridgeMacCMSFallbackRequest(NSString *cmsAPI,NSStri
 static NSData *MediaJARBridgeTryDecryptData(NSData *data,NSDictionary *source) {
     if(!data.length)return nil;
     NSDictionary *cfg=MediaJARBridgeJSONDictionary(source[@"options"]);
+    NSDictionary *defaultCfg=MediaJARBridgeDefaultConfigForAPI(source[@"api"]);
     NSString *keyStr=MediaTVBoxFirstString(cfg,@[@"dataKey",@"siteKey",@"key"]);
+    if(!keyStr.length)keyStr=MediaTVBoxFirstString(defaultCfg,@[@"dataKey",@"siteKey",@"key"]);
     NSString *ivStr=MediaTVBoxFirstString(cfg,@[@"dataIv",@"listKey",@"iv"]);
+    if(!ivStr.length)ivStr=MediaTVBoxFirstString(defaultCfg,@[@"dataIv",@"listKey",@"iv"]);
     if(!keyStr.length)return nil;
     if(!ivStr.length)ivStr=keyStr;
     NSString *text=[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
@@ -955,7 +1068,7 @@ static NSURLRequest *MediaJARBridgeRequest(NSDictionary *source,NSString *operat
     NSUInteger siteIdx=[arguments[@"_jar_site_index"] respondsToSelector:@selector(unsignedIntegerValue)]?[arguments[@"_jar_site_index"] unsignedIntegerValue]:0;
     NSString *base=candidates.count?candidates[MIN(siteIdx,candidates.count-1)]:@"";
     NSString *urlStr=@"";
-    if([lowAPI containsString:@"xbpq"]||[lowAPI containsString:@"xyqhiker"]||[lowAPI containsString:@"music1"]){
+    if([lowAPI containsString:@"xbpq"]||[lowAPI containsString:@"xyqhiker"]||[lowAPI containsString:@"xpath"]||[lowAPI containsString:@"music1"]){
         NSString *catTpl=MediaTVBoxString(cfg[@"分类url"]?:cfg[@"首页url"]?:cfg[@"url"]);
         if(!catTpl.length&&![operation isEqual:@"play"]){
             if(error)*error=[NSError errorWithDomain:@"CCTVHostJARBridge" code:1 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"站点「%@」（%@）配置中缺少直接可请求的 分类url/首页url（ext=%@）",siteName,api,[rawOptions description]?:@"空"]}];
@@ -999,20 +1112,32 @@ static NSURLRequest *MediaJARBridgeRequest(NSDictionary *source,NSString *operat
             NSString *vid=MediaTVBoxString(arguments[@"id"]);
             urlStr=[vid hasPrefix:@"http"]?vid:[NSString stringWithFormat:@"https://www.bilibili.com/video/%@",vid];
         }
-    } else if(([lowAPI containsString:@"panweb"]||[lowAPI containsString:@"wogg"])&&base.length){
+    } else if(([lowAPI containsString:@"panweb"]||[lowAPI containsString:@"wogg"]||[lowAPI isEqual:@"csp_pansearch"]||[lowAPI isEqual:@"csp_tegou"]||[lowAPI isEqual:@"csp_wftv"]||[lowAPI isEqual:@"csp_rejutv"]||[lowAPI isEqual:@"csp_zhuiying"]||[lowAPI isEqual:@"csp_zxzj"]||[lowAPI isEqual:@"csp_lib"]||[lowAPI isEqual:@"csp_czsapp"]||[lowAPI isEqual:@"csp_bdys01"]||[lowAPI isEqual:@"csp_ddrk"]||[lowAPI isEqual:@"csp_kuaikan"]||[lowAPI isEqual:@"csp_sikv4k"]||[lowAPI isEqual:@"csp_daishu"]||[lowAPI isEqual:@"csp_dongmanbashi"]||[lowAPI isEqual:@"csp_fandazi"]||[lowAPI isEqual:@"csp_fourkmp"]||[lowAPI isEqual:@"csp_nongmin"])&&base.length){
         if([operation isEqual:@"home"]){
-            urlStr=[base stringByAppendingString:@"/index.php/vod/show/id/1/page/1.html"];
+            urlStr=([lowAPI isEqual:@"csp_pansearch"]||[lowAPI containsString:@"panweb"]||[lowAPI containsString:@"wogg"])?[base stringByAppendingString:@"/index.php/vod/show/id/1/page/1.html"]:base;
         } else if([operation isEqual:@"category"]){
             NSString *tid=MediaTVBoxString(arguments[@"categoryId"]);if(!tid.length)tid=@"1";
             NSString *pg=[NSString stringWithFormat:@"%ld",(long)MAX(1,[arguments[@"page"] integerValue])];
-            urlStr=[NSString stringWithFormat:@"%@/index.php/vod/show/id/%@/page/%@.html",base,tid,pg];
+            urlStr=[NSString stringWithFormat:@"%@/vodshow/%@--------%@---.html",base,tid,pg];
         } else if([operation isEqual:@"search"]){
             NSString *kw=MediaParserEncodeValue(MediaTVBoxString(arguments[@"keyword"]));
             NSString *pg=[NSString stringWithFormat:@"%ld",(long)MAX(1,[arguments[@"page"] integerValue])];
-            urlStr=[NSString stringWithFormat:@"%@/index.php/vod/search/page/%@/wd/%@.html",base,pg,kw];
+            urlStr=[NSString stringWithFormat:@"%@/vodsearch/%@----------%@---.html",base,kw,pg];
         } else if([operation isEqual:@"detail"]||[operation isEqual:@"play"]){
             NSString *vid=MediaTVBoxString(arguments[@"id"]);
-            urlStr=[vid hasPrefix:@"http"]?vid:[NSString stringWithFormat:@"%@/index.php/vod/detail/id/%@.html",base,vid];
+            urlStr=[vid hasPrefix:@"http"]?vid:[NSString stringWithFormat:@"%@/voddetail/%@.html",base,vid];
+        }
+    } else if([lowAPI isEqual:@"csp_hongguo"]&&base.length){
+        if([operation isEqual:@"home"]||[operation isEqual:@"category"]){
+            NSString *pg=[NSString stringWithFormat:@"%ld",(long)MAX(1,[arguments[@"page"] integerValue])];
+            urlStr=[NSString stringWithFormat:@"%@/?page=%@",base,pg];
+        } else if([operation isEqual:@"search"]){
+            NSString *kw=MediaParserEncodeValue(MediaTVBoxString(arguments[@"keyword"]));
+            NSString *pg=[NSString stringWithFormat:@"%ld",(long)MAX(1,[arguments[@"page"] integerValue])];
+            urlStr=[NSString stringWithFormat:@"%@/api/search/result?aid=8662&query=%@&page=%@",base,kw,pg];
+        } else if([operation isEqual:@"detail"]||[operation isEqual:@"play"]){
+            NSString *vid=MediaTVBoxString(arguments[@"id"]);
+            urlStr=[vid hasPrefix:@"http"]?vid:[NSString stringWithFormat:@"%@/detail?series_id=%@",base,vid];
         }
     } else {
         if(!base.length){
@@ -1021,8 +1146,9 @@ static NSURLRequest *MediaJARBridgeRequest(NSDictionary *source,NSString *operat
             if(error)*error=[NSError errorWithDomain:@"CCTVHostJARBridge" code:2 userInfo:@{NSLocalizedDescriptionKey:reasonMsg}];
             return nil;
         }
-        if([base.lowercaseString hasSuffix:@".php"]){
-            return MediaJARBridgeMacCMSFallbackRequest(base,operation,arguments);
+        if([base.lowercaseString hasSuffix:@".php"]||[base.lowercaseString containsString:@"/api.php/provide/vod"]||[lowAPI isEqual:@"csp_zjdr"]||[lowAPI isEqual:@"csp_ai"]){
+            NSString *cmsEndpoint=[base.lowercaseString containsString:@"/api.php/provide/vod"]?base:([lowAPI isEqual:@"csp_zjdr"]?[base stringByAppendingString:@"/api.php/provide/vod/at/json/"]:([lowAPI isEqual:@"csp_ai"]?[base stringByAppendingString:@"/mb/api.php/provide/vod/"]:base));
+            return MediaJARBridgeMacCMSFallbackRequest(cmsEndpoint,operation,arguments);
         }
         if([operation isEqual:@"home"]){
             urlStr=[base stringByAppendingString:@"/api.php/app/nav"];
@@ -1338,7 +1464,7 @@ static id MediaJARBridgeNormalize(NSString *operation,NSDictionary *arguments,NS
     [RuntimeDiagnostics.shared recordEvent:@"media_api_started" category:@"media_api" fields:startFields];
     }
 
-    if(MediaJARUsesRuntime(self.tvboxSource)&&![@[@"capabilities",@"providers"] containsObject:operation]){
+    if(MediaJARUsesRuntime(self.tvboxSource)&&MediaJARRuntime.available&&![@[@"capabilities",@"providers"] containsObject:operation]){
         NSDictionary *source=self.tvboxSource;
         __weak typeof(self) weakSelf=self;
         self.jarRequest=[MediaJARRuntime requestSource:source operation:operation arguments:arguments?:@{} completion:^(id raw,NSError *jarFailure){
@@ -1387,8 +1513,9 @@ static id MediaJARBridgeNormalize(NSString *operation,NSDictionary *arguments,NS
 
     if(jarBridge&&![arguments[@"_jar_txt_resolved"] boolValue]){
         NSDictionary *jarCfg=MediaJARBridgeJSONDictionary(self.tvboxSource[@"options"]);
-        NSArray<NSString *> *knownCandidates=MediaJARBridgeCandidateURLs(@[jarCfg[@"url"]?:@"",jarCfg[@"host"]?:@"",jarCfg[@"site"]?:@"",self.tvboxSource[@"options"]?:@""]);
-        NSString *txtMirrorURL=knownCandidates.count?@"":MediaJARBridgeExtractTxtMirrorURL(@[jarCfg[@"url"]?:@"",jarCfg[@"host"]?:@"",jarCfg[@"site"]?:@"",self.tvboxSource[@"options"]?:@""]);
+        NSDictionary *defCfg=MediaJARBridgeDefaultConfigForAPI(self.tvboxSource[@"api"]);
+        NSArray<NSString *> *knownCandidates=MediaJARBridgeCandidateURLs(@[jarCfg[@"url"]?:@"",jarCfg[@"host"]?:@"",jarCfg[@"site"]?:@"",self.tvboxSource[@"options"]?:@"",defCfg]);
+        NSString *txtMirrorURL=knownCandidates.count?@"":MediaJARBridgeExtractTxtMirrorURL(@[jarCfg[@"url"]?:@"",jarCfg[@"host"]?:@"",jarCfg[@"site"]?:@"",self.tvboxSource[@"options"]?:@"",defCfg]);
         NSURL *mirrorTarget=txtMirrorURL.length?[NSURL URLWithString:txtMirrorURL]:nil;
         if(mirrorTarget){
             NSMutableURLRequest *mirrorReq=[NSMutableURLRequest requestWithURL:mirrorTarget cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:6.0];
@@ -1587,6 +1714,8 @@ static id MediaJARBridgeNormalize(NSString *operation,NSDictionary *arguments,NS
                     return;
                 }
             }
+            NSDictionary *monitorSource=tvboxSource?:@{@"port":@(port),@"protocol":@"local-service"};
+            MediaAPIRecordAdaptationMonitor(operation?:@"unknown", monitorSource, arguments[@"provider"], arguments, result==NSNull.null?nil:result, failure, (NSInteger)((CACurrentMediaTime()-startedAt)*1000));
             [client completeResult:result==NSNull.null?nil:result error:failure operation:operation generation:generation correlationID:correlationID completion:completion];
         });
     };

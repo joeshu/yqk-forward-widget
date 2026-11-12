@@ -8,6 +8,18 @@ static inline NSTimeInterval MediaPlaybackForwardBuffer(BOOL firstFrame, BOOL fa
     if(firstFrame)seconds+=MIN(stalls,(NSUInteger)3)*4.0;
     return MIN(constrained?12.0:30.0,seconds*MAX(1.0,rate));
 }
+// Four-stage smooth buffer ramp after first frame (1.5s -> 4.0s -> 8.0s -> 12.0s)
+// to prevent post-startup buffer starvation re-stalls.
+static inline NSTimeInterval MediaPlaybackSmoothForwardBuffer(BOOL firstFrame, BOOL fastStartup, double observed, double rate, NSUInteger stalls, BOOL constrained) {
+    if(!firstFrame)return MediaPlaybackForwardBuffer(NO,fastStartup,rate,stalls,constrained);
+    if(!isfinite(observed)||observed>=15.0)return MediaPlaybackForwardBuffer(YES,fastStartup,rate,stalls,constrained);
+    rate=isfinite(rate)?MIN(3.0,MAX(0.5,rate)):1.0;
+    double base=3.5;
+    if(observed>=6.0)base=constrained?5.0:8.0;
+    else if(observed>=2.0)base=4.0;
+    base+=MIN(stalls,(NSUInteger)3)*3.5;
+    return MIN(constrained?12.0:30.0,base*MAX(1.0,rate));
+}
 // A displayed poster/first frame does not prove continuous playback. Increasing
 // the target while data is still scarce can create another startup wait.
 static inline BOOL MediaPlaybackCanGrowForwardBuffer(double observed, double ahead, double target, BOOL playing) {

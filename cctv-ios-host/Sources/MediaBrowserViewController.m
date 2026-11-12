@@ -16,6 +16,7 @@
 #import "MediaGlobalSearchViewController.h"
 #import "MediaSourceHealthStore.h"
 #import "TVBoxCatalogStore.h"
+#import "MediaAdaptationMonitor.h"
 #import "PyHost.h"
 #import <float.h>
 #import <math.h>
@@ -156,6 +157,7 @@ static BOOL MediaBrowserIdentityNameMatches(id value, NSString *savedName) {
 @property(nonatomic,strong) UIButton *previousPageButton;
 @property(nonatomic,strong) UIButton *nextPageButton;
 @property(nonatomic,strong) UIButton *episodeReverseButton;
+@property(nonatomic,strong) UIButton *episodeStyleButton;
 @property(nonatomic) BOOL episodeOrderReversed;
 @property(nonatomic,strong) MediaPlaybackViewController *inlinePlaybackController;
 @property(nonatomic,strong) UIActivityIndicatorView *spinner;
@@ -303,7 +305,7 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
     [super viewDidLoad];self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();self.title=@"";self.view.backgroundColor=HostBackground();self.navigationItem.largeTitleDisplayMode=UINavigationItemLargeTitleDisplayModeNever;
     self.selectedLineIndex=0;self.selectedEpisodeIndex=0;self.episodePage=0;self.episodeButtons=[NSMutableArray array];self.diagnosticTraceID=NSUUID.UUID.UUIDString.lowercaseString;
     UIButton *back=[UIButton buttonWithType:UIButtonTypeSystem];back.frame=CGRectMake(0,0,44,44);[back setTitle:@"‹" forState:UIControlStateNormal];back.titleLabel.font=[UIFont systemFontOfSize:32 weight:UIFontWeightMedium];back.titleLabel.adjustsFontForContentSizeCategory=NO;back.titleEdgeInsets=UIEdgeInsetsMake(-3,0,0,0);back.tintColor=HostAccent();HostStyleGlassCard(back,14);HostInstallPressFeedback(back);back.accessibilityLabel=@"返回";back.accessibilityIdentifier=@"media-detail-back";[back addTarget:self action:@selector(goBack) forControlEvents:UIControlEventTouchUpInside];self.navigationItem.hidesBackButton=YES;self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithCustomView:back];
-    __weak typeof(self) weakSelf=self;self.navigationItem.rightBarButtonItems=@[HostToolbar(@[@{@"icon":@"ellipsis",@"title":@"更多影片操作",@"menu":[UIMenu menuWithChildren:@[[UIAction actionWithTitle:@"返回影视首页" image:[UIImage systemImageNamed:@"house"] identifier:nil handler:^(UIAction *action){if(weakSelf.onReturnHome)weakSelf.onReturnHome();}],[UIAction actionWithTitle:@"重新加载详情" image:[UIImage systemImageNamed:@"arrow.clockwise"] identifier:nil handler:^(UIAction *action){[weakSelf reloadDetail];}],[UIAction actionWithTitle:@"复制片名" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(UIAction *action){[weakSelf copyTitle];}],[UIAction actionWithTitle:@"分享影片信息" image:[UIImage systemImageNamed:@"square.and.arrow.up"] identifier:nil handler:^(UIAction *action){[weakSelf shareTitle];}]]]}])];
+    __weak typeof(self) weakSelf=self;self.navigationItem.rightBarButtonItems=@[HostToolbar(@[@{@"icon":@"arrow.clockwise",@"title":@"重新加载详情",@"identifier":@"media-detail-reload",@"action":[UIAction actionWithHandler:^(__unused UIAction *action){[weakSelf reloadDetail];}]},@{@"icon":@"ellipsis",@"title":@"更多影片操作",@"menu":[UIMenu menuWithChildren:@[[UIAction actionWithTitle:@"重新加载详情" image:[UIImage systemImageNamed:@"arrow.clockwise"] identifier:nil handler:^(UIAction *action){[weakSelf reloadDetail];}],[UIAction actionWithTitle:@"站点与播放适配监测" image:[UIImage systemImageNamed:@"waveform.path.ecg"] identifier:nil handler:^(UIAction *action){[weakSelf openAdaptationMonitor];}],[UIAction actionWithTitle:@"返回影视首页" image:[UIImage systemImageNamed:@"house"] identifier:nil handler:^(UIAction *action){if(weakSelf.onReturnHome)weakSelf.onReturnHome();}],[UIAction actionWithTitle:@"复制片名" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(UIAction *action){[weakSelf copyTitle];}],[UIAction actionWithTitle:@"分享影片信息" image:[UIImage systemImageNamed:@"square.and.arrow.up"] identifier:nil handler:^(UIAction *action){[weakSelf shareTitle];}]]]}])];
     if(!MediaSourceUsesNativeCatalogAPI(self.source)&&[self.source[@"id"] isKindOfClass:NSString.class]){for(NSDictionary *stored in [ServiceStore services])if([stored[@"id"] isEqual:self.source[@"id"]]){self.source=stored;break;}}
     NSString *catalogID=[self.source[@"catalogID"] isKindOfClass:NSString.class]?self.source[@"catalogID"]:([self.source[@"tvboxCatalogID"] isKindOfClass:NSString.class]?self.source[@"tvboxCatalogID"]:@"");self.client=MediaSourceUsesNativeCatalogAPI(self.source)?[[MediaAPIClient alloc] initWithTVBoxSource:self.source]:[[MediaAPIClient alloc] initWithPort:[self.source[@"port"] integerValue] catalogID:catalogID];
     NSDictionary *manifest=[self.source[@"manifest"] isKindOfClass:NSDictionary.class]?self.source[@"manifest"]:@{};NSDictionary *options=[manifest[@"options"] isKindOfClass:NSDictionary.class]?manifest[@"options"]:([self.source[@"options"] isKindOfClass:NSDictionary.class]?self.source[@"options"]:@{});NSInteger playTimeout=[options[@"playTimeoutMs"] respondsToSelector:@selector(integerValue)]?[options[@"playTimeoutMs"] integerValue]:0;if(playTimeout>0)self.client.playTimeoutMilliseconds=MIN(120000,MAX(1000,playTimeout));
@@ -390,8 +392,19 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
     self.previousPageButton=[UIButton buttonWithType:UIButtonTypeSystem];self.nextPageButton=[UIButton buttonWithType:UIButtonTypeSystem];self.episodeReverseButton=[UIButton buttonWithType:UIButtonTypeSystem];
     UIImageSymbolConfiguration *pageSymCfg=[UIImageSymbolConfiguration configurationWithPointSize:12.5 weight:UIImageSymbolWeightBold];[self.previousPageButton setImage:[UIImage systemImageNamed:@"chevron.left" withConfiguration:pageSymCfg]?:[UIImage systemImageNamed:@"chevron.left"] forState:UIControlStateNormal];[self.nextPageButton setImage:[UIImage systemImageNamed:@"chevron.right" withConfiguration:pageSymCfg]?:[UIImage systemImageNamed:@"chevron.right"] forState:UIControlStateNormal];self.previousPageButton.accessibilityLabel=@"上一页";self.nextPageButton.accessibilityLabel=@"下一页";HostStylePillButton(self.previousPageButton,NO);HostStylePillButton(self.nextPageButton,NO);HostInstallPressFeedback(self.previousPageButton);HostInstallPressFeedback(self.nextPageButton);self.previousPageButton.contentEdgeInsets=UIEdgeInsetsMake(6,11,6,11);self.nextPageButton.contentEdgeInsets=UIEdgeInsetsMake(6,11,6,11);self.previousPageButton.tintColor=HostText();self.nextPageButton.tintColor=HostText();[self.previousPageButton.widthAnchor constraintGreaterThanOrEqualToConstant:38].active=YES;[self.nextPageButton.widthAnchor constraintGreaterThanOrEqualToConstant:38].active=YES;
     [self.previousPageButton addTarget:self action:@selector(previousEpisodePage) forControlEvents:UIControlEventTouchUpInside];[self.nextPageButton addTarget:self action:@selector(nextEpisodePage) forControlEvents:UIControlEventTouchUpInside];
+    self.episodeStyleButton=[UIButton buttonWithType:UIButtonTypeSystem];
+    self.episodeStyleButton.accessibilityIdentifier=@"media-detail-episode-style";
+    self.episodeStyleButton.accessibilityLabel=@"切换选集显示样式";
+    self.episodeStyleButton.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];
+    HostStylePillButton(self.episodeStyleButton,NO);HostInstallPressFeedback(self.episodeStyleButton);
+    self.episodeStyleButton.contentEdgeInsets=UIEdgeInsetsMake(6,10,6,10);
+    self.episodeStyleButton.showsMenuAsPrimaryAction=YES;
+    [self.episodeStyleButton addTarget:self action:@selector(cycleEpisodeLayoutStyle) forControlEvents:UIControlEventTouchUpInside];
+    [self.episodeStyleButton.heightAnchor constraintGreaterThanOrEqualToConstant:36].active=YES;
+    [paging addArrangedSubview:self.episodeStyleButton];
     self.episodeReverseButton.accessibilityLabel=@"切换选集正序或倒序";[self.episodeReverseButton setTitle:@"正序" forState:UIControlStateNormal];self.episodeReverseButton.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];HostStylePillButton(self.episodeReverseButton,NO);HostInstallPressFeedback(self.episodeReverseButton);self.episodeReverseButton.contentEdgeInsets=UIEdgeInsetsMake(6,12,6,12);[self.episodeReverseButton addTarget:self action:@selector(toggleEpisodeOrder) forControlEvents:UIControlEventTouchUpInside];[paging addArrangedSubview:self.episodeReverseButton];
     [paging addArrangedSubview:self.previousPageButton];[paging addArrangedSubview:self.nextPageButton];self.previousPageButton.hidden=YES;self.nextPageButton.hidden=YES;[self.previousPageButton.heightAnchor constraintGreaterThanOrEqualToConstant:36].active=YES;[self.nextPageButton.heightAnchor constraintGreaterThanOrEqualToConstant:36].active=YES;[self.episodeReverseButton.heightAnchor constraintGreaterThanOrEqualToConstant:36].active=YES;[sourceStack addArrangedSubview:paging];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(handleEpisodeLayoutStyleDidChange) name:CCTVMediaEpisodeLayoutStyleDidChangeNotification object:nil];
     self.episodeGrid=[UIStackView new];self.episodeGrid.axis=UILayoutConstraintAxisVertical;self.episodeGrid.spacing=5;self.episodeGrid.distribution=UIStackViewDistributionFillEqually;self.episodeGrid.accessibilityIdentifier=@"media-detail-episode-grid";[sourceStack addArrangedSubview:self.episodeGrid];
     [self.contentStack addArrangedSubview:sourceCard];
     [self.scrollView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor].active=YES;
@@ -399,7 +412,7 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
     self.spinner=[[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];self.spinner.hidesWhenStopped=YES;self.spinner.translatesAutoresizingMaskIntoConstraints=NO;[self.view addSubview:self.spinner];
     [NSLayoutConstraint activateConstraints:@[[self.spinner.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],[self.spinner.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor]]];
 }
-- (void)dealloc {[self.client cancel];self.inlinePlaybackController=nil;}
+- (void)dealloc {[NSNotificationCenter.defaultCenter removeObserver:self];[self.client cancel];self.inlinePlaybackController=nil;}
 - (void)teardownInlinePlayback {MediaPlaybackViewController *player=self.inlinePlaybackController;if(!player)return;self.inlinePlaybackController=nil;self.playButton.hidden=NO;self.contentStack.layoutMargins=UIEdgeInsetsMake(0,14,20,14);[player willMoveToParentViewController:nil];[player.view removeFromSuperview];[player removeFromParentViewController];}
 - (void)goBack {[self.navigationController popViewControllerAnimated:YES];}
 - (void)viewDidDisappear:(BOOL)animated {[super viewDidDisappear:animated];[self.inlinePlaybackController pauseForBackground];if(self.isMovingFromParentViewController){self.generation++;[self.client cancel];[self teardownInlinePlayback];}}
@@ -442,14 +455,56 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
     CGFloat maximum=MIN(420.0,MAX(180.0,height*.42));CGFloat target=[self.inlinePlaybackController preferredInlineVideoHeightForWidth:width maximumHeight:maximum];
     if(fabs(self.inlinePlaybackDockHeightConstraint.constant-target)>.5){self.inlinePlaybackDockHeightConstraint.constant=target;[self.view setNeedsLayout];}
 }
+- (void)openAdaptationMonitor {
+    NSString *srcName=[self safeDetailString:self.source[@"name"]];
+    NSString *mediaName=MediaDetailPreferredTitle([self safeDetailString:self.detail[@"name"]],[self safeDetailString:self.item[@"name"]],[self safeDetailString:self.item[@"id"]],[self safeDetailString:self.detail[@"description"]]);
+    NSString *api=[self safeDetailString:self.source[@"api"]];
+    if(!api.length&&[self.source[@"port"] integerValue]>0)api=[NSString stringWithFormat:@"http://127.0.0.1:%ld/api/v1/detail",(long)[self.source[@"port"] integerValue]];
+    NSString *streamURL=self.inlinePlaybackController?[self safeDetailString:self.inlinePlaybackController.result[@"originalURL"]?:self.inlinePlaybackController.result[@"url"]]:@"";
+    MediaAdaptationMonitorViewController *monitor=[[MediaAdaptationMonitorViewController alloc] initWithContext:@{
+        @"sourceName":srcName.length?srcName:@"当前资源",
+        @"mediaName":mediaName.length?mediaName:@"当前影片",
+        @"provider":self.provider?:@"",
+        @"api":api?:@"",
+        @"probeURL":streamURL.length?streamURL:(api?:@"")
+    }];
+    if(self.navigationController)[self.navigationController pushViewController:monitor animated:YES];
+    else{UINavigationController *nav=[[UINavigationController alloc] initWithRootViewController:monitor];[self presentViewController:nav animated:YES completion:nil];}
+}
 - (void)loadDetail { [self loadDetailRefreshing:NO]; }
 - (void)reloadDetail { [self loadDetailRefreshing:YES]; }
 - (void)loadDetailRefreshing:(BOOL)forceRefresh {
     NSUInteger generation=++self.generation;
     [self.client cancel];
-    self.status.text=@"正在加载影片详情…";
+    if(forceRefresh&&!MediaSourceUsesNativeCatalogAPI(self.source)&&[self.source[@"id"] isKindOfClass:NSString.class]){
+        for(NSDictionary *stored in [ServiceStore services]){
+            if([stored[@"id"] isEqual:self.source[@"id"]]){
+                NSInteger newPort=[stored[@"port"] integerValue];
+                NSInteger oldPort=[self.source[@"port"] integerValue];
+                self.source=stored;
+                if(newPort>0&&newPort!=oldPort){
+                    NSString *catalogID=[self.source[@"catalogID"] isKindOfClass:NSString.class]?self.source[@"catalogID"]:([self.source[@"tvboxCatalogID"] isKindOfClass:NSString.class]?self.source[@"tvboxCatalogID"]:@"");
+                    self.client=[[MediaAPIClient alloc] initWithPort:newPort catalogID:catalogID];
+                    NSDictionary *manifest=[self.source[@"manifest"] isKindOfClass:NSDictionary.class]?self.source[@"manifest"]:@{};
+                    NSDictionary *options=[manifest[@"options"] isKindOfClass:NSDictionary.class]?manifest[@"options"]:([self.source[@"options"] isKindOfClass:NSDictionary.class]?self.source[@"options"]:@{});
+                    NSInteger playTimeout=[options[@"playTimeoutMs"] respondsToSelector:@selector(integerValue)]?[options[@"playTimeoutMs"] integerValue]:0;
+                    if(playTimeout>0)self.client.playTimeoutMilliseconds=MIN(120000,MAX(1000,playTimeout));
+                }
+                break;
+            }
+        }
+    }
+    self.status.text=forceRefresh?@"正在重新加载影片详情与分集…":@"正在加载影片详情…";
     self.status.hidden=NO;
     [self.spinner startAnimating];
+    if(forceRefresh){
+        self.pageLabel.text=@"正在重新加载影片详情与分集…";
+        if(self.inlinePlaybackController){
+            self.inlinePlaybackController.status.text=@"正在重新加载详情与播放源…";
+            self.inlinePlaybackController.status.accessibilityLabel=self.inlinePlaybackController.status.text;
+            [self.inlinePlaybackController.spinner startAnimating];
+        }
+    }
     NSString *requestedItemID=([self.item[@"id"] isKindOfClass:NSString.class]||[self.item[@"id"] isKindOfClass:NSNumber.class])?[self.item[@"id"] description]:@"";NSMutableDictionary *args=[@{@"id":requestedItemID} mutableCopy];
     NSString *itemTitleHint=[self safeDetailString:self.item[@"name"]];if(itemTitleHint.length)args[@"vodName"]=itemTitleHint;
     if(self.provider.length)args[@"provider"]=self.provider;
@@ -470,11 +525,20 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
         if(!self.resumeEntry){NSString *sourceID=self.source[@"id"]?:@"";self.resumeEntry=[MediaPlaybackStateStore latestHistoryForSourceID:sourceID provider:self.provider?:@"" itemID:requestedItemID];}
         [self restoreResumeEntrySelection];[self refreshDetailHeader];[self updateRouteAndEpisodeViews];
         if(self.lines.count){
-            [self.spinner stopAnimating];self.status.hidden=YES;
             [RuntimeDiagnostics.shared recordEvent:@"media_detail_cache_hit" category:@"media_api" fields:@{@"correlation_id":self.diagnosticTraceID?:@"",@"service_id":self.source[@"id"]?:@"",@"cache_stale":@(cacheStale),@"elapsed_ms":@((NSInteger)(MAX(0,CACurrentMediaTime()-startedAt)*1000)),@"network_skipped":@(!cacheStale&&!forceRefresh)}];
+            if(!forceRefresh){[self.spinner stopAnimating];self.status.hidden=YES;}
             if(!cacheStale&&!forceRefresh)return;
+            if(forceRefresh){
+                self.status.text=@"正在重新加载影片详情与分集…";
+                self.status.hidden=NO;
+                [self.spinner startAnimating];
+                self.pageLabel.text=@"正在重新加载影片详情与分集…";
+            }else{
+                [self.spinner stopAnimating];self.status.hidden=YES;
+            }
         }
     }
+    if(forceRefresh)args[@"refresh"]=@YES;
     NSDictionary *requestedSource=self.source;
     static dispatch_queue_t detailProcessingQueue;static dispatch_once_t detailProcessingOnce;
     dispatch_once(&detailProcessingOnce,^{detailProcessingQueue=dispatch_queue_create("com.cctvhost.detail.prepare",dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL,QOS_CLASS_USER_INITIATED,0));});
@@ -513,7 +577,12 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
                 @"error_code":@(error.code), @"error_message":error.localizedDescription?:@"invalid_response_shape",
                 @"plugin_error_code":error.userInfo[@"plugin_error_code"]?:@"", @"failure_stage":error.userInfo[@"failure_stage"]?:@""
             }];
-            if(owner.detail){owner.status.text=[NSString stringWithFormat:@"刷新失败 · 保留当前详情：%@",error.localizedDescription?:@"来源未返回详情"];owner.status.hidden=NO;}
+            [MediaAdaptationMonitor.shared recordAPICallWithOperation:@"detail" source:owner.source provider:owner.provider arguments:args result:result error:error elapsedMs:elapsedMS];
+            if(owner.detail){
+                owner.status.text=[NSString stringWithFormat:@"刷新失败 · 保留当前详情：%@",error.localizedDescription?:@"来源未返回详情"];owner.status.hidden=NO;
+                owner.pageLabel.text=owner.status.text;
+                if(owner.inlinePlaybackController){[owner.inlinePlaybackController.spinner stopAnimating];owner.inlinePlaybackController.status.text=owner.status.text;}
+            }
             else{owner.status.text=[NSString stringWithFormat:@"影片详情加载失败\n%@",error.localizedDescription?:@"来源没有提供影片详情"];owner.status.hidden=NO;}
             return;
         }
@@ -541,9 +610,15 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
                 owner.status.text=@"";owner.status.hidden=YES;
                 if(!owner.resumeEntry){NSString *sourceID=owner.source[@"id"]?:@"",*itemID=owner.item[@"id"]?[owner.item[@"id"] description]:@"";owner.resumeEntry=[MediaPlaybackStateStore latestHistoryForSourceID:sourceID provider:owner.provider?:@"" itemID:itemID];}
                 [owner restoreResumeEntrySelection];[owner refreshDetailHeader];[owner updateRouteAndEpisodeViews];
+                [MediaAdaptationMonitor.shared recordAPICallWithOperation:@"detail" source:owner.source provider:owner.provider arguments:args result:sanitizedDetail error:nil elapsedMs:elapsedMS];
                 if(!owner.lines.count){
                     owner.status.text=@"此来源未返回可播放分集，请更换站点或检查源配置";owner.status.hidden=NO;
                     [RuntimeDiagnostics.shared recordEvent:@"media_detail_no_episodes" category:@"media_api" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"",@"service_id":owner.source[@"id"]?:@"",@"provider_id":owner.provider?:@"",@"line_count":@(owner.lines.count),@"episode_count":@(episodeCount)}];
+                }else if(forceRefresh){
+                    [owner showTemporaryStatus:[NSString stringWithFormat:@"详情已重新加载 · 共 %lu 条线路 / %lu 集",(unsigned long)owner.lines.count,(unsigned long)episodeCount]];
+                    if(owner.inlinePlaybackController){
+                        [owner resolveAndPlaySelectedEpisode];
+                    }
                 }
             });
         });
@@ -636,6 +711,67 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
     [NSUserDefaults.standardUserDefaults setObject:favorites forKey:@"cctv.mediaFavorites.v1"];[self updateFavoriteButton];
 }
 - (void)toggleDescription {self.descriptionExpanded=!self.descriptionExpanded;self.descriptionLabel.numberOfLines=self.descriptionExpanded?0:3;[self.descriptionToggle setTitle:self.descriptionExpanded?@"收起简介":@"展开简介" forState:UIControlStateNormal];}
+- (void)handleEpisodeLayoutStyleDidChange {
+    if(!NSThread.isMainThread){dispatch_async(dispatch_get_main_queue(),^{[self handleEpisodeLayoutStyleDidChange];});return;}
+    if(self.isViewLoaded)[self updateRouteAndEpisodeViews];
+}
+- (void)cycleEpisodeLayoutStyle {
+    CCTVEpisodeLayoutStyle next=(CCTVEpisodeLayoutStyle)((CCTVEpisodeCurrentLayoutStyle()+1)%4);
+    CCTVEpisodeSetLayoutStyle(next);
+    [self updateRouteAndEpisodeViews];
+}
+- (void)presentEpisodeGroupJumpSheet {
+    NSArray *episodes=self.selectedLineIndex<self.lines.count&&[self.lines[self.selectedLineIndex][@"episodes"] isKindOfClass:NSArray.class]?self.lines[self.selectedLineIndex][@"episodes"]:@[];
+    if(!episodes.count)return;
+    NSUInteger pageCount=MAX(1,(episodes.count+CCTVEpisodesPerGroup-1)/CCTVEpisodesPerGroup);
+    UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"选集分组与样式" message:[NSString stringWithFormat:@"共 %lu 集 · 当前样式：%@",(unsigned long)episodes.count,CCTVEpisodeLayoutStyleName(CCTVEpisodeCurrentLayoutStyle())] preferredStyle:UIAlertControllerStyleActionSheet];
+    __weak typeof(self) weakSelf=self;
+    for(NSUInteger p=0;p<pageCount;p++){
+        NSUInteger s=p*CCTVEpisodesPerGroup,e=MIN(s+CCTVEpisodesPerGroup,episodes.count);
+        NSUInteger fIdx=e>s?CCTVEpisodeSourceIndex(s,episodes.count,self.episodeOrderReversed):0;
+        NSUInteger lIdx=e>s?CCTVEpisodeSourceIndex(e-1,episodes.count,self.episodeOrderReversed):0;
+        NSString *gTitle=[NSString stringWithFormat:@"第 %lu 组（第 %lu–%lu 集）%@", (unsigned long)p+1, (unsigned long)fIdx+1, (unsigned long)lIdx+1, (NSInteger)p==self.episodePage?@" ✓":@""];
+        [sheet addAction:[UIAlertAction actionWithTitle:gTitle style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){
+            MediaDetailViewController *owner=weakSelf;if(!owner)return;
+            owner.episodePage=(NSInteger)p;[owner updateRouteAndEpisodeViews];
+        }]];
+    }
+    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    sheet.popoverPresentationController.sourceView=self.episodeStyleButton?:self.view;
+    sheet.popoverPresentationController.sourceRect=(self.episodeStyleButton?:self.view).bounds;
+    [self presentViewController:sheet animated:YES completion:nil];
+}
+- (UIMenu *)buildEpisodeStyleMenu {
+    __weak typeof(self) weakSelf=self;
+    CCTVEpisodeLayoutStyle curStyle=CCTVEpisodeCurrentLayoutStyle();
+    BOOL badgeOn=CCTVEpisodeShowRemarksBadgeEnabled();
+    BOOL autoExpandOn=CCTVEpisodeAutoExpandEnabled();
+    NSMutableArray<UIMenuElement *> *items=[NSMutableArray array];
+    for(NSNumber *sNum in @[@(CCTVEpisodeLayoutStyleGrid4),@(CCTVEpisodeLayoutStyleList),@(CCTVEpisodeLayoutStyleCard2),@(CCTVEpisodeLayoutStyleGrid3)]){
+        CCTVEpisodeLayoutStyle st=(CCTVEpisodeLayoutStyle)sNum.integerValue;
+        UIAction *act=[UIAction actionWithTitle:CCTVEpisodeLayoutStyleName(st) image:[UIImage systemImageNamed:CCTVEpisodeLayoutStyleIconName(st)] identifier:nil handler:^(__unused UIAction *a){
+            CCTVEpisodeSetLayoutStyle(st);
+            [weakSelf updateRouteAndEpisodeViews];
+        }];
+        if(st==curStyle)act.state=UIMenuElementStateOn;
+        [items addObject:act];
+    }
+    UIAction *toggleBadge=[UIAction actionWithTitle:badgeOn?@"显示分集角标与状态：已开启":@"显示分集角标与状态：已关闭" image:[UIImage systemImageNamed:@"tag"] identifier:nil handler:^(__unused UIAction *a){
+        CCTVEpisodeSetShowRemarksBadgeEnabled(!badgeOn);
+        [weakSelf updateRouteAndEpisodeViews];
+    }];
+    if(badgeOn)toggleBadge.state=UIMenuElementStateOn;
+    UIAction *toggleExpand=[UIAction actionWithTitle:autoExpandOn?@"选集弹窗默认展开：已开启":@"选集弹窗默认展开：已关闭" image:[UIImage systemImageNamed:@"rectangle.expand.vertical"] identifier:nil handler:^(__unused UIAction *a){
+        CCTVEpisodeSetAutoExpandEnabled(!autoExpandOn);
+        [weakSelf updateRouteAndEpisodeViews];
+    }];
+    if(autoExpandOn)toggleExpand.state=UIMenuElementStateOn;
+    UIAction *jumpAct=[UIAction actionWithTitle:@"快速跳转分集分组…" image:[UIImage systemImageNamed:@"arrow.up.and.down.text.horizontal"] identifier:nil handler:^(__unused UIAction *a){
+        [weakSelf presentEpisodeGroupJumpSheet];
+    }];
+    [items addObject:[UIMenu menuWithTitle:@"" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:@[toggleBadge,toggleExpand,jumpAct]]];
+    return [UIMenu menuWithTitle:@"选集排列样式与选项" children:items];
+}
 - (void)toggleEpisodeOrder {
     NSArray *episodes=self.selectedLineIndex<self.lines.count&&[self.lines[self.selectedLineIndex][@"episodes"] isKindOfClass:NSArray.class]?self.lines[self.selectedLineIndex][@"episodes"]:@[];
     self.episodeOrderReversed=!self.episodeOrderReversed;
@@ -655,9 +791,14 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
     self.previousPageButton.hidden=pageCount<=1;self.nextPageButton.hidden=pageCount<=1;self.previousPageButton.enabled=self.episodePage>0;self.nextPageButton.enabled=self.episodePage+1<pageCount;self.playButton.hidden=(self.inlinePlaybackController!=nil);self.playButton.enabled=episodes.count>0;self.playButton.alpha=episodes.count?1.0:0.55;
     NSDictionary *selectedLine=self.selectedLineIndex<self.lines.count?self.lines[self.selectedLineIndex]:@{};NSDictionary *selectedEpisode=self.selectedEpisodeIndex<episodes.count?episodes[self.selectedEpisodeIndex]:@{};NSString *resumeLineID=[self.resumeEntry[@"lineID"] description]?:@"",*resumeEpisodeID=[self.resumeEntry[@"episodeID"] description]?:@"",*resumeLineName=[self.resumeEntry[@"lineName"] isKindOfClass:NSString.class]?self.resumeEntry[@"lineName"]:@"",*resumeEpisodeName=[self.resumeEntry[@"episodeName"] isKindOfClass:NSString.class]?self.resumeEntry[@"episodeName"]:@"";BOOL lineMatches=resumeLineID.length&&[[selectedLine[@"id"] description] isEqual:resumeLineID];if(!lineMatches&&resumeLineName.length)lineMatches=MediaBrowserIdentityNameMatches(selectedLine[@"name"],resumeLineName);if(!lineMatches)lineMatches=self.selectedLineIndex==[self.resumeEntry[@"lineIndex"] integerValue];BOOL episodeMatches=resumeEpisodeID.length&&[[selectedEpisode[@"id"] description] isEqual:resumeEpisodeID];if(!episodeMatches&&resumeEpisodeName.length)episodeMatches=MediaBrowserIdentityNameMatches(selectedEpisode[@"name"],resumeEpisodeName);if(!episodeMatches)episodeMatches=self.selectedEpisodeIndex==[self.resumeEntry[@"episodeIndex"] integerValue];BOOL resumeSelected=self.resumeEntry&&lineMatches&&episodeMatches;
     if(resumeSelected){NSString *verb=[self.resumeEntry[@"completed"] boolValue]?@"重新播放":@"继续观看";[self.playButton setTitle:[NSString stringWithFormat:@"▶︎  %@ · %@",verb,self.resumeEntry[@"episodeName"]?:@"上次分集"] forState:UIControlStateNormal];}else [self.playButton setTitle:@"▶︎  播放" forState:UIControlStateNormal];
+    CCTVEpisodeLayoutStyle episodeStyle=CCTVEpisodeCurrentLayoutStyle();
+    BOOL showBadge=CCTVEpisodeShowRemarksBadgeEnabled();
+    [self.episodeStyleButton setTitle:CCTVEpisodeLayoutStyleShortName(episodeStyle) forState:UIControlStateNormal];
+    self.episodeStyleButton.menu=[self buildEpisodeStyleMenu];
+    self.episodeStyleButton.hidden=episodes.count==0;
     for(UIView *row in self.episodeGrid.arrangedSubviews.copy){[self.episodeGrid removeArrangedSubview:row];[row removeFromSuperview];}[self.episodeButtons removeAllObjects];if(!episodes.count)return;
-    NSUInteger columnCount=UIContentSizeCategoryIsAccessibilityCategory(self.traitCollection.preferredContentSizeCategory)?3:4;NSUInteger visibleCount=end>start?end-start:0;NSUInteger rowCount=(visibleCount+columnCount-1)/columnCount;for(NSUInteger rowIndex=0;rowIndex<rowCount;rowIndex++){UIStackView *row=[UIStackView new];row.axis=UILayoutConstraintAxisHorizontal;row.spacing=6;row.distribution=UIStackViewDistributionFillEqually;
-        for(NSUInteger col=0;col<columnCount;col++){NSUInteger displayIndex=start+rowIndex*columnCount+col;if(displayIndex<end){NSUInteger index=CCTVEpisodeSourceIndex(displayIndex,episodes.count,self.episodeOrderReversed);UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];button.translatesAutoresizingMaskIntoConstraints=NO;button.layer.cornerRadius=14;button.layer.cornerCurve=kCACornerCurveContinuous;button.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];button.titleLabel.adjustsFontForContentSizeCategory=YES;button.titleLabel.adjustsFontSizeToFitWidth=YES;button.titleLabel.minimumScaleFactor=0.78;button.titleLabel.lineBreakMode=NSLineBreakByTruncatingTail;NSDictionary *episode=episodes[index];NSString *name=[episode[@"name"] isKindOfClass:NSString.class]?episode[@"name"]:[NSString stringWithFormat:@"第 %lu 集",(unsigned long)index+1];[button setTitle:name forState:UIControlStateNormal];button.tag=index;button.accessibilityIdentifier=[NSString stringWithFormat:@"media-detail-episode-%lu",(unsigned long)index];HostStylePillButton(button,(NSInteger)index==self.selectedEpisodeIndex);if(resumeSelected&&(NSInteger)index==[self.resumeEntry[@"episodeIndex"] integerValue]){button.layer.borderWidth=1.2;HostSetLayerBorderColor(button,HostAccent());button.accessibilityHint=@"上次播放至此集";}button.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];button.titleLabel.adjustsFontForContentSizeCategory=YES;button.titleLabel.adjustsFontSizeToFitWidth=YES;button.titleLabel.minimumScaleFactor=0.78;[button addTarget:self action:@selector(selectEpisode:) forControlEvents:UIControlEventTouchUpInside];[self.episodeButtons addObject:button];[row addArrangedSubview:button];}else{UIView *spacer=[UIView new];spacer.isAccessibilityElement=NO;[row addArrangedSubview:spacer];}}
+    NSUInteger columnCount=CCTVEpisodeColumnsForStyle(episodeStyle,UIContentSizeCategoryIsAccessibilityCategory(self.traitCollection.preferredContentSizeCategory));NSUInteger visibleCount=end>start?end-start:0;NSUInteger rowCount=(visibleCount+columnCount-1)/columnCount;for(NSUInteger rowIndex=0;rowIndex<rowCount;rowIndex++){UIStackView *row=[UIStackView new];row.axis=UILayoutConstraintAxisHorizontal;row.spacing=6;row.distribution=UIStackViewDistributionFillEqually;
+        for(NSUInteger col=0;col<columnCount;col++){NSUInteger displayIndex=start+rowIndex*columnCount+col;if(displayIndex<end){NSUInteger index=CCTVEpisodeSourceIndex(displayIndex,episodes.count,self.episodeOrderReversed);UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];button.translatesAutoresizingMaskIntoConstraints=NO;button.layer.cornerRadius=14;button.layer.cornerCurve=kCACornerCurveContinuous;button.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];button.titleLabel.adjustsFontForContentSizeCategory=YES;button.titleLabel.adjustsFontSizeToFitWidth=YES;button.titleLabel.minimumScaleFactor=0.78;button.titleLabel.lineBreakMode=NSLineBreakByTruncatingTail;NSDictionary *episode=episodes[index];BOOL isSel=(NSInteger)index==self.selectedEpisodeIndex;BOOL isRes=resumeSelected&&(NSInteger)index==[self.resumeEntry[@"episodeIndex"] integerValue];NSString *name=CCTVEpisodeFormattedDisplayTitle(episode,index,episodeStyle,isSel,isRes,showBadge);[button setTitle:name forState:UIControlStateNormal];button.tag=index;button.accessibilityIdentifier=[NSString stringWithFormat:@"media-detail-episode-%lu",(unsigned long)index];HostStylePillButton(button,isSel);if(isRes){button.layer.borderWidth=1.2;HostSetLayerBorderColor(button,HostAccent());button.accessibilityHint=@"上次播放至此集";}if(episodeStyle==CCTVEpisodeLayoutStyleList){button.contentHorizontalAlignment=UIControlContentHorizontalAlignmentLeading;button.contentEdgeInsets=UIEdgeInsetsMake(10,14,10,14);}else if(episodeStyle==CCTVEpisodeLayoutStyleCard2){button.contentHorizontalAlignment=UIControlContentHorizontalAlignmentLeading;button.contentEdgeInsets=UIEdgeInsetsMake(8,12,8,12);button.titleLabel.numberOfLines=2;}button.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];button.titleLabel.adjustsFontForContentSizeCategory=YES;button.titleLabel.adjustsFontSizeToFitWidth=YES;button.titleLabel.minimumScaleFactor=0.78;[button addTarget:self action:@selector(selectEpisode:) forControlEvents:UIControlEventTouchUpInside];[self.episodeButtons addObject:button];[row addArrangedSubview:button];}else{UIView *spacer=[UIView new];spacer.isAccessibilityElement=NO;[row addArrangedSubview:spacer];}}
         [self.episodeGrid addArrangedSubview:row];[row.heightAnchor constraintGreaterThanOrEqualToConstant:44].active=YES;
     }
     __weak typeof(self) weakSelf=self;
@@ -894,9 +1035,32 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 @end
 @implementation MediaHomeConfigurationViewController
 - (instancetype)init {return [super initWithStyle:UITableViewStyleInsetGrouped];}
+- (UIMenu *)episodeStyleConfigurationMenu {
+    __weak typeof(self) weakSelf=self;
+    CCTVEpisodeLayoutStyle curStyle=CCTVEpisodeCurrentLayoutStyle();
+    NSMutableArray<UIMenuElement *> *items=[NSMutableArray array];
+    for(NSNumber *sNum in @[@(CCTVEpisodeLayoutStyleGrid4),@(CCTVEpisodeLayoutStyleList),@(CCTVEpisodeLayoutStyleCard2),@(CCTVEpisodeLayoutStyleGrid3)]){
+        CCTVEpisodeLayoutStyle st=(CCTVEpisodeLayoutStyle)sNum.integerValue;
+        UIAction *act=[UIAction actionWithTitle:CCTVEpisodeLayoutStyleName(st) image:[UIImage systemImageNamed:CCTVEpisodeLayoutStyleIconName(st)] identifier:nil handler:^(__unused UIAction *a){
+            CCTVEpisodeSetLayoutStyle(st);
+            [weakSelf updateEpisodeStyleBarItem];
+            if(weakSelf.onChange)weakSelf.onChange();
+        }];
+        if(st==curStyle)act.state=UIMenuElementStateOn;
+        [items addObject:act];
+    }
+    return [UIMenu menuWithTitle:@"详情页选集默认样式" children:items];
+}
+- (void)updateEpisodeStyleBarItem {
+    NSString *title=[NSString stringWithFormat:@"选集：%@",CCTVEpisodeLayoutStyleShortName(CCTVEpisodeCurrentLayoutStyle())];
+    UIBarButtonItem *item=[[UIBarButtonItem alloc] initWithTitle:title menu:[self episodeStyleConfigurationMenu]];
+    item.accessibilityIdentifier=@"media-home-episode-style";
+    self.navigationItem.rightBarButtonItem=item;
+}
 - (void)viewDidLoad {
     [super viewDidLoad];self.title=@"媒体显示";self.view.backgroundColor=HostBackground();self.tableView.backgroundColor=HostBackground();self.tableView.separatorStyle=UITableViewCellSeparatorStyleNone;self.tableView.tintColor=HostAccent();self.modules=[MediaHomeEnabledModules() mutableCopy];self.pinnedSources=[MediaHomePinnedSources() mutableCopy];
     if(self.navigationController.viewControllers.firstObject==self)self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(close)];
+    [self updateEpisodeStyleBarItem];
 }
 - (void)reloadThemeAppearance {
     self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();

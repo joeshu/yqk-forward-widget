@@ -68,7 +68,18 @@ static NSData *ResourceImportBundledFallbackForURL(NSURL *url) {
     NSString *abs=(url.absoluteString.stringByRemovingPercentEncoding?:url.absoluteString).lowercaseString;
     if([abs containsString:@"ddgksf2013.top/webox/index.json"]||[abs hasSuffix:@"/webox/index.json"]){
         NSString *p=[NSBundle.mainBundle pathForResource:@"webox-index" ofType:@"json" inDirectory:@"BuiltinMedia"];
-        return p.length?[NSData dataWithContentsOfFile:p options:NSDataReadingMappedIfSafe error:NULL]:nil;
+        if(p.length)return [NSData dataWithContentsOfFile:p options:NSDataReadingMappedIfSafe error:NULL];
+        if([NSFileManager.defaultManager fileExistsAtPath:@"Resources/BuiltinMedia/webox-index.json"])return [NSData dataWithContentsOfFile:@"Resources/BuiltinMedia/webox-index.json" options:NSDataReadingMappedIfSafe error:NULL];
+    }
+    if([abs containsString:@"gitee.com/cycod/tvbox"]||[abs containsString:@"cycod/tvbox/raw/master/api.json"]){
+        NSString *p=[NSBundle.mainBundle pathForResource:@"cycod-tvbox" ofType:@"json" inDirectory:@"BuiltinMedia"];
+        if(p.length)return [NSData dataWithContentsOfFile:p options:NSDataReadingMappedIfSafe error:NULL];
+        if([NSFileManager.defaultManager fileExistsAtPath:@"Resources/BuiltinMedia/cycod-tvbox.json"])return [NSData dataWithContentsOfFile:@"Resources/BuiltinMedia/cycod-tvbox.json" options:NSDataReadingMappedIfSafe error:NULL];
+    }
+    if([abs containsString:@"cttv.vip/app/json/ctys.json"]||[abs containsString:@"cttv.vip/ys/json/ctys.json"]||[abs hasSuffix:@"/ctys.json"]){
+        NSString *p=[NSBundle.mainBundle pathForResource:@"cttv-ctys" ofType:@"json" inDirectory:@"BuiltinMedia"];
+        if(p.length)return [NSData dataWithContentsOfFile:p options:NSDataReadingMappedIfSafe error:NULL];
+        if([NSFileManager.defaultManager fileExistsAtPath:@"Resources/BuiltinMedia/cttv-ctys.json"])return [NSData dataWithContentsOfFile:@"Resources/BuiltinMedia/cttv-ctys.json" options:NSDataReadingMappedIfSafe error:NULL];
     }
     NSString *last=(url.lastPathComponent.stringByRemovingPercentEncoding?:url.lastPathComponent).lowercaseString;
     NSDictionary<NSString *,NSString *> *weboxScripts=@{
@@ -197,6 +208,8 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
         @{@"title":@"🦋 蝴蝶影视",@"url":@"https://sub.lytvs.top/hamo/tk_95f9cbf6.hawk"},
         @{@"title":@"🎭 短剧专区",@"url":@"https://sub.lytvs.top/hamo/duanju_tk_95f9cbf6.hawk"},
         @{@"title":@"🍉 吃瓜专区",@"url":@"https://sub.lytvs.top/hamo/chigua_tk_95f9cbf6.hawk"},
+        @{@"title":@"🌸 初忆合集",@"url":@"https://gitee.com/cycod/tvbox/raw/master/api.json"},
+        @{@"title":@"🏮 刺桐影视",@"url":@"https://www.cttv.vip/app/json/ctys.json"},
         @{@"title":@"⚡ WeBox 合集",@"url":@"https://ddgksf2013.top/webox/index.json"},
         @{@"title":@"🎬 4K影视",@"url":@"https://ddgksf2013.top/webox/js/4k%E5%BD%B1%E8%A7%86.webox.js"},
         @{@"title":@"📺 瓜子影视",@"url":@"https://ddgksf2013.top/webox/js/%E7%93%9C%E5%AD%90.webox.js"},
@@ -476,6 +489,7 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
     NSString *kind=row[@"kind"]?:@"";
     if([kind isEqual:@"catalog"]){
         NSDictionary *cat=row[@"catalog"]?:@{};
+        if([cat[@"catalogKind"] isEqual:@"tvbox-local-bundle"])return @"[TVBox 本地包]";
         if([cat[@"catalogKind"] isEqual:@"webox"]||[row[@"weboxScripts"] count]>0)return @"[WeBox 合集]";
         return @"[TVBox 合集]";
     }
@@ -811,11 +825,21 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
     unsigned char digest[CC_SHA256_DIGEST_LENGTH];CC_SHA256(data.bytes,(CC_LONG)data.length,digest);NSMutableString *fingerprint=[NSMutableString string];for(NSUInteger i=0;i<CC_SHA256_DIGEST_LENGTH;i++)[fingerprint appendFormat:@"%02x",digest[i]];
     NSError *error=nil;NSMutableDictionary *catalog=[[TVBoxCatalogStore parseData:data sourceURL:origin error:&error] mutableCopy];if(catalog)catalog[@"importFingerprint"]=fingerprint;
     if(catalog){
+        if([catalog[@"catalogKind"] isEqual:@"tvbox-local-bundle"]&&file.isFileURL){
+            NSString *fileTitle=file.lastPathComponent.stringByDeletingPathExtension;
+            if(fileTitle.length&&![fileTitle hasPrefix:@"pasted-resource-"]&&![fileTitle hasPrefix:@"resource-"]&&![fileTitle hasPrefix:@"batch-"]&&![fileTitle hasPrefix:@"retry-"]&&([catalog[@"name"] isEqualToString:@"资源合集"]||[catalog[@"name"] hasSuffix:@"· TVBox 合集"])){
+                catalog[@"name"]=fileTitle;
+            }
+        }
         NSArray *sites=catalog[@"sites"]?:@[];NSUInteger recognized=0;for(NSDictionary *site in sites)if([site[@"supported"] boolValue])recognized++;
-        NSMutableDictionary *row=[@{@"kind":@"catalog",@"catalog":catalog,@"name":catalog[@"name"]?:file.lastPathComponent?:@"资源合集",@"summary":[NSString stringWithFormat:@"合集 · %lu 个站点 · %lu 个已识别 · %lu 个直播列表",(unsigned long)sites.count,(unsigned long)recognized,(unsigned long)[catalog[@"lives"] count]],@"selected":@YES} mutableCopy];
+        NSDictionary *bMeta=[catalog[@"bundleMetadata"] isKindOfClass:NSDictionary.class]?catalog[@"bundleMetadata"]:nil;
+        NSString *summary=[bMeta[@"isLocalBundle"] boolValue]?[NSString stringWithFormat:@"本地集合包 · %lu 个站点 · %lu 个已识别 · JAR 校验%@", (unsigned long)sites.count, (unsigned long)recognized, [bMeta[@"jarMD5Verified"] boolValue]?@"通过":@"就绪"]:[NSString stringWithFormat:@"合集 · %lu 个站点 · %lu 个已识别 · %lu 个直播列表",(unsigned long)sites.count,(unsigned long)recognized,(unsigned long)[catalog[@"lives"] count]];
+        NSMutableDictionary *row=[@{@"kind":@"catalog",@"catalog":catalog,@"name":catalog[@"name"]?:file.lastPathComponent?:@"资源合集",@"summary":summary,@"selected":@YES} mutableCopy];
         id rawJSON=[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
         if([rawJSON isKindOfClass:NSDictionary.class]&&[rawJSON[@"scripts"] isKindOfClass:NSArray.class]&&[rawJSON[@"scripts"] count]>0){
             row[@"weboxScripts"]=rawJSON[@"scripts"];
+        }else if([catalog[@"depots"] isKindOfClass:NSArray.class]&&[catalog[@"depots"] count]>0){
+            row[@"weboxScripts"]=catalog[@"depots"];
         }
         [self decorateCandidate:row file:file origin:origin];return row;
     }
@@ -904,7 +928,7 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
     if(!raw.length){[self showFailure:@"请先输入或粘贴资源链接、JSON 配置或脚本内容"];return;}
 
     // Support direct paste of raw JSON / M3U / WeBox / JS / Python content
-    BOOL looksLikeRawContent=ResourceContentIsHTML([raw dataUsingEncoding:NSUTF8StringEncoding])||([raw hasPrefix:@"{"]&&[raw hasSuffix:@"}"])||([raw hasPrefix:@"["]&&[raw hasSuffix:@"]"])||[raw hasPrefix:@"#EXTM3U"]||[raw containsString:@"#EXTINF:"]||[raw containsString:@"WeBox.define("]||[raw containsString:@"class Spider"]||[raw containsString:@"module.exports"]||[raw containsString:@"export default"];
+    BOOL looksLikeRawContent=ResourceContentIsHTML([raw dataUsingEncoding:NSUTF8StringEncoding])||([raw hasPrefix:@"{"]&&[raw hasSuffix:@"}"])||([raw hasPrefix:@"["]&&[raw hasSuffix:@"]"])||(([raw hasPrefix:@"//"]||[raw hasPrefix:@"/*"])&&[raw containsString:@""sites""]&&[raw hasSuffix:@"}"])||[raw hasPrefix:@"#EXTM3U"]||[raw containsString:@"#EXTINF:"]||[raw containsString:@"WeBox.define("]||[raw containsString:@"class Spider"]||[raw containsString:@"module.exports"]||[raw containsString:@"export default"];
     if(looksLikeRawContent){
         [self.view endEditing:YES];self.restoredAddress=raw;self.taskKind=@"url";self.busy=YES;self.stage=@"正在识别粘贴内容…";NSUInteger generation=++self.generation;NSString *hint=[self runtimeHint];[self updateView];
         NSData *rawData=[raw dataUsingEncoding:NSUTF8StringEncoding];
@@ -960,9 +984,21 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
     if(!urls.count){self.retryCandidateIndex=NSNotFound;return;}BOOL folder=self.pickingFolder;NSInteger retryIndex=self.retryCandidateIndex;self.retryCandidateIndex=NSNotFound;self.busy=YES;self.taskKind=retryIndex!=NSNotFound?@"file-retry":@"file";self.stage=retryIndex!=NSNotFound?@"正在重新识别此文件…":@"正在检查本地文件…";NSUInteger generation=++self.generation;NSString *hint=[self runtimeHint];[self updateView];__weak typeof(self) weakSelf=self;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{@autoreleasepool{
         NSURL *root=folder?urls.firstObject:nil;BOOL scoped=[root startAccessingSecurityScopedResource];NSMutableArray *files=[NSMutableArray array];BOOL truncated=NO;
-        if(folder){NSDirectoryEnumerator *enumerator=[NSFileManager.defaultManager enumeratorAtURL:root includingPropertiesForKeys:@[NSURLIsRegularFileKey,NSURLIsSymbolicLinkKey] options:NSDirectoryEnumerationSkipsHiddenFiles errorHandler:^BOOL(NSURL *url,NSError *error){return NO;}];NSUInteger scanned=0;for(NSURL *url in enumerator){if(++scanned>4096||weakSelf.generation!=generation){truncated=YES;break;}NSNumber *regular=nil,*link=nil;[url getResourceValue:&regular forKey:NSURLIsRegularFileKey error:NULL];[url getResourceValue:&link forKey:NSURLIsSymbolicLinkKey error:NULL];if(link.boolValue){[enumerator skipDescendants];continue;}if(!regular.boolValue)continue;if(![@[@"json",@"hawk",@"js",@"hjs",@"mjs",@"cjs",@"py",@"zip",@"txt",@"m3u",@"m3u8",@"php"] containsObject:url.pathExtension.lowercaseString])continue;if(files.count==128){truncated=YES;break;}[files addObject:url];}}
+        NSMutableDictionary *folderBundleCandidate=nil;
+        if(folder&&root){
+            NSError *bundleErr=nil;
+            NSMutableDictionary *bundleCat=[[TVBoxCatalogStore parseBundleDirectoryAtURL:root error:&bundleErr] mutableCopy];
+            if(bundleCat){
+                NSArray *bSites=bundleCat[@"sites"]?:@[];NSUInteger bRec=0;for(NSDictionary *s in bSites)if([s[@"supported"] boolValue])bRec++;
+                NSDictionary *bMeta=[bundleCat[@"bundleMetadata"] isKindOfClass:NSDictionary.class]?bundleCat[@"bundleMetadata"]:nil;
+                NSString *bSummary=[NSString stringWithFormat:@"本地集合包 · %lu 个站点 · %lu 个已识别 · JAR 校验%@", (unsigned long)bSites.count, (unsigned long)bRec, [bMeta[@"jarMD5Verified"] boolValue]?@"通过":@"就绪"];
+                folderBundleCandidate=[@{@"kind":@"catalog",@"catalog":bundleCat,@"name":bundleCat[@"name"]?:root.lastPathComponent?:@"本地合集包",@"summary":bSummary,@"selected":@YES} mutableCopy];
+                [weakSelf decorateCandidate:folderBundleCandidate file:root origin:nil];
+            }
+        }
+        if(folder&&!folderBundleCandidate){NSDirectoryEnumerator *enumerator=[NSFileManager.defaultManager enumeratorAtURL:root includingPropertiesForKeys:@[NSURLIsRegularFileKey,NSURLIsSymbolicLinkKey] options:NSDirectoryEnumerationSkipsHiddenFiles errorHandler:^BOOL(NSURL *url,NSError *error){return NO;}];NSUInteger scanned=0;for(NSURL *url in enumerator){if(++scanned>4096||weakSelf.generation!=generation){truncated=YES;break;}NSNumber *regular=nil,*link=nil;[url getResourceValue:&regular forKey:NSURLIsRegularFileKey error:NULL];[url getResourceValue:&link forKey:NSURLIsSymbolicLinkKey error:NULL];if(link.boolValue){[enumerator skipDescendants];continue;}if(!regular.boolValue)continue;if(![@[@"json",@"hawk",@"js",@"hjs",@"mjs",@"cjs",@"py",@"zip",@"txt",@"m3u",@"m3u8",@"php"] containsObject:url.pathExtension.lowercaseString])continue;if(files.count==128){truncated=YES;break;}[files addObject:url];}}
         else {truncated=urls.count>128;[files addObjectsFromArray:[urls subarrayWithRange:NSMakeRange(0,MIN((NSUInteger)128,urls.count))]];}
-        NSMutableArray *rows=[NSMutableArray array];NSUInteger total=0;NSMutableSet *batchPorts=[NSMutableSet set];for(NSDictionary *s in [ServiceStore services])if(s[@"port"])[batchPorts addObject:s[@"port"]];
+        NSMutableArray *rows=[NSMutableArray array];if(folderBundleCandidate)[rows addObject:folderBundleCandidate];NSUInteger total=0;NSMutableSet *batchPorts=[NSMutableSet set];for(NSDictionary *s in [ServiceStore services])if(s[@"port"])[batchPorts addObject:s[@"port"]];
         for(NSURL *file in files){if([file.lastPathComponent isEqual:@"index.config.js"]){BOOL companion=NO;for(NSURL *main in files)if(![main isEqual:file]&&[@[@"js",@"hjs",@"mjs",@"cjs"] containsObject:main.pathExtension.lowercaseString]&&[main.URLByDeletingLastPathComponent isEqual:file.URLByDeletingLastPathComponent]){companion=YES;break;}if(companion)continue;}ResourceImportWorkflowViewController *owner=weakSelf;if(!owner||owner.generation!=generation)break;BOOL childScope=[file startAccessingSecurityScopedResource];NSNumber *size=nil;[file getResourceValue:&size forKey:NSURLFileSizeKey error:NULL];NSData *data=nil;if(size.unsignedLongLongValue<=32*1024*1024&&total+size.unsignedLongLongValue<=64*1024*1024)data=ResourceImportReadBounded(file,MIN((NSUInteger)32*1024*1024,(NSUInteger)64*1024*1024-total));if(data)total+=data.length;
             NSMutableDictionary *companions=[NSMutableDictionary dictionary];if([@[@"js",@"hjs",@"mjs",@"cjs"] containsObject:file.pathExtension.lowercaseString]&&![file.lastPathComponent isEqual:@"index.config.js"]){for(NSURL *other in files)if([other.lastPathComponent isEqual:@"index.config.js"]&&[other.URLByDeletingLastPathComponent isEqual:file.URLByDeletingLastPathComponent]){BOOL access=[other startAccessingSecurityScopedResource];NSNumber *bytes=nil;[other getResourceValue:&bytes forKey:NSURLFileSizeKey error:NULL];if(bytes.unsignedLongLongValue<=65536){NSData *configuration=ResourceImportReadBounded(other,65536);if(configuration)companions[@"index.config.js"]=configuration;}if(access)[other stopAccessingSecurityScopedResource];break;}}
             NSMutableDictionary *row=data?[owner candidateForData:data file:file origin:nil companions:companions hint:hint]:[@{@"name":file.lastPathComponent,@"error":@"无法读取或超过本次导入大小上限",@"selected":@NO,@"localFileName":file.lastPathComponent?:@""} mutableCopy];if(!data){NSData *bookmark=[file bookmarkDataWithOptions:0 includingResourceValuesForKeys:nil relativeToURL:nil error:NULL];if(bookmark)row[@"retryBookmark"]=bookmark;row[@"retryFileName"]=file.lastPathComponent?:@"";row[@"retryHint"]=hint?:@"";}if([row[@"service"] isKindOfClass:NSDictionary.class]){NSMutableDictionary *svc=[row[@"service"] mutableCopy];NSInteger p=[svc[@"port"] integerValue];if(p<1024||[batchPorts containsObject:@(p)]){NSInteger nextP=18780;while([batchPorts containsObject:@(nextP)]&&nextP<65535)nextP++;svc[@"port"]=@(nextP);p=nextP;}[batchPorts addObject:@(p)];row[@"service"]=svc.copy;}[rows addObject:row];if(childScope)[file stopAccessingSecurityScopedResource];

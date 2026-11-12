@@ -39,5 +39,19 @@ class HostCryptoTests(unittest.TestCase):
         self.assertIn('PyBytes_AS_STRING(output)', source)
 
 
+
+    def test_aes_cbc_decrypt_and_gil_release_in_pyhost(self):
+        from Crypto.Cipher import AES
+        from Crypto.Util.Padding import pad
+        key = b'0123456789abcdef'
+        iv = b'fedcba9876543210'
+        plain = b'cctvhost-native-cbc-payload'
+        enc = AES.new(key, AES.MODE_CBC, iv).encrypt(pad(plain, 16))
+        self.assertEqual(hostcrypto.aes_cbc_decrypt(key, iv, enc), plain)
+        source = (ROOT / 'Sources' / 'PyHost.m').read_text()
+        self.assertIn('pyHostCryptoAESCBCDecrypt', source)
+        self.assertIn('Py_BEGIN_ALLOW_THREADS', source)
+
+
 if __name__ == '__main__':
     unittest.main()

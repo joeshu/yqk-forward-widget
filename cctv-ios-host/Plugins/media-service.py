@@ -110,8 +110,10 @@ class Server(ThreadingHTTPServer):
         self.cenc_entries = collections.OrderedDict()
         self.cenc_sessions = collections.OrderedDict()
         self.host_fetch_token = uuid.uuid4().hex
-        self.slots = threading.BoundedSemaphore(12)
+        self.slots = threading.BoundedSemaphore(16)
+        self._host_workers = self.slots
         super().__init__(address, Handler)
+        self._host_workers = self.slots
 
     def server_close(self):
         self.artwork_relay.close()
@@ -197,7 +199,7 @@ class Server(ThreadingHTTPServer):
         self.server_name, self.server_port = self.server_address[:2]
 
     def process_request(self, request, client_address):
-        request.settimeout(10)
+        request.settimeout(30)
         try:
             import socket as _socket
             request.setsockopt(_socket.IPPROTO_TCP, _socket.TCP_NODELAY, 1)

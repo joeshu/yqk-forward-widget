@@ -127,6 +127,124 @@ class RelayTransportTests(unittest.TestCase):
         self.assertEqual(headers['Content-Type'], 'video/mp2t')
 
 
+
+    def test_http11_keep_alive_pool_reuses_upstream_socket_across_segments(self):
+        client_ports = []
+        body_payload = (b'\x47' + b'a' * 187) * 8
+
+        class KeepAliveUpstream(http.server.BaseHTTPRequestHandler):
+            protocol_version = 'HTTP/1.1'
+
+            def log_message(self, *_):
+                pass
+
+            def do_GET(self):
+                client_ports.append(self.client_address[1])
+                self.send_response(200)
+                self.send_header('Content-Type', 'video/mp2t')
+                self.send_header('Content-Length', str(len(body_payload)))
+                self.send_header('Connection', 'keep-alive')
+                self.end_headers()
+                self.wfile.write(body_payload)
+
+        relay_module._UPSTREAM_POOL.clear()
+        ka_upstream = http.server.ThreadingHTTPServer(('127.0.0.1', 0), KeepAliveUpstream)
+        ka_thread = threading.Thread(target=ka_upstream.serve_forever, kwargs={'poll_interval': .01}, daemon=True)
+        ka_thread.start()
+        try:
+            for idx in range(3):
+                tok = self.relay.register(
+                    f'http://127.0.0.1:{ka_upstream.server_port}/seg-{idx}.ts', {}, segment=True)
+                status, _, data = self.fetch(tok)
+                self.assertEqual((status, data), (200, body_payload))
+            self.assertEqual(len(client_ports), 3)
+            self.assertEqual(len(set(client_ports)), 1, 'HTTP/1.1 upstream socket must be reused across sequential segments')
+        finally:
+            relay_module._UPSTREAM_POOL.clear()
+            ka_upstream.shutdown()
+            ka_upstream.server_close()
+            ka_thread.join(2)
+
+    def test_speculative_warmup_prefetches_key_map_and_first_segment_stream(self):
+        requests = []
+        key_bytes = b'0123456789abcdef'
+        map_bytes = b'\x00\x00\x00\x18ftypmp42' + b'm' * 64
+        seg_bytes = b'\x00\x00\x00\x18moofbox!' + b's' * 8192
+
+        class WarmupUpstream(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *_):
+                pass
+
+            def do_GET(self):
+                requests.append(self.path)
+                if self.path == '/playlist.m3u8':
+                    playlist = (
+                        '#EXTM3U\n#EXT-X-VERSION:7\n'
+                        '#EXT-X-KEY:METHOD=AES-128,URI="enc.key"\n'
+                        '#EXT-X-MAP:URI="init.mp4"\n'
+                        '#EXTINF:4.0,\nseg1.m4s\n'
+                    ).encode('utf-8')
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/vnd.apple.mpegurl')
+                    self.send_header('Content-Length', str(len(playlist)))
+                    self.end_headers()
+                    self.wfile.write(playlist)
+                elif self.path == '/enc.key':
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/octet-stream')
+                    self.send_header('Content-Length', str(len(key_bytes)))
+                    self.end_headers()
+                    self.wfile.write(key_bytes)
+                elif self.path == '/init.mp4':
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'video/mp4')
+                    self.send_header('Content-Length', str(len(map_bytes)))
+                    self.end_headers()
+                    self.wfile.write(map_bytes)
+                elif self.path == '/seg1.m4s':
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'video/mp4')
+                    self.send_header('Content-Length', str(len(seg_bytes)))
+                    self.end_headers()
+                    self.wfile.write(seg_bytes)
+
+        w_upstream = http.server.ThreadingHTTPServer(('127.0.0.1', 0), WarmupUpstream)
+        w_thread = threading.Thread(target=w_upstream.serve_forever, kwargs={'poll_interval': .01}, daemon=True)
+        w_thread.start()
+        self.relay.speculative_warmup = True
+        try:
+            m_tok = self.relay.register(
+                f'http://127.0.0.1:{w_upstream.server_port}/playlist.m3u8', {}, expected_hls=True)
+            status, _, m_body = self.fetch(m_tok)
+            self.assertEqual(status, 200)
+            import re as _re, time as _time
+            tokens = _re.findall(r'/media/([0-9a-f]{32})', m_body.decode('utf-8'))
+            self.assertEqual(len(tokens), 3)
+            deadline = _time.monotonic() + 2.0
+            while _time.monotonic() < deadline and (
+                not self.relay.remote_key_cache or not self.relay.remote_map_cache or not self.relay.prefetched_segment_streams
+            ):
+                _time.sleep(0.02)
+            self.assertTrue(self.relay.remote_key_cache)
+            self.assertTrue(self.relay.remote_map_cache)
+            self.assertTrue(self.relay.prefetched_segment_streams)
+            before_count = len(requests)
+            self.assertEqual(self.fetch(tokens[0])[2], key_bytes)
+            self.assertEqual(self.fetch(tokens[1])[2], map_bytes)
+            self.assertEqual(self.fetch(tokens[2])[2], seg_bytes)
+            self.assertEqual(len(requests), before_count, 'warmed key, map, and first segment must not re-request upstream')
+        finally:
+            self.relay.speculative_warmup = None
+            w_upstream.shutdown()
+            w_upstream.server_close()
+            w_thread.join(2)
+
+    def test_extensionless_flv_and_mkv_magic_sets_content_type(self):
+        self.assertEqual(relay_module.MediaRelay.sniff_container_magic(b'FLV\x01\x05\x00\x00\x00\x09'), 'video/x-flv')
+        self.assertEqual(relay_module.MediaRelay.sniff_container_magic(b'\x1a\x45\xdf\xa3\x93\x42\x82\x88'), 'video/x-matroska')
+        self.assertEqual(relay_module.MediaRelay.sniff_container_magic(b'\x00\x00\x00\x18ftypisom'), 'video/mp4')
+
+
 class RelayTLSVerificationTests(unittest.TestCase):
     def test_tls_failures_never_retry_with_verification_disabled_or_cache_the_host(self):
         for cause in (ssl.SSLCertVerificationError(1, 'certificate verify failed'),

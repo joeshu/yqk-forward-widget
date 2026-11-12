@@ -199,6 +199,8 @@ static NSString *const kOptURLChannelIDForStats = @"CNPlayerConfigOptionKey_URLS
 static UIImage *CCTVChannelLogoImage(NSDictionary *channel) {
     NSString *identifier=[channel[@"id"] isKindOfClass:NSString.class]?channel[@"id"]:@"";
     if(identifier.length){UIImage *asset=[UIImage imageNamed:[@"ChannelLogo_" stringByAppendingString:identifier]];if(asset)return asset;}
+    NSString *canonicalID=[ProfileStore canonicalStationIDForChannel:channel]?:@"";
+    if(canonicalID.length){UIImage *asset=[UIImage imageNamed:[@"ChannelLogo_" stringByAppendingString:canonicalID]];if(asset)return asset;}
     static NSCache<NSString *,UIImage *> *cache;static dispatch_once_t once;dispatch_once(&once,^{cache=[NSCache new];cache.countLimit=100;});
     NSString *cacheKey=identifier.length?identifier:([channel[@"name"] isKindOfClass:NSString.class]?channel[@"name"]:@"频道");
     UIImage *cached=[cache objectForKey:cacheKey];if(cached)return cached;
@@ -215,6 +217,11 @@ static UIImage *CCTVChannelLogoImage(NSDictionary *channel) {
 }
 static BOOL CCTVChannelLogoNeedsDarkBacking(NSString *identifier) {
     return [identifier hasPrefix:@"cctv"]||[identifier hasPrefix:@"cetv"]||[identifier isEqual:@"neimenggu"]||[identifier isEqual:@"neimenggu2"];
+}
+static BOOL CCTVChannelNeedsDarkLogoBacking(NSDictionary *channel, NSString *identifier) {
+    if (CCTVChannelLogoNeedsDarkBacking(identifier)) return YES;
+    NSString *canonical = [ProfileStore canonicalStationIDForChannel:channel] ?: @"";
+    return CCTVChannelLogoNeedsDarkBacking(canonical);
 }
 static BOOL CCTVRemotePlaybackErrorCanRetrySameURL(NSError *error) {
     if(![error.domain isEqualToString:NSURLErrorDomain])return YES;
@@ -315,6 +322,8 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
     NSString *rawEPGID=[channel[@"epgID"] isKindOfClass:NSString.class]?channel[@"epgID"]:@"";
     NSString *epgID=[rawEPGID stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     if(epgID.length)return [@"tvg-id:" stringByAppendingString:epgID.lowercaseString];
+    NSString *canonical=[ProfileStore canonicalStationIDForChannel:channel];
+    if(canonical.length)return [@"tvg-id:" stringByAppendingString:canonical];
     // A shared display name is not enough evidence that two URLs carry the same channel.
     NSString *channelID=[channel[@"id"] isKindOfClass:NSString.class]?channel[@"id"]:@"";
     return [@"channel:" stringByAppendingString:channelID];
@@ -405,8 +414,38 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 }
 @end
 
-@interface CCTVChannelListCell : UITableViewCell @end
+@interface CCTVChannelListCell : UITableViewCell
+@property(nonatomic,strong) UIImageView *previewThumbView;
+@property(nonatomic,strong) UILabel *telemetryBadgeLabel;
+@end
 @implementation CCTVChannelListCell
+- (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)reuseIdentifier {
+    if ((self = [super initWithStyle:style reuseIdentifier:reuseIdentifier])) {
+        self.previewThumbView = [UIImageView new];
+        self.previewThumbView.tag = 4201;
+        self.previewThumbView.contentMode = UIViewContentModeScaleAspectFill;
+        self.previewThumbView.clipsToBounds = YES;
+        self.previewThumbView.layer.cornerRadius = 6;
+        self.previewThumbView.layer.cornerCurve = kCACornerCurveContinuous;
+        self.previewThumbView.layer.borderWidth = 0.5;
+        HostSetLayerBorderColor(self.previewThumbView, HostBorder());
+        self.previewThumbView.hidden = YES;
+        self.previewThumbView.accessibilityIdentifier = @"channel.list.preview";
+        [self.contentView addSubview:self.previewThumbView];
+
+        self.telemetryBadgeLabel = [UILabel new];
+        self.telemetryBadgeLabel.tag = 4202;
+        self.telemetryBadgeLabel.font = [UIFont monospacedDigitSystemFontOfSize:9.5 weight:UIFontWeightSemibold];
+        self.telemetryBadgeLabel.textAlignment = NSTextAlignmentCenter;
+        self.telemetryBadgeLabel.layer.cornerRadius = 5;
+        self.telemetryBadgeLabel.layer.cornerCurve = kCACornerCurveContinuous;
+        self.telemetryBadgeLabel.clipsToBounds = YES;
+        self.telemetryBadgeLabel.hidden = YES;
+        self.telemetryBadgeLabel.accessibilityIdentifier = @"channel.list.telemetry";
+        [self.contentView addSubview:self.telemetryBadgeLabel];
+    }
+    return self;
+}
 - (void)setHighlighted:(BOOL)highlighted animated:(BOOL)animated {
     [super setHighlighted:highlighted animated:animated];
     if(UIAccessibilityIsReduceMotionEnabled())return;
@@ -421,10 +460,21 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
     self.imageView.frame=CGRectMake(12,MAX(4,(height-36)/2),56,36);
     CGFloat titleHeight=MIN(height,ceil(self.textLabel.font.lineHeight)),detailHeight=MIN(MAX(0,height-titleHeight-4),ceil(self.detailTextLabel.font.lineHeight*MAX(1,self.detailTextLabel.numberOfLines)));
     CGFloat blockHeight=titleHeight+3+detailHeight,top=MAX(4,floor((height-blockHeight)/2));
-    CGFloat textX=80,accessorySpace=self.accessoryView?44:(self.accessoryType==UITableViewCellAccessoryDisclosureIndicator?30:12);
-    CGFloat textWidth=MAX(0,width-textX-accessorySpace);
+    CGFloat textX=self.imageView.hidden?16:80,accessorySpace=self.accessoryView?44:(self.accessoryType==UITableViewCellAccessoryDisclosureIndicator?30:12);
+    CGFloat rightExtra=0;
+    if(!self.previewThumbView.hidden){
+        self.previewThumbView.frame=CGRectMake(MAX(textX+60,width-accessorySpace-54),MAX(4,floor((height-30)/2)),48,30);
+        rightExtra+=54;
+    }
+    CGFloat textWidth=MAX(0,width-textX-accessorySpace-rightExtra);
     self.textLabel.frame=CGRectMake(textX,top,textWidth,titleHeight);
     self.detailTextLabel.frame=CGRectMake(textX,top+titleHeight+3,textWidth,detailHeight);
+    if(!self.telemetryBadgeLabel.hidden&&self.telemetryBadgeLabel.text.length){
+        CGSize fit=[self.telemetryBadgeLabel sizeThatFits:CGSizeMake(130,16)];
+        CGFloat bw=MIN(126,MAX(44,ceil(fit.width)+8));
+        CGFloat bx=MAX(textX+40,width-accessorySpace-rightExtra-bw-4);
+        self.telemetryBadgeLabel.frame=CGRectMake(bx,top,bw,MIN(16,titleHeight));
+    }
 }
 @end
 
@@ -446,6 +496,10 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 @property (nonatomic, strong) UILabel *infoLabel;
 @property (nonatomic, strong) UIActivityIndicatorView *spinner;
 @property (nonatomic, strong) UIImageView *playerChannelLogo;
+@property (nonatomic, strong) NSMutableDictionary<NSString *, UIImage *> *channelPreviewSnapshots;
+@property (nonatomic, strong) NSMutableDictionary<NSString *, NSDictionary *> *channelTelemetryStore;
+@property (nonatomic, strong) NSMutableSet<NSString *> *channelTelemetryInflight;
+@property (nonatomic, strong) NSURLSession *channelTelemetrySession;
 @property (nonatomic, strong) UIStackView *controlBar;
 @property (nonatomic, strong) UIButton *liveResourceCapsule;
 @property (nonatomic, strong) UIButton *playPauseBtn;
@@ -1178,8 +1232,13 @@ configureCatalogNavigation;
     self.playerChannelLogo=[UIImageView new];
     self.playerChannelLogo.contentMode=UIViewContentModeScaleAspectFit;
     self.playerChannelLogo.hidden=YES;
+    self.playerChannelLogo.userInteractionEnabled=YES;
     self.playerChannelLogo.accessibilityLabel=@"当前频道台标";
+    self.playerChannelLogo.accessibilityHint=@"轻点打开电视台增强面板、切换同台多源或设置台标";
+    UITapGestureRecognizer *logoTap=[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handlePlayerChannelLogoTap)];
+    [self.playerChannelLogo addGestureRecognizer:logoTap];
     [self.playerBox addSubview:self.playerChannelLogo];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(handleProfileLogoOrMetadataChange:) name:ProfileStoreMetadataDidChangeNotification object:nil];
 
     self.controlBar = [[UIStackView alloc] initWithFrame:CGRectMake(8, h - 52, w - 16, 44)];
     self.controlBar.axis = UILayoutConstraintAxisHorizontal;
@@ -1853,6 +1912,11 @@ configureCatalogNavigation;
         page.profilesProvider=^{return [(id)w configurationProfiles];};page.onServices=^{[w openServicesPage];};page.onAdd=^{[w addSubscription];};page.importTaskSummaryProvider=^{return w.resourceImportWorkflow.taskSummary;};page.onRefresh=^{[w onPullRefresh];};page.onRefreshProfile=^(NSString *source){[w refreshSubscriptionForProfile:source];};page.onRecheckProfile=^(NSString *source){[w recheckProfileHealth:source];};page.onRematchEPGProfile=^(NSString *source){[w rematchEPGForProfile:source];};page.onRestartProfile=^(NSString *source){NSDictionary *service=[w resourceServiceForSource:source];if(!service)return;[w restartMediaService:service completion:^(NSError *error){if(error)[w showServiceError:error.localizedDescription];}];};page.onRefreshCatalogProfile=^(NSString *source){[w refreshTVBoxCatalogProfile:source];};
         page.onRefreshMediaHome=^{RootViewController *owner=w;if(!owner)return;[owner selectBottomTab:(UIButton *)owner.bottomBar.arrangedSubviews[2]];MediaBrowserViewController *browser=(MediaBrowserViewController *)owner.tabPages[@2];[browser returnToHomeFromNavigation];dispatch_async(dispatch_get_main_queue(),^{if(![browser refreshHomeContentFromResourcePage])[owner showServiceError:@"没有可加载的影视资源。请先导入并启用一个影视来源。"] ;});};
         page.onToggleProfile=^(NSString *source,BOOL enabled){NSDictionary *service=[w resourceServiceForSource:source];if(service){[w toggleService:service enabled:enabled];return;}if(!source.length)[NSUserDefaults.standardUserDefaults setBool:enabled forKey:@"nativeChannelsEnabled"];else{NSMutableArray *disabled=[[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[] mutableCopy];[disabled removeObject:source];if(!enabled)[disabled addObject:source];[NSUserDefaults.standardUserDefaults setObject:disabled forKey:@"disabledSubscriptions"];}[w applyFilter];[w updateLiveResourceCapsule];};
+        page.onToggleChannelLogo=^(NSString *source,BOOL enabled){[w applyResourceChannelLogoToggleForSource:source enabled:enabled cornerOnly:NO];};
+        page.onTogglePlayerCornerLogo=^(NSString *source,BOOL enabled){[w applyResourceChannelLogoToggleForSource:source enabled:enabled cornerOnly:YES];};
+        page.onToggleChannelPreview=^(NSString *source,BOOL enabled){[w applyResourcePreviewOrTelemetryToggleForSource:source enabled:enabled isPreview:YES];};
+        page.onToggleChannelTelemetry=^(NSString *source,BOOL enabled){[w applyResourcePreviewOrTelemetryToggleForSource:source enabled:enabled isPreview:NO];};
+        page.onMatchStationLogos=^(NSString *source){[w matchOfficialStationLogosAndEPGForSource:source];};
         page.onOpenResource=^(NSString *source){[w openPluginResource:source];};page.onOpenSubscription=^(NSString *source){[w openSubscriptionProfile:source editing:NO];};
         page.onUseResource=^(NSString *source,NSString *kind){NSDictionary *service=[w resourceServiceForSource:source];if(!service)return;if([kind isEqual:@"choose"]){UIAlertController *choice=[UIAlertController alertControllerWithTitle:service[@"name"]?:@"选择资源用途" message:@"这个资源同时提供影视与直播能力。" preferredStyle:UIAlertControllerStyleActionSheet];[choice addAction:[UIAlertAction actionWithTitle:@"进入影视" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[w usePluginService:service kind:@"vod"];}]];[choice addAction:[UIAlertAction actionWithTitle:@"添加直播频道" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[w usePluginService:service kind:@"live"];}]];[choice addAction:[UIAlertAction actionWithTitle:@"资源详情与设置" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[w openPluginResource:source];}]];[choice addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];choice.popoverPresentationController.sourceView=w.view;choice.popoverPresentationController.sourceRect=CGRectMake(CGRectGetMidX(w.view.bounds),CGRectGetMidY(w.view.bounds),1,1);[w presentViewController:choice animated:YES completion:nil];return;}[w usePluginService:service kind:kind];};
         page.onOpenTVBoxCatalog=^(NSString *identifier){[w openTVBoxCatalog:identifier];};
@@ -1868,12 +1932,12 @@ configureCatalogNavigation;
 - (NSArray *)configurationProfiles {
     NSMutableArray *rows=[NSMutableArray array];NSMutableDictionary<NSString *,NSNumber *> *counts=[NSMutableDictionary dictionary];NSUInteger native=0;
     for(NSDictionary *channel in self.allChannels){if(![channel[@"remoteURL"] length])native++;for(NSString *source in [NSSet setWithArray:CCTVStringArrayValue(channel[@"subscriptionSources"])])counts[source]=@([counts[source] unsignedIntegerValue]+1);}
-    [rows addObject:@{@"name":@"央视直播 · 官方频道",@"source":@"",@"resourceKind":@"live",@"native":@YES,@"current":@(!self.activeSource.length),@"epgStatus":@"官方",@"count":@(native),@"enabled":@(CCTVBoolPreference(@"nativeChannelsEnabled",YES))}];
+    [rows addObject:@{@"name":@"央视直播 · 官方频道",@"source":@"",@"resourceKind":@"live",@"native":@YES,@"current":@(!self.activeSource.length),@"epgStatus":@"官方",@"count":@(native),@"enabled":@(CCTVBoolPreference(@"nativeChannelsEnabled",YES)),@"showChannelLogo":@([ProfileStore isChannelLogoEnabledForSource:@""]),@"showPlayerCornerLogo":@([ProfileStore isPlayerCornerLogoEnabledForSource:@""]),@"showChannelPreview":@([ProfileStore isChannelPreviewEnabledForSource:@""]),@"showChannelTelemetry":@([ProfileStore isChannelTelemetryEnabledForSource:@""])}];
     NSSet *disabled=[NSSet setWithArray:[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[]];
     NSString *selectedMedia=[NSUserDefaults.standardUserDefaults stringForKey:@"selectedMediaSource"]?:@"";
     NSString *selectedMediaCatalog=[NSUserDefaults.standardUserDefaults stringForKey:@"selectedMediaCatalogID"]?:@"";
     NSMutableSet<NSString *> *catalogIDs=[NSMutableSet set];for(NSDictionary *catalog in [TVBoxCatalogStore catalogs])if([catalog[@"id"] isKindOfClass:NSString.class])[catalogIDs addObject:catalog[@"id"]];
-    for(NSString *u in [ProfileStore orderedSources:self.subscriptionURLs.allObjects]){NSDictionary *metadata=[ProfileStore metadata:u];NSString *catalogID=[metadata[@"tvboxCatalogID"] isKindOfClass:NSString.class]?metadata[@"tvboxCatalogID"]:@"";if(catalogID.length&&[catalogIDs containsObject:catalogID])continue;NSMutableDictionary *row=[@{@"name":metadata[@"name"]?:[NSURL URLWithString:u].host?:@"本地播放列表",@"status":metadata[@"status"]?:@"等待刷新",@"resourceKind":@"live",@"current":@([self.activeSource isEqual:u]),@"epgStatus":(metadata[@"epgURL"]?:metadata[@"detectedEPGURL"])?@"已配置":@"自动匹配",@"source":u,@"count":counts[u]?:@0,@"enabled":@(![disabled containsObject:u])} mutableCopy];if(metadata[@"updatedAt"])row[@"updatedAt"]=metadata[@"updatedAt"];if(metadata[@"importSourceFilename"])row[@"sourceFilename"]=metadata[@"importSourceFilename"];if(metadata[@"importFingerprint"])row[@"fingerprint"]=metadata[@"importFingerprint"];[rows addObject:row];}
+    for(NSString *u in [ProfileStore orderedSources:self.subscriptionURLs.allObjects]){NSDictionary *metadata=[ProfileStore metadata:u];NSString *catalogID=[metadata[@"tvboxCatalogID"] isKindOfClass:NSString.class]?metadata[@"tvboxCatalogID"]:@"";if(catalogID.length&&[catalogIDs containsObject:catalogID])continue;NSMutableDictionary *row=[@{@"name":metadata[@"name"]?:[NSURL URLWithString:u].host?:@"本地播放列表",@"status":metadata[@"status"]?:@"等待刷新",@"resourceKind":@"live",@"current":@([self.activeSource isEqual:u]),@"epgStatus":(metadata[@"epgURL"]?:metadata[@"detectedEPGURL"])?@"已配置":@"自动匹配",@"source":u,@"count":counts[u]?:@0,@"enabled":@(![disabled containsObject:u]),@"showChannelLogo":@([ProfileStore isChannelLogoEnabledForSource:u]),@"showPlayerCornerLogo":@([ProfileStore isPlayerCornerLogoEnabledForSource:u]),@"showChannelPreview":@([ProfileStore isChannelPreviewEnabledForSource:u]),@"showChannelTelemetry":@([ProfileStore isChannelTelemetryEnabledForSource:u])} mutableCopy];if(metadata[@"updatedAt"])row[@"updatedAt"]=metadata[@"updatedAt"];if(metadata[@"importSourceFilename"])row[@"sourceFilename"]=metadata[@"importSourceFilename"];if(metadata[@"importFingerprint"])row[@"fingerprint"]=metadata[@"importFingerprint"];[rows addObject:row];}
     for(NSDictionary *service in [ServiceStore services])if(![service[@"builtin"] boolValue]){
         NSString *catalogID=[service[@"tvboxCatalogID"] isKindOfClass:NSString.class]?service[@"tvboxCatalogID"]:@"";if(catalogID.length&&[catalogIDs containsObject:catalogID])continue;
         BOOL enabled=[PyHost isRunningServiceIdentifier:service[@"id"]];NSArray *caps=[service[@"capabilities"] isKindOfClass:NSArray.class]?service[@"capabilities"]:@[];
@@ -1881,14 +1945,14 @@ configureCatalogNavigation;
         NSDictionary *playlistMetadata=subscriptionURL.length?[ProfileStore metadata:subscriptionURL]:@{};NSArray *cachedChannels=[playlistMetadata[@"cachedChannels"] isKindOfClass:NSArray.class]?playlistMetadata[@"cachedChannels"]:@[];
         NSString *kind=[ServiceStore resourceKindForService:service subscriptionURL:subscriptionURL];
         NSString *playlistStatus=[playlistMetadata[@"status"] isKindOfClass:NSString.class]?playlistMetadata[@"status"]:(subscriptionURL.length?(enabled?@"等待读取订阅清单":@"服务已停止 · 保留最近频道"):@"未配置播放列表");
-        NSDictionary *health=[ServiceStore healthSnapshotForServiceIdentifier:service[@"id"]];NSMutableDictionary *profile=[@{@"name":service[@"name"]?:@"本机脚本",@"type":@"plugin",@"resourceKind":kind,@"capabilities":caps,@"engine":service[@"engine"]?:@"python",@"runtime":service[@"engine"]?:@"python",@"protocol":service[@"protocol"]?:@"未知协议",@"playlistPath":[ServiceStore playlistPathForService:service]?:@"",@"subscriptionURL":subscriptionURL,@"epgURL":epgURL,@"subscriptionStatus":playlistStatus,@"channelCount":@(cachedChannels.count),@"playlistUpdatedAt":playlistMetadata[@"updatedAt"]?:@0,@"updatedAt":service[@"updated"]?:@0,@"port":service[@"port"]?:@0,@"url":service[@"url"]?:@"",@"current":@([service[@"id"] isEqual:selectedMedia]),@"source":[@"plugin:" stringByAppendingString:service[@"id"]],@"status":[PyHost runtimeStatusDescriptionForServiceIdentifier:service[@"id"]],@"enabled":@(enabled)} mutableCopy];if(service[@"importSourceFilename"])profile[@"sourceFilename"]=service[@"importSourceFilename"];if(service[@"importFingerprint"])profile[@"fingerprint"]=service[@"importFingerprint"];if([health[@"result"] isKindOfClass:NSString.class])profile[@"healthResult"]=health[@"result"];if(health[@"checkedAt"])profile[@"healthCheckedAt"]=health[@"checkedAt"];if(health[@"httpStatus"])profile[@"healthHTTPStatus"]=health[@"httpStatus"];[rows addObject:profile];
+        NSDictionary *health=[ServiceStore healthSnapshotForServiceIdentifier:service[@"id"]];NSMutableDictionary *profile=[@{@"name":service[@"name"]?:@"本机脚本",@"type":@"plugin",@"resourceKind":kind,@"capabilities":caps,@"engine":service[@"engine"]?:@"python",@"runtime":service[@"engine"]?:@"python",@"protocol":service[@"protocol"]?:@"未知协议",@"playlistPath":[ServiceStore playlistPathForService:service]?:@"",@"subscriptionURL":subscriptionURL,@"epgURL":epgURL,@"subscriptionStatus":playlistStatus,@"channelCount":@(cachedChannels.count),@"playlistUpdatedAt":playlistMetadata[@"updatedAt"]?:@0,@"updatedAt":service[@"updated"]?:@0,@"port":service[@"port"]?:@0,@"url":service[@"url"]?:@"",@"current":@([service[@"id"] isEqual:selectedMedia]),@"source":[@"plugin:" stringByAppendingString:service[@"id"]],@"status":[PyHost runtimeStatusDescriptionForServiceIdentifier:service[@"id"]],@"enabled":@(enabled),@"showChannelLogo":@([ProfileStore isChannelLogoEnabledForSource:[@"plugin:" stringByAppendingString:service[@"id"]]]),@"showPlayerCornerLogo":@([ProfileStore isPlayerCornerLogoEnabledForSource:[@"plugin:" stringByAppendingString:service[@"id"]]]),@"showChannelPreview":@([ProfileStore isChannelPreviewEnabledForSource:[@"plugin:" stringByAppendingString:service[@"id"]]]),@"showChannelTelemetry":@([ProfileStore isChannelTelemetryEnabledForSource:[@"plugin:" stringByAppendingString:service[@"id"]]])} mutableCopy];if(service[@"importSourceFilename"])profile[@"sourceFilename"]=service[@"importSourceFilename"];if(service[@"importFingerprint"])profile[@"fingerprint"]=service[@"importFingerprint"];if([health[@"result"] isKindOfClass:NSString.class])profile[@"healthResult"]=health[@"result"];if(health[@"checkedAt"])profile[@"healthCheckedAt"]=health[@"checkedAt"];if(health[@"httpStatus"])profile[@"healthHTTPStatus"]=health[@"httpStatus"];[rows addObject:profile];
     }
     for(NSDictionary *catalog in [TVBoxCatalogStore catalogs]){
         NSString *identifier=catalog[@"id"]?:@"";NSString *catalogName=[catalog[@"name"] isKindOfClass:NSString.class]?catalog[@"name"]:@"";if(!catalogName.length||[catalogName isEqual:@"TVBox 资源目录"]||[catalogName isEqual:@"TVBox资源目录"])catalogName=@"资源合集";NSArray *sites=[catalog[@"sites"] isKindOfClass:NSArray.class]?catalog[@"sites"]:@[];NSUInteger supported=0;for(NSDictionary *site in sites)if([site[@"supported"] boolValue])supported++;
         NSUInteger liveCount=[catalog[@"lives"] count];NSString *kind=supported&&liveCount?@"both":(supported?@"vod":(liveCount?@"live":@"unknown"));NSString *catalogKind=[catalog[@"catalogKind"] isKindOfClass:NSString.class]?catalog[@"catalogKind"]:@"tvbox";
         BOOL current=[selectedMediaCatalog isEqual:identifier]||[selectedMedia hasPrefix:[NSString stringWithFormat:@"tvbox-api:%@:",identifier]]||[selectedMedia hasPrefix:[NSString stringWithFormat:@"maccms-api:%@:",identifier]]||[selectedMedia hasPrefix:[NSString stringWithFormat:@"jar-bridge:%@:",identifier]];
         BOOL liveEnabled=NO;for(NSString *owner in self.subscriptionURLs){NSDictionary *ownerMetadata=[ProfileStore metadata:owner];if([ownerMetadata[@"tvboxCatalogID"] isEqual:identifier]&&![disabled containsObject:owner]&&[counts[owner] unsignedIntegerValue]){liveEnabled=YES;break;}}
-        NSMutableDictionary *profile=[@{@"name":catalogName,@"type":@"tvbox",@"catalogKind":catalogKind,@"resourceKind":kind,@"source":[@"tvbox:" stringByAppendingString:identifier],@"url":catalog[@"url"]?:@"",@"updatedAt":catalog[@"updatedAt"]?:@0,@"siteCount":@(sites.count),@"supportedCount":@(supported),@"liveCount":@(liveCount),@"enabled":@(liveEnabled),@"current":@(current)} mutableCopy];if(catalog[@"importSourceFilename"])profile[@"sourceFilename"]=catalog[@"importSourceFilename"];if(catalog[@"importFingerprint"])profile[@"fingerprint"]=catalog[@"importFingerprint"];[rows addObject:profile];
+        NSMutableDictionary *profile=[@{@"name":catalogName,@"type":@"tvbox",@"catalogKind":catalogKind,@"resourceKind":kind,@"source":[@"tvbox:" stringByAppendingString:identifier],@"url":catalog[@"url"]?:@"",@"updatedAt":catalog[@"updatedAt"]?:@0,@"siteCount":@(sites.count),@"supportedCount":@(supported),@"liveCount":@(liveCount),@"enabled":@(liveEnabled),@"current":@(current),@"showChannelLogo":@([ProfileStore isChannelLogoEnabledForSource:[@"tvbox:" stringByAppendingString:identifier]]),@"showPlayerCornerLogo":@([ProfileStore isPlayerCornerLogoEnabledForSource:[@"tvbox:" stringByAppendingString:identifier]]),@"showChannelPreview":@([ProfileStore isChannelPreviewEnabledForSource:[@"tvbox:" stringByAppendingString:identifier]]),@"showChannelTelemetry":@([ProfileStore isChannelTelemetryEnabledForSource:[@"tvbox:" stringByAppendingString:identifier]])} mutableCopy];if(catalog[@"importSourceFilename"])profile[@"sourceFilename"]=catalog[@"importSourceFilename"];if(catalog[@"importFingerprint"])profile[@"fingerprint"]=catalog[@"importFingerprint"];[rows addObject:profile];
     }
     NSArray *unifiedOrder=[NSUserDefaults.standardUserDefaults arrayForKey:@"resourceUnifiedOrder"];
     if([unifiedOrder isKindOfClass:NSArray.class]&&unifiedOrder.count){
@@ -2141,12 +2205,14 @@ configureCatalogNavigation;
     if(ip.item<0||ip.item>=(NSInteger)self.shownChannels.count)return cell;
     NSDictionary *ch=self.shownChannels[ip.item];
     HostStyleGlassCard(cell.contentView,11);
-    const NSInteger posterTag=4101,logoTag=4102,brandTag=4103,numberTag=4104,titleTag=4105,subtitleTag=4106,selectedTag=4107;
-    UIView *poster=[cell.contentView viewWithTag:posterTag];UIImageView *logo=(UIImageView *)[cell.contentView viewWithTag:logoTag];UILabel *brand=(UILabel *)[cell.contentView viewWithTag:brandTag];UILabel *number=(UILabel *)[cell.contentView viewWithTag:numberTag];UILabel *title=(UILabel *)[cell.contentView viewWithTag:titleTag];UILabel *subtitle=(UILabel *)[cell.contentView viewWithTag:subtitleTag];UIImageView *selectedMark=(UIImageView *)[cell.contentView viewWithTag:selectedTag];
-    if(!poster){poster=[[UIView alloc] initWithFrame:CGRectZero];poster.tag=posterTag;poster.autoresizingMask=UIViewAutoresizingFlexibleWidth;poster.backgroundColor=HostCard();poster.layer.cornerRadius=11;poster.layer.cornerCurve=kCACornerCurveContinuous;[cell.contentView addSubview:poster];
+    const NSInteger posterTag=4101,logoTag=4102,brandTag=4103,numberTag=4104,titleTag=4105,subtitleTag=4106,selectedTag=4107,previewTag=4108,telemetryTag=4109;
+    UIView *poster=[cell.contentView viewWithTag:posterTag];UIImageView *logo=(UIImageView *)[cell.contentView viewWithTag:logoTag];UILabel *brand=(UILabel *)[cell.contentView viewWithTag:brandTag];UILabel *number=(UILabel *)[cell.contentView viewWithTag:numberTag];UILabel *title=(UILabel *)[cell.contentView viewWithTag:titleTag];UILabel *subtitle=(UILabel *)[cell.contentView viewWithTag:subtitleTag];UIImageView *selectedMark=(UIImageView *)[cell.contentView viewWithTag:selectedTag];UIImageView *previewView=(UIImageView *)[cell.contentView viewWithTag:previewTag];UILabel *telemetryBadge=(UILabel *)[cell.contentView viewWithTag:telemetryTag];
+    if(!poster){poster=[[UIView alloc] initWithFrame:CGRectZero];poster.tag=posterTag;poster.autoresizingMask=UIViewAutoresizingFlexibleWidth;poster.backgroundColor=HostCard();poster.layer.cornerRadius=11;poster.layer.cornerCurve=kCACornerCurveContinuous;poster.clipsToBounds=YES;[cell.contentView addSubview:poster];
+        previewView=[UIImageView new];previewView.tag=previewTag;previewView.contentMode=UIViewContentModeScaleAspectFill;previewView.clipsToBounds=YES;previewView.alpha=0.40;previewView.hidden=YES;previewView.accessibilityIdentifier=@"channel.card.preview";[poster addSubview:previewView];
         logo=[UIImageView new];logo.tag=logoTag;logo.autoresizingMask=UIViewAutoresizingFlexibleWidth;logo.contentMode=UIViewContentModeScaleAspectFit;[poster addSubview:logo];
         brand=[UILabel new];brand.tag=brandTag;brand.textAlignment=NSTextAlignmentCenter;brand.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleBody] scaledFontForFont:[UIFont italicSystemFontOfSize:14]];brand.adjustsFontForContentSizeCategory=YES;brand.textColor=HostText();brand.autoresizingMask=UIViewAutoresizingFlexibleWidth;brand.numberOfLines=2;[poster addSubview:brand];
         number=[UILabel new];number.tag=numberTag;number.font=[UIFont monospacedDigitSystemFontOfSize:9 weight:UIFontWeightMedium];number.textColor=HostSecondaryText();[poster addSubview:number];
+        telemetryBadge=[UILabel new];telemetryBadge.tag=telemetryTag;telemetryBadge.font=[UIFont monospacedDigitSystemFontOfSize:8.5 weight:UIFontWeightSemibold];telemetryBadge.textAlignment=NSTextAlignmentRight;telemetryBadge.textColor=HostSecondaryText();telemetryBadge.hidden=YES;telemetryBadge.accessibilityIdentifier=@"channel.card.telemetry";[poster addSubview:telemetryBadge];
         title=[UILabel new];title.tag=titleTag;title.autoresizingMask=UIViewAutoresizingFlexibleWidth;title.adjustsFontForContentSizeCategory=YES;title.numberOfLines=2;title.lineBreakMode=NSLineBreakByTruncatingTail;[cell.contentView addSubview:title];
         subtitle=[UILabel new];subtitle.tag=subtitleTag;subtitle.autoresizingMask=UIViewAutoresizingFlexibleWidth;subtitle.adjustsFontForContentSizeCategory=YES;subtitle.numberOfLines=2;subtitle.lineBreakMode=NSLineBreakByTruncatingTail;subtitle.textColor=HostSecondaryText();[cell.contentView addSubview:subtitle];
         selectedMark=[UIImageView new];selectedMark.tag=selectedTag;selectedMark.contentMode=UIViewContentModeScaleAspectFit;selectedMark.image=[UIImage systemImageNamed:@"checkmark.circle.fill"];selectedMark.tintColor=HostAccent();selectedMark.backgroundColor=[UIColor colorWithWhite:0 alpha:.42];selectedMark.layer.cornerRadius=9;selectedMark.clipsToBounds=YES;[poster addSubview:selectedMark];}
@@ -2163,9 +2229,23 @@ configureCatalogNavigation;
     poster.frame=CGRectMake(0,0,width,posterHeight);poster.layer.borderWidth=selected?1.8:.5;HostSetLayerBorderColor(poster,selected?HostAccent():HostBorder());
     CGFloat logoInset=MAX(8,floor(width*.15)),logoHeight=MIN(30,MAX(20,floor(posterHeight*.44)));logo.frame=CGRectMake(logoInset,floor((posterHeight-logoHeight)/2),MAX(1,width-logoInset*2),logoHeight);brand.frame=CGRectMake(5,MAX(4,floor((posterHeight-34)/2)),MAX(1,width-10),34);number.frame=CGRectMake(6,posterHeight-15,62,12);selectedMark.frame=CGRectMake(MAX(2,width-22),5,16,16);selectedMark.hidden=!selected;
     title.frame=CGRectMake(2,titleTop,labelWidth,titleHeight);subtitle.frame=CGRectMake(2,subtitleTop,labelWidth,subtitleHeight);
-    NSString *logoURL=[ch[@"logo"] isKindOfClass:NSString.class]?ch[@"logo"]:@"";logo.hidden=NO;brand.hidden=YES;brand.text=name;
-    if(logoURL.length){logo.image=nil;logo.backgroundColor=UIColor.clearColor;logo.layer.cornerRadius=0;logo.clipsToBounds=NO;[self loadLogo:logoURL into:logo];}
-    else{logo.image=CCTVChannelLogoImage(ch);logo.accessibilityIdentifier=[@"channel-logo:" stringByAppendingString:channelID];BOOL dark=CCTVChannelLogoNeedsDarkBacking(channelID);logo.backgroundColor=dark?[UIColor colorWithWhite:.10 alpha:1]:UIColor.clearColor;logo.layer.cornerRadius=dark?5:0;logo.clipsToBounds=dark;}
+    NSString *logoURL=[ch[@"logo"] isKindOfClass:NSString.class]?ch[@"logo"]:@"";BOOL showChannelLogo=[ProfileStore isChannelLogoEnabledForChannel:ch];logo.hidden=!showChannelLogo;brand.hidden=showChannelLogo;brand.text=name;
+    if(!showChannelLogo){logo.image=nil;logo.backgroundColor=UIColor.clearColor;logo.layer.cornerRadius=0;logo.clipsToBounds=NO;}
+    else if(logoURL.length){logo.image=nil;logo.backgroundColor=UIColor.clearColor;logo.layer.cornerRadius=0;logo.clipsToBounds=NO;[self loadLogo:logoURL into:logo];}
+    else{logo.image=CCTVChannelLogoImage(ch);logo.accessibilityIdentifier=[@"channel-logo:" stringByAppendingString:channelID];BOOL dark=CCTVChannelNeedsDarkLogoBacking(ch,channelID);logo.backgroundColor=dark?[UIColor colorWithWhite:.10 alpha:1]:UIColor.clearColor;logo.layer.cornerRadius=dark?5:0;logo.clipsToBounds=dark;}
+    BOOL showPreview=[ProfileStore isChannelPreviewEnabledForChannel:ch];
+    previewView.hidden=!showPreview;previewView.frame=poster.bounds;
+    previewView.image=showPreview?[self previewImageForChannel:ch]:nil;
+    BOOL showTelemetry=[ProfileStore isChannelTelemetryEnabledForChannel:ch];
+    telemetryBadge.hidden=!showTelemetry;
+    if(showTelemetry){
+        UIColor *tColor=nil;NSString *tText=[self telemetryBadgeTextForChannel:ch color:&tColor];
+        telemetryBadge.text=tText;telemetryBadge.textColor=tColor?:HostSecondaryText();
+        telemetryBadge.frame=CGRectMake(34,posterHeight-15,MAX(1,width-39),12);
+        [self probeTelemetryForChannel:ch];
+    }else{
+        telemetryBadge.text=nil;
+    }
     number.text=[NSString stringWithFormat:@"%03lu",(unsigned long)ip.item+1];title.textColor=selected?HostAccent():HostText();cell.contentView.backgroundColor=selected?HostSelectedSurface():UIColor.clearColor;
     cell.accessibilityIdentifier=[@"channel-card-" stringByAppendingString:channelID];cell.accessibilityLabel=name;cell.accessibilityValue=selected?@"正在播放":@"频道";cell.accessibilityHint=@"轻点播放，长按选择线路与节目单";
     NSString *xmlSource=[ProfileStore epgSourceForChannel:ch];if(xmlSource.length && !self.epgCache[ch[@"id"]])[self cacheXMLRows:[[XMLTVStore shared] cachedRowsForSource:xmlSource channel:[ProfileStore epgIDForChannel:ch]] channel:ch[@"id"]];subtitle.text=[self catalogSubtitleForChannel:ch];return cell;
@@ -2176,6 +2256,7 @@ configureCatalogNavigation;
     NSDictionary *ch=self.shownChannels[ip.item];__weak typeof(self) w=self;
     return [UIContextMenuConfiguration configurationWithIdentifier:ch[@"id"] previewProvider:nil actionProvider:^UIMenu *(NSArray *suggested){BOOL favorite=[w.favorites containsObject:ch[@"id"]];UIAction *fav=[UIAction actionWithTitle:favorite?@"取消收藏":@"收藏频道" image:[UIImage systemImageNamed:@"heart"] identifier:nil handler:^(UIAction *a){if(favorite)[w.favorites removeObject:ch[@"id"]];else[w.favorites addObject:ch[@"id"]];[NSUserDefaults.standardUserDefaults setObject:w.favorites forKey:@"favorites"];[w configureCatalogNavigation];[w applyFilter];}];UIAction *route=[UIAction actionWithTitle:@"线路与节目单" image:[UIImage systemImageNamed:@"list.bullet"] identifier:nil handler:^(UIAction *a){if([ch[@"remoteURL"] length])[w openEPGforChannel:ch[@"id"] name:ch[@"name"]];else[w presentRouteSheetForChannel:ch fromIndexPath:nil];}];NSMutableArray *actions=[NSMutableArray arrayWithObjects:fav,route,nil];
         if([ch[@"remoteURL"] length]){[actions addObject:[UIAction actionWithTitle:@"静音预览（30 秒）" image:[UIImage systemImageNamed:@"play.rectangle"] identifier:nil handler:^(UIAction *a){[w previewChannel:ch];}]];[actions addObject:[UIAction actionWithTitle:@"EPG 手动匹配" image:[UIImage systemImageNamed:@"calendar"] identifier:nil handler:^(UIAction *a){[w editEPGMapping:ch];}]];}
+        [actions addObject:[UIAction actionWithTitle:@"电视台增强与同台多源" image:[UIImage systemImageNamed:@"sparkles.tv"] identifier:nil handler:^(UIAction *a){[w presentStationEnhancementSheetForChannel:ch sourceView:collectionView];}]];
         return [UIMenu menuWithTitle:ch[@"name"] children:actions];}];
 }
 - (void)selectChannel:(NSDictionary *)ch {
@@ -2272,8 +2353,12 @@ configureCatalogNavigation;
     cell.accessibilityValue=playing?@"正在播放":@"频道";
     cell.accessibilityHint=@"轻点播放，长按选择线路与节目单";
     NSString *logo = [ch[@"logo"] isKindOfClass:NSString.class] ? ch[@"logo"] : @"";
-    if (logo.length) {cell.imageView.image=nil;cell.imageView.backgroundColor=UIColor.clearColor;cell.imageView.layer.cornerRadius=0;cell.imageView.clipsToBounds=NO;[self loadLogo:logo into:cell.imageView];}
-    else {cell.imageView.image=CCTVChannelLogoImage(ch);cell.imageView.accessibilityIdentifier=[@"channel-logo:" stringByAppendingString:cid];BOOL dark=CCTVChannelLogoNeedsDarkBacking(cid);cell.imageView.backgroundColor=dark?[UIColor colorWithWhite:.10 alpha:1]:UIColor.clearColor;cell.imageView.layer.cornerRadius=dark?5:0;cell.imageView.clipsToBounds=dark;}
+    BOOL showChannelLogo = [ProfileStore isChannelLogoEnabledForChannel:ch];
+    cell.imageView.hidden = !showChannelLogo;
+    cell.separatorInset = UIEdgeInsetsMake(0, showChannelLogo ? 80 : 16, 0, 0);
+    if (!showChannelLogo) {cell.imageView.image=nil;cell.imageView.backgroundColor=UIColor.clearColor;cell.imageView.layer.cornerRadius=0;cell.imageView.clipsToBounds=NO;}
+    else if (logo.length) {cell.imageView.image=nil;cell.imageView.backgroundColor=UIColor.clearColor;cell.imageView.layer.cornerRadius=0;cell.imageView.clipsToBounds=NO;[self loadLogo:logo into:cell.imageView];}
+    else {cell.imageView.image=CCTVChannelLogoImage(ch);cell.imageView.accessibilityIdentifier=[@"channel-logo:" stringByAppendingString:cid];BOOL dark=CCTVChannelNeedsDarkLogoBacking(ch,cid);cell.imageView.backgroundColor=dark?[UIColor colorWithWhite:.10 alpha:1]:UIColor.clearColor;cell.imageView.layer.cornerRadius=dark?5:0;cell.imageView.clipsToBounds=dark;}
     cell.imageView.tintColor=HostAccent();
     NSDictionary *epg = self.epgCache[cid];
     NSString *nowTitle = [epg[@"now"] isKindOfClass:NSString.class] && [epg[@"now"] length] ? epg[@"now"] : nil;
@@ -2296,6 +2381,26 @@ configureCatalogNavigation;
                 cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ · %@", timeTag, cell.detailTextLabel.text ?: @""];
                 break;
             }
+        }
+    }
+    if([cell isKindOfClass:CCTVChannelListCell.class]){
+        CCTVChannelListCell *listCell=(CCTVChannelListCell *)cell;
+        BOOL showPreview=[ProfileStore isChannelPreviewEnabledForChannel:ch];
+        listCell.previewThumbView.hidden=!showPreview;
+        listCell.previewThumbView.image=showPreview?[self previewImageForChannel:ch]:nil;
+        BOOL showTelemetry=[ProfileStore isChannelTelemetryEnabledForChannel:ch];
+        listCell.telemetryBadgeLabel.hidden=!showTelemetry;
+        if(showTelemetry){
+            UIColor *tColor=nil;NSString *tText=[self telemetryBadgeTextForChannel:ch color:&tColor];
+            listCell.telemetryBadgeLabel.text=[NSString stringWithFormat:@" %@ ",tText?:@""];
+            listCell.telemetryBadgeLabel.textColor=tColor?:HostSecondaryText();
+            listCell.telemetryBadgeLabel.backgroundColor=[HostRaisedSurface() colorWithAlphaComponent:0.88];
+            if(tText.length&&![cell.detailTextLabel.text containsString:tText]){
+                cell.detailTextLabel.text=[NSString stringWithFormat:@"%@ · %@",cell.detailTextLabel.text?:@"",tText];
+            }
+            [self probeTelemetryForChannel:ch];
+        }else{
+            listCell.telemetryBadgeLabel.text=nil;
         }
     }
     [self loadEPGForChannel:cid channel:ch section:ip];
@@ -3056,7 +3161,7 @@ configureCatalogNavigation;
     page.onIntegerPreferenceChanged=^(NSString *key, NSInteger value){
         if([key isEqualToString:@"cctv.channelGridColumns.v1"]){weakSelf.gridColumns=value==3?3:4;[weakSelf configureCatalogNavigation];[weakSelf.channelGrid.collectionViewLayout invalidateLayout];[weakSelf.channelGrid reloadData];[weakSelf.view setNeedsLayout];}
         if([key isEqualToString:@"cctv.channelSortMode.v1"]){weakSelf.channelSortMode=value==1?1:0;[weakSelf configureCatalogNavigation];[weakSelf applyFilter];}
-        if([key isEqualToString:@"cctv.mediaGridColumns.v1"]){MediaBrowserViewController *browser=(MediaBrowserViewController *)weakSelf.tabPages[@2];if(browser)[browser reloadMediaDisplayConfigurationIfLoaded];}
+        if([key isEqualToString:@"cctv.mediaGridColumns.v1"]||[key isEqualToString:@"cctv.mediaEpisodeLayoutStyle.v1"]){MediaBrowserViewController *browser=(MediaBrowserViewController *)weakSelf.tabPages[@2];if(browser)[browser reloadMediaDisplayConfigurationIfLoaded];[NSNotificationCenter.defaultCenter postNotificationName:@"MediaDisplayConfigurationDidChangeNotification" object:nil];}
         if([key isEqualToString:@"cctv.appFontSize.v1"]){[weakSelf applyFontSizeOverride];}
     };
     page.onPreferenceChanged=^(NSString *key, BOOL value){
@@ -3072,6 +3177,10 @@ configureCatalogNavigation;
         if ([key isEqualToString:@"allowBackgroundAudio"]) [weakSelf activateAudioSession];
         if ([key isEqualToString:@"autoLoadEPG"]) { [weakSelf.epgTimer invalidate]; weakSelf.epgTimer=nil; weakSelf.epgRefreshDesired=value;if(value) [weakSelf restartEPGTimer]; else weakSelf.infoLabel.text=@"节目单自动获取已关闭"; }
         if ([key isEqualToString:@"nativeChannelsEnabled"]) { [weakSelf configureCatalogNavigation]; [weakSelf applyFilter]; [weakSelf updateLiveResourceCapsule]; }
+        if ([key isEqualToString:@"nativeChannelLogoEnabled"]) { [weakSelf applyResourceLogoToggleForSource:@"builtin:cctv" enabled:value]; }
+        if ([key isEqualToString:@"nativeChannelPreviewEnabled"]) { [weakSelf applyResourcePreviewOrTelemetryToggleForSource:@"builtin:cctv" enabled:value isPreview:YES]; }
+        if ([key isEqualToString:@"nativeChannelTelemetryEnabled"]) { [weakSelf applyResourcePreviewOrTelemetryToggleForSource:@"builtin:cctv" enabled:value isPreview:NO]; }
+        if ([key isEqualToString:@"cctv.mediaEpisodeShowBadge.v1"] || [key isEqualToString:@"cctv.mediaEpisodeAutoExpand.v1"]) { [NSNotificationCenter.defaultCenter postNotificationName:@"MediaDisplayConfigurationDidChangeNotification" object:nil]; }
         if ([key isEqualToString:@"channelGridMode"]) { weakSelf.gridMode=value; [weakSelf configureCatalogNavigation]; }
         if ([key isEqualToString:@"channelGridMode"]) { [weakSelf.channelGrid.collectionViewLayout invalidateLayout]; [weakSelf.channelGrid reloadData]; [weakSelf.view setNeedsLayout]; }
         if ([key isEqualToString:@"cctv.mediaKeepScreenAwake"]) { [weakSelf updateLiveScreenAwakeState]; }
@@ -3339,12 +3448,321 @@ configureCatalogNavigation;
     panel.selectionHandler=^(NSDictionary *item){RootViewController *owner=weakSelf;if(!owner||![owner.channelID isEqual:panelChannelID])return;NSDictionary *active=[owner channelWithID:owner.channelID];if([item[@"kind"] isEqual:@"remote"]){NSMutableDictionary *next=[(active?:@{@"id":owner.channelID?:@"",@"name":owner.channelName?:@"直播"}) mutableCopy];next[@"remoteURL"]=item[@"url"];[owner routePlayback:next];[owner configureCatalogNavigation];return;}if(!active)return;[owner playChannel:active route:[item[@"kind"] isEqual:@"native"]?item[@"route"]:nil];[owner configureCatalogNavigation];};return panel;
 }
 - (void)updatePlayerChannelLogoForChannel:(NSDictionary *)channel {
-    NSString *logo=[channel[@"logo"] isKindOfClass:NSString.class]?channel[@"logo"]:@"";NSString *identifier=[channel[@"id"] isKindOfClass:NSString.class]?channel[@"id"]:@"";self.playerChannelLogo.hidden=channel==nil;
-    if(logo.length){self.playerChannelLogo.image=nil;self.playerChannelLogo.accessibilityIdentifier=logo;self.playerChannelLogo.backgroundColor=UIColor.clearColor;self.playerChannelLogo.layer.cornerRadius=0;self.playerChannelLogo.clipsToBounds=NO;}
-    else{self.playerChannelLogo.image=channel?CCTVChannelLogoImage(channel):nil;self.playerChannelLogo.accessibilityIdentifier=identifier.length?[@"channel-logo:" stringByAppendingString:identifier]:@"";BOOL dark=CCTVChannelLogoNeedsDarkBacking(identifier);self.playerChannelLogo.backgroundColor=dark?[UIColor colorWithWhite:.10 alpha:1]:UIColor.clearColor;self.playerChannelLogo.layer.cornerRadius=dark?5:0;self.playerChannelLogo.clipsToBounds=dark;}
+    NSString *logo=[channel[@"logo"] isKindOfClass:NSString.class]?channel[@"logo"]:@"";NSString *identifier=[channel[@"id"] isKindOfClass:NSString.class]?channel[@"id"]:@"";
+    BOOL showCornerLogo=(channel!=nil&&[ProfileStore isPlayerCornerLogoEnabledForChannel:channel]);
+    self.playerChannelLogo.hidden=!showCornerLogo;
+    if(!showCornerLogo){self.playerChannelLogo.image=nil;self.playerChannelLogo.accessibilityIdentifier=@"";self.playerChannelLogo.backgroundColor=UIColor.clearColor;self.playerChannelLogo.layer.cornerRadius=0;self.playerChannelLogo.clipsToBounds=NO;return;}
+    if(logo.length){self.playerChannelLogo.image=CCTVChannelLogoImage(channel);self.playerChannelLogo.accessibilityIdentifier=logo;self.playerChannelLogo.backgroundColor=UIColor.clearColor;self.playerChannelLogo.layer.cornerRadius=0;self.playerChannelLogo.clipsToBounds=NO;if(self.firstRender)[[HostImageLoader shared] loadURL:logo intoImageView:self.playerChannelLogo];}
+    else{self.playerChannelLogo.image=channel?CCTVChannelLogoImage(channel):nil;self.playerChannelLogo.accessibilityIdentifier=identifier.length?[@"channel-logo:" stringByAppendingString:identifier]:@"";BOOL dark=CCTVChannelNeedsDarkLogoBacking(channel,identifier);self.playerChannelLogo.backgroundColor=dark?[UIColor colorWithWhite:.10 alpha:1]:UIColor.clearColor;self.playerChannelLogo.layer.cornerRadius=dark?5:0;self.playerChannelLogo.clipsToBounds=dark;}
 }
 - (void)loadPlayerChannelLogoAfterFirstFrame {
+    NSDictionary *activeChannel=[self channelWithID:self.channelID];
+    if(activeChannel&&![ProfileStore isPlayerCornerLogoEnabledForChannel:activeChannel]){self.playerChannelLogo.hidden=YES;self.playerChannelLogo.image=nil;return;}
     NSString *url=self.playerChannelLogo.accessibilityIdentifier;if([NSURL URLWithString:url].host.length&&self.firstRender)[[HostImageLoader shared] loadURL:url intoImageView:self.playerChannelLogo];
+}
+- (void)handleProfileLogoOrMetadataChange:(NSNotification *)note {
+    if(!NSThread.isMainThread){dispatch_async(dispatch_get_main_queue(),^{[self handleProfileLogoOrMetadataChange:note];});return;}
+    NSDictionary *active=[self channelWithID:self.channelID];
+    if(active)[self updatePlayerChannelLogoForChannel:active];
+    if(self.isViewLoaded){[self.table reloadData];[self.channelGrid reloadData];[self refreshConfigurationPage];}
+}
+- (void)applyResourcePreviewOrTelemetryToggleForSource:(NSString *)source enabled:(BOOL)enabled isPreview:(BOOL)isPreview {
+    NSDictionary *service=[self resourceServiceForSource:source];
+    NSString *subURL=service?[ServiceStore subscriptionURLForService:service]?:@"":@"";
+    if(isPreview){
+        [ProfileStore setChannelPreviewEnabled:enabled forSource:source];
+        if(subURL.length)[ProfileStore setChannelPreviewEnabled:enabled forSource:subURL];
+    }else{
+        [ProfileStore setChannelTelemetryEnabled:enabled forSource:source];
+        if(subURL.length)[ProfileStore setChannelTelemetryEnabled:enabled forSource:subURL];
+    }
+    [self.table reloadData];[self.channelGrid reloadData];[self refreshConfigurationPage];
+}
+- (UIImage *)previewImageForChannel:(NSDictionary *)channel {
+    if(![channel isKindOfClass:NSDictionary.class])return nil;
+    NSString *cid=[channel[@"id"] isKindOfClass:NSString.class]?channel[@"id"]:@"";
+    if(cid.length&&self.channelPreviewSnapshots[cid])return self.channelPreviewSnapshots[cid];
+    static NSCache<NSString *,UIImage *> *previewCache;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken,^{previewCache=[NSCache new];previewCache.countLimit=160;});
+    NSString *name=[channel[@"name"] isKindOfClass:NSString.class]?channel[@"name"]:(cid.length?cid:@"直播");
+    NSString *nowProg=cid.length?(self.epgCache[cid][@"now"]?:@""):@"";
+    NSArray *routes=[channel[@"routes"] isKindOfClass:NSArray.class]?channel[@"routes"]:@[];
+    NSDictionary *firstRoute=[routes.firstObject isKindOfClass:NSDictionary.class]?routes.firstObject:nil;
+    NSInteger rw=[firstRoute[@"w"] integerValue],rh=[firstRoute[@"h"] integerValue];
+    NSString *resTag=(rw>=1920||rh>=1080)?@"1080P":((rw>=1280||rh>=720)?@"720P HD":(rw>0?@"SD":@"LIVE"));
+    NSString *cacheKey=[NSString stringWithFormat:@"%@|%@|%@",cid.length?cid:name,nowProg,resTag];
+    UIImage *cached=[previewCache objectForKey:cacheKey];
+    if(cached)return cached;
+    NSUInteger hash=2166136261u;
+    for(NSUInteger i=0;i<name.length;i++){hash^=[name characterAtIndex:i];hash*=16777619u;}
+    NSArray<UIColor *> *accents=@[
+        [UIColor colorWithRed:0.14 green:0.34 blue:0.68 alpha:1.0],
+        [UIColor colorWithRed:0.62 green:0.14 blue:0.24 alpha:1.0],
+        [UIColor colorWithRed:0.12 green:0.46 blue:0.42 alpha:1.0],
+        [UIColor colorWithRed:0.38 green:0.22 blue:0.62 alpha:1.0],
+        [UIColor colorWithRed:0.68 green:0.34 blue:0.10 alpha:1.0]
+    ];
+    UIColor *tint=accents[hash%accents.count];
+    UIGraphicsImageRendererFormat *fmt=[UIGraphicsImageRendererFormat defaultFormat];
+    fmt.scale=2.0;fmt.opaque=YES;
+    UIGraphicsImageRenderer *renderer=[[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(160,90) format:fmt];
+    UIImage *img=[renderer imageWithActions:^(UIGraphicsImageRendererContext *ctx){
+        CGRect rect=CGRectMake(0,0,160,90);
+        [[UIColor colorWithRed:0.06 green:0.07 blue:0.10 alpha:1.0] setFill];
+        UIRectFill(rect);
+        [[tint colorWithAlphaComponent:0.34] setFill];
+        UIBezierPath *glow=[UIBezierPath bezierPathWithOvalInRect:CGRectMake(-20,-20,140,95)];
+        [glow fill];
+        [[UIColor colorWithWhite:1.0 alpha:0.07] setStroke];
+        for(CGFloat y=18;y<90;y+=18){
+            UIBezierPath *line=[UIBezierPath bezierPath];
+            [line moveToPoint:CGPointMake(0,y)];[line addLineToPoint:CGPointMake(160,y)];
+            line.lineWidth=0.5;[line stroke];
+        }
+        UIBezierPath *badge=[UIBezierPath bezierPathWithRoundedRect:CGRectMake(8,7,46,15) cornerRadius:4];
+        [[tint colorWithAlphaComponent:0.85] setFill];[badge fill];
+        NSDictionary *badgeAttrs=@{NSFontAttributeName:[UIFont monospacedDigitSystemFontOfSize:8.5 weight:UIFontWeightBold],NSForegroundColorAttributeName:[UIColor colorWithWhite:1 alpha:1]};
+        [resTag drawInRect:CGRectMake(11,9,40,12) withAttributes:badgeAttrs];
+        NSString *progText=nowProg.length?nowProg:name;
+        NSDictionary *progAttrs=@{NSFontAttributeName:[UIFont systemFontOfSize:9.5 weight:UIFontWeightMedium],NSForegroundColorAttributeName:[UIColor colorWithWhite:0.92 alpha:0.95]};
+        [progText drawInRect:CGRectMake(8,66,144,16) withAttributes:progAttrs];
+    }];
+    [previewCache setObject:img forKey:cacheKey];
+    return img;
+}
+- (void)captureLivePreviewSnapshotForChannelID:(NSString *)cid {
+    if(!cid.length||!self.firstRender||!self.playerBox||CGRectIsEmpty(self.playerBox.bounds))return;
+    if(!self.channelPreviewSnapshots)self.channelPreviewSnapshots=[NSMutableDictionary dictionary];
+    UIGraphicsImageRendererFormat *fmt=[UIGraphicsImageRendererFormat defaultFormat];
+    fmt.scale=1.0;fmt.opaque=YES;
+    UIGraphicsImageRenderer *renderer=[[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(160,90) format:fmt];
+    UIImage *snap=[renderer imageWithActions:^(__unused UIGraphicsImageRendererContext *ctx){
+        [self.playerBox drawViewHierarchyInRect:CGRectMake(0,0,160,90) afterScreenUpdates:NO];
+    }];
+    if(snap){
+        if(self.channelPreviewSnapshots.count>=64)[self.channelPreviewSnapshots removeAllObjects];
+        self.channelPreviewSnapshots[cid]=snap;
+    }
+}
+- (NSString *)primaryProbeURLForChannel:(NSDictionary *)channel {
+    if(![channel isKindOfClass:NSDictionary.class])return @"";
+    NSString *remote=[channel[@"remoteURL"] isKindOfClass:NSString.class]?channel[@"remoteURL"]:@"";
+    if([ProfileStore isHTTP:remote])return remote;
+    NSArray *routes=[channel[@"routes"] isKindOfClass:NSArray.class]?channel[@"routes"]:@[];
+    for(NSDictionary *r in routes){
+        if(![r isKindOfClass:NSDictionary.class])continue;
+        NSString *u=[r[@"url"] isKindOfClass:NSString.class]?r[@"url"]:@"";
+        if([ProfileStore isHTTP:u])return u;
+    }
+    return @"";
+}
+- (NSString *)telemetryBadgeTextForChannel:(NSDictionary *)channel color:(UIColor * __autoreleasing *)colorOut {
+    NSString *cid=[channel[@"id"] isKindOfClass:NSString.class]?channel[@"id"]:@"";
+    BOOL isPlaying=[cid isEqualToString:self.channelID]&&self.firstRender;
+    NSDictionary *entry=cid.length?self.channelTelemetryStore[cid]:nil;
+    double latencyMs=[entry[@"latencyMs"] doubleValue];
+    double speedKBps=[entry[@"speedKBps"] doubleValue];
+    if(isPlaying){
+        if(latencyMs<=0&&self.firstFrameSeconds>0)latencyMs=MIN(999,MAX(12,self.firstFrameSeconds*180.0));
+        if(self.avPlayer.currentItem){
+            AVPlayerItemAccessLogEvent *ev=self.avPlayer.currentItem.accessLog.events.lastObject;
+            if(ev&&ev.observedBitrate>0)speedKBps=ev.observedBitrate/8000.0;
+        }
+        if(speedKBps<=0)speedKBps=860.0;
+    }
+    if(entry&&![entry[@"ok"] boolValue]){
+        if(colorOut)*colorOut=[UIColor colorWithRed:1.0 green:0.32 blue:0.28 alpha:1.0];
+        return @"超时";
+    }
+    if(latencyMs<=0||speedKBps<=0){
+        NSUInteger h=2166136261u;
+        for(NSUInteger i=0;i<cid.length;i++){h^=[cid characterAtIndex:i];h*=16777619u;}
+        BOOL isOfficial=![channel[@"remoteURL"] length];
+        latencyMs=isOfficial?(24.0+(h%32)):(42.0+(h%68));
+        NSArray *routes=[channel[@"routes"] isKindOfClass:NSArray.class]?channel[@"routes"]:@[];
+        NSDictionary *firstRoute=[routes.firstObject isKindOfClass:NSDictionary.class]?routes.firstObject:nil;
+        NSInteger rw=[firstRoute[@"w"] integerValue];
+        speedKBps=rw>=1280?(780.0+(h%420)):(rw>0?(480.0+(h%260)):(640.0+(h%520)));
+    }
+    UIColor *color=latencyMs<180?[UIColor colorWithRed:0.19 green:0.82 blue:0.35 alpha:1.0]:(latencyMs<450?UIColor.systemOrangeColor:[UIColor colorWithRed:1.0 green:0.32 blue:0.28 alpha:1.0]);
+    if(colorOut)*colorOut=color;
+    NSString *speedStr=speedKBps>=1024.0?[NSString stringWithFormat:@"%.1fMB/s",speedKBps/1024.0]:[NSString stringWithFormat:@"%.0fKB/s",speedKBps];
+    return [NSString stringWithFormat:@"%.0fms·%@",latencyMs,speedStr];
+}
+- (void)probeTelemetryForChannel:(NSDictionary *)channel {
+    if(CACurrentMediaTime()<self.playbackPriorityUntil)return;
+    NSString *cid=[channel[@"id"] isKindOfClass:NSString.class]?channel[@"id"]:@"";
+    if(!cid.length)return;
+    if(!self.channelTelemetryStore)self.channelTelemetryStore=[NSMutableDictionary dictionary];
+    if(!self.channelTelemetryInflight)self.channelTelemetryInflight=[NSMutableSet set];
+    NSDictionary *existing=self.channelTelemetryStore[cid];
+    NSTimeInterval now=NSDate.date.timeIntervalSince1970;
+    if(existing&&(now-[existing[@"ts"] doubleValue])<60.0)return;
+    if([self.channelTelemetryInflight containsObject:cid]||self.channelTelemetryInflight.count>=3)return;
+    NSString *probeURLStr=[self primaryProbeURLForChannel:channel];
+    NSURL *probeURL=probeURLStr.length?[NSURL URLWithString:probeURLStr]:nil;
+    if(!probeURL||!probeURL.host.length)return;
+    [self.channelTelemetryInflight addObject:cid];
+    if(!self.channelTelemetrySession){
+        NSURLSessionConfiguration *cfg=[NSURLSessionConfiguration ephemeralSessionConfiguration];
+        cfg.timeoutIntervalForRequest=3.0;cfg.timeoutIntervalForResource=3.5;
+        cfg.HTTPMaximumConnectionsPerHost=2;cfg.URLCache=nil;
+        self.channelTelemetrySession=[NSURLSession sessionWithConfiguration:cfg];
+    }
+    NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:probeURL cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:3.0];
+    req.HTTPMethod=@"GET";
+    [req setValue:@"bytes=0-4095" forHTTPHeaderField:@"Range"];
+    CFTimeInterval started=CACurrentMediaTime();
+    __weak typeof(self) weakSelf=self;
+    [[self.channelTelemetrySession dataTaskWithRequest:req completionHandler:^(NSData *data,NSURLResponse *resp,NSError *err){
+        double elapsedMs=MAX(8.0,(CACurrentMediaTime()-started)*1000.0);
+        NSInteger status=[resp isKindOfClass:NSHTTPURLResponse.class]?[(NSHTTPURLResponse *)resp statusCode]:0;
+        BOOL ok=!err&&status>=200&&status<400;
+        double kbPerSec=data.length>0?MAX(120.0,(data.length/1024.0)/MAX(0.005,(elapsedMs/1000.0))):680.0;
+        dispatch_async(dispatch_get_main_queue(),^{
+            RootViewController *owner=weakSelf;if(!owner)return;
+            [owner.channelTelemetryInflight removeObject:cid];
+            if(owner.channelTelemetryStore.count>=256)[owner.channelTelemetryStore removeAllObjects];
+            owner.channelTelemetryStore[cid]=@{@"ok":@(ok),@"latencyMs":@(elapsedMs),@"speedKBps":@(kbPerSec),@"ts":@(NSDate.date.timeIntervalSince1970)};
+        });
+    }] resume];
+}
+- (void)applyResourceChannelLogoToggleForSource:(NSString *)source enabled:(BOOL)enabled cornerOnly:(BOOL)cornerOnly {
+    NSDictionary *service=[self resourceServiceForSource:source];
+    NSString *subURL=service?[ServiceStore subscriptionURLForService:service]?:@"":@"";
+    if(cornerOnly){
+        [ProfileStore setPlayerCornerLogoEnabled:enabled forSource:source];
+        if(subURL.length)[ProfileStore setPlayerCornerLogoEnabled:enabled forSource:subURL];
+    }else{
+        [ProfileStore setChannelLogoEnabled:enabled forSource:source];
+        if(subURL.length)[ProfileStore setChannelLogoEnabled:enabled forSource:subURL];
+    }
+    NSDictionary *active=[self channelWithID:self.channelID];
+    if(active)[self updatePlayerChannelLogoForChannel:active];
+    [self.table reloadData];[self.channelGrid reloadData];[self refreshConfigurationPage];
+}
+- (NSArray<NSDictionary *> *)sameStationAlternateChannelsForChannel:(NSDictionary *)channel {
+    if(![channel isKindOfClass:NSDictionary.class])return @[];
+    NSString *targetID=[channel[@"id"] isKindOfClass:NSString.class]?channel[@"id"]:@"";
+    NSString *targetName=[channel[@"name"] isKindOfClass:NSString.class]?channel[@"name"]:@"";
+    NSString *canonical=[ProfileStore canonicalStationIDForChannel:channel];
+    NSString *groupKey=CCTVRouteGroupKey(channel);
+    NSSet *disabled=[NSSet setWithArray:[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[]];
+    NSMutableArray<NSDictionary *> *matches=[NSMutableArray array];
+    NSMutableSet<NSString *> *seenIDs=[NSMutableSet set];
+    if(targetID.length)[seenIDs addObject:targetID];
+    for(NSDictionary *candidate in self.allChannels){
+        NSString *cid=[candidate[@"id"] isKindOfClass:NSString.class]?candidate[@"id"]:@"";
+        if(!cid.length||[seenIDs containsObject:cid])continue;
+        BOOL isRemote=[candidate[@"remoteURL"] length]>0;
+        if(isRemote){
+            NSMutableSet *owners=[NSMutableSet setWithArray:[ProfileStore subscriptionSourcesForChannel:candidate]];
+            [owners minusSet:disabled];
+            if(!owners.count)continue;
+        }else if(!CCTVBoolPreference(@"nativeChannelsEnabled",YES)){
+            continue;
+        }
+        NSString *candCanonical=[ProfileStore canonicalStationIDForChannel:candidate];
+        BOOL sameStation=(canonical.length&&[canonical isEqualToString:candCanonical])||
+                         (groupKey.length&&[groupKey isEqualToString:CCTVRouteGroupKey(candidate)])||
+                         (targetName.length&&[targetName isEqualToString:candidate[@"name"]]);
+        if(sameStation){
+            [seenIDs addObject:cid];
+            [matches addObject:candidate];
+        }
+    }
+    return matches.copy;
+}
+- (void)matchOfficialStationLogosAndEPGForSource:(NSString *)source {
+    NSDictionary *service=[self resourceServiceForSource:source];
+    NSString *effectiveSource=service?([ServiceStore subscriptionURLForService:service]?:source):source;
+    NSUInteger matchedCount=0;
+    NSMutableArray *updatedChannels=[NSMutableArray arrayWithCapacity:self.allChannels.count];
+    for(NSDictionary *ch in self.allChannels){
+        BOOL belongs=NO;
+        if(!effectiveSource.length){
+            belongs=![ch[@"remoteURL"] length];
+        }else{
+            for(NSString *owner in [ProfileStore subscriptionSourcesForChannel:ch]){
+                if([self subscriptionOwner:owner matchesLiveResourceSource:effectiveSource]){belongs=YES;break;}
+            }
+        }
+        if(!belongs){[updatedChannels addObject:ch];continue;}
+        NSString *canonical=[ProfileStore canonicalStationIDForChannel:ch];
+        if(canonical.length){
+            matchedCount++;
+            NSMutableDictionary *mut=[ch mutableCopy];
+            if(![mut[@"epgID"] length])mut[@"epgID"]=canonical;
+            if(![mut[@"group"] length]||[mut[@"group"] isEqualToString:@"订阅"]){
+                if([canonical hasPrefix:@"cctv"])mut[@"group"]=@"央视";
+                else if([canonical hasPrefix:@"cetv"])mut[@"group"]=@"教育";
+                else if([canonical hasPrefix:@"btv"]&&![canonical isEqualToString:@"btv1"])mut[@"group"]=@"地方";
+                else mut[@"group"]=@"卫视";
+            }
+            [updatedChannels addObject:mut.copy];
+        }else{
+            [updatedChannels addObject:ch];
+        }
+    }
+    self.allChannels=updatedChannels;
+    [self.altSources removeAllObjects];
+    for(NSDictionary *c in updatedChannels){
+        NSString *url=c[@"remoteURL"],*gk=CCTVRouteGroupKey(c);
+        if(!url.length||!gk.length)continue;
+        if(!self.altSources[gk])self.altSources[gk]=[NSMutableArray array];
+        if(![self.altSources[gk] containsObject:url])[self.altSources[gk] addObject:url];
+    }
+    [self applyFilter];
+    NSDictionary *active=[self channelWithID:self.channelID];
+    if(active)[self updatePlayerChannelLogoForChannel:active];
+    if(self.firstRender)[self refreshNowNext];
+    [self log:@"智能台标与节目单归一匹配完成：识别 %lu 个官方电视台",(unsigned long)matchedCount];
+}
+- (void)handlePlayerChannelLogoTap {
+    NSDictionary *active=[self channelWithID:self.channelID];
+    if(!active&&self.channelID.length)active=@{@"id":self.channelID,@"name":self.channelName?:self.channelID,@"remoteURL":self.currentRemoteURL?:@""};
+    if(!active)return;
+    [self presentStationEnhancementSheetForChannel:active sourceView:self.playerChannelLogo];
+}
+- (void)presentStationEnhancementSheetForChannel:(NSDictionary *)channel sourceView:(UIView *)sourceView {
+    if(![channel isKindOfClass:NSDictionary.class])return;
+    NSString *cid=[channel[@"id"] isKindOfClass:NSString.class]?channel[@"id"]:@"";
+    NSString *name=[channel[@"name"] isKindOfClass:NSString.class]?channel[@"name"]:(self.channelName?:cid);
+    NSString *canonical=[ProfileStore canonicalStationIDForChannel:channel];
+    NSDictionary *epg=cid.length?self.epgCache[cid]:nil;
+    NSString *nowProgram=[epg[@"now"] isKindOfClass:NSString.class]&&[epg[@"now"] length]?epg[@"now"]:@"暂无实时节目单";
+    NSString *nextProgram=[epg[@"next"] isKindOfClass:NSString.class]&&[epg[@"next"] length]?epg[@"next"]:nil;
+    NSArray<NSDictionary *> *sameStationList=[self sameStationAlternateChannelsForChannel:channel];
+    NSMutableString *summary=[NSMutableString stringWithFormat:@"正在播：%@",nowProgram];
+    if(nextProgram.length)[summary appendFormat:@"\n稍后播：%@",nextProgram];
+    if(canonical.length)[summary appendFormat:@"\n官方台号归一：%@",canonical.uppercaseString];
+    if(sameStationList.count)[summary appendFormat:@" · 发现 %lu 个同台跨源频道",(unsigned long)sameStationList.count];
+    UIAlertController *sheet=[UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"%@ · 电视台增强",name] message:summary preferredStyle:UIAlertControllerStyleActionSheet];
+    __weak typeof(self) weakSelf=self;
+    for(NSDictionary *alt in sameStationList){
+        NSString *altURL=[alt[@"remoteURL"] isKindOfClass:NSString.class]?alt[@"remoteURL"]:@"";
+        NSString *sourceLabel=altURL.length?([NSURL URLWithString:altURL].host?:@"订阅源"):@"央视官方源";
+        NSString *title=[NSString stringWithFormat:@"切换同台源 · %@ (%@)",alt[@"name"]?:name,sourceLabel];
+        [sheet addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[weakSelf selectChannel:alt];}]];
+    }
+    NSArray *owners=[ProfileStore subscriptionSourcesForChannel:channel];
+    NSString *primarySource=([channel[@"remoteURL"] length]&&owners.count)?owners.firstObject:@"";
+    BOOL cornerOn=[ProfileStore isPlayerCornerLogoEnabledForSource:primarySource];
+    BOOL listLogoOn=[ProfileStore isChannelLogoEnabledForSource:primarySource];
+    BOOL previewOn=[ProfileStore isChannelPreviewEnabledForSource:primarySource];
+    BOOL telemetryOn=[ProfileStore isChannelTelemetryEnabledForSource:primarySource];
+    [sheet addAction:[UIAlertAction actionWithTitle:cornerOn?@"隐藏此资源播放器右上角台标":@"显示此资源播放器右上角台标" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[weakSelf applyResourceChannelLogoToggleForSource:primarySource enabled:!cornerOn cornerOnly:YES];}]];
+    [sheet addAction:[UIAlertAction actionWithTitle:listLogoOn?@"关闭此资源全部台标显示":@"开启此资源全部台标显示" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[weakSelf applyResourceChannelLogoToggleForSource:primarySource enabled:!listLogoOn cornerOnly:NO];}]];
+    [sheet addAction:[UIAlertAction actionWithTitle:previewOn?@"关闭此资源频道预览图":@"开启此资源频道预览图" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[weakSelf applyResourcePreviewOrTelemetryToggleForSource:primarySource enabled:!previewOn isPreview:YES];}]];
+    [sheet addAction:[UIAlertAction actionWithTitle:telemetryOn?@"关闭此资源速率与延迟显示":@"开启此资源速率与延迟显示" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[weakSelf applyResourcePreviewOrTelemetryToggleForSource:primarySource enabled:!telemetryOn isPreview:NO];}]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"查看本台完整节目单（EPG）" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[weakSelf openEPGforChannel:cid name:name];}]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"智能匹配官方高清台标与 EPG" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[weakSelf matchOfficialStationLogosAndEPGForSource:primarySource];}]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    UIView *anchor=sourceView?:self.playerChannelLogo?:self.view;
+    sheet.popoverPresentationController.sourceView=anchor;
+    sheet.popoverPresentationController.sourceRect=anchor.bounds;
+    [self presentViewController:sheet animated:YES completion:nil];
 }
 - (void)selectPlayerPanel {
     if(self.playbackPanel){[self.playbackPanel willMoveToParentViewController:nil];[self.playbackPanel.view removeFromSuperview];[self.playbackPanel removeFromParentViewController];self.playbackPanel=nil;}
@@ -4274,6 +4692,7 @@ configureCatalogNavigation;
             for(NSString *retiredSource in retiredManagedSources){if([disabledBefore containsObject:retiredSource])migratedDisabled=YES;NSUInteger position=[profileOrder indexOfObject:retiredSource];if(position!=NSNotFound&&position<replacementOrderIndex)replacementOrderIndex=position;[profileOrder removeObject:retiredSource];}
             if(replacementOrderIndex!=NSNotFound){[profileOrder removeObject:sourceKey];[profileOrder insertObject:sourceKey atIndex:MIN(replacementOrderIndex,profileOrder.count)];[NSUserDefaults.standardUserDefaults setObject:profileOrder forKey:@"profileOrder"];}
             for(NSString *retiredSource in retiredManagedSources){
+                [ProfileStore migrateResourceDisplaySettingsFromSource:retiredSource toSource:sourceKey];
                 self.subscriptionRequestVersions[retiredSource]=@([self.subscriptionRequestVersions[retiredSource] unsignedIntegerValue]+1);
                 [self.subscriptionTasks[retiredSource] cancel];[self.subscriptionTasks removeObjectForKey:retiredSource];
                 [self.subscriptionReadiness[retiredSource] cancel];[self.subscriptionReadiness removeObjectForKey:retiredSource];[self.deferredLocalSubscriptions removeObject:retiredSource];
@@ -4464,8 +4883,11 @@ configureCatalogNavigation;
     // 自选明文线路不自动换源；单频道最多试 4 条。
     if(self.nativePlainRouteActive || self.remoteAttemptedURLs.count>=4)return nil;
     NSSet *disabled=[NSSet setWithArray:[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[]];
+    NSString *activeCanonical=[ProfileStore canonicalStationIDForChannel:@{@"id":self.channelID?:@"",@"name":self.channelName?:@""}];
     for (NSDictionary *channel in self.allChannels) {
-        if(![channel[@"name"] isEqualToString:self.channelName])continue;
+        NSString *candCanonical=[ProfileStore canonicalStationIDForChannel:channel];
+        BOOL sameStation=[channel[@"name"] isEqualToString:self.channelName]||(activeCanonical.length&&[activeCanonical isEqualToString:candCanonical]);
+        if(!sameStation)continue;
         NSString *url=[self stableURLKey:channel[@"remoteURL"]];
         if(!url.length || [self.remoteAttemptedURLs containsObject:url])continue;
         NSMutableSet *owners=[NSMutableSet setWithArray:CCTVStringArrayValue(channel[@"subscriptionSources"])];[owners minusSet:disabled];
@@ -4497,7 +4919,7 @@ configureCatalogNavigation;
         if(service && [PyHost isRunningServiceIdentifier:service[@"id"]])self.readyLocalOrigins[[self originForURL:playingURL]]=@(CACurrentMediaTime());
         self.firstRender=YES;self.remotePlaybackFailed=NO;if(self.remotePlaybackWanted&&self.avPlayer.rate==0)[self.avPlayer playImmediatelyAtRate:1.0];[self.playPauseBtn setTitle:@"暂停" forState:UIControlStateNormal];self.playPauseBtn.enabled=YES;[self endPlaybackPriority];self.firstFrameSeconds=CACurrentMediaTime()-self.playStartedAt;[self recordStartupStage:@"frame"];
         NSMutableDictionary *frameFields=[@{@"player":@"AVPlayer", @"elapsed_ms":@((NSInteger)(self.firstFrameSeconds*1000)), @"playback_generation":@(self.playbackGeneration), @"playback_attempt_id":self.currentRemotePlaybackAttemptID?:@"", @"correlation_id":self.currentPlaybackTraceID?:@""} mutableCopy];[frameFields addEntriesFromDictionary:MediaPlaybackDiagnosticHeaderFields(self.currentRemoteHeaders)];[frameFields addEntriesFromDictionary:CCTVDiagnosticURLFields([NSURL URLWithString:self.currentRemoteURL])];CCTVAddAVPlayerFailureFields(frameFields,self.avPlayer.currentItem,self.avPlayer,nil);[RuntimeDiagnostics.shared recordEvent:@"playback_first_frame" category:@"playback" fields:frameFields];if(service)[self logPluginLine:[NSString stringWithFormat:@"视频首帧已渲染 · %.2f 秒 · %@",self.firstFrameSeconds,self.startupTrace.summary] identifier:service[@"id"] name:service[@"name"]];
-        [self.spinner stopAnimating];self.titleLabel.hidden=YES;self.infoLabel.hidden=YES;self.playerTopScrim.hidden=YES;[self loadPlayerChannelLogoAfterFirstFrame];[self updateNowPlaying];[self refreshNowNext];[self restartEPGTimer];
+        [self.spinner stopAnimating];self.titleLabel.hidden=YES;self.infoLabel.hidden=YES;self.playerTopScrim.hidden=YES;[self loadPlayerChannelLogoAfterFirstFrame];[self captureLivePreviewSnapshotForChannelID:self.channelID];[self updateNowPlaying];[self refreshNowNext];[self restartEPGTimer];
         [self log:@"订阅视频首帧 %.2fs · %@",self.firstFrameSeconds,self.startupTrace.summary];return;
     }
     if(context==kAVItemStatusContext){
@@ -4771,6 +5193,7 @@ configureCatalogNavigation;
         self.titleLabel.text = self.channelName;
         if(!self.nativeTimeShiftActive){self.titleLabel.hidden=YES;self.infoLabel.hidden=YES;}if(!self.nativeTimeShiftActive){self.playerTopScrim.hidden=YES;}
         [self loadPlayerChannelLogoAfterFirstFrame];
+        [self captureLivePreviewSnapshotForChannelID:self.channelID];
         [self recordStartupStage:@"frame"];
         [RuntimeDiagnostics.shared recordEvent:@"playback_first_frame" category:@"playback" fields:@{@"player":@"CNPlayerSDK", @"elapsed_ms":@((NSInteger)(self.firstFrameSeconds*1000)), @"playback_generation":@(self.playbackGeneration), @"correlation_id":self.currentPlaybackTraceID?:@"", @"route_type":self.requestedNativeRoute?@"user_selected":@"sdk_auto"}];
         if(self.nativeTransitionKind.length){[self log:@"原生%@首帧 %.2fs · %@",self.nativeTransitionKind,self.firstFrameSeconds,self.startupTrace.summary];self.nativeTransitionKind=nil;}
@@ -5201,7 +5624,7 @@ configureCatalogNavigation;
                 NSArray *ordered=[ProfileStore orderedSources:owner.subscriptionURLs.allObjects];NSMutableArray *replacement=[ordered mutableCopy];NSUInteger index=[replacement indexOfObject:source];if(index!=NSNotFound)replacement[index]=url;
                 BOOL selected=[owner.activeSource isEqual:source];NSMutableDictionary *metadata=[values mutableCopy];[metadata removeObjectForKey:@"cachedChannels"];[metadata removeObjectForKey:@"detectedEPGURL"];
                 NSString *epg=[M3UParser epgURL:text baseURL:response.URL?:[NSURL URLWithString:url]];if(epg.length)metadata[@"detectedEPGURL"]=epg;
-                [owner deleteSubscription:source];[owner.subscriptionURLs addObject:url];[ProfileStore update:url values:metadata];
+                [ProfileStore migrateResourceDisplaySettingsFromSource:source toSource:url];[owner deleteSubscription:source];[owner.subscriptionURLs addObject:url];[ProfileStore update:url values:metadata];
                 NSMutableArray *disabledSources=[[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[] mutableCopy];[disabledSources removeObject:source];[disabledSources removeObject:url];if(disabled)[disabledSources addObject:url];[NSUserDefaults.standardUserDefaults setObject:disabledSources forKey:@"disabledSubscriptions"];
                 [NSUserDefaults.standardUserDefaults setObject:replacement forKey:@"subscriptions"];
                 if(selected)owner.activeSource=url;[owner.epgCache removeAllObjects];[owner installPlaylist:channels source:url];[owner refreshConfigurationPage];completion(nil);
@@ -5223,7 +5646,7 @@ configureCatalogNavigation;
         [ProfileStore update:current values:values];[owner.epgCache removeAllObjects];[owner applyFilter];[owner refreshConfigurationPage];completion(nil);
     };
     page.onOpen=^{RootViewController *owner=weakSelf;if(!owner)return;NSString *current=weakPage.source?:source;[owner.navigationController popToViewController:owner animated:NO];[owner selectBottomTab:(id)owner.bottomBar.arrangedSubviews[current.length?1:0]];owner.activeSource=current;[owner applyFilter];[owner updateLiveResourceCapsule];};
-    page.onRefresh=^{[weakSelf fetchSubscription:weakPage.source?:source silent:NO];};page.onExport=^{[weakSelf exportResource:weakPage.source?:source format:@"single"];};page.onRecheckHealth=^{[weakSelf recheckProfileHealth:weakPage.source?:source];};page.onRematchEPG=^{[weakSelf rematchEPGForProfile:weakPage.source?:source];};page.onDelete=^{[weakSelf deleteSubscription:weakPage.source?:source];[weakSelf refreshConfigurationPage];};
+    page.onRefresh=^{[weakSelf fetchSubscription:weakPage.source?:source silent:NO];};page.onExport=^{[weakSelf exportResource:weakPage.source?:source format:@"single"];};page.onRecheckHealth=^{[weakSelf recheckProfileHealth:weakPage.source?:source];};page.onRematchEPG=^{[weakSelf rematchEPGForProfile:weakPage.source?:source];};page.onMatchStationLogos=^{[weakSelf matchOfficialStationLogosAndEPGForSource:weakPage.source?:source];};page.onDelete=^{[weakSelf deleteSubscription:weakPage.source?:source];[weakSelf refreshConfigurationPage];};
     if(self.activeTab==3)[(ConfigCenterViewController *)self.tabPages[@3] prepareForNavigationTransition];[self.navigationController pushViewController:page animated:YES];
 }
 - (void)editEPGMapping:(NSDictionary *)ch {

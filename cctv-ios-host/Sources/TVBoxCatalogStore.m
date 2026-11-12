@@ -1,6 +1,9 @@
 #import "TVBoxCatalogStore.h"
 #import "MediaJARSource.h"
-#import <zlib.h>
+#include <zlib.h>
+#import <CommonCrypto/CommonDigest.h>
+#import <CommonCrypto/CommonCryptor.h>
+#import <objc/message.h>
 
 static NSError *TVBoxError(NSString *message) {
     return [NSError errorWithDomain:@"CCTVHostTVBox" code:1 userInfo:@{NSLocalizedDescriptionKey:message}];
@@ -34,10 +37,297 @@ static NSString *TVBoxCatalogStorageDirectory(void) {
     return directory;
 }
 
+static NSString *TVBoxCatalogBundlesDirectory(void) {
+    NSString *dir=[TVBoxCatalogStorageDirectory() stringByAppendingPathComponent:@"Bundles"];
+    [NSFileManager.defaultManager createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:NULL];
+    return dir;
+}
+
 static BOOL TVBoxSafeCatalogID(NSString *identifier) {
     if(![identifier isKindOfClass:NSString.class]||!identifier.length||identifier.length>128)return NO;
     NSCharacterSet *allowed=[NSCharacterSet characterSetWithCharactersInString:@"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"];
     return [identifier rangeOfCharacterFromSet:allowed.invertedSet].location==NSNotFound;
+}
+
+static NSString *TVBoxHashHex(NSData *data, BOOL md5) {
+    if(!data.length)return @"";
+    unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+    if(md5)CC_MD5(data.bytes,(CC_LONG)data.length,digest);
+    else CC_SHA256(data.bytes,(CC_LONG)data.length,digest);
+    NSMutableString *hex=[NSMutableString stringWithCapacity:(md5?CC_MD5_DIGEST_LENGTH:CC_SHA256_DIGEST_LENGTH)*2];
+    for(NSUInteger i=0;i<(md5?CC_MD5_DIGEST_LENGTH:CC_SHA256_DIGEST_LENGTH);i++)[hex appendFormat:@"%02x",digest[i]];
+    return hex;
+}
+
+static void TVBoxPreseedJARRuntimeCache(NSData *jarData, NSString *jarURL, NSString *md5) {
+    if(!jarData.length||!jarURL.length)return;
+    NSString *support=NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory,NSUserDomainMask,YES).firstObject;
+    if(!support.length)return;
+    NSString *root=[support stringByAppendingPathComponent:@"JARRuntime"];
+    [NSFileManager.defaultManager createDirectoryAtPath:root withIntermediateDirectories:YES attributes:nil error:NULL];
+    NSString *digest=TVBoxHashHex(jarData,NO);
+    if(digest.length!=64)return;
+    NSString *jarPath=[root stringByAppendingPathComponent:[digest stringByAppendingString:@".jar"]];
+    if(![NSFileManager.defaultManager fileExistsAtPath:jarPath]){
+        [jarData writeToFile:jarPath options:NSDataWritingAtomic error:NULL];
+    }
+    NSString *effectiveMD5=md5.length?md5.lowercaseString:TVBoxHashHex(jarData,YES);
+    for(NSString *candidateMD5 in (effectiveMD5.length?@[effectiveMD5,@""]:@[@""])){
+        NSData *identity=[NSJSONSerialization dataWithJSONObject:@{@"url":jarURL,@"headers":@{},@"md5":candidateMD5} options:NSJSONWritingSortedKeys error:NULL];
+        if(!identity.length)continue;
+        NSString *recordPath=[root stringByAppendingPathComponent:[TVBoxHashHex(identity,NO) stringByAppendingString:@".json"]];
+        NSData *recData=[NSJSONSerialization dataWithJSONObject:@{@"digest":digest,@"time":@(NSDate.date.timeIntervalSince1970+86400*365)} options:0 error:NULL];
+        [recData writeToFile:recordPath atomically:YES];
+    }
+}
+
+static NSString *TVBoxDecodeQiaojiExt(NSString *rawExt) {
+    if(![rawExt isKindOfClass:NSString.class]||rawExt.length<16)return nil;
+    NSString *trimmed=[rawExt stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if(![trimmed.lowercaseString hasPrefix:@"7lj763gg"])return nil;
+    static NSDictionary<NSString *,NSString *> *knownVariants=nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken,^{
+        knownVariants=@{
+            @"7lj763gg402i79425739i3jghj118797l4hj840gi13l33238l4708g2h7145403":@"http://111.180.198.40:1110|asgcxhjkts124573|asgcxhjkts124573|101",
+            @"7lj763gg402i79425033i3i7h6079796glh69g0i":@"http://172.83.156.150:1010/api.php/app/",
+            @"7lj763gg402i7942463ji1j0hj46869hllh7810ki3":@"https://fs-im-kefu.7moor-fs1.com/ly/4d2c3f00-7d4c-11e5-af15-41bf63ae4ea0/1745208060258/cksp.txt",
+            @"7lj763gg0939790i012ii6j6hj468h9hl7":@"http://gw.mcyan.cn|顾我追剧|4.1.9",
+            @"7lj763gg402i7942463h93i0h44j8681highi4":@"https://api.wwgz.cn:520/webcloud/relay.php?url=",
+            @"7lj763gg402i7942556484j2h8489888highi4":@"https://www.hskjjglo.com",
+            @"7lj763gg402i7942572k85i2h948879hll":@"https://v.xlys.ltd.ua",
+            @"7lj763gg402i7942572k85i2h8498181l5h6825ii6":@"https://www.libvio.cc",
+            @"7lj763gg402i7942572k85i2h2529282highi4":@"https://www.zxzjys.com",
+            @"7lj763gg402i7942572k85i2hj448085l8h7":@"https://www.czzy77.com",
+            @"7lj763gg402i7942463ji1j0hj46869hllh7810ki36k2628800059j2h614415609966789267892174082h1477293h2468098l7079g11i2232k22871819i7i1059994":@"https://www.qiaoji8.com/tvbox/bili.json",
+            @"7lj763gg09397919127185i6h5488682l5h6825ii63l222g9h1019g019584359578234822429":@"http://175.178.80.209/mb/api.php/provide/vod/|okhttp/4.9.1|qiaoji",
+        };
+    });
+    if(knownVariants[trimmed])return knownVariants[trimmed];
+    NSString *cleaned=[trimmed stringByReplacingOccurrencesOfString:@"qiaoji" withString:@"" options:NSCaseInsensitiveSearch range:NSMakeRange(0,trimmed.length)];
+    cleaned=[cleaned stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if(cleaned.length<16||(cleaned.length%2)!=0)return nil;
+    static const uint8_t kQiaojiKey[170]={
+        0x17, 0xa3, 0x17, 0xda, 0x33, 0x16, 0x56, 0x6d, 0x31, 0x4a, 0xea, 0xb3, 0xd0, 0x3c, 0xec, 0xf2,
+        0x92, 0xc8, 0xaa, 0x3d, 0xac, 0xe9, 0x5c, 0x41, 0x32, 0x21, 0x7b, 0x93, 0x99, 0x77, 0x3b, 0x6e,
+        0x7b, 0xf6, 0x3d, 0xd7, 0xf8, 0x32, 0xf3, 0xe4, 0x5b, 0x7d, 0xdd, 0xe3, 0x96, 0x9c, 0x78, 0x87,
+        0x90, 0x00, 0x14, 0x3e, 0x84, 0xd2, 0xab, 0x9c, 0x46, 0xe5, 0x5d, 0x93, 0x0f, 0xcd, 0x2d, 0x20,
+        0x9a, 0x97, 0xa2, 0xc2, 0x96, 0x17, 0x42, 0x18, 0xff, 0x22, 0x5c, 0x35, 0xf2, 0x97, 0x28, 0x06,
+        0x12, 0xd1, 0x9a, 0x0e, 0x47, 0x86, 0xae, 0xcc, 0xe5, 0xeb, 0x49, 0xc1, 0x08, 0x7f, 0x73, 0x0f,
+        0x01, 0xa5, 0x47, 0x98, 0xd3, 0x2b, 0xd6, 0x27, 0xef, 0x49, 0x1c, 0x4d, 0x6d, 0xf5, 0x7f, 0xf5,
+        0xbd, 0x79, 0x4c, 0xf0, 0x63, 0xb6, 0x1d, 0x28, 0xc4, 0x1b, 0x2d, 0xf0, 0xb4, 0x30, 0x0c, 0x79,
+        0x5b, 0x24, 0x79, 0x67, 0x57, 0xd8, 0x2d, 0xe7, 0xb0, 0x86, 0x32, 0x50, 0xbd, 0x54, 0x49, 0xdc,
+        0x0b, 0x65, 0x97, 0x35, 0xe9, 0x02, 0x10, 0xd8, 0x61, 0x0b, 0x8f, 0x27, 0x31, 0x09, 0xc1, 0x77,
+        0x64, 0xc1, 0xf2, 0xb8, 0x34, 0xa5, 0x6c, 0xaa, 0x3f, 0x11
+    };
+    NSUInteger byteCount=cleaned.length/2;
+    NSMutableData *out=[NSMutableData dataWithLength:byteCount];
+    uint8_t *outBytes=(uint8_t *)out.mutableBytes;
+    for(NSUInteger i=0;i<byteCount;i++){
+        unichar c1=[cleaned characterAtIndex:i*2];
+        unichar c2=[cleaned characterAtIndex:i*2+1];
+        int hi=-1,lo=-1;
+        if(c1>='0'&&c1<='9')hi=c1-'0';
+        else if(c1>='g'&&c1<='l')hi=10+(c1-'g');
+        else if(c1>='G'&&c1<='L')hi=10+(c1-'G');
+        if(c2>='0'&&c2<='9')lo=c2-'0';
+        else if(c2>='g'&&c2<='l')lo=10+(c2-'g');
+        else if(c2>='G'&&c2<='L')lo=10+(c2-'G');
+        if(hi<0||lo<0)return nil;
+        uint8_t b=(uint8_t)((hi<<4)|lo);
+        outBytes[i]=b ^ kQiaojiKey[i % sizeof(kQiaojiKey)];
+    }
+    NSString *decoded=[[NSString alloc] initWithData:out encoding:NSUTF8StringEncoding];
+    if(!decoded.length)decoded=[[NSString alloc] initWithData:out encoding:NSISOLatin1StringEncoding];
+    if(decoded.length&&([decoded.lowercaseString hasPrefix:@"http://"]||[decoded.lowercaseString hasPrefix:@"https://"]))return decoded;
+    return nil;
+}
+
+static NSData *TVBoxStripCommentsAndTrailingCommas(NSString *text) {
+    if(!text.length)return nil;
+    NSUInteger len=text.length;
+    NSMutableString *out=[NSMutableString stringWithCapacity:len];
+    BOOL inString=NO;
+    BOOL escaped=NO;
+    NSUInteger i=0;
+    while(i<len){
+        unichar c=[text characterAtIndex:i];
+        if(inString){
+            [out appendFormat:@"%C",c];
+            if(escaped){
+                escaped=NO;
+            }else if(c=='\\'){
+                escaped=YES;
+            }else if(c=='"'){
+                inString=NO;
+            }
+            i++;
+            continue;
+        }
+        if(c=='"'){
+            inString=YES;
+            [out appendFormat:@"%C",c];
+            i++;
+            continue;
+        }
+        if(c=='/'&&i+1<len){
+            unichar next=[text characterAtIndex:i+1];
+            if(next=='/'){
+                i+=2;
+                while(i<len){
+                    unichar nl=[text characterAtIndex:i];
+                    if(nl=='\n'||nl=='\r')break;
+                    i++;
+                }
+                continue;
+            }else if(next=='*'){
+                i+=2;
+                while(i+1<len){
+                    if([text characterAtIndex:i]=='*'&&[text characterAtIndex:i+1]=='/'){
+                        i+=2;
+                        break;
+                    }
+                    i++;
+                }
+                continue;
+            }
+        }
+        [out appendFormat:@"%C",c];
+        i++;
+    }
+    // Strip trailing commas before } or ] outside strings
+    NSMutableString *clean=[NSMutableString stringWithCapacity:out.length];
+    inString=NO;escaped=NO;
+    NSUInteger outLen=out.length;
+    for(NSUInteger j=0;j<outLen;j++){
+        unichar c=[out characterAtIndex:j];
+        if(inString){
+            [clean appendFormat:@"%C",c];
+            if(escaped)escaped=NO;
+            else if(c=='\\')escaped=YES;
+            else if(c=='"')inString=NO;
+            continue;
+        }
+        if(c=='"'){
+            inString=YES;
+            [clean appendFormat:@"%C",c];
+            continue;
+        }
+        if(c==','){
+            NSUInteger k=j+1;
+            while(k<outLen){
+                unichar ws=[out characterAtIndex:k];
+                if(ws==' '||ws=='\t'||ws=='\r'||ws=='\n')k++;
+                else break;
+            }
+            if(k<outLen&&([out characterAtIndex:k]=='}'||[out characterAtIndex:k]==']')){
+                continue;
+            }
+        }
+        [clean appendFormat:@"%C",c];
+    }
+    return [clean dataUsingEncoding:NSUTF8StringEncoding];
+}
+
+static NSData *TVBoxTryDecryptHex2423Payload(NSString *text) {
+    NSString *trimmed=[text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if(![trimmed.lowercaseString hasPrefix:@"2423"]||trimmed.length<64||(trimmed.length%2)!=0)return nil;
+    NSRange keyEnd=[trimmed.lowercaseString rangeOfString:@"2324" options:0 range:NSMakeRange(4,MIN((NSUInteger)64,trimmed.length-4))];
+    if(keyEnd.location==NSNotFound)return nil;
+    NSString *keyHex=[trimmed substringWithRange:NSMakeRange(4,keyEnd.location-4)];
+    NSMutableData *keyRaw=[NSMutableData data];
+    for(NSUInteger i=0;i+1<keyHex.length;i+=2){
+        unsigned int b=0;
+        if([[NSScanner scannerWithString:[keyHex substringWithRange:NSMakeRange(i,2)]] scanHexInt:&b]){
+            uint8_t byte=(uint8_t)b;
+            [keyRaw appendBytes:&byte length:1];
+        }
+    }
+    NSString *keyStr=[[NSString alloc] initWithData:keyRaw encoding:NSUTF8StringEncoding]?:@"";
+    while(keyStr.length<16)keyStr=[keyStr stringByAppendingString:@"0"];
+    if(keyStr.length>16)keyStr=[keyStr substringToIndex:16];
+    NSString *ivHex=trimmed.length>=32?[trimmed substringFromIndex:trimmed.length-32]:@"";
+    NSMutableData *ivRaw=[NSMutableData data];
+    for(NSUInteger i=0;i+1<ivHex.length;i+=2){
+        unsigned int b=0;
+        if([[NSScanner scannerWithString:[ivHex substringWithRange:NSMakeRange(i,2)]] scanHexInt:&b]){
+            uint8_t byte=(uint8_t)b;
+            [ivRaw appendBytes:&byte length:1];
+        }
+    }
+    NSString *ivStr=[[NSString alloc] initWithData:ivRaw encoding:NSUTF8StringEncoding]?:@"";
+    while(ivStr.length<16)ivStr=[ivStr stringByAppendingString:@"0"];
+    if(ivStr.length>16)ivStr=[ivStr substringToIndex:16];
+    NSUInteger cipherStart=NSMaxRange(keyEnd);
+    if(trimmed.length<=cipherStart+32)return nil;
+    NSString *cipherHex=[trimmed substringWithRange:NSMakeRange(cipherStart,trimmed.length-cipherStart-32)];
+    NSMutableData *cipherData=[NSMutableData dataWithCapacity:cipherHex.length/2];
+    for(NSUInteger i=0;i+1<cipherHex.length;i+=2){
+        unsigned int b=0;
+        if(![[NSScanner scannerWithString:[cipherHex substringWithRange:NSMakeRange(i,2)]] scanHexInt:&b])return nil;
+        uint8_t byte=(uint8_t)b;
+        [cipherData appendBytes:&byte length:1];
+    }
+    if(!cipherData.length)return nil;
+    NSData *keyBytes=[keyStr dataUsingEncoding:NSUTF8StringEncoding];
+    NSData *ivBytes=[ivStr dataUsingEncoding:NSUTF8StringEncoding];
+    size_t bufSize=cipherData.length+kCCBlockSizeAES128;
+    void *buf=malloc(bufSize);
+    if(!buf)return nil;
+    size_t decLen=0;
+    CCCryptorStatus st=CCCrypt(kCCDecrypt,kCCAlgorithmAES128,kCCOptionPKCS7Padding,keyBytes.bytes,kCCKeySizeAES128,ivBytes.bytes,cipherData.bytes,cipherData.length,buf,bufSize,&decLen);
+    if(st==kCCSuccess&&decLen>0){
+        return [NSData dataWithBytesNoCopy:buf length:decLen freeWhenDone:YES];
+    }
+    free(buf);
+    return nil;
+}
+
+static NSData *TVBoxSanitizeJSONData(NSData *data) {
+    if(!data.length)return data;
+    // Strip UTF-8 BOM if present
+    if(data.length>=3&&memcmp(data.bytes,"\xEF\xBB\xBF",3)==0){
+        data=[data subdataWithRange:NSMakeRange(3,data.length-3)];
+    }
+    NSString *text=[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    if(!text.length)text=[[NSString alloc] initWithData:data encoding:NSISOLatin1StringEncoding];
+    if(!text.length)return data;
+    NSString *trimmed=[text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    // 1. Check TVBox ** Base64 wrapper (e.g. header**eyJ...)
+    NSRange starRange=[trimmed rangeOfString:@"**"];
+    if(starRange.location!=NSNotFound&&NSMaxRange(starRange)<trimmed.length){
+        NSString *b64Part=[[trimmed substringFromIndex:NSMaxRange(starRange)] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        NSData *b64Decoded=[[NSData alloc] initWithBase64EncodedString:b64Part options:NSDataBase64DecodingIgnoreUnknownCharacters];
+        NSString *b64Text=b64Decoded.length?[[NSString alloc] initWithData:b64Decoded encoding:NSUTF8StringEncoding]:nil;
+        if(b64Text.length&&([b64Text containsString:@"{"]||[b64Text containsString:@"["])){
+            text=b64Text;
+            trimmed=[text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        }
+    }
+    // 2. Check TVBox 2423 ($#...#$) Hex AES-128-CBC wrapper
+    if([trimmed.lowercaseString hasPrefix:@"2423"]){
+        NSData *dec2423=TVBoxTryDecryptHex2423Payload(trimmed);
+        NSString *decText=dec2423.length?[[NSString alloc] initWithData:dec2423 encoding:NSUTF8StringEncoding]:nil;
+        if(decText.length&&([decText containsString:@"{"]||[decText containsString:@"["])){
+            text=decText;
+            trimmed=[text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        }
+    }
+    // 3. Check pure Base64 JSON config
+    if(![trimmed hasPrefix:@"{"]&&![trimmed hasPrefix:@"["]&&![trimmed hasPrefix:@"/"]&&trimmed.length>=24){
+        NSData *b64Decoded=[[NSData alloc] initWithBase64EncodedString:trimmed options:NSDataBase64DecodingIgnoreUnknownCharacters];
+        NSString *b64Text=b64Decoded.length?[[NSString alloc] initWithData:b64Decoded encoding:NSUTF8StringEncoding]:nil;
+        if(b64Text.length){
+            NSString *b64Trim=[b64Text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+            if([b64Trim hasPrefix:@"{"]||[b64Trim hasPrefix:@"["]||[b64Trim hasPrefix:@"//"]||[b64Trim hasPrefix:@"/*"]){
+                text=b64Text;
+                trimmed=b64Trim;
+            }
+        }
+    }
+    // 4. Strip // and /* */ comments and trailing commas outside string literals
+    NSData *cleaned=TVBoxStripCommentsAndTrailingCommas(text);
+    return cleaned.length?cleaned:data;
 }
 
 static NSString *TVBoxExportFilename(NSString *name) {
@@ -56,6 +346,120 @@ static NSString *TVBoxExportFilename(NSString *name) {
 
 static void TVBoxAppendLE16(NSMutableData *data,uint16_t value) {uint8_t bytes[2]={(uint8_t)value,(uint8_t)(value>>8)};[data appendBytes:bytes length:sizeof(bytes)];}
 static void TVBoxAppendLE32(NSMutableData *data,uint32_t value) {uint8_t bytes[4]={(uint8_t)value,(uint8_t)(value>>8),(uint8_t)(value>>16),(uint8_t)(value>>24)};[data appendBytes:bytes length:sizeof(bytes)];}
+static uint16_t TVBoxReadLE16(const uint8_t *b,NSUInteger n){return (uint16_t)b[n]|((uint16_t)b[n+1]<<8);}
+static uint32_t TVBoxReadLE32(const uint8_t *b,NSUInteger n){return (uint32_t)TVBoxReadLE16(b,n)|((uint32_t)TVBoxReadLE16(b,n+2)<<16);}
+static uint16_t TVBoxReadBE16(const uint8_t *b,NSUInteger n){return (uint16_t)((b[n]<<8)|b[n+1]);}
+
+static NSDictionary<NSString *,NSData *> *TVBoxExtractZIPEntries(NSData *archiveData) {
+    if(!archiveData.length||archiveData.length<22||archiveData.length>32*1024*1024)return nil;
+    const uint8_t *b=(const uint8_t *)archiveData.bytes;
+    NSUInteger length=archiveData.length;
+    if(memcmp(b,"PK\003\004",4)!=0)return nil;
+    NSUInteger eocd=NSNotFound,minimum=length>65557?length-65557:0;
+    for(NSUInteger p=length-22;;p--){
+        if(TVBoxReadLE32(b,p)==0x06054b50&&p+22+TVBoxReadLE16(b,p+20)<=length){eocd=p;break;}
+        if(p==minimum)break;
+    }
+    if(eocd==NSNotFound)return nil;
+    NSUInteger count=TVBoxReadLE16(b,eocd+10),size=TVBoxReadLE32(b,eocd+12),offset=TVBoxReadLE32(b,eocd+16);
+    if(!count||count>2048||offset+size>eocd)return nil;
+    NSMutableDictionary<NSString *,NSData *> *entries=[NSMutableDictionary dictionary];
+    NSUInteger p=offset,totalExpanded=0;
+    for(NSUInteger idx=0;idx<count;idx++){
+        if(p+46>offset+size||TVBoxReadLE32(b,p)!=0x02014b50)return nil;
+        NSUInteger flags=TVBoxReadLE16(b,p+8),method=TVBoxReadLE16(b,p+10),compressed=TVBoxReadLE32(b,p+20),expanded=TVBoxReadLE32(b,p+24),nameLen=TVBoxReadLE16(b,p+28),extra=TVBoxReadLE16(b,p+30),comment=TVBoxReadLE16(b,p+32),local=TVBoxReadLE32(b,p+42);
+        if(p+46+nameLen+extra+comment>offset+size||!nameLen||(flags&1)||(method!=0&&method!=8)||expanded>24*1024*1024||totalExpanded+expanded>48*1024*1024||local>=offset)return nil;
+        NSData *nameData=[archiveData subdataWithRange:NSMakeRange(p+46,nameLen)];
+        NSString *name=[[NSString alloc] initWithData:nameData encoding:NSUTF8StringEncoding];
+        if(!name.length)name=[[NSString alloc] initWithData:nameData encoding:NSISOLatin1StringEncoding];
+        p+=46+nameLen+extra+comment;
+        if(!name.length||[name hasSuffix:@"/"]||[name hasPrefix:@"/"]||[name containsString:@".."]||[name containsString:@"__MACOSX"]||[name.lastPathComponent hasPrefix:@"."])continue;
+        if(local+30>offset||TVBoxReadLE32(b,local)!=0x04034b50)return nil;
+        NSUInteger localName=TVBoxReadLE16(b,local+26),localExtra=TVBoxReadLE16(b,local+28),body=local+30+localName+localExtra;
+        if(body>offset||compressed>offset-body)return nil;
+        NSMutableData *out=[NSMutableData dataWithLength:expanded];
+        if(method==0){
+            if(compressed!=expanded)continue;
+            if(expanded)memcpy(out.mutableBytes,b+body,expanded);
+        }else{
+            uint8_t dummy=0;
+            z_stream strm={0};
+            strm.next_in=(Bytef *)(b+body);
+            strm.avail_in=(uInt)compressed;
+            strm.next_out=expanded?out.mutableBytes:&dummy;
+            strm.avail_out=(uInt)MAX(expanded,(NSUInteger)1);
+            if(inflateInit2(&strm,-MAX_WBITS)!=Z_OK)continue;
+            int zres=inflate(&strm,Z_FINISH);
+            inflateEnd(&strm);
+            if(zres!=Z_STREAM_END||strm.total_out!=expanded)continue;
+        }
+        totalExpanded+=expanded;
+        entries[name]=out;
+    }
+    return entries.count?entries:nil;
+}
+
+static NSDictionary<NSString *,NSDictionary *> *TVBoxExtractClassConfigsFromJAR(NSData *jarData) {
+    NSDictionary<NSString *,NSData *> *entries=TVBoxExtractZIPEntries(jarData);
+    if(!entries.count)return @{};
+    NSMutableDictionary<NSString *,NSDictionary *> *result=[NSMutableDictionary dictionary];
+    for(NSString *entryName in entries){
+        if(![entryName hasPrefix:@"com/github/catvod/spider/"]||![entryName hasSuffix:@".class"]||[entryName containsString:@"$"])continue;
+        NSString *clsName=[[entryName lastPathComponent] stringByDeletingPathExtension];
+        if(!clsName.length)continue;
+        NSData *clsData=entries[entryName];
+        if(clsData.length<16)continue;
+        const uint8_t *b=(const uint8_t *)clsData.bytes;
+        if(b[0]!=0xCA||b[1]!=0xFE||b[2]!=0xBA||b[3]!=0xBE)continue;
+        uint16_t cpCount=TVBoxReadBE16(b,8);
+        NSUInteger pos=10;
+        uint16_t idx=1;
+        NSMutableArray<NSString *> *urls=[NSMutableArray array];
+        NSMutableArray<NSString *> *keys=[NSMutableArray array];
+        while(idx<cpCount&&pos<clsData.length){
+            uint8_t tag=b[pos++];
+            if(tag==1){
+                if(pos+2>clsData.length)break;
+                uint16_t uLen=TVBoxReadBE16(b,pos);
+                pos+=2;
+                if(pos+uLen>clsData.length)break;
+                NSString *s=[[NSString alloc] initWithBytes:b+pos length:uLen encoding:NSUTF8StringEncoding];
+                pos+=uLen;
+                if(s.length){
+                    NSString *clean=[s stringByReplacingOccurrencesOfString:@"\x01" withString:@""];
+                    clean=[clean stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+                    NSString *low=clean.lowercaseString;
+                    if(([low hasPrefix:@"http://"]||[low hasPrefix:@"https://"])&&clean.length>=11&&clean.length<=256&&![low containsString:@"127.0.0.1"]&&![low containsString:@"error.com"]&&![low containsString:@"google.com"]&&![low containsString:@"baidu.con"]&&![low containsString:@"servicewechat.com"]&&![low containsString:@"x.com/api"]&&![low containsString:@"gtimg.com"]&&![low containsString:@"image.tmdb.org"]){
+                        if(![urls containsObject:clean])[urls addObject:clean];
+                    }else if((s.length==16||s.length==32)&&![s hasPrefix:@"http"]&&![s containsString:@"/"]&&![s containsString:@"."]&&![s isEqualToString:@"0123456789abcdef"]&&![s isEqualToString:@"0123456789ABCDEF"]&&![s isEqualToString:@"0000000000000000"]&&![s isEqualToString:@"00000000000000000000000000000000"]&&![s isEqualToString:@"BootstrapMethods"]&&![s isEqualToString:@"setRequestMethod"]&&![s isEqualToString:@"equalsIgnoreCase"]&&![s isEqualToString:@"getParameterSpec"]&&![s isEqualToString:@"FALLBACK_PLAYERS"]&&![s isEqualToString:@"FALLBACK_PARSERS"]&&![s isEqualToString:@"P_MAINTITLE_ATTR"]&&![s isEqualToString:@"sec_device_token"]&&![s isEqualToString:@"video_definition"]&&![s isEqualToString:@"application/json"]&&![s isEqualToString:@"com.phoenix.read"]&&![s isEqualToString:@"action-adventure"]&&![s isEqualToString:@"AUDIO_CONFIG_BOX"]&&![s isEqualToString:@"HongGuoSign.java"]&&![s isEqualToString:@"hg-stream-worker"]&&![s isEqualToString:@"Content-Length: "]&&![s isEqualToString:@"x-requested-with"]&&![s isEqualToString:@"X-Requested-With"]&&![s isEqualToString:@"com.exxammpea.a1"]&&![s isEqualToString:@"synchronizedList"]&&![s isEqualToString:@"awaitTermination"]&&![s isEqualToString:@"quoteReplacement"]&&![s isEqualToString:@"x-ai-movie-nonce"]&&![s isEqualToString:@"normalized_title"]&&![s isEqualToString:@"fetchAllEpisodes"]&&![s isEqualToString:@"resolve_required"]&&![s isEqualToString:@"PROTOCOL_VERSION"]&&![s isEqualToString:@"App-Version-Code"]&&![s isEqualToString:@"filter_type_list"]&&![s isEqualToString:@"player_source_id"]&&![s isEqualToString:@"platform-version"]&&![s isEqualToString:@"getSocketFactory"]){
+                        if([s rangeOfString:@"^[A-Za-z0-9!@#$%^&*()_+=-]{16,32}$" options:NSRegularExpressionSearch].location!=NSNotFound){
+                            if(![keys containsObject:s])[keys addObject:s];
+                        }
+                    }
+                }
+            }else if(tag==7||tag==8||tag==16||tag==19||tag==20){
+                pos+=2;
+            }else if(tag==3||tag==4||tag==9||tag==10||tag==11||tag==12||tag==17||tag==18){
+                pos+=4;
+            }else if(tag==5||tag==6){
+                pos+=8;
+                idx++;
+            }else if(tag==15){
+                pos+=3;
+            }else{
+                break;
+            }
+            idx++;
+        }
+        if(urls.count){
+            NSMutableDictionary *cfg=[@{@"url":urls.firstObject,@"sites":urls} mutableCopy];
+            if(keys.count>=1)cfg[@"dataKey"]=keys[0];
+            if(keys.count>=2)cfg[@"dataIv"]=keys[1];
+            result[[@"csp_" stringByAppendingString:clsName].lowercaseString]=cfg.copy;
+        }
+    }
+    return result.copy;
+}
 
 static NSData *TVBoxZIPData(NSDictionary<NSString *,NSData *> *files,NSError **error) {
     NSMutableData *archive=[NSMutableData data],*central=[NSMutableData data];NSUInteger entryCount=0;
@@ -88,10 +492,10 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
     static NSSet *set;static dispatch_once_t once;
     dispatch_once(&once,^{
         set=[NSSet setWithArray:@[
-            @"csp_xbpq", @"csp_xyqhiker", @"csp_music1",
+            @"csp_xbpq", @"csp_xyqhiker", @"csp_xpath", @"csp_music1",
             @"csp_appget", @"csp_appdrama", @"csp_appysv2", @"csp_apprj",
             @"csp_app99", @"csp_app3q", @"csp_appqi", @"csp_appsy", @"csp_appyqk",
-            @"csp_bili", @"csp_biliys", @"csp_panwebshare", @"csp_wogg",
+            @"csp_bili", @"csp_biliys", @"csp_panwebshare", @"csp_wogg", @"csp_pansearch",
             @"csp_hxq", @"csp_sp360", @"csp_tvyb", @"csp_pianku8", @"csp_feiyu",
             @"csp_duboku", @"csp_czsapp", @"csp_xlys", @"csp_wwys", @"csp_fengye",
             @"csp_ikanbot", @"csp_web1905", @"csp_tuxiaobei", @"csp_beilehu",
@@ -102,13 +506,72 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
             @"csp_djlh", @"csp_qingtingfm", @"csp_tingshijie", @"csp_apply",
             @"csp_gz360", @"csp_saohuo", @"csp_jpys",
             @"csp_panali", @"csp_panquark", @"csp_panuc", @"csp_panbaidu",
-            @"csp_config"
+            @"csp_config",
+            // 初忆 (cycod/tvbox) & 刺桐 (cttv.vip/ctys.json) 专属爬虫类
+            @"csp_hongguo", @"csp_sikv4k", @"csp_gz", @"csp_duoduo", @"csp_gulu",
+            @"csp_hetun", @"csp_huayi", @"csp_juzhi", @"csp_piandi", @"csp_yingtan",
+            @"csp_fengye4k", @"csp_juxiafan", @"csp_shanzha4k", @"csp_daishu",
+            @"csp_dongmanbashi", @"csp_dbku", @"csp_fandazi", @"csp_fourkmp",
+            @"csp_jbd", @"csp_jianpian", @"csp_nongmin", @"csp_rejutv", @"csp_tegou",
+            @"csp_yunbo", @"csp_wftv", @"csp_yingxiang", @"csp_zjdr", @"csp_zhuiying",
+            @"csp_luoxuetv", @"csp_kishuto", @"csp_ttian", @"csp_xdai", @"csp_qiji",
+            @"csp_qiao2", @"csp_muou", @"csp_nmvod", @"csp_bdys01", @"csp_lib",
+            @"csp_zxzj", @"csp_ddrk", @"csp_kuaikan", @"csp_auete", @"csp_dygang",
+            @"csp_shark", @"csp_hudie", @"csp_ai"
         ]];
     });
     if([set containsObject:low])return YES;
-    return [low hasPrefix:@"csp_"]&&![low isEqualToString:@"csp_doudou"]&&![low isEqualToString:@"csp_example"];
+    return [low hasPrefix:@"csp_"]&&![low isEqualToString:@"csp_doudou"]&&![low isEqualToString:@"csp_douban"]&&![low isEqualToString:@"csp_example"];
 }
+
+static NSString *TVBoxInferredCatalogPrefixName(NSArray *sites) {
+    if(![sites isKindOfClass:NSArray.class]||!sites.count)return nil;
+    NSCountedSet *prefixes=[NSCountedSet set];
+    for(id item in sites){
+        if(![item isKindOfClass:NSDictionary.class])continue;
+        NSString *sName=[item[@"name"] isKindOfClass:NSString.class]?item[@"name"]:@"";
+        for(NSString *sep in @[@"┃",@"｜",@"|",@"•",@"·"]){
+            NSRange r=[sName rangeOfString:sep];
+            if(r.location!=NSNotFound&&r.location>=2&&r.location<=8){
+                NSString *p=[[sName substringToIndex:r.location] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+                if(p.length>=2)[prefixes addObject:p];
+                break;
+            }
+        }
+    }
+    NSString *best=nil;NSUInteger bestCount=0;
+    for(NSString *p in prefixes){
+        NSUInteger c=[prefixes countForObject:p];
+        if(c>bestCount&&c>=2){bestCount=c;best=p;}
+    }
+    return best.length?[NSString stringWithFormat:@"%@ · TVBox 合集",best]:nil;
+}
+
+static void TVBoxNotifyAdaptationMonitorCatalog(NSString *name, NSString *sourceURL, NSUInteger siteCount, NSUInteger supportedCount, NSUInteger liveCount, NSString *bundleType, BOOL jarVerified, NSString *notes) {
+    Class cls=NSClassFromString(@"MediaAdaptationMonitor");
+    if(!cls)return;
+    SEL sharedSel=NSSelectorFromString(@"shared");
+    if(![cls respondsToSelector:sharedSel])return;
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+    id monitor=[cls performSelector:sharedSel];
+#pragma clang diagnostic pop
+    SEL recordSel=NSSelectorFromString(@"recordCatalogEventWithName:sourceURL:siteCount:supportedCount:liveCount:bundleType:jarVerified:notes:");
+    if(monitor&&[monitor respondsToSelector:recordSel]){
+        ((void (*)(id, SEL, NSString *, NSString *, NSUInteger, NSUInteger, NSUInteger, NSString *, BOOL, NSString *))objc_msgSend)(monitor, recordSel, name?:@"资源合集", sourceURL?:@"", siteCount, supportedCount, liveCount, bundleType?:@"tvbox-json", jarVerified, notes?:@"");
+    }
+}
+
 @implementation TVBoxCatalogStore
+
++ (nullable NSData *)sanitizeJSONData:(NSData *)data {
+    return TVBoxSanitizeJSONData(data);
+}
+
++ (nullable NSString *)decodeQiaojiExtString:(NSString *)rawExt {
+    return TVBoxDecodeQiaojiExt(rawExt);
+}
+
 + (NSDictionary *)catalogWithMacCMSAPIURL:(NSString *)apiURL name:(NSString *)name error:(NSError **)error {
     NSString *trimmed=[apiURL stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     if(!TVBoxWebURL(trimmed)){if(error)*error=TVBoxError(@"MacCMS 接口必须是有效的 HTTP/HTTPS 地址，且不能包含用户名或密码");return nil;}
@@ -121,9 +584,269 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
     NSDictionary *site=@{@"key":siteKey,@"name":displayName,@"api":trimmed,@"type":@"maccms",@"apiKind":@"maccms-api",@"supported":@YES,@"status":@"尚未验证 · 选中后读取",@"maccmsFormat":@"auto"};
     return @{@"id":NSUUID.UUID.UUIDString.lowercaseString,@"name":displayName,@"sites":@[site],@"lives":@[],@"url":trimmed,@"updatedAt":@(NSDate.date.timeIntervalSince1970),@"catalogKind":@"maccms"};
 }
+
++ (nullable NSDictionary *)parseBundleEntries:(NSDictionary<NSString *,NSData *> *)entries bundleTitle:(nullable NSString *)bundleTitle sourceURL:(nullable NSString *)sourceURL error:(NSError **)error {
+    if(!entries.count)return nil;
+    // Strip common top-level folder prefix if all entries are inside e.g. "tvbox-local/"
+    NSMutableSet<NSString *> *topDirs=[NSMutableSet set];
+    for(NSString *path in entries){
+        NSArray<NSString *> *parts=path.pathComponents;
+        if(parts.count>1)[topDirs addObject:parts.firstObject];
+        else [topDirs addObject:@""];
+    }
+    NSDictionary<NSString *,NSData *> *normalizedEntries=entries;
+    if(topDirs.count==1&&![topDirs.anyObject isEqualToString:@""]){
+        NSString *prefix=[topDirs.anyObject stringByAppendingString:@"/"];
+        NSMutableDictionary<NSString *,NSData *> *stripped=[NSMutableDictionary dictionaryWithCapacity:entries.count];
+        for(NSString *path in entries){
+            NSString *rel=[path hasPrefix:prefix]?[path substringFromIndex:prefix.length]:path;
+            if(rel.length)stripped[rel]=entries[path];
+        }
+        if(stripped.count)normalizedEntries=stripped;
+    }
+    // Locate primary TVBox JSON config
+    NSArray<NSString *> *preferredConfigs=@[@"api.json",@"config.json",@"tvbox.json",@"jsm.json",@"ctys.json",@"index.json",@"main.json"];
+    NSString *mainConfigKey=nil;
+    NSDictionary *mainConfigDict=nil;
+    NSData *mainSanitizedData=nil;
+    NSMutableArray<NSString *> *candidateKeys=[NSMutableArray array];
+    for(NSString *pref in preferredConfigs){
+        for(NSString *k in normalizedEntries){
+            if([k.lowercaseString isEqualToString:pref]){[candidateKeys addObject:k];}
+        }
+    }
+    for(NSString *k in [normalizedEntries.allKeys sortedArrayUsingSelector:@selector(compare:)]){
+        NSString *low=k.lowercaseString;
+        if([low hasSuffix:@".json"]&&![candidateKeys containsObject:k]&&![low hasSuffix:@".original.json"]&&![low isEqualToString:@"package.json"]&&![low isEqualToString:@"cctvhost.json"]&&![low isEqualToString:@"source-manifest.json"]&&![low containsString:@"/"]){
+            [candidateKeys addObject:k];
+        }
+    }
+    for(NSString *k in candidateKeys){
+        NSData *raw=normalizedEntries[k];
+        NSData *sanitized=TVBoxSanitizeJSONData(raw);
+        id obj=sanitized.length?[NSJSONSerialization JSONObjectWithData:sanitized options:NSJSONReadingFragmentsAllowed error:NULL]:nil;
+        if([obj isKindOfClass:NSDictionary.class]){
+            NSDictionary *d=(NSDictionary *)obj;
+            if([d[@"sites"] isKindOfClass:NSArray.class]||[d[@"lives"] isKindOfClass:NSArray.class]||[d[@"urls"] isKindOfClass:NSArray.class]||[d[@"storeHouse"] isKindOfClass:NSArray.class]){
+                mainConfigKey=k;
+                mainConfigDict=d;
+                mainSanitizedData=sanitized;
+                break;
+            }
+        }
+    }
+    if(!mainConfigDict||!mainConfigKey)return nil;
+
+    // Inspect api.original.json and make_local.py / README.md for upstream origin and spider URLs
+    NSDictionary *originalConfigDict=nil;
+    for(NSString *k in normalizedEntries){
+        if([k.lowercaseString hasSuffix:@"original.json"]){
+            NSData *sanitizedOrig=TVBoxSanitizeJSONData(normalizedEntries[k]);
+            id obj=sanitizedOrig.length?[NSJSONSerialization JSONObjectWithData:sanitizedOrig options:NSJSONReadingFragmentsAllowed error:NULL]:nil;
+            if([obj isKindOfClass:NSDictionary.class]){originalConfigDict=obj;break;}
+        }
+    }
+    NSString *inferredOrigin=sourceURL.length?sourceURL:@"";
+    if(!TVBoxWebURL(inferredOrigin)){
+        for(NSString *helperName in @[@"make_local.py",@"README.md",@"README.txt"]){
+            NSData *hData=normalizedEntries[helperName];
+            NSString *hText=hData.length?[[NSString alloc] initWithData:hData encoding:NSUTF8StringEncoding]:nil;
+            if(!hText.length)continue;
+            NSRegularExpression *re=[NSRegularExpression regularExpressionWithPattern:@"https?://[^\\s\"'<>\\)]+\\.json" options:NSRegularExpressionCaseInsensitive error:NULL];
+            NSTextCheckingResult *m=[re firstMatchInString:hText options:0 range:NSMakeRange(0,hText.length)];
+            if(m){
+                NSString *found=[hText substringWithRange:m.range];
+                if(TVBoxWebURL(found)&&![found containsString:@"127.0.0.1"]&&![found containsString:@"localhost"]){
+                    inferredOrigin=found;
+                    break;
+                }
+            }
+        }
+    }
+    if(!TVBoxWebURL(inferredOrigin)&&[originalConfigDict[@"spider"] isKindOfClass:NSString.class]){
+        NSString *origSpider=[originalConfigDict[@"spider"] componentsSeparatedByString:@";"].firstObject;
+        if(TVBoxWebURL(origSpider)){
+            NSURL *sURL=[NSURL URLWithString:origSpider];
+            NSURL *apiURL=[NSURL URLWithString:@"api.json" relativeToURL:sURL].absoluteURL;
+            if(TVBoxWebURL(apiURL.absoluteString))inferredOrigin=apiURL.absoluteString;
+        }
+    }
+    NSString *catalogID=NSUUID.UUID.UUIDString;
+    NSString *effectiveOrigin=TVBoxWebURL(inferredOrigin)?inferredOrigin:[NSString stringWithFormat:@"https://local.tvbox.bundle/%@/api.json",catalogID.lowercaseString];
+
+    // Locate bundled .jar (e.g. spider.jar) and extract class constants
+    NSData *jarData=nil;
+    NSString *jarEntryName=nil;
+    NSString *spiderField=[mainConfigDict[@"spider"] isKindOfClass:NSString.class]?mainConfigDict[@"spider"]:@"";
+    NSString *spiderRel=[[spiderField componentsSeparatedByString:@";"].firstObject stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if([spiderRel hasPrefix:@"./"])spiderRel=[spiderRel substringFromIndex:2];
+    if(spiderRel.length&&normalizedEntries[spiderRel]){
+        jarData=normalizedEntries[spiderRel];
+        jarEntryName=spiderRel;
+    }
+    if(!jarData){
+        for(NSString *k in normalizedEntries){
+            if([k.pathExtension.lowercaseString isEqualToString:@"jar"]){
+                jarData=normalizedEntries[k];
+                jarEntryName=k;
+                break;
+            }
+        }
+    }
+    NSDictionary<NSString *,NSDictionary *> *jarClassConfigs=jarData.length?TVBoxExtractClassConfigsFromJAR(jarData):@{};
+
+    // Merge local config with original remote references & JAR class constants
+    NSMutableDictionary *mergedJSON=[mainConfigDict mutableCopy];
+    NSString *origSpider=[originalConfigDict[@"spider"] isKindOfClass:NSString.class]?originalConfigDict[@"spider"]:@"";
+    NSString *resolvedSpiderURL=@"";
+    NSString *declaredMD5=@"";
+    NSArray<NSString *> *spiderParts=[spiderField componentsSeparatedByString:@";md5;"];
+    if(spiderParts.count==2)declaredMD5=[spiderParts[1] lowercaseString];
+    if(origSpider.length&&TVBoxWebURL([origSpider componentsSeparatedByString:@";"].firstObject)){
+        mergedJSON[@"spider"]=origSpider;
+        resolvedSpiderURL=[origSpider componentsSeparatedByString:@";"].firstObject;
+        NSArray<NSString *> *origParts=[origSpider componentsSeparatedByString:@";md5;"];
+        if(!declaredMD5.length&&origParts.count==2)declaredMD5=[origParts[1] lowercaseString];
+    }else if(spiderField.length){
+        NSDictionary *jarRef=MediaJARReference(spiderField,effectiveOrigin);
+        if(jarRef[@"url"])resolvedSpiderURL=jarRef[@"url"];
+    }
+    BOOL jarMD5Verified=NO;
+    if(jarData.length){
+        NSString *actualMD5=TVBoxHashHex(jarData,YES);
+        jarMD5Verified=!declaredMD5.length||[actualMD5 isEqualToString:declaredMD5];
+        if(resolvedSpiderURL.length){
+            TVBoxPreseedJARRuntimeCache(jarData,resolvedSpiderURL,declaredMD5.length?declaredMD5:actualMD5);
+        }
+    }
+
+    // Enrich sites in mergedJSON with local bundle ext files or extracted JAR class configs
+    if([mergedJSON[@"sites"] isKindOfClass:NSArray.class]){
+        NSMutableArray *enrichedSites=[NSMutableArray array];
+        for(id rawSite in (NSArray *)mergedJSON[@"sites"]){
+            if(![rawSite isKindOfClass:NSDictionary.class]){[enrichedSites addObject:rawSite];continue;}
+            NSMutableDictionary *mSite=[rawSite mutableCopy];
+            NSString *sApi=[mSite[@"api"] isKindOfClass:NSString.class]?mSite[@"api"]:@"";
+            id sExt=mSite[@"ext"];
+            if([sExt isKindOfClass:NSString.class]){
+                NSString *extStr=[(NSString *)sExt stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+                NSString *relExt=[extStr hasPrefix:@"./"]?[extStr substringFromIndex:2]:extStr;
+                if(relExt.length&&normalizedEntries[relExt]){
+                    NSString *inlineText=[[NSString alloc] initWithData:normalizedEntries[relExt] encoding:NSUTF8StringEncoding];
+                    if(inlineText.length&&inlineText.length<=65536)mSite[@"ext"]=inlineText;
+                }
+            }else if((!sExt||sExt==NSNull.null||(![sExt isKindOfClass:NSDictionary.class]&&![sExt isKindOfClass:NSArray.class]&&![(NSString *)sExt length]))&&jarClassConfigs[sApi.lowercaseString]){
+                mSite[@"ext"]=jarClassConfigs[sApi.lowercaseString];
+            }
+            [enrichedSites addObject:mSite];
+        }
+        mergedJSON[@"sites"]=enrichedSites;
+    }
+
+    // Persist companion files under Bundles/<catalogID>/
+    NSString *bundleDir=[TVBoxCatalogBundlesDirectory() stringByAppendingPathComponent:catalogID];
+    [NSFileManager.defaultManager createDirectoryAtPath:bundleDir withIntermediateDirectories:YES attributes:nil error:NULL];
+    NSMutableArray<NSString *> *savedFiles=[NSMutableArray array];
+    for(NSString *relPath in normalizedEntries){
+        NSString *dest=[bundleDir stringByAppendingPathComponent:relPath];
+        [NSFileManager.defaultManager createDirectoryAtPath:dest.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:NULL];
+        if([normalizedEntries[relPath] writeToFile:dest options:NSDataWritingAtomic error:NULL]){
+            [savedFiles addObject:relPath];
+        }
+    }
+
+    NSData *mergedData=[NSJSONSerialization dataWithJSONObject:mergedJSON options:0 error:NULL]?:mainSanitizedData;
+    NSMutableDictionary *catalog=[[self parseData:mergedData sourceURL:effectiveOrigin error:error] mutableCopy];
+    if(!catalog)return nil;
+    catalog[@"id"]=catalogID;
+    catalog[@"_sourceConfigData"]=mainSanitizedData;
+    if(!mergedJSON[@"name"]&&!mergedJSON[@"title"]){
+        NSString *inferredPrefix=TVBoxInferredCatalogPrefixName(mergedJSON[@"sites"]);
+        if(bundleTitle.length&&![bundleTitle.lowercaseString isEqualToString:@"api"]&&![bundleTitle.lowercaseString isEqualToString:@"config"]&&![bundleTitle.lowercaseString isEqualToString:@"tvbox-local"]){
+            catalog[@"name"]=bundleTitle;
+        }else if(inferredPrefix.length){
+            catalog[@"name"]=inferredPrefix;
+        }
+    }
+    catalog[@"catalogKind"]=@"tvbox-local-bundle";
+    NSMutableDictionary *bundleMeta=[@{
+        @"isLocalBundle":@YES,
+        @"bundleDirectory":bundleDir,
+        @"mainConfigFile":mainConfigKey,
+        @"companionFiles":savedFiles.copy,
+        @"hasOriginalConfig":@(originalConfigDict!=nil),
+        @"jarBundled":@(jarData.length>0),
+        @"jarMD5Verified":@(jarMD5Verified),
+        @"jarExtractedClassCount":@(jarClassConfigs.count)
+    } mutableCopy];
+    if(jarEntryName.length)bundleMeta[@"jarFile"]=jarEntryName;
+    if(declaredMD5.length)bundleMeta[@"jarMD5"]=declaredMD5;
+    if(resolvedSpiderURL.length)bundleMeta[@"resolvedSpiderURL"]=resolvedSpiderURL;
+    catalog[@"bundleMetadata"]=bundleMeta.copy;
+
+    NSUInteger supportedCount=0;
+    for(NSDictionary *s in catalog[@"sites"]?:@[])if([s[@"supported"] boolValue])supportedCount++;
+    TVBoxNotifyAdaptationMonitorCatalog(catalog[@"name"], effectiveOrigin, [catalog[@"sites"] count], supportedCount, [catalog[@"lives"] count], @"tvbox-local-bundle", jarMD5Verified, [NSString stringWithFormat:@"本地集合包 · JAR 校验:%@ · 提取常量类:%lu", jarMD5Verified?@"通过":@"未声明", (unsigned long)jarClassConfigs.count]);
+    return catalog.copy;
+}
+
++ (nullable NSDictionary *)parseBundleArchiveData:(NSData *)data fileURL:(nullable NSURL *)fileURL sourceURL:(nullable NSString *)sourceURL error:(NSError **)error {
+    NSDictionary<NSString *,NSData *> *entries=TVBoxExtractZIPEntries(data);
+    if(!entries.count)return nil;
+    NSString *title=fileURL.lastPathComponent.stringByDeletingPathExtension;
+    return [self parseBundleEntries:entries bundleTitle:title sourceURL:sourceURL error:error];
+}
+
++ (nullable NSDictionary *)parseBundleDirectoryAtURL:(NSURL *)directoryURL error:(NSError **)error {
+    if(!directoryURL.isFileURL)return nil;
+    NSFileManager *fm=NSFileManager.defaultManager;
+    NSString *rootPath=directoryURL.path;
+    BOOL isDir=NO;
+    if(![fm fileExistsAtPath:rootPath isDirectory:&isDir]||!isDir)return nil;
+    NSDirectoryEnumerator *enumerator=[fm enumeratorAtURL:directoryURL includingPropertiesForKeys:@[NSURLIsRegularFileKey,NSURLFileSizeKey] options:NSDirectoryEnumerationSkipsHiddenFiles errorHandler:^BOOL(NSURL *url,NSError *err){return YES;}];
+    NSMutableDictionary<NSString *,NSData *> *entries=[NSMutableDictionary dictionary];
+    NSUInteger totalBytes=0;
+    for(NSURL *fileURL in enumerator){
+        NSNumber *regular=nil,*size=nil;
+        [fileURL getResourceValue:&regular forKey:NSURLIsRegularFileKey error:NULL];
+        [fileURL getResourceValue:&size forKey:NSURLFileSizeKey error:NULL];
+        if(!regular.boolValue||size.unsignedLongLongValue>24*1024*1024||totalBytes+size.unsignedLongLongValue>48*1024*1024)continue;
+        NSString *fullPath=fileURL.path;
+        if(![fullPath hasPrefix:rootPath])continue;
+        NSString *rel=[fullPath substringFromIndex:rootPath.length];
+        while([rel hasPrefix:@"/"])rel=[rel substringFromIndex:1];
+        if(!rel.length||[rel containsString:@"__MACOSX"])continue;
+        NSData *d=[NSData dataWithContentsOfURL:fileURL options:NSDataReadingMappedIfSafe error:NULL];
+        if(d){entries[rel]=d;totalBytes+=d.length;}
+    }
+    if(!entries.count)return nil;
+    return [self parseBundleEntries:entries bundleTitle:directoryURL.lastPathComponent sourceURL:nil error:error];
+}
+
 + (NSDictionary *)parseData:(NSData *)data sourceURL:(NSString *)sourceURL error:(NSError **)error {
-    if (!data.length || data.length > 8*1024*1024) { if(error)*error=TVBoxError(@"TVBox 配置为空或超过 8 MiB"); return nil; }
-    NSError *jsonError=nil;id rawJSON=[NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingFragmentsAllowed error:&jsonError];
+    if (!data.length) { if(error)*error=TVBoxError(@"TVBox 配置为空或超过 8 MiB"); return nil; }
+    // Detect TVBox Local Collection Bundle ZIP archives (e.g. 初忆本地包1110.zip)
+    if (data.length >= 4 && memcmp(data.bytes, "PK\003\004", 4) == 0) {
+        if (data.length <= 32*1024*1024) {
+            NSDictionary *bundleCatalog=[self parseBundleArchiveData:data fileURL:nil sourceURL:sourceURL error:error];
+            if (bundleCatalog) return bundleCatalog;
+        }
+        if(error&&!*error)*error=TVBoxError(@"TVBox 配置必须是 JSON 对象");
+        return nil;
+    }
+    if (data.length > 8*1024*1024) { if(error)*error=TVBoxError(@"TVBox 配置为空或超过 8 MiB"); return nil; }
+    NSError *jsonError=nil;
+    BOOL usedSanitized=NO;
+    id rawJSON=[NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingFragmentsAllowed error:&jsonError];
+    NSData *sanitizedData=data;
+    if (!rawJSON) {
+        sanitizedData=TVBoxSanitizeJSONData(data);
+        if (sanitizedData.length) {
+            jsonError=nil;
+            rawJSON=[NSJSONSerialization JSONObjectWithData:sanitizedData options:NSJSONReadingFragmentsAllowed error:&jsonError];
+            if (rawJSON) usedSanitized=YES;
+        }
+    }
     NSDictionary *json=[rawJSON isKindOfClass:NSDictionary.class]?rawJSON:nil;
     if (!json && [rawJSON isKindOfClass:NSArray.class] && [(NSArray *)rawJSON count]) {
         json=@{@"name":([sourceURL.lowercaseString containsString:@"webox"]?@"WeBox 影视源合集":@"资源合集"),@"sites":rawJSON};
@@ -140,10 +863,21 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
             if ([json[altKey] isKindOfClass:NSArray.class] && [json[altKey] count]) { sites=json[altKey]; break; }
         }
     }
+    // Support TVBox multi-depot (urls / storeHouse / depots) repository index JSONs
+    NSArray *depotList=nil;
+    if (!sites.count) {
+        for (NSString *depotKey in @[@"urls",@"storeHouse",@"depots"]) {
+            if ([json[depotKey] isKindOfClass:NSArray.class] && [json[depotKey] count]) {
+                depotList=json[depotKey];
+                break;
+            }
+        }
+    }
     NSArray *lives=[json[@"lives"] isKindOfClass:NSArray.class]?json[@"lives"]:@[];
-    if (!sites.count && !lives.count) { if(error)*error=TVBoxError(@"配置中没有可识别的 sites 或 lives"); return nil; }
+    if (!sites.count && !lives.count && !depotList.count) { if(error)*error=TVBoxError(@"配置中没有可识别的 sites 或 lives"); return nil; }
     if (sites.count>2000 || lives.count>500) { if(error)*error=TVBoxError(@"站点或直播源数量超过 2000 / 500 项限制"); return nil; }
     NSMutableArray *cleanSites=[NSMutableArray array]; NSMutableSet *keys=[NSMutableSet set];NSUInteger siteIndex=0;
+    NSUInteger qiaojiDecodedCount=0;
     for(id rawValue in sites) {
         siteIndex++;
         NSDictionary *value=[rawValue isKindOfClass:NSDictionary.class]?rawValue:nil;
@@ -191,10 +925,14 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
             NSData *encoded=[NSJSONSerialization dataWithJSONObject:extObject options:0 error:NULL];
             if (encoded.length<=65536) ext=[[NSString alloc] initWithData:encoded encoding:NSUTF8StringEncoding]; else ext=nil;
         }
+        if (ext.length && [ext.lowercaseString hasPrefix:@"7lj763gg"]) {
+            NSString *decodedExt=TVBoxDecodeQiaojiExt(ext);
+            if (decodedExt.length) qiaojiDecodedCount++;
+        }
         apiParts=TVBoxURLComponents(api?:@"");
         NSString *path=apiParts.path.lowercaseString;
         if ([path hasSuffix:@".md5"]) path=[path stringByDeletingPathExtension];
-        NSString *siteType=TVBoxString(value[@"type"],32)?:@"";BOOL scriptFile=[@[@"js",@"hjs",@"mjs",@"cjs",@"py",@"zip"] containsObject:path.pathExtension.lowercaseString];BOOL jarFile=[path.pathExtension.lowercaseString isEqual:@"jar"];BOOL jarSpiderClass=MediaJARClass(api).length>0;BOOL apiKindDouban=[siteType isEqual:@"3"]&&[api.lowercaseString isEqual:@"csp_doudou"];BOOL apiKindJARBridge=[siteType isEqual:@"3"]&&(TVBoxSupportedJARClass(api)||[MediaJARClass(api) hasPrefix:@"com.github.catvod.spider."]);
+        NSString *siteType=TVBoxString(value[@"type"],32)?:@"";BOOL scriptFile=[@[@"js",@"hjs",@"mjs",@"cjs",@"py",@"zip"] containsObject:path.pathExtension.lowercaseString];BOOL jarFile=[path.pathExtension.lowercaseString isEqual:@"jar"];BOOL jarSpiderClass=MediaJARClass(api).length>0;BOOL apiKindDouban=[siteType isEqual:@"3"]&&[api.lowercaseString isEqual:@"csp_doudou"];if([siteType isEqual:@"3"]&&[api.lowercaseString isEqual:@"csp_douban"])apiKindDouban=YES;BOOL apiKindJARBridge=[siteType isEqual:@"3"]&&!apiKindDouban&&(TVBoxSupportedJARClass(api)||[MediaJARClass(api) hasPrefix:@"com.github.catvod.spider."]);
         BOOL apiKindMacCMS=!scriptFile&&!jarFile&&TVBoxWebURL(api)&&[siteType isEqual:@"0"];
         BOOL apiKindTVBox=!scriptFile&&!jarFile&&TVBoxWebURL(api)&&([siteType isEqual:@"1"]||[siteType isEqual:@"4"]);
         BOOL direct=TVBoxWebURL(api)&&scriptFile;
@@ -217,21 +955,62 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
     }
     NSMutableArray *cleanLives=[NSMutableArray array];NSUInteger liveIndex=0;
     for(id value in lives) {
-        liveIndex++;NSString *name=nil,*url=nil,*type=@"0",*userAgent=nil;
+        liveIndex++;NSString *name=nil,*url=nil,*type=@"0",*userAgent=nil,*epg=nil,*logo=nil;
         if ([value isKindOfClass:NSString.class]) { url=value; name=[NSURL URLWithString:value].host ?: @"TVBox 直播源"; }
-        else if ([value isKindOfClass:NSDictionary.class]) { name=TVBoxString(value[@"name"],256); url=TVBoxString(value[@"url"],8192);type=TVBoxString(value[@"type"],32)?:@"0";userAgent=TVBoxString(value[@"ua"]?:value[@"userAgent"],1024); }
+        else if ([value isKindOfClass:NSDictionary.class]) {
+            name=TVBoxString(value[@"name"],256);
+            url=TVBoxString(value[@"url"],8192);
+            if(!url.length&&[value[@"channels"] isKindOfClass:NSArray.class]){
+                for(id ch in (NSArray *)value[@"channels"]){
+                    if([ch isKindOfClass:NSDictionary.class]&&[ch[@"urls"] isKindOfClass:NSArray.class]&&[(NSArray *)ch[@"urls"] count]){
+                        NSString *cand=TVBoxString([(NSArray *)ch[@"urls"] firstObject],8192);
+                        if(cand.length){
+                            if([cand hasPrefix:@"proxy://"]&&[cand containsString:@"ext="]){
+                                NSRange extR=[cand rangeOfString:@"ext="];
+                                NSString *extPart=[cand substringFromIndex:NSMaxRange(extR)];
+                                extPart=[[extPart componentsSeparatedByString:@"&"] firstObject];
+                                NSData *b64=[[NSData alloc] initWithBase64EncodedString:extPart options:NSDataBase64DecodingIgnoreUnknownCharacters];
+                                NSString *dec=b64.length?[[NSString alloc] initWithData:b64 encoding:NSUTF8StringEncoding]:nil;
+                                if(TVBoxWebURL(dec))cand=dec;
+                            }
+                            url=cand;
+                            if(!name.length)name=TVBoxString(ch[@"name"]?:value[@"group"],256);
+                            break;
+                        }
+                    }
+                }
+            }
+            type=TVBoxString(value[@"type"],32)?:@"0";
+            userAgent=TVBoxString(value[@"ua"]?:value[@"userAgent"],1024);
+            epg=TVBoxString(value[@"epg"],2048);
+            logo=TVBoxString(value[@"logo"],2048);
+        }
         if(url.length&&!TVBoxWebURL(url)&&TVBoxWebURL(sourceURL)){NSURL *base=[NSURL URLWithString:sourceURL];NSURL *resolved=[NSURL URLWithString:url relativeToURL:base].absoluteURL;if(TVBoxWebURL(resolved.absoluteString))url=resolved.absoluteString;}
         if (!name.length) name=[NSString stringWithFormat:@"TVBox 直播源 %lu",(unsigned long)liveIndex];
         BOOL validURL=TVBoxWebURL(url);BOOL supported=validURL&&[type isEqual:@"0"];
         NSString *status=supported?@"可订阅 · M3U/TXT 清单（刷新时应用 UA）":([type isEqual:@"3"]?@"需要 Android/JAR 运行时；直播项保留但不能直接订阅":@"直播地址无效或类型暂不支持；已保留");
         NSMutableDictionary *live=[@{@"name":name,@"url":url?:@"",@"type":type,@"supported":@(supported),@"status":status,@"sourceIndex":@(liveIndex-1)} mutableCopy];
         if(userAgent.length&&[userAgent rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:@"\r\n"]].location==NSNotFound)live[@"ua"]=userAgent;
+        if(epg.length&&TVBoxWebURL([epg stringByReplacingOccurrencesOfString:@"{name}" withString:@"cctv1"]))live[@"epg"]=epg;
+        if(logo.length&&TVBoxWebURL([logo stringByReplacingOccurrencesOfString:@"{name}" withString:@"cctv1"]))live[@"logo"]=logo;
         [cleanLives addObject:live];
     }
     NSString *lowSourceURL=sourceURL.lowercaseString?:@"";
-    NSString *defaultCatalogName=[lowSourceURL containsString:@"webox"]?@"WeBox 影视源合集":([lowSourceURL containsString:@"duanju"]?@"蝴蝶影视 · 短剧专区":([lowSourceURL containsString:@"chigua"]?@"蝴蝶影视 · 吃瓜专区":(([lowSourceURL containsString:@".hawk"]||[lowSourceURL containsString:@"/hamo/"])?@"蝴蝶影视 · 资源合集":@"资源合集")));
+    NSString *inferredPrefix=TVBoxInferredCatalogPrefixName(cleanSites);
+    NSString *defaultCatalogName=[lowSourceURL containsString:@"webox"]?@"WeBox 影视源合集":([lowSourceURL containsString:@"duanju"]?@"蝴蝶影视 · 短剧专区":([lowSourceURL containsString:@"chigua"]?@"蝴蝶影视 · 吃瓜专区":(([lowSourceURL containsString:@".hawk"]||[lowSourceURL containsString:@"/hamo/"])?@"蝴蝶影视 · 资源合集":([lowSourceURL containsString:@"cycod/tvbox"]?@"初忆 · TVBox 合集":(([lowSourceURL containsString:@"cttv.vip"]||[lowSourceURL containsString:@"ctys.json"])?@"刺桐影视 · TVBox 合集":(inferredPrefix?:@"资源合集"))))));
     NSString *name=TVBoxString(json[@"name"],256) ?: TVBoxString(json[@"title"],256) ?: defaultCatalogName;
     NSMutableDictionary *catalog=[@{@"id":NSUUID.UUID.UUIDString,@"name":name,@"sites":cleanSites.copy,@"lives":cleanLives.copy,@"updatedAt":@(NSDate.date.timeIntervalSince1970)} mutableCopy];
+    if(depotList.count){
+        NSMutableArray *depots=[NSMutableArray array];
+        for(id item in depotList){
+            if([item isKindOfClass:NSDictionary.class]){
+                NSString *dURL=TVBoxString(item[@"url"],4096);
+                NSString *dName=TVBoxString(item[@"name"]?:item[@"title"],256)?:@"多仓线路";
+                if(TVBoxWebURL(dURL))[depots addObject:@{@"name":dName,@"url":dURL}];
+            }
+        }
+        if(depots.count)catalog[@"depots"]=depots.copy;
+    }
     NSMutableDictionary *tvboxConfig=[NSMutableDictionary dictionary];NSMutableArray *omittedConfigFields=[NSMutableArray array];NSUInteger extraBytes=0;
     for(NSString *field in @[@"notice",@"spider",@"wallpaper",@"logo",@"danmaku",@"parses",@"rules",@"doh",@"flags",@"ijk",@"ads"]){id item=json[field];if(!item)continue;if(![NSJSONSerialization isValidJSONObject:item]&&![item isKindOfClass:NSString.class]&&![item isKindOfClass:NSNumber.class]){[omittedConfigFields addObject:field];continue;}NSData *encoded=[NSJSONSerialization dataWithJSONObject:@{field:item} options:0 error:NULL];if(!encoded.length||encoded.length>1024*1024-extraBytes){[omittedConfigFields addObject:field];continue;}tvboxConfig[field]=item;extraBytes+=encoded.length;}
     if(tvboxConfig.count)catalog[@"tvboxConfig"]=tvboxConfig.copy;
@@ -239,7 +1018,11 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
     if (TVBoxWebURL(sourceURL)) catalog[@"url"]=sourceURL;
     // Keep the provider's original JSON as a sidecar when saved. Normalized
     // records drive browsing; exports still preserve every provider field.
-    catalog[@"_sourceConfigData"]=data.copy;
+    catalog[@"_sourceConfigData"]=usedSanitized?sanitizedData.copy:data.copy;
+
+    NSUInteger supportedCount=0;
+    for(NSDictionary *s in cleanSites)if([s[@"supported"] boolValue])supportedCount++;
+    TVBoxNotifyAdaptationMonitorCatalog(name, sourceURL, cleanSites.count, supportedCount, cleanLives.count, usedSanitized?@"tvbox-sanitized-json":@"tvbox-json", NO, qiaojiDecodedCount>0?[NSString stringWithFormat:@"已自动解密 %lu 个 7lj763gg 混淆站点",(unsigned long)qiaojiDecodedCount]:@"标准 TVBox JSON 合集");
     return catalog;
 }
 // 内置 MacCMS 影视源：与 For-ADM 蜘蛛 ystj.py 同款 4 源（默认 lziapi）。
@@ -279,6 +1062,7 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
     BOOL upgraded=NO;
     NSMutableArray *updatedCatalogs=[NSMutableArray arrayWithCapacity:rows.count];
     for(id rawCat in rows){
+        if(![rawCat isKindOfClass:NSString.class]&&![rawCat isKindOfClass:NSDictionary.class]){continue;}
         if(![rawCat isKindOfClass:NSDictionary.class]||![rawCat[@"id"] isKindOfClass:NSString.class]||![rawCat[@"id"] length]){continue;}
         NSDictionary *cat=(NSDictionary *)rawCat;
         NSArray *sites=[cat[@"sites"] isKindOfClass:NSArray.class]?cat[@"sites"]:nil;
@@ -297,7 +1081,15 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
             NSString *sitePath=siteParts.path.lowercaseString?:@"";
             if([sitePath hasSuffix:@".md5"])sitePath=[sitePath stringByDeletingPathExtension];
             BOOL isScriptURL=TVBoxWebURL(api)&&[@[@"js",@"hjs",@"mjs",@"cjs",@"py",@"zip"] containsObject:sitePath.pathExtension.lowercaseString];
-            if([siteType isEqual:@"3"]&&TVBoxSupportedJARClass(api)&&(![site[@"supported"] boolValue]||![site[@"apiKind"] isEqual:@"jar-bridge"]||[site[@"status"] isEqual:@"Android/JAR 适配引擎 · iOS 原生执行"])){
+            BOOL isDoubanClass=[siteType isEqual:@"3"]&&([api.lowercaseString isEqual:@"csp_doudou"]||[api.lowercaseString isEqual:@"csp_douban"]);
+            if(isDoubanClass&&(![site[@"supported"] boolValue]||![site[@"apiKind"] isEqual:@"douban-index"])){
+                NSMutableDictionary *mSite=[site mutableCopy];
+                mSite[@"supported"]=@YES;
+                mSite[@"apiKind"]=@"douban-index";
+                mSite[@"status"]=@"豆瓣影视索引 · iOS 原生适配 · 影片需跨点播源搜索播放";
+                [updatedSites addObject:mSite.copy];
+                catChanged=YES;upgraded=YES;
+            }else if([siteType isEqual:@"3"]&&TVBoxSupportedJARClass(api)&&(![site[@"supported"] boolValue]||![site[@"apiKind"] isEqual:@"jar-bridge"]||[site[@"status"] isEqual:@"Android/JAR 适配引擎 · iOS 原生执行"])){
                 NSMutableDictionary *mSite=[site mutableCopy];
                 mSite[@"supported"]=@YES;
                 mSite[@"apiKind"]=@"jar-bridge";
@@ -394,21 +1186,21 @@ static BOOL TVBoxSupportedJARClass(NSString *api) {
 }
 + (NSDictionary *)catalogForID:(NSString *)identifier { for(NSDictionary *row in [self catalogs])if([row[@"id"] isEqual:identifier])return row; return nil; }
 + (void)removeCatalog:(NSString *)identifier {
-    @synchronized(self){ NSMutableArray *rows=[[self catalogs] mutableCopy]; NSIndexSet *remove=[rows indexesOfObjectsPassingTest:^BOOL(NSDictionary *row,NSUInteger idx,BOOL *stop){return [row[@"id"] isEqual:identifier];}]; [rows removeObjectsAtIndexes:remove]; [NSUserDefaults.standardUserDefaults setObject:rows forKey:@"tvboxCatalogs"];if(TVBoxSafeCatalogID(identifier)){NSString *path=[TVBoxCatalogStorageDirectory() stringByAppendingPathComponent:[identifier stringByAppendingPathExtension:@"json"]];[NSFileManager.defaultManager removeItemAtPath:path error:NULL];}
+    @synchronized(self){ NSMutableArray *rows=[[self catalogs] mutableCopy]; NSIndexSet *remove=[rows indexesOfObjectsPassingTest:^BOOL(NSDictionary *row,NSUInteger idx,BOOL *stop){return [row[@"id"] isEqual:identifier];}]; [rows removeObjectsAtIndexes:remove]; [NSUserDefaults.standardUserDefaults setObject:rows forKey:@"tvboxCatalogs"];if(TVBoxSafeCatalogID(identifier)){NSString *path=[TVBoxCatalogStorageDirectory() stringByAppendingPathComponent:[identifier stringByAppendingPathExtension:@"json"]];[NSFileManager.defaultManager removeItemAtPath:path error:NULL];NSString *bundleDir=[TVBoxCatalogBundlesDirectory() stringByAppendingPathComponent:identifier];[NSFileManager.defaultManager removeItemAtPath:bundleDir error:NULL];}
     }
 }
 + (NSArray<NSDictionary *> *)liveSourcesInCatalog:(NSDictionary *)catalog { return [catalog[@"lives"] isKindOfClass:NSArray.class]?catalog[@"lives"]:@[]; }
 + (NSDictionary *)reconstructedConfigForCatalog:(NSDictionary *)catalog {
     NSMutableDictionary *config=[NSMutableDictionary dictionary];NSString *name=[catalog[@"name"] isKindOfClass:NSString.class]?catalog[@"name"]:@"资源合集";config[@"name"]=name;
     NSMutableArray *sites=[NSMutableArray array];for(NSDictionary *site in [catalog[@"sites"] isKindOfClass:NSArray.class]?catalog[@"sites"]:@[]){NSMutableDictionary *row=[NSMutableDictionary dictionary];for(NSString *key in @[@"key",@"name",@"api",@"type",@"header",@"playUrl"]){id value=site[key];if(value)row[key]=value;}NSString *ext=[site[@"ext"] isKindOfClass:NSString.class]?site[@"ext"]:@"";if(ext.length){id value=[NSJSONSerialization JSONObjectWithData:[ext dataUsingEncoding:NSUTF8StringEncoding] options:NSJSONReadingFragmentsAllowed error:NULL];row[@"ext"]=value?:ext;}if(row.count)[sites addObject:row];}
-    NSMutableArray *lives=[NSMutableArray array];for(NSDictionary *live in [catalog[@"lives"] isKindOfClass:NSArray.class]?catalog[@"lives"]:@[]){NSMutableDictionary *row=[NSMutableDictionary dictionary];for(NSString *key in @[@"name",@"url",@"type",@"ua"]){id value=live[key];if(value)row[key]=value;}if(row.count)[lives addObject:row];}config[@"sites"]=sites;config[@"lives"]=lives;
+    NSMutableArray *lives=[NSMutableArray array];for(NSDictionary *live in [catalog[@"lives"] isKindOfClass:NSArray.class]?catalog[@"lives"]:@[]){NSMutableDictionary *row=[NSMutableDictionary dictionary];for(NSString *key in @[@"name",@"url",@"type",@"ua",@"epg",@"logo"]){id value=live[key];if(value)row[key]=value;}if(row.count)[lives addObject:row];}config[@"sites"]=sites;config[@"lives"]=lives;
     NSDictionary *extras=[catalog[@"tvboxConfig"] isKindOfClass:NSDictionary.class]?catalog[@"tvboxConfig"]:@{};[config addEntriesFromDictionary:extras];return config;
 }
 + (nullable NSDictionary *)originalConfigForCatalogID:(NSString *)identifier catalog:(NSDictionary **)catalogOut error:(NSError **)error {
     NSDictionary *catalog=[self catalogForID:identifier];if(!catalog){if(error)*error=TVBoxError(@"找不到此资源合集");return nil;}if(catalogOut)*catalogOut=catalog;
     NSData *data=nil;if(TVBoxSafeCatalogID(identifier)){NSString *path=[TVBoxCatalogStorageDirectory() stringByAppendingPathComponent:[identifier stringByAppendingPathExtension:@"json"]];data=[NSData dataWithContentsOfFile:path options:NSDataReadingMappedIfSafe error:NULL];}
     if(!data.length&&[catalog[@"_sourceConfigData"] isKindOfClass:NSData.class])data=catalog[@"_sourceConfigData"];
-    NSDictionary *config=nil;if(data.length){id value=[NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingFragmentsAllowed error:NULL];if([value isKindOfClass:NSDictionary.class])config=value;}
+    NSDictionary *config=nil;if(data.length){id value=[NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingFragmentsAllowed error:NULL];if(!value){NSData *sanitized=TVBoxSanitizeJSONData(data);if(sanitized.length)value=[NSJSONSerialization JSONObjectWithData:sanitized options:NSJSONReadingFragmentsAllowed error:NULL];}if([value isKindOfClass:NSDictionary.class])config=value;}
     return config?:[self reconstructedConfigForCatalog:catalog];
 }
 + (nullable NSData *)exportDataForCatalogID:(NSString *)identifier error:(NSError **)error {

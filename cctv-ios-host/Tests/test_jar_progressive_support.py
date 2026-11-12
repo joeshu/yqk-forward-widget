@@ -873,7 +873,94 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
         self.assertIn('@"MediaMetadataCache-v3.json"', mc_m)
 
 
+    def test_round21_local_bundle_ctys_cycod_catalog_and_monitor_enhancements(self):
+        """Verifies Request 6:
+        1. TVBox Local Collection Bundle ZIP/folder support (初忆本地包1110.zip, spider.jar .class constant pool extraction, api.original.json upstream URL recovery).
+        2. cttv.vip/app/json/ctys.json (刺桐影视: // header comments, 7lj763gg Qiaoji cipher decoding, pipe-delimited url|dataKey|dataIv, MacCMS type:1 sites) and gitee.com/cycod/tvbox/raw/master/api.json (初忆 TVBox 合集: csp_Douban -> douban-index, 32 csp_* JAR-Bridge sites).
+        3. MediaAdaptationMonitor enhancements (recordCatalogEventWithName, decodeAndInspectConfigString, batchProbeCatalogSites, jarBridgeCount).
+        """
+        from csp_adapter import _decode_qiaoji_7lj763gg, AppVideoEngine, CSPAdapter, DEXParser
+
+        # 1. Verify Qiaoji 7lj763gg decryption & pipe-delimited ext in Python
+        qiaoji_sample = "7lj763gg0939795i007hi482k80ii2i3ghl084099ij36j70031107l2kg105816139i56g38h03i1j06k4gkk9ll7kl1lk4k8687k55l0g19ggk72j06gg073li1j11"
+        decoded = _decode_qiaoji_7lj763gg(qiaoji_sample)
+        self.assertEqual(decoded, "http://111.180.198.40:1110|asgcxhjkts124573|asgcxhjkts124573|101")
+
+        engine_qiaoji = AppVideoEngine("csp_AppGet", qiaoji_sample)
+        self.assertEqual(engine_qiaoji.base_url, "http://111.180.198.40:1110")
+        self.assertEqual(engine_qiaoji.key, b"asgcxhjkts124573")
+        self.assertEqual(engine_qiaoji.iv, b"asgcxhjkts124573")
+
+        # 2. Verify cycod/tvbox and ctys.json built-in csp_* site defaults
+        for cls_name in ("csp_FourKMP", "csp_HongGuo", "csp_SiKv4K", "csp_DuoDuo", "csp_NongMin", "csp_JianPian", "csp_Wwys", "csp_Tvyb", "csp_Mayi", "csp_Dryou"):
+            eng = AppVideoEngine(cls_name, "")
+            self.assertTrue(eng.base_url.startswith("http"), f"{cls_name} should resolve built-in base_url")
+
+        # 3. Verify DEXParser Java .class constant pool extraction
+        # Build a minimal valid Java .class header with UTF8 constants
+        cls_bytes = bytearray()
+        cls_bytes += b"\xca\xfe\xba\xbe\x00\x00\x00\x34"  # magic + version 52
+        cls_bytes += (3).to_bytes(2, "big")  # constant_pool_count = 3 (entries 1 and 2)
+        u1 = b"https://api.java-class-spider.test"
+        cls_bytes += b"\x01" + len(u1).to_bytes(2, "big") + u1
+        u2 = b"abcdef0123456789"
+        cls_bytes += b"\x01" + len(u2).to_bytes(2, "big") + u2
+        jar_buf = io.BytesIO()
+        with zipfile.ZipFile(jar_buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("com/github/catvod/spider/Sample.class", bytes(cls_bytes))
+        parsed_jar = DEXParser.from_jar_bytes(jar_buf.getvalue())
+        self.assertIn("https://api.java-class-spider.test", parsed_jar.strings)
+        self.assertIn("abcdef0123456789", parsed_jar.strings)
+
+        # 4. Verify bundled cycod-tvbox.json and cttv-ctys.json exist and are valid
+        cycod_json_path = ROOT / "Resources/BuiltinMedia/cycod-tvbox.json"
+        ctys_json_path = ROOT / "Resources/BuiltinMedia/cttv-ctys.json"
+        self.assertTrue(cycod_json_path.exists())
+        self.assertTrue(ctys_json_path.exists())
+        cycod_data = json.loads(cycod_json_path.read_text(encoding="utf-8"))
+        self.assertEqual(len(cycod_data["sites"]), 33)
+        self.assertEqual(cycod_data["sites"][0]["api"], "csp_Douban")
+        ctys_raw = ctys_json_path.read_text(encoding="utf-8")
+        self.assertTrue(ctys_raw.startswith("//"))
+        self.assertIn("7lj763gg", ctys_raw)
+
+        # 5. Verify Objective-C source contracts in TVBoxCatalogStore, MediaAPIClient, TVBoxCatalogDownloader, ResourceImportWorkflowViewController, and MediaAdaptationMonitor
+        store_h = (SOURCES / "TVBoxCatalogStore.h").read_text(encoding="utf-8")
+        store_m = (SOURCES / "TVBoxCatalogStore.m").read_text(encoding="utf-8")
+        self.assertIn("+ (nullable NSDictionary *)parseBundleArchiveData:(NSData *)data", store_h)
+        self.assertIn("+ (nullable NSDictionary *)parseBundleDirectoryAtURL:(NSURL *)directoryURL", store_h)
+        self.assertIn("+ (nullable NSData *)sanitizeJSONData:(NSData *)data;", store_h)
+        self.assertIn("+ (nullable NSString *)decodeQiaojiExtString:(NSString *)rawExt;", store_h)
+        self.assertIn("TVBoxDecodeQiaojiExt", store_m)
+        self.assertIn("TVBoxExtractClassConfigsFromJAR", store_m)
+        self.assertIn("([api.lowercaseString isEqual:@\"csp_doudou\"]||[api.lowercaseString isEqual:@\"csp_douban\"])", store_m)
+
+        api_m = (SOURCES / "MediaAPIClient.m").read_text(encoding="utf-8")
+        self.assertIn("MediaJARBridgeDefaultConfigForAPI", api_m)
+        self.assertIn("[TVBoxCatalogStore decodeQiaojiExtString:str]", api_m)
+        self.assertIn("MediaJARUsesRuntime(self.tvboxSource)&&MediaJARRuntime.available", api_m)
+
+        dl_m = (SOURCES / "TVBoxCatalogDownloader.m").read_text(encoding="utf-8")
+        self.assertIn("@\"cycod-tvbox\"", dl_m)
+        self.assertIn("@\"cttv-ctys\"", dl_m)
+
+        wf_m = (SOURCES / "ResourceImportWorkflowViewController.m").read_text(encoding="utf-8")
+        self.assertIn("https://gitee.com/cycod/tvbox/raw/master/api.json", wf_m)
+        self.assertIn("https://www.cttv.vip/app/json/ctys.json", wf_m)
+        self.assertIn("[TVBoxCatalogStore parseBundleDirectoryAtURL:root error:&bundleErr]", wf_m)
+
+        mon_h = (SOURCES / "MediaAdaptationMonitor.h").read_text(encoding="utf-8")
+        mon_m = (SOURCES / "MediaAdaptationMonitor.m").read_text(encoding="utf-8")
+        self.assertIn("- (void)recordCatalogEventWithName:(NSString *)name", mon_h)
+        self.assertIn("- (NSDictionary *)decodeAndInspectConfigString:(NSString *)rawInput;", mon_h)
+        self.assertIn("- (void)batchProbeCatalogSites:(nullable NSArray<NSDictionary *> *)sites", mon_h)
+        self.assertIn("decodeAndInspectConfigString:", mon_m)
+        self.assertIn("batchProbeCatalogSites:", mon_m)
+        self.assertIn("jarBridgeCount", mon_m)
+
+
 if __name__ == '__main__':
+
 
 
     unittest.main()

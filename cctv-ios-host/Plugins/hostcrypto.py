@@ -25,3 +25,13 @@ class AES_CTR:
 
     def close(self):
         self._cipher = None
+
+
+def aes_cbc_decrypt(key, iv, data):
+    key, iv, data = bytes(key), bytes(iv), bytes(data)
+    if len(key) not in (16, 24, 32) or len(iv) != 16:
+        raise ValueError('aes_cbc_decrypt requires a 16/24/32-byte key and a 16-byte IV')
+    from Crypto.Cipher import AES
+    from Crypto.Util.Padding import unpad
+    cipher = AES.new(key, AES.MODE_CBC, iv)
+    return unpad(cipher.decrypt(data), 16)

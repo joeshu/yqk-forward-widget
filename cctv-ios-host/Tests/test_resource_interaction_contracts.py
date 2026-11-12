@@ -1792,5 +1792,19 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('@"切换采集站"', browser)
 
 
+
+    def test_detail_reload_bypasses_cache_and_integrates_adaptation_monitor(self):
+        browser_src = (ROOT / 'Sources/MediaBrowserViewController.m').read_text(encoding='utf-8')
+        self.assertIn('@"media-detail-reload"', browser_src)
+        self.assertIn('if(forceRefresh)args[@"refresh"]=@YES;', browser_src)
+        self.assertIn('openAdaptationMonitor', browser_src)
+        self.assertIn('MediaAdaptationMonitor.shared', browser_src)
+        monitor_h = (ROOT / 'Sources/MediaAdaptationMonitor.h').read_text(encoding='utf-8')
+        monitor_m = (ROOT / 'Sources/MediaAdaptationMonitor.m').read_text(encoding='utf-8')
+        self.assertIn('MediaAdaptationMonitorViewController', monitor_h)
+        self.assertIn('probeURLString:', monitor_m)
+        self.assertIn('diagnosisAndRecommendationForRecord:', monitor_m)
+
+
 if __name__ == '__main__':
     unittest.main()

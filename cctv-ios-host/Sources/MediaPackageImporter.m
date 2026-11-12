@@ -64,7 +64,12 @@ static BOOL PackageContainsNodeCoreImport(NSString *root,NSString *pattern){
     }
     return NO;
 }
-static BOOL MediaAPIMethodDeclaredInSource(NSString *source) {
+static NSString *PackageBoundedScanWindow(NSString *source, NSUInteger windowBytes) {
+    if (!source || source.length <= windowBytes * 2) return source ?: @"";
+    return [NSString stringWithFormat:@"%@\n%@", [source substringToIndex:windowBytes], [source substringFromIndex:source.length - windowBytes]];
+}
+static BOOL MediaAPIMethodDeclaredInSource(NSString *rawSource) {
+    NSString *source = PackageBoundedScanWindow(rawSource, 65536);
     // 与 JSPlugins/generic/entry.mjs 的起播校验保持一致：cctvhost.media/1 插件
     // 至少实现 home/category/search/detail/play/channels/catalog/resolve 之一，
     // 或声明 WeBox.define(...) / CatVod QuickJS / 混淆打包影视源。

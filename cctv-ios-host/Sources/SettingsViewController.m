@@ -3,6 +3,7 @@
 #import "HostImageLoader.h"
 #import "MediaMetadataCache.h"
 #import "MediaPlaybackStateStore.h"
+#import "MediaAdaptationMonitor.h"
 #import <math.h>
 #import <AVFoundation/AVFoundation.h>
 
@@ -124,6 +125,9 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
       ]},
       @{ @"category":@"live", @"title":@"直播与频道管理", @"footer":@"集中管理内置央视频道展示、频道网格/列表视图、排序方式及直播画中画。播放时屏幕常亮对央视与订阅直播同时生效。", @"rows":@[
         @{ @"title":@"显示内置央视频道", @"detail":@"在直播与频道列表中展示内置央视/卫视频道", @"key":@"nativeChannelsEnabled", @"icon":@"tv.badge.wifi", @"default":@YES },
+        @{ @"title":@"内置央视频道台标", @"detail":@"控制央视页列表与播放器右上角高清台标展示", @"key":@"nativeChannelLogoEnabled", @"icon":@"sparkles.tv", @"default":@YES },
+        @{ @"title":@"内置央视频道实时预览图", @"detail":@"在央视页与频道页展示频道实时画面缩略预览卡片", @"key":@"nativeChannelPreviewEnabled", @"icon":@"photo.tv", @"default":@YES },
+        @{ @"title":@"内置央视频道速率与延迟", @"detail":@"在央视页与频道页展示实时网速与毫秒级响应延迟角标", @"key":@"nativeChannelTelemetryEnabled", @"icon":@"speedometer", @"default":@YES },
         @{ @"title":@"频道用网格显示", @"detail":@"切换频道列表为海报卡片网格或紧凑列表", @"key":@"channelGridMode", @"icon":@"square.grid.2x2", @"default":@YES },
         @{ @"title":@"频道网格列数", @"detail":@"网格模式下的单行频道卡片数量", @"key":@"cctv.channelGridColumns.v1", @"segmented":@YES, @"options":@[@"3 列",@"4 列"], @"values":@[@3,@4], @"default":@4, @"icon":@"rectangle.grid.3x2" },
         @{ @"title":@"频道排序方式", @"detail":@"按默认频道分组顺序或按频道名称排序", @"key":@"cctv.channelSortMode.v1", @"segmented":@YES, @"options":@[@"默认",@"名称"], @"values":@[@0,@1], @"default":@0, @"icon":@"arrow.up.arrow.down" },
@@ -138,6 +142,9 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
       @{ @"category":@"vod", @"title":@"影视与点播体验", @"footer":@"调整影视精选首页模块、海报网格列数与点播默认策略。自动跳过仅对已标记片头片尾位置的剧集生效；播放参数在播放器内也可随时调整。", @"rows":@[
         @{ @"title":@"媒体显示", @"detail":SettingsMediaDisplaySummaryText(), @"action":@"mediaDisplay", @"icon":@"rectangle.grid.2x2" },
         @{ @"title":@"影视海报网格列数", @"detail":@"分类浏览与聚合列表的海报卡片密度", @"key":@"cctv.mediaGridColumns.v1", @"segmented":@YES, @"options":@[@"3 列",@"4 列"], @"values":@[@3,@4], @"default":@3, @"icon":@"square.grid.3x2" },
+        @{ @"title":@"详情与选集列表样式", @"detail":@"切换影视详情页与选集页的分集排列视图样式", @"key":@"cctv.mediaEpisodeLayoutStyle.v1", @"segmented":@YES, @"options":@[@"四列",@"单列",@"双列",@"三列"], @"values":@[@0,@1,@2,@3], @"default":@0, @"icon":@"list.bullet.below.rectangle" },
+        @{ @"title":@"显示分集备注与状态角标", @"detail":@"在单列/双列选集视图中展示分集副标题、清晰度与播放状态", @"key":@"cctv.mediaEpisodeShowBadge.v1", @"icon":@"tag", @"default":@YES },
+        @{ @"title":@"进入选集页自动展开全集", @"detail":@"打开选集页时默认展开完整分集列表，无需手动点按展开", @"key":@"cctv.mediaEpisodeAutoExpand.v1", @"icon":@"rectangle.expand.vertical", @"default":@NO },
         @{ @"title":@"自动连播下一集", @"detail":@"本集播放结束后自动切换并播放下一集", @"key":@"cctv.mediaAutoPlayNext", @"icon":@"forward.end.fill", @"default":@YES },
         @{ @"title":@"自动跳过片头片尾", @"detail":@"按本机已保存的片头片尾锚点自动跳过", @"key":@"cctv.mediaAutoSkipIntroOutro", @"icon":@"forward.end.circle", @"default":@NO },
         @{ @"title":@"默认播放速度", @"detail":SettingsPlaybackRateText(), @"action":@"defaultPlaybackRate", @"icon":@"speedometer" },
@@ -151,7 +158,9 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
         @{ @"title":@"网络请求超时", @"detail":@"影视接口、目录抓取与搜索请求超时上限", @"key":@"cctv.networkTimeout.v1", @"segmented":@YES, @"options":@[@"10 秒",@"20 秒",@"40 秒"], @"values":@[@10,@20,@40], @"default":@20, @"icon":@"network" },
         @{ @"title":@"SDK 详细日志（诊断）", @"detail":@"输出底层播放器 SDK 调试日志供排障分析", @"key":@"nativeSDKVerboseLogs", @"icon":@"doc.text", @"default":@NO }
       ]},
-      @{ @"category":@"diagnostics", @"title":@"运行诊断与日志中心", @"footer":@"开启后记录应用启动、影视加载与播放阶段、海报失败和系统内存告警。每次 App 运行单独存档，单次最多 4 MiB。日志默认脱敏，不记录敏感参数。", @"rows":@[
+      @{ @"category":@"diagnostics", @"title":@"运行诊断与日志中心", @"footer":@"开启后记录应用启动、影视加载与播放阶段、海报失败和系统内存告警。站点与播放适配监测支持实时追踪站点连通性、容器编码、播放器内核选路及网址/流媒体探测。", @"rows":@[
+        @{ @"title":@"站点与播放适配监测记录", @"detail":@"自动记录站点接口、CENC/代理、播放器内核与适配建议", @"key":@"cctv.adaptationMonitor.enabled", @"icon":@"waveform.badge.magnifyingglass", @"default":@YES },
+        @{ @"title":@"站点与播放适配监测中心", @"detail":@"查看站点健康度、播放器适配矩阵与网址/流实时探测", @"action":@"adaptationMonitor", @"icon":@"antenna.radiowaves.left.and.right" },
         @{ @"title":@"运行诊断模式", @"detail":@"先开启再复现；若闪退，重开 App 后导出", @"key":@"runtimeDiagnosticsEnabled", @"icon":@"waveform.path.ecg", @"default":@NO },
         @{ @"title":@"运行诊断记录", @"detail":@"按 App 运行分开查看 · 可单次导出、删除或清空", @"action":@"runtimeDiagnostics", @"icon":@"list.bullet.rectangle" },
         @{ @"title":@"日志中心", @"action":@"logs", @"detail":@"总日志与各插件独立日志", @"icon":@"doc.text.magnifyingglass" }
@@ -675,6 +684,11 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
     else if([row[@"action"] isEqualToString:@"openTabResources"]){if(self.onOpenTab)self.onOpenTab(3);}
     else if([row[@"action"] isEqualToString:@"openServices"]){if(self.onOpenServices)self.onOpenServices();}
     else if([row[@"action"] isEqualToString:@"export"]){if(self.onExportData)self.onExportData();}
+    else if([row[@"action"] isEqualToString:@"adaptationMonitor"]){
+        MediaAdaptationMonitorViewController *monitor=[[MediaAdaptationMonitorViewController alloc] initWithContext:nil];
+        if(self.navigationController)[self.navigationController pushViewController:monitor animated:YES];
+        else{UINavigationController *nav=[[UINavigationController alloc] initWithRootViewController:monitor];[self presentViewController:nav animated:YES completion:nil];}
+    }
     else if([row[@"action"] isEqualToString:@"runtimeDiagnostics"]){if(self.onOpenDiagnostics)self.onOpenDiagnostics();}
     else if([row[@"action"] isEqualToString:@"mediaDisplay"]){if(self.onMediaDisplaySettings)self.onMediaDisplaySettings();}
     else if([row[@"action"] isEqualToString:@"import"]){if(self.onImportData)self.onImportData();}
@@ -833,7 +847,8 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
         NSArray<NSString *> *keysToReset=@[
             HostThemeModePreferenceKey, HostDarkThemePreferenceKey, HostThemePaletteIdentifierPreferenceKey,
             @"cctv.appFontSize.v1", @"cctv.restoreLastTab.v1",
-            @"nativeChannelsEnabled", @"channelGridMode", @"cctv.channelGridColumns.v1", @"cctv.channelSortMode.v1",
+            @"nativeChannelsEnabled", @"nativeChannelLogoEnabled", @"nativeChannelPreviewEnabled", @"nativeChannelTelemetryEnabled", @"channelGridMode", @"cctv.channelGridColumns.v1", @"cctv.channelSortMode.v1",
+            @"cctv.mediaEpisodeLayoutStyle.v1", @"cctv.mediaEpisodeShowBadge.v1", @"cctv.mediaEpisodeAutoExpand.v1",
             @"cctv.mediaKeepScreenAwake", @"allowBackgroundAudio", @"autoPiP", @"autoLoadEPG",
             @"rememberLastChannel", @"resumeLastChannel", @"cctv.mediaPreferredQuality.v1",
             @"cctv.mediaGridColumns.v1", @"cctv.mediaAutoPlayNext", @"cctv.mediaAutoSkipIntroOutro",

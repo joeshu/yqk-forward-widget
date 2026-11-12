@@ -169,6 +169,13 @@ static id MediaMetadataPersistentSafeValue(id value, NSString *key, NSUInteger d
     });
 }
 - (NSString *)keyForSource:(NSDictionary *)source operation:(NSString *)operation arguments:(NSDictionary *)arguments {
+    NSMutableDictionary *cleanArgs=[NSMutableDictionary dictionary];
+    if([arguments isKindOfClass:NSDictionary.class]){
+        for(id k in arguments){
+            if([k isEqual:@"refresh"]||[k isEqual:@"forceRefresh"])continue;
+            cleanArgs[k]=arguments[k];
+        }
+    }
     NSDictionary *identity=@{ @"id":[source[@"id"] isKindOfClass:NSString.class]?source[@"id"]:@"",
         @"port":[source[@"port"] respondsToSelector:@selector(stringValue)]?[source[@"port"] stringValue]:@"",
         @"protocol":[source[@"protocol"] isKindOfClass:NSString.class]?source[@"protocol"]:@"",
@@ -178,7 +185,7 @@ static id MediaMetadataPersistentSafeValue(id value, NSString *key, NSUInteger d
         @"options":source[@"options"]?:@"",@"tvboxType":source[@"tvboxType"]?:@0,
         @"jar":[source[@"jar"] isKindOfClass:NSDictionary.class]?source[@"jar"]:@{},
         @"subscriptionURL":[source[@"subscriptionURL"] isKindOfClass:NSString.class]?source[@"subscriptionURL"]:@"",
-        @"operation":operation?:@"", @"arguments":arguments?:@{} };
+        @"operation":operation?:@"", @"arguments":cleanArgs };
     NSData *data=[NSJSONSerialization dataWithJSONObject:identity options:NSJSONWritingSortedKeys error:NULL];
     if(!data.length)return nil;
     unsigned char digest[CC_SHA256_DIGEST_LENGTH];CC_SHA256(data.bytes,(CC_LONG)data.length,digest);
@@ -227,6 +234,20 @@ static id MediaMetadataPersistentSafeValue(id value, NSString *key, NSUInteger d
         else if(self.persistentRecords[key]){[self.persistentRecords removeObjectForKey:key];persistenceChanged=YES;}
     });
     if(persistenceChanged)[self schedulePersistentWrite];
+}
+- (void)removeResultForSource:(NSDictionary *)source operation:(NSString *)operation arguments:(NSDictionary *)arguments {
+    NSString *key=[self keyForSource:source operation:operation arguments:arguments];
+    if(!key.length)return;
+    __block BOOL removedPersistent=NO;
+    dispatch_sync(self.queue, ^{
+        [self.entries removeObjectForKey:key];
+        [self.order removeObjectForKey:key];
+        if(self.persistentRecords[key]){
+            [self.persistentRecords removeObjectForKey:key];
+            removedPersistent=YES;
+        }
+    });
+    if(removedPersistent)[self schedulePersistentWrite];
 }
 - (void)removeResultsForSourceID:(NSString *)sourceID {
     if(!sourceID.length)return;

@@ -8,6 +8,7 @@
 @property(nonatomic,copy) dispatch_block_t onRefresh;
 @property(nonatomic,copy) dispatch_block_t onRecheckHealth;
 @property(nonatomic,copy) dispatch_block_t onRematchEPG;
+@property(nonatomic,copy) dispatch_block_t onMatchStationLogos;
 @property(nonatomic,copy) dispatch_block_t onExport;
 @property(nonatomic,copy) dispatch_block_t onDelete;
 - (void)reloadThemeAppearance;

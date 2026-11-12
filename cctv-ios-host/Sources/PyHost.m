@@ -664,8 +664,11 @@ static PyObject *pyHostCryptoCTRUpdate(PyHostCryptoCTR *self, PyObject *args) {
     if (!output) { PyBuffer_Release(&input); return NULL; }
     size_t inputLength = (size_t)input.len;
     size_t moved = 0;
-    CCCryptorStatus status = CCCryptorUpdate(self->cryptor, input.buf, inputLength,
+    CCCryptorStatus status = kCCSuccess;
+    Py_BEGIN_ALLOW_THREADS
+    status = CCCryptorUpdate(self->cryptor, input.buf, inputLength,
         PyBytes_AS_STRING(output), inputLength, &moved);
+    Py_END_ALLOW_THREADS
     PyBuffer_Release(&input);
     if (status != kCCSuccess || moved != inputLength) {
         Py_DECREF(output);
@@ -689,9 +692,44 @@ static PyObject *pyHostCryptoCTRNew(PyTypeObject *type, PyObject *args, PyObject
     if (self) self->cryptor = NULL;
     return (PyObject *)self;
 }
+static PyObject *pyHostCryptoAESCBCDecrypt(PyObject *Py_UNUSED(module), PyObject *args) {
+    Py_buffer key = {0}, iv = {0}, data = {0};
+    if (!PyArg_ParseTuple(args, "y*y*y*:aes_cbc_decrypt", &key, &iv, &data)) return NULL;
+    if ((key.len != 16 && key.len != 24 && key.len != 32) || iv.len != 16) {
+        PyBuffer_Release(&key); PyBuffer_Release(&iv); PyBuffer_Release(&data);
+        PyErr_SetString(PyExc_ValueError, "aes_cbc_decrypt requires a 16/24/32-byte key and a 16-byte IV");
+        return NULL;
+    }
+    PyObject *output = PyBytes_FromStringAndSize(NULL, data.len);
+    if (!output) {
+        PyBuffer_Release(&key); PyBuffer_Release(&iv); PyBuffer_Release(&data);
+        return NULL;
+    }
+    size_t moved = 0;
+    CCCryptorStatus status = kCCSuccess;
+    Py_BEGIN_ALLOW_THREADS
+    status = CCCrypt(kCCDecrypt, kCCAlgorithmAES, kCCOptionPKCS7Padding,
+                     key.buf, (size_t)key.len, iv.buf,
+                     data.buf, (size_t)data.len,
+                     PyBytes_AS_STRING(output), (size_t)data.len, &moved);
+    Py_END_ALLOW_THREADS
+    PyBuffer_Release(&key); PyBuffer_Release(&iv); PyBuffer_Release(&data);
+    if (status != kCCSuccess) {
+        Py_DECREF(output);
+        PyErr_Format(PyExc_RuntimeError, "CommonCrypto AES-CBC decrypt failed (%d)", (int)status);
+        return NULL;
+    }
+    PyObject *trimmed = PyBytes_FromStringAndSize(PyBytes_AS_STRING(output), (Py_ssize_t)moved);
+    Py_DECREF(output);
+    return trimmed;
+}
+static PyMethodDef pyHostCryptoModuleMethods[] = {
+    {"aes_cbc_decrypt", pyHostCryptoAESCBCDecrypt, METH_VARARGS, "Decrypt AES-CBC with PKCS7 padding while releasing the CPython GIL."},
+    {NULL, NULL, 0, NULL}
+};
 static PyTypeObject pyHostCryptoCTRType = { PyVarObject_HEAD_INIT(NULL, 0) };
 static PyModuleDef pyHostCryptoModule = {
-    PyModuleDef_HEAD_INIT, "hostcrypto", "CCTVHost native cryptographic acceleration.", -1, NULL,
+    PyModuleDef_HEAD_INIT, "hostcrypto", "CCTVHost native cryptographic acceleration.", -1, pyHostCryptoModuleMethods,
     NULL, NULL, NULL, NULL
 };
 static PyObject *PyInit_hostcrypto(void) {

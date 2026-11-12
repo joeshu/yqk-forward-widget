@@ -2,10 +2,24 @@
 #import "TVBoxCatalogStore.h"
 static NSData *TVBoxBundledWeBoxIndexForURL(NSString *sourceURL) {
     if(![sourceURL isKindOfClass:NSString.class]||!sourceURL.length)return nil;
-    NSString *lower=sourceURL.lowercaseString;
+    NSString *lower=(sourceURL.stringByRemovingPercentEncoding?:sourceURL).lowercaseString;
+    NSString *resName=nil;
     if([lower containsString:@"ddgksf2013.top/webox/index.json"]||[lower hasSuffix:@"/webox/index.json"]){
-        NSString *bundlePath=[NSBundle.mainBundle pathForResource:@"webox-index" ofType:@"json" inDirectory:@"BuiltinMedia"];
-        return bundlePath.length?[NSData dataWithContentsOfFile:bundlePath options:NSDataReadingMappedIfSafe error:NULL]:nil;
+        resName=@"webox-index";
+    }else if([lower containsString:@"gitee.com/cycod/tvbox"]||[lower containsString:@"cycod/tvbox/raw/master/api.json"]){
+        resName=@"cycod-tvbox";
+    }else if([lower containsString:@"cttv.vip/app/json/ctys.json"]||[lower containsString:@"cttv.vip/ys/json/ctys.json"]||[lower hasSuffix:@"/ctys.json"]){
+        resName=@"cttv-ctys";
+    }
+    if(!resName.length)return nil;
+    NSString *bundlePath=[NSBundle.mainBundle pathForResource:resName ofType:@"json" inDirectory:@"BuiltinMedia"];
+    if(bundlePath.length){
+        NSData *d=[NSData dataWithContentsOfFile:bundlePath options:NSDataReadingMappedIfSafe error:NULL];
+        if(d.length)return d;
+    }
+    NSString *relPath=[NSString stringWithFormat:@"Resources/BuiltinMedia/%@.json",resName];
+    if([NSFileManager.defaultManager fileExistsAtPath:relPath]){
+        return [NSData dataWithContentsOfFile:relPath options:NSDataReadingMappedIfSafe error:NULL];
     }
     return nil;
 }
@@ -24,7 +38,11 @@ static NSData *TVBoxBundledWeBoxIndexForURL(NSString *sourceURL) {
     self.completion=completion;self.source=url.absoluteString;self.redirectCount=0;NSURLComponents *parts=[NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:NO];
     if(!parts||![@[@"https",@"http"] containsObject:parts.scheme.lowercaseString]||!parts.host.length||parts.user.length||parts.password.length){[self finish:nil error:[self failure:@"请输入有效的 HTTP/HTTPS TVBox JSON 地址"]];return;}
     NSURLSessionConfiguration *config=NSURLSessionConfiguration.ephemeralSessionConfiguration;config.URLCache=nil;config.HTTPCookieStorage=nil;NSTimeInterval savedTimeout=[[NSUserDefaults standardUserDefaults] objectForKey:@"cctv.networkTimeout.v1"]?[[NSUserDefaults standardUserDefaults] doubleForKey:@"cctv.networkTimeout.v1"]:20;NSTimeInterval timeout=MIN(40,MAX(5,savedTimeout));config.timeoutIntervalForRequest=timeout;config.timeoutIntervalForResource=timeout+5;
-    NSOperationQueue *queue=[NSOperationQueue new];queue.maxConcurrentOperationCount=1;self.session=[NSURLSession sessionWithConfiguration:config delegate:self delegateQueue:queue];self.data=[NSMutableData data];self.task=[self.session dataTaskWithURL:url];[self.task resume];
+    NSOperationQueue *queue=[NSOperationQueue new];queue.maxConcurrentOperationCount=1;self.session=[NSURLSession sessionWithConfiguration:config delegate:self delegateQueue:queue];self.data=[NSMutableData data];
+    NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:timeout];
+    [req setValue:@"okhttp/4.12.0" forHTTPHeaderField:@"User-Agent"];
+    [req setValue:@"application/json, text/plain, */*" forHTTPHeaderField:@"Accept"];
+    self.task=[self.session dataTaskWithRequest:req];[self.task resume];
 }
 - (void)cancel {[self finish:nil error:[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil]];}
 - (void)finish:(NSDictionary *)catalog error:(NSError *)error { @synchronized(self){if(self.finished)return;self.finished=YES;}[self.session invalidateAndCancel];self.session=nil;self.task=nil;self.data=nil;void (^completion)(NSDictionary *,NSError *)=self.completion;self.completion=nil;if(completion)dispatch_async(dispatch_get_main_queue(),^{completion(catalog,error);}); }

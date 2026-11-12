@@ -89,5 +89,26 @@ class MediaPlaybackRouteFallbackTests(unittest.TestCase):
         self.assertIn("- (void)resetAutomaticFallbackLines", SOURCE)
 
 
+
+    def test_staggered_hedged_resolution_and_line_health_recording(self):
+        resolve_body = method_body("- (void)resolveAndPlay")
+        self.assertIn("scheduleHedgedBackupLineResolutionForGeneration:", resolve_body)
+        self.assertIn("recordLineResolutionForSourceID:", resolve_body)
+        self.assertIn("hedgedEpisodeResult", resolve_body)
+        hedge_body = method_body("- (void)scheduleHedgedBackupLineResolutionForGeneration:(NSUInteger)generation")
+        self.assertIn("lineHealthKeyForSourceID:", hedge_body)
+        self.assertIn("isDeprioritizedSourceID:", hedge_body)
+
+    def test_three_tier_watchdog_and_smooth_buffer_ramp_and_cicada_quarantine(self):
+        watchdog = method_body("- (void)watchAVPlayerFirstFrameForItem:")
+        self.assertIn("tier1DeadLink", watchdog)
+        self.assertIn("tier2AudioOnlyVideoStuck", watchdog)
+        buf_body = method_body("- (void)updateForwardBufferForItem:(AVPlayerItem *)item")
+        self.assertIn("MediaPlaybackSmoothForwardBuffer", buf_body)
+        ca_src = (ROOT / "Sources" / "MediaPlaybackCicadaAdapter.m").read_text(encoding="utf-8")
+        self.assertIn("MediaPlaybackCicadaQuarantineQueue()", ca_src)
+        self.assertIn('CicadaCallVoidObject(player, NSSelectorFromString(@"setPlayerView:"), nil);', ca_src)
+
+
 if __name__ == "__main__":
     unittest.main()

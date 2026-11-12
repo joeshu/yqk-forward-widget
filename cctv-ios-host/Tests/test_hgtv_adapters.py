@@ -558,5 +558,61 @@ class HgtvAdapterTests(unittest.TestCase):
                     module._DEVICE_SESSION = None
 
 
+
+    def test_unencrypted_audio_track_before_encrypted_video_track_is_preserved(self):
+        key = bytes.fromhex('2b7e151628aed2a6abf7158809cf4f3c')
+        iv8 = bytes.fromhex('f0f1f2f3f4f5f6f7')
+        audio_plain = b'clear-aac-audio-sample-bytes'
+        video_plain = b'encrypted-hevc-video-sample-bytes'
+        ctr = hostcrypto.AES_CTR(key, iv8 + b'\0' * 8)
+        video_enc = ctr.update(video_plain)
+        ctr.close()
+
+        ftyp = box(b'ftyp', b'isom\0\0\x02\0isomiso2')
+        # Track 1: unencrypted mp4a audio track (no saiz/saio/senc)
+        audio_entry = box(b'mp4a', bytes(28))
+        a_stsd = box(b'stsd', b'\0' * 4 + struct.pack('>I', 1) + audio_entry)
+        a_stsz = box(b'stsz', b'\0' * 4 + struct.pack('>II', 0, 1) + struct.pack('>I', len(audio_plain)))
+        a_stsc = box(b'stsc', b'\0' * 4 + struct.pack('>I', 1) + struct.pack('>III', 1, 1, 1))
+
+        # Track 2: encrypted encv video track
+        frma = box(b'frma', b'hvc1')
+        schm = box(b'schm', b'\0\0\0\0cenc\0\x01\0\0')
+        tenc = box(b'tenc', b'\0\0\0\0\0\x01\x08' + b'k' * 16)
+        sinf = box(b'sinf', frma + schm + box(b'schi', tenc))
+        visual_entry = bytearray(78)
+        struct.pack_into('>HH', visual_entry, 24, 360, 640)
+        v_entry = box(b'encv', bytes(visual_entry) + box(b'hvcC', hevc_config()) + sinf)
+        v_stsd = box(b'stsd', b'\0' * 4 + struct.pack('>I', 1) + v_entry)
+        v_stsz = box(b'stsz', b'\0' * 4 + struct.pack('>II', 0, 1) + struct.pack('>I', len(video_plain)))
+        v_stsc = box(b'stsc', b'\0' * 4 + struct.pack('>I', 1) + struct.pack('>III', 1, 1, 1))
+        v_saiz = box(b'saiz', b'\0' * 4 + b'\x08' + struct.pack('>I', 1))
+        v_senc = box(b'senc', b'\0' * 4 + struct.pack('>I', 1) + iv8)
+
+        def build_moov(a_off, v_off, aux_off):
+            a_stco = box(b'stco', b'\0' * 4 + struct.pack('>II', 1, a_off))
+            a_trak = box(b'trak', box(b'mdia', box(b'minf', box(b'stbl', a_stsd + a_stsz + a_stsc + a_stco))))
+            v_stco = box(b'stco', b'\0' * 4 + struct.pack('>II', 1, v_off))
+            v_saio = box(b'saio', b'\0' * 4 + struct.pack('>II', 1, aux_off))
+            v_trak = box(b'trak', box(b'mdia', box(b'minf', box(b'stbl', v_stsd + v_stsz + v_stsc + v_stco + v_saiz + v_saio + v_senc))))
+            return box(b'moov', a_trak + v_trak)
+
+        dummy_moov = build_moov(0, 0, 0)
+        aux_off = len(ftyp) + dummy_moov.index(v_senc) + 16
+        a_off = len(ftyp) + len(dummy_moov) + 8
+        v_off = a_off + len(audio_plain)
+        real_moov = build_moov(a_off, v_off, aux_off)
+        mp4_bytes = ftyp + real_moov + box(b'mdat', audio_plain + video_enc) + box(b'free', b'\0' * 9000)
+
+        src = Path(self.tmp.name, 'multitrack_enc.mp4')
+        dst = Path(self.tmp.name, 'multitrack_dec.mp4')
+        src.write_bytes(mp4_bytes)
+        hgtv._cenc_decrypt(str(src), str(dst), key)
+        out = dst.read_bytes()
+        self.assertTrue(hgtv._verify_mp4(str(dst)))
+        self.assertEqual(out[a_off:a_off + len(audio_plain)], audio_plain)
+        self.assertEqual(out[v_off:v_off + len(video_plain)], video_plain)
+
+
 if __name__ == '__main__':
     unittest.main()

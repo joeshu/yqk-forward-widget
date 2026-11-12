@@ -16,6 +16,9 @@ NS_ASSUME_NONNULL_BEGIN
          forSource:(NSDictionary *)source
          operation:(NSString *)operation
          arguments:(NSDictionary *)arguments;
+- (void)removeResultForSource:(NSDictionary *)source
+                    operation:(NSString *)operation
+                    arguments:(NSDictionary *)arguments;
 - (void)removeResultsForSourceID:(NSString *)sourceID;
 - (NSDictionary<NSString *, NSNumber *> *)summary;
 - (void)evictMemoryCache;

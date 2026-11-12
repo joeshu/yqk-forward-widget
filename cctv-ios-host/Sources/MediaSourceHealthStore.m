@@ -15,6 +15,17 @@ static NSTimeInterval const MediaSourceHealthExpiry = 7 * 24 * 60 * 60;
 - (BOOL)isDeprioritizedSourceID:(NSString *)sourceID {
     if(!sourceID.length)return NO;@synchronized(self){NSDictionary *record=[self records][sourceID];if(![record isKindOfClass:NSDictionary.class])return NO;NSTimeInterval now=NSDate.date.timeIntervalSince1970,updated=[record[@"updated"] doubleValue];if(now-updated>MediaSourceHealthExpiry)return NO;return [record[@"cooldownUntil"] doubleValue]>now;}
 }
+- (NSTimeInterval)averageLatencyForSourceID:(NSString *)sourceID {
+    if(!sourceID.length)return 0;@synchronized(self){NSDictionary *record=[self records][sourceID];if(![record isKindOfClass:NSDictionary.class])return 0;double lat=[record[@"latency"] doubleValue];return (isfinite(lat)&&lat>0)?lat:0;}
+}
+- (NSString *)lineHealthKeyForSourceID:(NSString *)sourceID lineID:(NSString *)lineID {
+    if(!sourceID.length||!lineID.length)return @"";
+    return [NSString stringWithFormat:@"%@::line::%@",sourceID,lineID];
+}
+- (void)recordLineResolutionForSourceID:(NSString *)sourceID lineID:(NSString *)lineID success:(BOOL)success elapsed:(NSTimeInterval)elapsed {
+    NSString *key=[self lineHealthKeyForSourceID:sourceID lineID:lineID];
+    if(key.length)[self recordSourceID:key success:success elapsed:elapsed];
+}
 - (void)recordSourceID:(NSString *)sourceID success:(BOOL)success elapsed:(NSTimeInterval)elapsed {
     if(!sourceID.length)return;@synchronized(self){NSMutableDictionary *records=[self records];NSTimeInterval now=NSDate.date.timeIntervalSince1970;for(NSString *key in records.allKeys.copy)if(now-[records[key][@"updated"] doubleValue]>MediaSourceHealthExpiry)[records removeObjectForKey:key];NSMutableDictionary *record=[records[sourceID] isKindOfClass:NSDictionary.class]?[records[sourceID] mutableCopy]:[NSMutableDictionary dictionary];
         if(success){double old=[record[@"latency"] doubleValue],sample=MAX(0,MIN(600,elapsed));record[@"failures"]=@0;record[@"cooldownUntil"]=@0;record[@"latency"]=old>0?@(old*0.7+sample*0.3):@(sample);record[@"lastSuccess"]=@(now);}

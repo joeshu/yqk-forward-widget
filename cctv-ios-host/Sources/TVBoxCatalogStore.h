@@ -3,6 +3,10 @@
 NS_ASSUME_NONNULL_BEGIN
 @interface TVBoxCatalogStore : NSObject
 + (nullable NSDictionary *)parseData:(NSData *)data sourceURL:(nullable NSString *)sourceURL error:(NSError **)error;
++ (nullable NSDictionary *)parseBundleArchiveData:(NSData *)data fileURL:(nullable NSURL *)fileURL sourceURL:(nullable NSString *)sourceURL error:(NSError **)error;
++ (nullable NSDictionary *)parseBundleDirectoryAtURL:(NSURL *)directoryURL error:(NSError **)error;
++ (nullable NSData *)sanitizeJSONData:(NSData *)data;
++ (nullable NSString *)decodeQiaojiExtString:(NSString *)rawExt;
 + (nullable NSDictionary *)catalogWithMacCMSAPIURL:(NSString *)apiURL name:(nullable NSString *)name error:(NSError **)error;
 + (NSArray<NSDictionary *> *)catalogs;
 + (NSArray<NSDictionary *> *)playbackParsers;

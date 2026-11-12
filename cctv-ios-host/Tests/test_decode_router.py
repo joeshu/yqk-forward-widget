@@ -230,5 +230,20 @@ class DecodeRouterContracts(unittest.TestCase):
             self.assertIn(anchor, text, f'补丁说明缺锚点 {anchor}')
 
 
+
+    def test_router_supports_probed_container_and_magic_sniffer(self):
+        self.assertIn('MediaPlaybackSniffContainerFormat', self.router_h)
+        self.assertIn('MediaPlaybackSniffContainerFormat', self.router_m)
+        self.assertIn('probedContainer', self.router_m)
+        self.assertIn('probedMIME', self.router_m)
+        probe_h = read_source('HLSRouteProbe.h')
+        probe_m = read_source('HLSRouteProbe.m')
+        self.assertIn('sniffContainerMagic:', probe_h)
+        self.assertIn('cctvhost.hls.route.probe', probe_m)
+        inspection_m = read_source('ResourceContentInspection.m')
+        self.assertIn('ResourcePythonRegex(void)', inspection_m)
+        self.assertIn('ResourceAnchorsRegex(void)', inspection_m)
+
+
 if __name__ == '__main__':
     unittest.main()

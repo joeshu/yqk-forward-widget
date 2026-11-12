@@ -89,6 +89,115 @@ _EXT_CACHE = {}
 _JAR_CACHE = {}
 _MACCMS_ROWS_CACHE = {}
 
+_QIAOJI_7LJ763GG_KEY = bytes([
+    0x17, 0xa3, 0x17, 0xda, 0x33, 0x16, 0x56, 0x6d, 0x31, 0x4a, 0xea, 0xb3, 0xd0, 0x3c, 0xec, 0xf2,
+    0x92, 0xc8, 0xaa, 0x3d, 0xac, 0xe9, 0x5c, 0x41, 0x32, 0x21, 0x7b, 0x93, 0x99, 0x77, 0x3b, 0x6e,
+    0x7b, 0xf6, 0x3d, 0xd7, 0xf8, 0x32, 0xf3, 0xe4, 0x5b, 0x7d, 0xdd, 0xe3, 0x96, 0x9c, 0x78, 0x87,
+    0x90, 0x00, 0x14, 0x3e, 0x84, 0xd2, 0xab, 0x9c, 0x46, 0xe5, 0x5d, 0x93, 0x0f, 0xcd, 0x2d, 0x20,
+    0x9a, 0x97, 0xa2, 0xc2, 0x96, 0x17, 0x42, 0x18, 0xff, 0x22, 0x5c, 0x35, 0xf2, 0x97, 0x28, 0x06,
+    0x12, 0xd1, 0x9a, 0x0e, 0x47, 0x86, 0xae, 0xcc, 0xe5, 0xeb, 0x49, 0xc1, 0x08, 0x7f, 0x73, 0x0f,
+    0x01, 0xa5, 0x47, 0x98, 0xd3, 0x2b, 0xd6, 0x27, 0xef, 0x49, 0x1c, 0x4d, 0x6d, 0xf5, 0x7f, 0xf5,
+    0xbd, 0x79, 0x4c, 0xf0, 0x63, 0xb6, 0x1d, 0x28, 0xc4, 0x1b, 0x2d, 0xf0, 0xb4, 0x30, 0x0c, 0x79,
+    0x5b, 0x24, 0x79, 0x67, 0x57, 0xd8, 0x2d, 0xe7, 0xb0, 0x86, 0x32, 0x50, 0xbd, 0x54, 0x49, 0xdc,
+    0x0b, 0x65, 0x97, 0x35, 0xe9, 0x02, 0x10, 0xd8, 0x61, 0x0b, 0x8f, 0x27, 0x31, 0x09, 0xc1, 0x77,
+    0x64, 0xc1, 0xf2, 0xb8, 0x34, 0xa5, 0x6c, 0xaa, 0x3f, 0x11
+])
+
+_QIAOJI_KNOWN_VARIANTS = {
+    "7lj763gg402i79425739i3jghj118797l4hj840gi13l33238l4708g2h7145403": "http://111.180.198.40:1110|asgcxhjkts124573|asgcxhjkts124573|101",
+    "7lj763gg402i79425033i3i7h6079796glh69g0i": "http://172.83.156.150:1010/api.php/app/",
+    "7lj763gg402i7942463ji1j0hj46869hllh7810ki3": "https://fs-im-kefu.7moor-fs1.com/ly/4d2c3f00-7d4c-11e5-af15-41bf63ae4ea0/1745208060258/cksp.txt",
+    "7lj763gg0939790i012ii6j6hj468h9hl7": "http://gw.mcyan.cn|顾我追剧|4.1.9",
+    "7lj763gg402i7942463h93i0h44j8681highi4": "https://api.wwgz.cn:520/webcloud/relay.php?url=",
+    "7lj763gg402i7942556484j2h8489888highi4": "https://www.hskjjglo.com",
+    "7lj763gg402i7942572k85i2h948879hll": "https://v.xlys.ltd.ua",
+    "7lj763gg402i7942572k85i2h8498181l5h6825ii6": "https://www.libvio.cc",
+    "7lj763gg402i7942572k85i2h2529282highi4": "https://www.zxzjys.com",
+    "7lj763gg402i7942572k85i2hj448085l8h7": "https://www.czzy77.com",
+    "7lj763gg402i7942463ji1j0hj46869hllh7810ki36k2628800059j2h614415609966789267892174082h1477293h2468098l7079g11i2232k22871819i7i1059994": "https://www.qiaoji8.com/tvbox/bili.json",
+    "7lj763gg09397919127185i6h5488682l5h6825ii63l222g9h1019g019584359578234822429": "http://175.178.80.209/mb/api.php/provide/vod/|okhttp/4.9.1|qiaoji",
+}
+
+_BUILTIN_CSP_SITE_DEFAULTS = {
+    "csp_sikv4k": {"url": "https://www.4kvm.net"},
+    "csp_gz": {"url": "https://api.cj7wq4.com", "dataKey": "mvXBSW7ekreItNsT", "dataIv": "2U3IrJL8szAKp0Fj"},
+    "csp_duoduo": {"url": "https://dduotv01.top", "dataKey": "8f3d2a1c7b6e5d4c9a0b1f2e3d4c5b6a"},
+    "csp_gulu": {"url": "http://103.45.132.22:19987"},
+    "csp_hetun": {"url": "https://az1-1456692500.cos.ap-guangzhou.myqcloud.com/az1.txt", "dataKey": "ed5fdsgucxumegqa", "dataIv": "OC1A06E197EF10CF3F6058CA7A803B5E"},
+    "csp_huayi": {"url": "http://43.240.158.154:18004", "dataKey": "ed5fdsgucxumegqa", "dataIv": "OC1A06E197EF10CF3F6058CA7A803B5E"},
+    "csp_juzhi": {"url": "https://gdsaj.hzhcbkj.cn", "dataKey": "11GK2we32144LO&hilUITB)FMd1khdaF", "dataIv": "OC1A06E197EF10CF3F6058CA7A803B5E"},
+    "csp_piandi": {"url": "https://dongpian17.com"},
+    "csp_yingtan": {"url": "http://cms.lyyytv.cn", "dataKey": "wP5bvxoc3yv7FoBQENFZuAF0EUYr4LTy", "dataIv": "wP5bvxoc3yv7FoBQENFZuAF0EUYr4LTy"},
+    "csp_kishuto": {"url": "http://cms.lyyytv.cn", "dataKey": "wP5bvxoc3yv7FoBQENFZuAF0EUYr4LTy", "dataIv": "wP5bvxoc3yv7FoBQENFZuAF0EUYr4LTy"},
+    "csp_fengye4k": {"url": "https://www.cd-zj.com"},
+    "csp_juxiafan": {"url": "http://manian.juxiafan.com", "dataKey": "kZ6fT8oF6oM8eX6lF7eH2rJ3pW7gW0kC"},
+    "csp_shanzha4k": {"url": "http://43.248.128.122:578"},
+    "csp_daishu": {"url": "https://dsystv.com"},
+    "csp_dongmanbashi": {"url": "https://dm845.com"},
+    "csp_dbku": {"url": "https://api.dbokutv.com"},
+    "csp_fandazi": {"url": "https://fdzys.com"},
+    "csp_fourkmp": {"url": "https://4k-av.com"},
+    "csp_jbd": {"url": "https://m.jiabaide.cn", "dataKey": "cb808529bae6b6be45ecfab29a4889bc"},
+    "csp_jianpian": {"url": "https://api.ztcgi.com"},
+    "csp_nongmin": {"url": "https://vip.wwgz.cn:5200"},
+    "csp_nmvod": {"url": "https://vip.wwgz.cn:5200"},
+    "csp_rejutv": {"url": "https://www.rjtvw.com"},
+    "csp_tegou": {"url": "https://www.tegou.me"},
+    "csp_yunbo": {"url": "http://app.tuxianimg.com", "dataKey": "MickwrKuMickwrKu", "dataIv": "MickwrKuMickwrKu"},
+    "csp_wftv": {"url": "https://www.wangfei.tv"},
+    "csp_yingxiang": {"url": "https://www.yxxq51.cc"},
+    "csp_zjdr": {"url": "https://cj.lziapi.com/api.php/provide/vod/at/json/"},
+    "csp_zhuiying": {"url": "https://zhuiying3.cc"},
+    "csp_luoxuetv": {"url": "https://tv.lxyy.club"},
+    "csp_pansearch": {"url": "https://www.wogg.net"},
+    "csp_hongguo": {"url": "https://hongguoduanju.com"},
+    "csp_ddrk": {"url": "https://ddys.mov"},
+    "csp_kuaikan": {"url": "https://www.kuaikanys.net"},
+    "csp_auete": {"url": "https://auete.pro"},
+    "csp_dygang": {"url": "https://www.dygangs.me"},
+    "csp_ttian": {"url": "http://tt.ysdqjs.cn"},
+    "csp_xdai": {"url": "http://111.180.198.40:1110", "dataKey": "asgcxhjkts124573", "dataIv": "asgcxhjkts124573"},
+    "csp_qiji": {"url": "http://172.83.156.150:1010"},
+    "csp_wwys": {"url": "https://www.wwgz.cn"},
+    "csp_tvyb": {"url": "http://www.tvyb03.com"},
+    "csp_mayi": {"url": "http://www.mayiyingshi.tv"},
+    "csp_dryou": {"url": "https://zy.hls.one"},
+    "csp_rbotv": {"url": "http://v.rbotv.cn"},
+    "csp_lkuys": {"url": "http://v.lkuys.cn"},
+    "csp_yingshi": {"url": "https://www.yingshi.tv"},
+    "csp_qiao2": {"url": "https://fs-im-kefu.7moor-fs1.com/ly/4d2c3f00-7d4c-11e5-af15-41bf63ae4ea0/1745208060258/cksp.txt"},
+    "csp_muou": {"url": "http://gw.mcyan.cn"},
+    "csp_bdys01": {"url": "https://v.xlys.ltd.ua"},
+    "csp_lib": {"url": "https://www.libvio.cc"},
+    "csp_zxzj": {"url": "https://www.zxzjys.com"},
+    "csp_czsapp": {"url": "https://www.czzy77.com"},
+    "csp_ai": {"url": "http://175.178.80.209/mb/api.php/provide/vod/"},
+}
+
+
+def _decode_qiaoji_7lj763gg(raw_ext):
+    if not isinstance(raw_ext, str):
+        return ""
+    s = raw_ext.strip()
+    if not s.lower().startswith("7lj763gg"):
+        return ""
+    if s in _QIAOJI_KNOWN_VARIANTS:
+        return _QIAOJI_KNOWN_VARIANTS[s]
+    cleaned = re.sub(r"(?i)qiaoji", "", s).strip()
+    if len(cleaned) < 16 or (len(cleaned) % 2) != 0:
+        return ""
+    try:
+        hx = "".join(chr(ord(c) - 6) if "g" <= c <= "l" else (chr(ord(c) - 6) if "G" <= c <= "L" else c) for c in cleaned)
+        raw_bytes = bytes.fromhex(hx)
+        dec = bytes(raw_bytes[i] ^ _QIAOJI_7LJ763GG_KEY[i % len(_QIAOJI_7LJ763GG_KEY)] for i in range(len(raw_bytes)))
+        text = dec.decode("utf-8", errors="ignore").strip()
+        if text.lower().startswith(("http://", "https://")):
+            return text
+    except Exception:
+        pass
+    return ""
+
+
 
 def _pad_pkcs7(data, block_size=16):
     p = block_size - (len(data) % block_size)
@@ -490,6 +599,10 @@ def _first_valid_http_url(candidate, allow_txt=True):
     raw = candidate.strip()
     if not raw:
         return ''
+    if raw.lower().startswith('7lj763gg'):
+        dec_q = _decode_qiaoji_7lj763gg(raw)
+        if dec_q:
+            raw = dec_q
     if raw.startswith(('{', '[')):
         try:
             return _first_valid_http_url(json.loads(raw), allow_txt=allow_txt)
@@ -510,7 +623,7 @@ def _first_valid_http_url(candidate, allow_txt=True):
         low = part.lower()
         if not allow_txt and low.endswith('.txt'):
             continue
-        for suffix in ('/api.php/app', '/api.php/provide/vod', '/api.php/v1.vod', '/app/bn'):
+        for suffix in ('/static/js/playerconfig.js', '/api.php/app', '/api.php/provide/vod', '/api.php/v1.vod', '/app/bn/v2', '/app/bn', '/webcloud/relay.php?url='):
             if low.endswith(suffix):
                 part = part[:-len(suffix)].rstrip('/')
                 break
@@ -759,11 +872,19 @@ class AppVideoEngine:
         self.api_type = str(api_type or '')
         if isinstance(ext_config, str):
             s = ext_config.strip()
+            if s.lower().startswith('7lj763gg'):
+                s = _decode_qiaoji_7lj763gg(s) or s
             if s.startswith('{'):
                 try:
                     self.config = json.loads(s)
                 except Exception:
                     self.config = {'url': _first_valid_http_url(s)}
+            elif '|' in s and s.lower().startswith(('http://', 'https://')):
+                parts = [p.strip() for p in s.split('|')]
+                self.config = {'url': _first_valid_http_url(parts[0])}
+                if len(parts) >= 2 and len(parts[1]) in (16, 24, 32):
+                    self.config['dataKey'] = parts[1]
+                    self.config['dataIv'] = parts[2] if (len(parts) >= 3 and len(parts[2]) in (16, 24, 32)) else parts[1]
             else:
                 self.config = {'url': _first_valid_http_url(s)}
         elif isinstance(ext_config, dict):
@@ -772,7 +893,14 @@ class AppVideoEngine:
             self.config = {}
 
         low_api = self.api_type.lower()
+        if low_api.startswith('com.github.catvod.spider.'):
+            low_api = 'csp_' + low_api.split('.')[-1].lower()
         self._is_yqk = 'appyqk' in low_api or low_api in ('yqk', 'csp_yqk')
+        if not self.config.get('url') and low_api in _BUILTIN_CSP_SITE_DEFAULTS:
+            builtin_def = _BUILTIN_CSP_SITE_DEFAULTS[low_api]
+            for bk, bv in builtin_def.items():
+                if not self.config.get(bk):
+                    self.config[bk] = bv
         self.base_url = _first_valid_http_url(self.config)
         if not self.base_url and self._is_yqk:
             # This named provider has a concrete protocol, unlike generic App*
@@ -1207,25 +1335,82 @@ class BiliEngine:
 class DEXParser:
     """Parses Android classes.dex to extract class constants, endpoints, and keys."""
 
-    def __init__(self, dex_bytes):
+    def __init__(self, dex_bytes, class_strings=None):
         self.data = dex_bytes if isinstance(dex_bytes, (bytes, bytearray)) else b''
         self.strings = []
         self.types = []
         self.class_defs = []
+        self.class_strings = dict(class_strings or {})
         if len(self.data) >= 112 and self.data[:4] == b'dex\n':
             self._parse_dex()
 
+    @staticmethod
+    def _extract_java_class_utf8(class_bytes):
+        if not isinstance(class_bytes, (bytes, bytearray)) or len(class_bytes) < 16 or class_bytes[:4] != b'\xca\xfe\xba\xbe':
+            return []
+        try:
+            cp_count = struct.unpack_from('>H', class_bytes, 8)[0]
+            pos = 10
+            idx = 1
+            out = []
+            while idx < cp_count and pos < len(class_bytes):
+                tag = class_bytes[pos]
+                pos += 1
+                if tag == 1:
+                    if pos + 2 > len(class_bytes):
+                        break
+                    u_len = struct.unpack_from('>H', class_bytes, pos)[0]
+                    pos += 2
+                    s = class_bytes[pos:pos + u_len].decode('utf-8', errors='ignore').replace('\x01', '').strip()
+                    pos += u_len
+                    if s:
+                        out.append(s)
+                elif tag in (7, 8, 16, 19, 20):
+                    pos += 2
+                elif tag in (3, 4, 9, 10, 11, 12, 17, 18):
+                    pos += 4
+                elif tag in (5, 6):
+                    pos += 8
+                    idx += 1
+                elif tag == 15:
+                    pos += 3
+                else:
+                    break
+                idx += 1
+            return out
+        except Exception:
+            return []
+
     @classmethod
     def from_jar_bytes(cls, jar_bytes):
-        """Extracts classes.dex from a TVBox spider.jar archive and returns a DEXParser."""
+        """Extracts classes.dex and Java .class constant pools from a TVBox spider.jar archive."""
         if isinstance(jar_bytes, (bytes, bytearray)):
             if jar_bytes[:4] == b'dex\n':
                 return cls(jar_bytes)
+            if jar_bytes[:4] == b'\xca\xfe\xba\xbe':
+                c_strs = cls._extract_java_class_utf8(jar_bytes)
+                inst = cls(b'', {'default': c_strs})
+                inst.strings.extend(c_strs)
+                return inst
             try:
+                dex_data = b''
+                class_map = {}
+                all_class_strs = []
                 with zipfile.ZipFile(io.BytesIO(jar_bytes), 'r') as zf:
                     for name in zf.namelist():
-                        if name.endswith('.dex'):
-                            return cls(zf.read(name))
+                        if name.endswith('.dex') and not dex_data:
+                            dex_data = zf.read(name)
+                        elif name.startswith('com/github/catvod/spider/') and name.endswith('.class') and '$' not in name:
+                            short_name = name.rsplit('/', 1)[-1][:-6].lower()
+                            c_strs = cls._extract_java_class_utf8(zf.read(name))
+                            if c_strs:
+                                class_map[short_name] = c_strs
+                                all_class_strs.extend(c_strs)
+                inst = cls(dex_data, class_map)
+                for s in all_class_strs:
+                    if s not in inst.strings:
+                        inst.strings.append(s)
+                return inst
             except Exception:
                 pass
         return cls(b'')
@@ -1286,13 +1471,28 @@ class DEXParser:
             pass
 
     def extract_site_config(self, class_name):
-        """Discovers base URL and AES keys from DEX string constants."""
-        clean_cls = str(class_name or '').replace('csp_', '').lower()
-        urls = [s for s in self.strings if s.startswith(('http://', 'https://')) and len(s) < 256]
-        # Prefer URLs whose domain or path hints at the class name if any match
+        """Discovers base URL and AES keys from DEX or Java .class string constants."""
+        raw_cls = str(class_name or '').strip()
+        if raw_cls.lower().startswith('com.github.catvod.spider.'):
+            clean_cls = raw_cls.rsplit('.', 1)[-1].lower()
+        else:
+            clean_cls = raw_cls.replace('csp_', '').replace('CSP_', '').lower()
+        pool = self.class_strings.get(clean_cls) or self.strings
+        ignored_hosts = ('127.0.0.1', 'error.com', 'google.com', 'baidu.con', 'servicewechat.com', 'x.com/api', 'gtimg.com', 'image.tmdb.org')
+        urls = [s for s in pool if s.startswith(('http://', 'https://')) and 10 < len(s) < 256 and not any(ig in s.lower() for ig in ignored_hosts)]
         matched_urls = [u for u in urls if clean_cls and clean_cls in u.lower()]
         ordered_urls = matched_urls + [u for u in urls if u not in matched_urls]
-        keys = [s for s in self.strings if len(s) in (16, 24, 32) and not s.startswith('http') and re.fullmatch(r'[A-Za-z0-9+/=_!@#$%^&*-]{16,32}', s)]
+        ignored_tokens = {
+            '0123456789abcdef', '0123456789ABCDEF', '0000000000000000', '00000000000000000000000000000000',
+            'BootstrapMethods', 'setRequestMethod', 'equalsIgnoreCase', 'getParameterSpec', 'FALLBACK_PLAYERS',
+            'FALLBACK_PARSERS', 'P_MAINTITLE_ATTR', 'sec_device_token', 'video_definition', 'application/json',
+            'com.phoenix.read', 'action-adventure', 'AUDIO_CONFIG_BOX', 'HongGuoSign.java', 'hg-stream-worker',
+            'x-requested-with', 'X-Requested-With', 'com.exxammpea.a1', 'synchronizedList', 'awaitTermination',
+            'quoteReplacement', 'x-ai-movie-nonce', 'normalized_title', 'fetchAllEpisodes', 'resolve_required',
+            'PROTOCOL_VERSION', 'App-Version-Code', 'filter_type_list', 'player_source_id', 'platform-version',
+            'getSocketFactory'
+        }
+        keys = [s for s in pool if len(s) in (16, 24, 32) and not s.startswith('http') and s not in ignored_tokens and re.fullmatch(r'[A-Za-z0-9+/=_!@#$%^&*()\-]{16,32}', s)]
         return {
             'url': ordered_urls[0] if ordered_urls else '',
             'candidate_urls': ordered_urls[:5],
@@ -1408,7 +1608,7 @@ class CSPAdapter:
 
     def _resolve_engine(self):
         low = self.class_name.lower()
-        if 'xbpq' in low or 'xyqhiker' in low or 'music1' in low:
+        if 'xbpq' in low or 'xyqhiker' in low or 'xpath' in low or 'music1' in low:
             return XBPQEngine(self.ext)
         elif 'bili' in low:
             return BiliEngine(self.ext)

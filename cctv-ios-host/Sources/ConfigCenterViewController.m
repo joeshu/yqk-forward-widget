@@ -2,6 +2,7 @@
 #import "HostTheme.h"
 #import "HostLogRedactor.h"
 #import "ProfileStore.h"
+#import "MediaAdaptationMonitor.h"
 #import "PyHost.h"
 #import <math.h>
 
@@ -212,7 +213,7 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     self.topActionsStack=[UIStackView new];self.topActionsStack.translatesAutoresizingMaskIntoConstraints=NO;self.topActionsStack.axis=UILayoutConstraintAxisHorizontal;self.topActionsStack.alignment=UIStackViewAlignmentCenter;self.topActionsStack.distribution=UIStackViewDistributionFillEqually;self.topActionsStack.spacing=0;self.topActionsStack.backgroundColor=HostRaisedSurface();self.topActionsStack.layer.cornerRadius=23;self.topActionsStack.layer.cornerCurve=kCACornerCurveContinuous;self.topActionsStack.layer.borderWidth=.7;HostSetLayerBorderColor(self.topActionsStack,HostBorder());[self.resourceHeader addSubview:self.topActionsStack];
     NSArray *actions=@[@{ @"icon":@"plus", @"label":@"添加资源", @"selector":NSStringFromSelector(@selector(add)) }];
     for(NSDictionary *item in actions){UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];button.translatesAutoresizingMaskIntoConstraints=NO;button.accessibilityLabel=item[@"label"];button.accessibilityIdentifier=[@"resource-action." stringByAppendingString:item[@"label"]];UIButtonConfiguration *config=[UIButtonConfiguration plainButtonConfiguration];config.image=[UIImage systemImageNamed:item[@"icon"]];config.baseForegroundColor=HostText();config.contentInsets=NSDirectionalEdgeInsetsMake(8,8,8,8);button.configuration=config;HostInstallPressFeedback(button);SEL selector=NSSelectorFromString(item[@"selector"]);[button addTarget:self action:selector forControlEvents:UIControlEventTouchUpInside];[self.topActionsStack addArrangedSubview:button];[button.widthAnchor constraintEqualToConstant:44].active=YES;[button.heightAnchor constraintEqualToConstant:44].active=YES;}
-    UIButton *moreButton=[UIButton buttonWithType:UIButtonTypeSystem];moreButton.translatesAutoresizingMaskIntoConstraints=NO;moreButton.accessibilityLabel=@"更多资源操作";moreButton.accessibilityIdentifier=@"resource-action.more";UIButtonConfiguration *moreConfig=[UIButtonConfiguration plainButtonConfiguration];moreConfig.image=[UIImage systemImageNamed:@"ellipsis"];moreConfig.baseForegroundColor=HostText();moreConfig.contentInsets=NSDirectionalEdgeInsetsMake(8,8,8,8);moreButton.configuration=moreConfig;HostInstallPressFeedback(moreButton);[moreButton.widthAnchor constraintEqualToConstant:44].active=YES;[moreButton.heightAnchor constraintEqualToConstant:44].active=YES;__weak typeof(self) weakSelf=self;UIAction *servicesAction=[UIAction actionWithTitle:@"脚本与服务" image:[UIImage systemImageNamed:@"slider.horizontal.3"] identifier:nil handler:^(UIAction *action){[weakSelf openServices];}];UIAction *filterAction=[UIAction actionWithTitle:@"筛选与排序" image:[UIImage systemImageNamed:@"line.3.horizontal.decrease"] identifier:nil handler:^(UIAction *action){[weakSelf showResourceFilters];}];UIAction *probeAction=[UIAction actionWithTitle:@"检查全部资源连接" image:[UIImage systemImageNamed:@"network"] identifier:nil handler:^(UIAction *action){[weakSelf probeResources];}];moreButton.menu=[UIMenu menuWithChildren:@[filterAction,probeAction,servicesAction]];moreButton.showsMenuAsPrimaryAction=YES;[self.topActionsStack addArrangedSubview:moreButton];
+    UIButton *moreButton=[UIButton buttonWithType:UIButtonTypeSystem];moreButton.translatesAutoresizingMaskIntoConstraints=NO;moreButton.accessibilityLabel=@"更多资源操作";moreButton.accessibilityIdentifier=@"resource-action.more";UIButtonConfiguration *moreConfig=[UIButtonConfiguration plainButtonConfiguration];moreConfig.image=[UIImage systemImageNamed:@"ellipsis"];moreConfig.baseForegroundColor=HostText();moreConfig.contentInsets=NSDirectionalEdgeInsetsMake(8,8,8,8);moreButton.configuration=moreConfig;HostInstallPressFeedback(moreButton);[moreButton.widthAnchor constraintEqualToConstant:44].active=YES;[moreButton.heightAnchor constraintEqualToConstant:44].active=YES;__weak typeof(self) weakSelf=self;UIAction *servicesAction=[UIAction actionWithTitle:@"脚本与服务" image:[UIImage systemImageNamed:@"slider.horizontal.3"] identifier:nil handler:^(UIAction *action){[weakSelf openServices];}];UIAction *filterAction=[UIAction actionWithTitle:@"筛选与排序" image:[UIImage systemImageNamed:@"line.3.horizontal.decrease"] identifier:nil handler:^(UIAction *action){[weakSelf showResourceFilters];}];UIAction *probeAction=[UIAction actionWithTitle:@"检查全部资源连接" image:[UIImage systemImageNamed:@"network"] identifier:nil handler:^(UIAction *action){[weakSelf probeResources];}];UIAction *monitorAction=[UIAction actionWithTitle:@"站点与播放适配监测" image:[UIImage systemImageNamed:@"waveform.path.ecg"] identifier:nil handler:^(UIAction *action){[weakSelf openAdaptationMonitor];}];moreButton.menu=[UIMenu menuWithChildren:@[filterAction,probeAction,monitorAction,servicesAction]];moreButton.showsMenuAsPrimaryAction=YES;[self.topActionsStack addArrangedSubview:moreButton];
 
     self.resourceTitleLabel=[UILabel new];self.resourceTitleLabel.translatesAutoresizingMaskIntoConstraints=NO;self.resourceTitleLabel.text=@"资源";self.resourceTitleLabel.textColor=HostText();self.resourceTitleLabel.font=HostRoundedFont(34,UIFontWeightBold,UIFontTextStyleLargeTitle);self.resourceTitleLabel.adjustsFontForContentSizeCategory=YES;[self.resourceHeader addSubview:self.resourceTitleLabel];
     self.resourceSearchField=[UITextField new];self.resourceSearchField.translatesAutoresizingMaskIntoConstraints=NO;self.resourceSearchField.accessibilityIdentifier=@"resource-search-field";self.resourceSearchField.accessibilityLabel=@"搜索资源";self.resourceSearchField.placeholder=@"搜索资源";self.resourceSearchField.clearButtonMode=UITextFieldViewModeWhileEditing;self.resourceSearchField.returnKeyType=UIReturnKeySearch;self.resourceSearchField.delegate=self;self.resourceSearchField.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];self.resourceSearchField.adjustsFontForContentSizeCategory=YES;self.resourceSearchField.textColor=HostText();self.resourceSearchField.tintColor=HostAccent();self.resourceSearchField.backgroundColor=HostRaisedSurface();self.resourceSearchField.layer.cornerRadius=14;self.resourceSearchField.layer.cornerCurve=kCACornerCurveContinuous;self.resourceSearchField.layer.borderWidth=0.65;HostSetLayerBorderColor(self.resourceSearchField,HostBorder());self.resourceSearchField.leftViewMode=UITextFieldViewModeAlways;UIView *searchIconContainer=[[UIView alloc] initWithFrame:CGRectMake(0,0,38,44)];UIImageView *searchIcon=[[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"magnifyingglass"]];searchIcon.tintColor=HostMutedText();searchIcon.frame=CGRectMake(12,13,18,18);searchIconContainer.userInteractionEnabled=NO;[searchIconContainer addSubview:searchIcon];self.resourceSearchField.leftView=searchIconContainer;
@@ -623,8 +624,41 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     NSString *host=[NSURL URLWithString:source].host;
     return host.length?host:([source hasPrefix:@"local-playlist:"]?@"本地播放列表":@"未命名资源");
 }
+- (BOOL)isLiveCapableProfile:(NSDictionary *)profile {
+    if (![profile isKindOfClass:NSDictionary.class]) return NO;
+    if ([profile[@"native"] boolValue]) return YES;
+    NSString *kind = [profile[@"resourceKind"] isKindOfClass:NSString.class] ? profile[@"resourceKind"] : @"";
+    if ([kind isEqual:@"live"] || [kind isEqual:@"both"]) return YES;
+    if ([profile[@"type"] isEqual:@"tvbox"]) return [profile[@"liveCount"] unsignedIntegerValue] > 0;
+    return !profile[@"type"] && [profile[@"source"] isKindOfClass:NSString.class] && [profile[@"source"] length] > 0;
+}
+- (void)toggleChannelLogoForSource:(NSString *)source enabled:(BOOL)enabled {
+    [ProfileStore setChannelLogoEnabled:enabled forSource:source];
+    if (self.onToggleChannelLogo) self.onToggleChannelLogo(source ?: @"", enabled);
+    [self reloadProfiles];
+}
+- (void)togglePlayerCornerLogoForSource:(NSString *)source enabled:(BOOL)enabled {
+    [ProfileStore setPlayerCornerLogoEnabled:enabled forSource:source];
+    if (self.onTogglePlayerCornerLogo) self.onTogglePlayerCornerLogo(source ?: @"", enabled);
+    [self reloadProfiles];
+}
+- (void)toggleChannelPreviewForSource:(NSString *)source enabled:(BOOL)enabled {
+    [ProfileStore setChannelPreviewEnabled:enabled forSource:source];
+    if (self.onToggleChannelPreview) self.onToggleChannelPreview(source ?: @"", enabled);
+    [self reloadProfiles];
+}
+- (void)toggleChannelTelemetryForSource:(NSString *)source enabled:(BOOL)enabled {
+    [ProfileStore setChannelTelemetryEnabled:enabled forSource:source];
+    if (self.onToggleChannelTelemetry) self.onToggleChannelTelemetry(source ?: @"", enabled);
+    [self reloadProfiles];
+}
 - (NSString *)resourceDetailForProfile:(NSDictionary *)profile {
-    NSString *cacheKey=[NSString stringWithFormat:@"%@|%@|%@|%@|%@",profile[@"source"]?:@"",profile[@"status"]?:@"",profile[@"updatedAt"]?:@0,profile[@"playlistUpdatedAt"]?:@0,profile[@"current"]?:@0];
+    NSString *rawSourceKey=[profile[@"source"] isKindOfClass:NSString.class]?profile[@"source"]:@"";
+    BOOL logoOn=profile[@"showChannelLogo"]?[profile[@"showChannelLogo"] boolValue]:[ProfileStore isChannelLogoEnabledForSource:rawSourceKey];
+    BOOL cornerOn=profile[@"showPlayerCornerLogo"]?[profile[@"showPlayerCornerLogo"] boolValue]:[ProfileStore isPlayerCornerLogoEnabledForSource:rawSourceKey];
+    BOOL previewOn=profile[@"showChannelPreview"]?[profile[@"showChannelPreview"] boolValue]:[ProfileStore isChannelPreviewEnabledForSource:rawSourceKey];
+    BOOL telemetryOn=profile[@"showChannelTelemetry"]?[profile[@"showChannelTelemetry"] boolValue]:[ProfileStore isChannelTelemetryEnabledForSource:rawSourceKey];
+    NSString *cacheKey=[NSString stringWithFormat:@"%@|%@|%@|%@|%@|%d|%d|%d|%d",rawSourceKey,profile[@"status"]?:@"",profile[@"updatedAt"]?:@0,profile[@"playlistUpdatedAt"]?:@0,profile[@"current"]?:@0,logoOn,cornerOn,previewOn,telemetryOn];
     NSString *cached=self.detailSummaryCache[cacheKey];if(cached)return cached;
     BOOL plugin=[profile[@"type"] isEqual:@"plugin"],tvbox=[profile[@"type"] isEqual:@"tvbox"];
     NSString *current=[profile[@"current"] boolValue]?@"当前使用 · ":@"";
@@ -655,6 +689,10 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     NSString *location=[source hasPrefix:@"local-playlist:"]?@"本机文件":(source.length?[NSURL URLWithString:source].host?:@"直播订阅":@"官方频道目录");
     NSString *summary=[NSString stringWithFormat:@"%@ 个频道 · EPG %@\n%@ · %@",profile[@"count"]?:@0,profile[@"epgStatus"]?:@"自动匹配",location,refreshInfo];
     if([profile[@"status"] isKindOfClass:NSString.class]&&[profile[@"status"] length])summary=[summary stringByAppendingFormat:@"\n%@",profile[@"status"]];
+    NSString *logoBadge=!logoOn?@"台标已关闭":(cornerOn?@"台标：列表+右上角":@"台标：仅列表");
+    NSString *previewBadge=previewOn?@"预览图:开":@"预览图:关";
+    NSString *telemetryBadge=telemetryOn?@"速率延迟:开":@"速率延迟:关";
+    summary=[summary stringByAppendingFormat:@" · %@ · %@ · %@",logoBadge,previewBadge,telemetryBadge];
     NSString *result=[NSString stringWithFormat:@"%@%@",current,summary];
     if(cacheKey.length)self.detailSummaryCache[cacheKey]=result;
     return result;
@@ -708,6 +746,11 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
         });
     }];
     [task resume];
+}
+- (void)openAdaptationMonitor {
+    MediaAdaptationMonitorViewController *monitor=[[MediaAdaptationMonitorViewController alloc] initWithContext:nil];
+    if(self.navigationController)[self.navigationController pushViewController:monitor animated:YES];
+    else{UINavigationController *nav=[[UINavigationController alloc] initWithRootViewController:monitor];[self presentViewController:nav animated:YES completion:nil];}
 }
 - (void)probeResources {
     if(self.probingResources)return;
@@ -991,6 +1034,30 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
             UIAction *manage=[UIAction actionWithTitle:tvbox?(macCMS?@"打开影视接口":@"打开资源合集"): @"资源能力与设置" image:[UIImage systemImageNamed:@"slider.horizontal.3"] identifier:nil handler:^(UIAction *a){if(tvbox){if([source hasPrefix:@"tvbox:"]&&weakSelf.onOpenTVBoxCatalog)weakSelf.onOpenTVBoxCatalog([source substringFromIndex:6]);}else if(weakSelf.onOpenResource)weakSelf.onOpenResource(source);}];
             NSMutableArray<UIAction *> *menuActions=[NSMutableArray array];
             if(plugin||tvbox)[menuActions addObject:manage];
+            else if([p[@"native"] boolValue]||source.length){
+                [menuActions addObject:[UIAction actionWithTitle:@"资源详情与台标设置" image:[UIImage systemImageNamed:@"slider.horizontal.3"] identifier:nil handler:^(UIAction *a){if(weakSelf.onOpenSubscription)weakSelf.onOpenSubscription(source);}]];
+            }
+            if([self isLiveCapableProfile:p]){
+                BOOL chLogoOn=p[@"showChannelLogo"]?[p[@"showChannelLogo"] boolValue]:[ProfileStore isChannelLogoEnabledForSource:source];
+                BOOL cornerLogoOn=p[@"showPlayerCornerLogo"]?[p[@"showPlayerCornerLogo"] boolValue]:[ProfileStore isPlayerCornerLogoEnabledForSource:source];
+                UIAction *toggleListLogo=[UIAction actionWithTitle:chLogoOn?@"列表与播放器台标：已开启":@"列表与播放器台标：已关闭" image:[UIImage systemImageNamed:chLogoOn?@"photo.fill":@"photo"] identifier:nil handler:^(UIAction *a){[weakSelf toggleChannelLogoForSource:source enabled:!chLogoOn];}];
+                if(chLogoOn)toggleListLogo.state=UIMenuElementStateOn;
+                BOOL previewOn=p[@"showChannelPreview"]?[p[@"showChannelPreview"] boolValue]:[ProfileStore isChannelPreviewEnabledForSource:source];
+                BOOL telemetryOn=p[@"showChannelTelemetry"]?[p[@"showChannelTelemetry"] boolValue]:[ProfileStore isChannelTelemetryEnabledForSource:source];
+                UIAction *toggleCornerLogo=[UIAction actionWithTitle:cornerLogoOn?@"播放器右上角台标：已开启":@"播放器右上角台标：已关闭" image:[UIImage systemImageNamed:cornerLogoOn?@"tv.inset.filled":@"tv"] identifier:nil handler:^(UIAction *a){[weakSelf togglePlayerCornerLogoForSource:source enabled:!cornerLogoOn];}];
+                if(cornerLogoOn)toggleCornerLogo.state=UIMenuElementStateOn;
+                UIAction *togglePreview=[UIAction actionWithTitle:previewOn?@"频道实时预览图：已开启":@"频道实时预览图：已关闭" image:[UIImage systemImageNamed:previewOn?@"photo.on.rectangle.angled":@"rectangle.slash"] identifier:nil handler:^(UIAction *a){[weakSelf toggleChannelPreviewForSource:source enabled:!previewOn];}];
+                if(previewOn)togglePreview.state=UIMenuElementStateOn;
+                UIAction *toggleTelemetry=[UIAction actionWithTitle:telemetryOn?@"频道速率与延迟：已开启":@"频道速率与延迟：已关闭" image:[UIImage systemImageNamed:@"speedometer"] identifier:nil handler:^(UIAction *a){[weakSelf toggleChannelTelemetryForSource:source enabled:!telemetryOn];}];
+                if(telemetryOn)toggleTelemetry.state=UIMenuElementStateOn;
+                [menuActions addObject:toggleListLogo];
+                [menuActions addObject:toggleCornerLogo];
+                [menuActions addObject:togglePreview];
+                [menuActions addObject:toggleTelemetry];
+                if(!tvbox&&weakSelf.onMatchStationLogos){
+                    [menuActions addObject:[UIAction actionWithTitle:@"智能匹配官方台标与节目单" image:[UIImage systemImageNamed:@"sparkles.tv"] identifier:nil handler:^(UIAction *a){if(weakSelf.onMatchStationLogos)weakSelf.onMatchStationLogos(source);}]];
+                }
+            }
             if(tvbox){
                 [menuActions addObject:[UIAction actionWithTitle:@"导出完整 JSON" image:[UIImage systemImageNamed:@"doc.text"] identifier:nil handler:^(UIAction *a){if(weakSelf.onExportResource)weakSelf.onExportResource(source,@"catalog-json");}]];
                 [menuActions addObject:[UIAction actionWithTitle:@"导出资源 ZIP（含可获取的 PY / JS）" image:[UIImage systemImageNamed:@"archivebox"] identifier:nil handler:^(UIAction *a){if(weakSelf.onExportResource)weakSelf.onExportResource(source,@"catalog-zip");}]];
@@ -1152,6 +1219,21 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
         }
         NSMutableArray *actions=[NSMutableArray array];
         if(source.length)[actions addObject:[UIAction actionWithTitle:[source hasPrefix:@"plugin:"]?@"编辑资源":@"编辑配置与 EPG" image:[UIImage systemImageNamed:@"pencil"] identifier:nil handler:^(UIAction *a){if(w.onEditProfile)w.onEditProfile(source);}]];
+        if([w isLiveCapableProfile:profile]){
+            BOOL chLogoOn=profile[@"showChannelLogo"]?[profile[@"showChannelLogo"] boolValue]:[ProfileStore isChannelLogoEnabledForSource:source];
+            BOOL cornerLogoOn=profile[@"showPlayerCornerLogo"]?[profile[@"showPlayerCornerLogo"] boolValue]:[ProfileStore isPlayerCornerLogoEnabledForSource:source];
+            UIAction *toggleListLogo=[UIAction actionWithTitle:chLogoOn?@"关闭此资源台标显示":@"开启此资源台标显示" image:[UIImage systemImageNamed:chLogoOn?@"photo.fill":@"photo"] identifier:nil handler:^(UIAction *a){[w toggleChannelLogoForSource:source enabled:!chLogoOn];}];
+            BOOL previewOn=profile[@"showChannelPreview"]?[profile[@"showChannelPreview"] boolValue]:[ProfileStore isChannelPreviewEnabledForSource:source];
+            BOOL telemetryOn=profile[@"showChannelTelemetry"]?[profile[@"showChannelTelemetry"] boolValue]:[ProfileStore isChannelTelemetryEnabledForSource:source];
+            UIAction *toggleCorner=[UIAction actionWithTitle:cornerLogoOn?@"关闭播放器右上角台标":@"开启播放器右上角台标" image:[UIImage systemImageNamed:cornerLogoOn?@"tv.inset.filled":@"tv"] identifier:nil handler:^(UIAction *a){[w togglePlayerCornerLogoForSource:source enabled:!cornerLogoOn];}];
+            UIAction *togglePreview=[UIAction actionWithTitle:previewOn?@"关闭频道实时预览图":@"开启频道实时预览图" image:[UIImage systemImageNamed:previewOn?@"photo.on.rectangle.angled":@"rectangle.slash"] identifier:nil handler:^(UIAction *a){[w toggleChannelPreviewForSource:source enabled:!previewOn];}];
+            UIAction *toggleTelemetry=[UIAction actionWithTitle:telemetryOn?@"关闭频道速率与延迟":@"开启频道速率与延迟" image:[UIImage systemImageNamed:@"speedometer"] identifier:nil handler:^(UIAction *a){[w toggleChannelTelemetryForSource:source enabled:!telemetryOn];}];
+            [actions addObject:toggleListLogo];
+            [actions addObject:toggleCorner];
+            [actions addObject:togglePreview];
+            [actions addObject:toggleTelemetry];
+            if(w.onMatchStationLogos)[actions addObject:[UIAction actionWithTitle:@"智能匹配官方台标与节目单" image:[UIImage systemImageNamed:@"sparkles.tv"] identifier:nil handler:^(UIAction *a){w.onMatchStationLogos(source);}]];
+        }
         [actions addObject:[UIAction actionWithTitle:@"导出单项资源文件" image:[UIImage systemImageNamed:@"square.and.arrow.up"] identifier:nil handler:^(UIAction *a){if(w.onExportResource)w.onExportResource(source,@"single");}]];
         if(canProbe)[actions addObject:[UIAction actionWithTitle:@"单条测速连接" image:[UIImage systemImageNamed:@"network"] identifier:nil handler:^(UIAction *a){[w probeSingleProfile:source];}]];
         if(copyableURL.length)[actions addObject:[UIAction actionWithTitle:@"复制资源地址" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(UIAction *a){UIPasteboard.generalPasteboard.string=[HostLogRedactor redactText:copyableURL];}]];

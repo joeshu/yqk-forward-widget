@@ -74,6 +74,11 @@ class BoundedCache:
         self.lock = threading.RLock()
         self.hits = self.misses = self.shared = 0
 
+    def clear(self):
+        with self.lock:
+            self.entries.clear()
+            self.bytes = 0
+
     def _purge(self):
         now = self.clock()
         for key, (_, expiry, weight) in list(self.entries.items()):
@@ -1799,19 +1804,38 @@ def _post_bytes(url, body, headers, timeout, max_bytes=8 * 1024 * 1024):
     except Exception:
         _requests = None
     if _requests is not None:
-        resp = _requests.post(url, data=body, headers=headers, timeout=timeout)
-        resp.raise_for_status()
-        if len(resp.content) > max_bytes:
-            raise ValueError("response exceeds size limit")
-        return resp.content
+        try:
+            resp = _requests.post(url, data=body, headers=headers, timeout=timeout)
+            resp.raise_for_status()
+            raw_content = resp.content
+            if len(raw_content) > max_bytes:
+                raise ValueError("response exceeds size limit")
+            if raw_content[:2] == b"\x1f\x8b":
+                try:
+                    raw_content = _gzip.decompress(raw_content)
+                except Exception:
+                    pass
+            return raw_content
+        except Exception:
+            pass
     req = _ureq.Request(url, data=body, headers=headers, method="POST")
-    with _ureq.urlopen(req, timeout=timeout) as r:
-        raw = r.read(max_bytes + 1)
-        encoding = str(r.headers.get("Content-Encoding", "") or "").strip().lower()
+    try:
+        with _ureq.urlopen(req, timeout=timeout) as r:
+            raw = r.read(max_bytes + 1)
+            encoding = str(r.headers.get("Content-Encoding", "") or "").strip().lower()
+    except Exception:
+        _ctx = ssl._create_unverified_context()
+        with _ureq.urlopen(req, timeout=timeout, context=_ctx) as r:
+            raw = r.read(max_bytes + 1)
+            encoding = str(r.headers.get("Content-Encoding", "") or "").strip().lower()
     if len(raw) > max_bytes:
         raise ValueError("response exceeds size limit")
-    if encoding == "gzip":
-        return _gzip.decompress(raw)
+    if encoding == "gzip" or raw[:2] == b"\x1f\x8b":
+        try:
+            return _gzip.decompress(raw)
+        except Exception:
+            if encoding == "gzip":
+                raise
     return raw
 
 
@@ -1930,8 +1954,17 @@ def _fetch_fallback_video_model(fb_url, seed_hint=""):
     if not isinstance(fb_url, str) or not fb_url.startswith(("http://", "https://")):
         return None
     req = _ureq.Request(fb_url, headers={"User-Agent": _PLAYBACK_UA, "Accept": "application/json"})
-    with _ureq.urlopen(req, timeout=15) as r:
-        raw = r.read(4 * 1024 * 1024)
+    try:
+        with _ureq.urlopen(req, timeout=15) as r:
+            raw = r.read(4 * 1024 * 1024)
+    except Exception:
+        with _ureq.urlopen(req, timeout=15, context=ssl._create_unverified_context()) as r:
+            raw = r.read(4 * 1024 * 1024)
+    if raw[:2] == b"\x1f\x8b":
+        try:
+            raw = _gzip.decompress(raw)
+        except Exception:
+            pass
     j = _json.loads(raw.decode("utf-8", "replace"))
     if not isinstance(j, dict):
         return None
@@ -2154,7 +2187,7 @@ def _signed_model(vid):
     ent = _SIGN_CACHE.get(str(vid))
     if ent and _time.time() - ent[0] < _SIGN_CACHE_TTL:
         return ent[1]
-    deadline = _time.monotonic() + 15
+    deadline = _time.monotonic() + 45
     last_err = None
     dev = None
     for attempt in range(3):
@@ -2216,6 +2249,9 @@ def _signed_model(vid):
                         return vm
             except Exception as e:
                 last_err = e
+    global _DEVICE_SESSION
+    with _DEVICE_LOCK:
+        _DEVICE_SESSION = None
     _trace("hgtv_signed_model_error", episode_id=vid,
            err=(type(last_err).__name__ if last_err else "request failed"))
     return None
@@ -2268,29 +2304,36 @@ def _video_quality(item, fallback=""):
     return fallback if fallback in _QORDER else fallback
 
 
-def _pick_best(vm, want):
-    """挑可解的最高档（bvc2 排后）。"""
+def _quality_candidates(vm):
+    """返回按清晰度从高到低排序的所有可用档位 [(it, q), ...]（排除 bytevc2/bvc2）。"""
     vl = (vm or {}).get("video_list") or {}
     cands = []
     for k, it in vl.items():
+        if not isinstance(it, dict):
+            continue
         q = _video_quality(it, str(k))
-        gear = str(it.get("gear_des_key") or "")
+        gear = str(it.get("gear_des_key") or "").lower()
         metadata = _video_metadata(it)
         bad = 1 if ("bytevc2" in gear or "bvc2" in gear) else 0
         if str(metadata.get("vtype") or it.get("vtype") or "").lower() in ("bytevc2", "bvc2"):
             bad = 1
         order = _QORDER.index(q) if q in _QORDER else 99
         cands.append((bad, order, q, it))
-    if not cands:
-        return None
     cands.sort(key=lambda x: (x[0], x[1]))
-    if want:
-        for c in cands:
-            if c[2] == want and c[0] == 0:
-                return c[3], c[2]
+    return [(c[3], c[2]) for c in cands if c[0] == 0]
+
+
+def _pick_best(vm, want):
+    """挑可解的最高档（bvc2 排后）。"""
+    usable = _quality_candidates(vm)
+    if not usable:
         return None
-    usable = [c for c in cands if c[0] == 0]
-    return (usable[0][3], usable[0][2]) if usable else None
+    if want:
+        for it, q in usable:
+            if q == want:
+                return it, q
+        return None
+    return usable[0]
 
 
 ########## 纯 Python CENC 解密（宿主无 ffmpeg 时使用） ##########
@@ -2353,8 +2396,14 @@ def _u64b(d, o):
 
 
 def _parse_track(moov, track):
-    stbl = _fd_box(moov, "stbl", track["body"])
+    # Scope searches strictly inside this track so an unencrypted audio track
+    # never borrows the following video track's saiz/saio/senc boxes.
+    moov = moov[track["offset"]:track["offset"] + track["size"]]
+    stbl = _fd_box(moov, "stbl", track["header"])
     if not stbl:
+        return None
+    stbl_slice = moov[stbl["offset"]:stbl["offset"] + stbl["size"]]
+    if b"encv" not in stbl_slice and b"enca" not in stbl_slice and b"sinf" not in stbl_slice:
         return None
     stsz = _bx_body(moov, "stsz", stbl["body"])
     stsc = _bx_body(moov, "stsc", stbl["body"])
@@ -2365,6 +2414,16 @@ def _parse_track(moov, track):
         return None
     if len(stsz) < 12 or len(stsc) < 8 or len(saiz) < 9 or len(saio) < 12:
         return None
+    iv_size = 8
+    tenc_pos = stbl_slice.find(b"tenc")
+    if tenc_pos >= 4 and tenc_pos + 11 <= len(stbl_slice):
+        cand_iv = stbl_slice[tenc_pos + 10]
+        if cand_iv in (8, 16):
+            iv_size = cand_iv
+    senc_box = _fd_box(moov, "senc", stbl["body"])
+    senc_flags = 0
+    if senc_box and senc_box["body"] + 4 <= senc_box["offset"] + senc_box["size"]:
+        senc_flags = int.from_bytes(moov[senc_box["body"] + 1:senc_box["body"] + 4], "big")
     dsize = _u32b(stsz, 4)
     scount = _u32b(stsz, 8)
     sizes = [dsize] * scount if dsize else []
@@ -2411,7 +2470,7 @@ def _parse_track(moov, track):
     sver = saio[0]
     aux_offset = (_u64b(saio, 8) if len(saio) >= 16 else -1) if sver == 1 else (_u32b(saio, 8) if len(saio) >= 12 else -1)
     return {"sizes": sizes, "offsets": offs, "spc": spc, "auxOffset": aux_offset,
-            "auxSizes": aux_sizes, "sampleCount": scount}
+            "auxSizes": aux_sizes, "sampleCount": scount, "ivSize": iv_size, "sencFlags": senc_flags}
 
 
 def _build_samples(data, tracks):
@@ -2419,7 +2478,9 @@ def _build_samples(data, tracks):
     for tr in tracks:
         idx = 0
         apos = 0
-        atotal = sum(max(s, 8) for s in tr["auxSizes"])
+        iv_size = tr.get("ivSize") or 8
+        senc_flags = tr.get("sencFlags") or 0
+        atotal = sum(max(s, iv_size) for s in tr["auxSizes"])
         if tr["auxOffset"] < 0 or tr["auxOffset"] + atotal > len(data):
             raise ValueError("aux out of range")
         aux = data[tr["auxOffset"]:tr["auxOffset"] + atotal]
@@ -2432,13 +2493,27 @@ def _build_samples(data, tracks):
                 if idx >= tr["sampleCount"]:
                     break
                 size = tr["sizes"][idx]
-                asz = max(tr["auxSizes"][idx] if idx < len(tr["auxSizes"]) else 8, 8)
+                asz = max(tr["auxSizes"][idx] if idx < len(tr["auxSizes"]) else iv_size, iv_size)
                 if apos + asz > len(aux):
                     raise ValueError("sample index out of range")
                 iv = bytearray(16)
-                take = min(8, asz)
+                take = min(iv_size, asz, 16)
                 iv[:take] = aux[apos:apos + take]
-                out.append((off, off + size, bytes(iv)))
+                subsamples = None
+                if (senc_flags & 2) or (asz > iv_size and asz >= iv_size + 8 and (asz - iv_size - 2) % 6 == 0):
+                    sub_count = _struct.unpack_from(">H", aux, apos + iv_size)[0]
+                    if 0 < sub_count <= 4096 and iv_size + 2 + sub_count * 6 == asz:
+                        subs = []
+                        sub_off = apos + iv_size + 2
+                        total_sub = 0
+                        for _si in range(sub_count):
+                            cl_b, enc_b = _struct.unpack_from(">HI", aux, sub_off)
+                            subs.append((cl_b, enc_b))
+                            total_sub += cl_b + enc_b
+                            sub_off += 6
+                        if total_sub == size:
+                            subsamples = subs
+                out.append((off, off + size, bytes(iv), subsamples))
                 off += size
                 idx += 1
                 apos += asz
@@ -2627,8 +2702,14 @@ def _cenc_decrypt(src, dst, key):
         raise RuntimeError("pycryptodome 不可用")
     with open(src, "rb") as source_file:
         data = source_file.read()
-    ftyp = _u32b(data, 0)
-    moov = _rd_box(data, ftyp)
+    moov = None
+    for top_box in _iter_mp4_boxes(data, 0, len(data)):
+        if top_box["type"] == "moov":
+            moov = top_box
+            break
+    if not moov:
+        ftyp = _u32b(data, 0) if len(data) >= 8 else 0
+        moov = _rd_box(data, ftyp)
     if not moov or moov["type"] != "moov":
         raise ValueError("invalid moov")
     mb = data[moov["body"]:moov["offset"] + moov["size"]]
@@ -2645,29 +2726,47 @@ def _cenc_decrypt(src, dst, key):
     if not samples:
         raise ValueError("CENC sample table is empty")
     out = bytearray(data)
-    header = bytearray(data[:moov["offset"] + moov["size"]])
-    _restore_protected_entries(header, moov)
-    _replace_sinf(header)
-    _clear_aux_boxes(header)
-    out[:len(header)] = header
-    for start, end, iv in samples:
+    moov_buf = bytearray(data[moov["offset"]:moov["offset"] + moov["size"]])
+    moov_local = {"offset": 0, "size": moov["size"], "type": "moov", "header": moov["header"], "body": moov["header"]}
+    _restore_protected_entries(moov_buf, moov_local)
+    _replace_sinf(moov_buf)
+    _clear_aux_boxes(moov_buf)
+    out[moov["offset"]:moov["offset"] + moov["size"]] = moov_buf
+    for sample_item in samples:
+        start, end, iv = sample_item[0], sample_item[1], sample_item[2]
+        subsamples = sample_item[3] if len(sample_item) > 3 else None
         if start >= len(out):
             continue
         end = min(end, len(out))
         counter_block = bytes(iv[:16]).ljust(16, b"\0")
-        encrypted = bytes(out[start:end])
         if _HOSTCRYPTO is not None:
             cipher = _HOSTCRYPTO.AES_CTR(key, counter_block)
             try:
-                out[start:end] = cipher.update(encrypted)
+                if not subsamples:
+                    out[start:end] = cipher.update(bytes(out[start:end]))
+                else:
+                    pos = start
+                    for clear_b, enc_b in subsamples:
+                        pos += clear_b
+                        seg_end = min(pos + enc_b, end)
+                        if enc_b > 0 and pos < seg_end:
+                            out[pos:seg_end] = cipher.update(bytes(out[pos:seg_end]))
+                        pos = seg_end
             finally:
                 cipher.close()
         else:
-            # Keep the bundled PyCryptodome-compatible implementation as the
-            # fallback for desktop runners and older host builds.
             cnt = int.from_bytes(counter_block, "big")
             cipher = _AES.new(key, _AES.MODE_CTR, counter=_Counter.new(128, initial_value=cnt))
-            out[start:end] = cipher.decrypt(encrypted)
+            if not subsamples:
+                out[start:end] = cipher.decrypt(bytes(out[start:end]))
+            else:
+                pos = start
+                for clear_b, enc_b in subsamples:
+                    pos += clear_b
+                    seg_end = min(pos + enc_b, end)
+                    if enc_b > 0 and pos < seg_end:
+                        out[pos:seg_end] = cipher.decrypt(bytes(out[pos:seg_end]))
+                    pos = seg_end
     with open(dst, "wb") as f:
         f.write(bytes(out))
     return dst
@@ -2736,22 +2835,72 @@ def _transcode_h264(ff, src, dst):
     return pr.returncode == 0 and _os.path.exists(dst) and _verify_mp4(dst)
 
 
+_DECRYPT_FLIGHTS_LOCK = _threading.Lock()
+_DECRYPT_FLIGHTS = {}
+
+
+def _item_explicit_size(it):
+    if not isinstance(it, dict):
+        return 0
+    meta = _video_metadata(it)
+    for val in (it.get("size"), meta.get("size"), meta.get("vsize")):
+        try:
+            n = int(val or 0)
+            if n > 0:
+                return n
+        except (ValueError, TypeError):
+            pass
+    return 0
+
+
 def _decrypt_to_file(vid, want):
+    flight_key = "%s:%s" % (vid, want or "")
+    with _DECRYPT_FLIGHTS_LOCK:
+        flight = _DECRYPT_FLIGHTS.get(flight_key)
+        owner = flight is None
+        if owner:
+            flight = _Flight()
+            _DECRYPT_FLIGHTS[flight_key] = flight
+    if not owner:
+        flight.event.wait(90)
+        return flight.value
+    try:
+        res = _decrypt_to_file_impl(vid, want)
+        flight.value = res
+        return res
+    finally:
+        with _DECRYPT_FLIGHTS_LOCK:
+            if _DECRYPT_FLIGHTS.get(flight_key) is flight:
+                _DECRYPT_FLIGHTS.pop(flight_key, None)
+        flight.event.set()
+
+
+def _decrypt_to_file_impl(vid, want):
     _os.makedirs(_DEC_DIR, exist_ok=True)
     vm = _signed_model(vid)
     if not vm:
         return None
-    selected = _pick_best(vm, want)
-    if not selected:
+    primary = _pick_best(vm, want)
+    if not primary:
         return None
-    it, q = selected
-    _trace("hgtv_quality_selected", episode_id=vid, quality=q)
-    dst = _os.path.join(_DEC_DIR, "%s_%s.mp4" % (vid, q))
+    all_cands = _quality_candidates(vm)
+    ordered = [primary]
+    for cand in all_cands:
+        if cand[1] != primary[1]:
+            ordered.append(cand)
+    if len(ordered) > 1 and _item_explicit_size(ordered[0][0]) > 15 * 1024 * 1024:
+        for idx, cand in enumerate(ordered):
+            sz = _item_explicit_size(cand[0])
+            if 0 < sz <= 15 * 1024 * 1024:
+                if idx > 0:
+                    fast_cand = ordered.pop(idx)
+                    ordered.insert(0, fast_cand)
+                break
 
     # 顺手清掉同一集的其它无效缓存（修复前留下的加密档/截断档）
     try:
         for f in _os.listdir(_DEC_DIR):
-            if f.startswith(str(vid) + "_") and f.endswith(".mp4"):
+            if f.startswith(str(vid) + "_") and f.endswith(".mp4") and not f.endswith((".tmp.mp4", ".enc.mp4")):
                 fp = _os.path.join(_DEC_DIR, f)
                 if not _verify_mp4(fp):
                     _os.remove(fp)
@@ -2759,112 +2908,137 @@ def _decrypt_to_file(vid, want):
     except OSError:
         pass
 
-    # 命中缓存也要校验
-    if _os.path.exists(dst):
-        if _verify_mp4(dst):
-            return dst
+    for it, q in ordered:
+        _trace("hgtv_quality_selected", episode_id=vid, quality=q)
+        dst = _os.path.join(_DEC_DIR, "%s_%s.mp4" % (vid, q))
+
+        # 命中缓存也要校验
+        if _os.path.exists(dst):
+            if _verify_mp4(dst):
+                return dst
+            try:
+                _os.remove(dst)
+                _trace("hgtv_cache_invalid", episode_id=vid, quality=q)
+            except OSError:
+                pass
+
+        url = _resolve_media_url(it, vm)
+        if not url:
+            continue
+
+        _sa = it.get("spade_a") or (it.get("encrypt_info") or {}).get("spade_a")
+        key = _content_key(_sa) if _sa else None
+
+        # 加密档但拿不到密钥：绝不落盘（否则就是黑屏源）
+        if _is_encrypted(it) and not key:
+            _trace("hgtv_signed_no_key", episode_id=vid, quality=q)
+            continue
+
+        tmp = dst + ".tmp.mp4"
+        req = _ureq.Request(url, headers={"User-Agent": _PLAYBACK_UA})
+        _cur_th = _threading.current_thread()
+        _prev_stream_flag = getattr(_cur_th, "_host_media_stream_read", False)
+        _cur_th._host_media_stream_read = True
+        dl_ok = False
         try:
-            _os.remove(dst)
-            _trace("hgtv_cache_invalid", episode_id=vid, quality=q)
-        except OSError:
-            pass
+            try:
+                resp_cm = _ureq.urlopen(req, timeout=60)
+            except Exception:
+                resp_cm = _ureq.urlopen(req, timeout=60, context=ssl._create_unverified_context())
+            with resp_cm as r, open(tmp, "wb") as f:
+                _total_dl = 0
+                while True:
+                    _chunk = r.read(65536)
+                    if not _chunk:
+                        break
+                    _total_dl += len(_chunk)
+                    if _total_dl > 32 * 1024 * 1024:
+                        raise ValueError("CENC MP4 exceeds 64 MB limit")
+                    f.write(_chunk)
+            dl_ok = _total_dl > 0
+        except Exception as e:
+            _trace("hgtv_download_failed", episode_id=vid, quality=q, err=str(e)[:120])
+            try:
+                if _os.path.exists(tmp):
+                    _os.remove(tmp)
+            except OSError:
+                pass
+            continue
+        finally:
+            _cur_th._host_media_stream_read = _prev_stream_flag
+        if not dl_ok:
+            continue
 
-    url = _resolve_media_url(it, vm)
-    if not url:
-        return None
+        ff = _ffmpeg_path()
+        if key and _is_encrypted(it) and not ff:
+            # 宿主没有 ffmpeg -> 纯 Python CENC 解密
+            enc = dst + ".enc.mp4"
+            _os.replace(tmp, enc)
+            try:
+                t0 = _time.time()
+                _cenc_decrypt(enc, tmp, bytes.fromhex(key))
+                _trace("hgtv_pure_cenc_ok", episode_id=vid, elapsed_ms=round((_time.time() - t0) * 1000))
+            except Exception as e:
+                _trace("hgtv_pure_cenc_failed", episode_id=vid, err=str(e)[:140])
+                for p in (enc, tmp):
+                    try:
+                        if _os.path.exists(p):
+                            _os.remove(p)
+                    except OSError:
+                        pass
+                continue
+            try:
+                _os.remove(enc)
+            except OSError:
+                pass
+        if key and _is_encrypted(it) and ff:
+            enc = dst + ".enc.mp4"
+            _os.replace(tmp, enc)
+            try:
+                pr = _subprocess.run([ff, "-y", "-v", "error", "-decryption_key", key,
+                                      "-i", enc, "-c", "copy", "-movflags", "+faststart",
+                                      "-f", "mp4", tmp], capture_output=True, text=True, timeout=600)
+            except Exception as e:
+                _trace("hgtv_ffmpeg_exec_failed", episode_id=vid, err=str(e)[:120])
+                for p in (enc, tmp):
+                    try:
+                        if _os.path.exists(p):
+                            _os.remove(p)
+                    except OSError:
+                        pass
+                continue
+            try:
+                _os.remove(enc)
+            except OSError:
+                pass
+            if pr.returncode != 0 or not _os.path.exists(tmp):
+                _trace("hgtv_signed_decrypt_failed", episode_id=vid, err=(pr.stderr or "")[:160])
+                continue
 
-    _sa = it.get("spade_a") or (it.get("encrypt_info") or {}).get("spade_a")
-    key = _content_key(_sa) if _sa else None
-
-    # 加密档但拿不到密钥：绝不落盘（否则就是黑屏源）
-    if _is_encrypted(it) and not key:
-        _trace("hgtv_signed_no_key", episode_id=vid, quality=q)
-        return None
-
-    tmp = dst + ".tmp.mp4"
-    req = _ureq.Request(url, headers={"User-Agent": _PLAYBACK_UA})
-    _cur_th = _threading.current_thread()
-    _prev_stream_flag = getattr(_cur_th, "_host_media_stream_read", False)
-    _cur_th._host_media_stream_read = True
-    try:
-        with _ureq.urlopen(req, timeout=60) as r, open(tmp, "wb") as f:
-            _total_dl = 0
-            while True:
-                _chunk = r.read(65536)
-                if not _chunk:
-                    break
-                _total_dl += len(_chunk)
-                if _total_dl > 32 * 1024 * 1024:
-                    raise ValueError("CENC MP4 exceeds 32 MB limit")
-                f.write(_chunk)
-    finally:
-        _cur_th._host_media_stream_read = _prev_stream_flag
-
-    ff = _ffmpeg_path()
-    if key and _is_encrypted(it) and not ff:
-        # 宿主没有 ffmpeg -> 纯 Python CENC 解密
-        enc = dst + ".enc.mp4"
-        _os.replace(tmp, enc)
-        try:
+        # 可选：HEVC -> H.264（老播放器黑屏时用 HGTV_TRANSCODE=1）
+        if _os.environ.get("HGTV_TRANSCODE") == "1" and ff:
+            h264 = dst + ".h264.mp4"
             t0 = _time.time()
-            _cenc_decrypt(enc, tmp, bytes.fromhex(key))
-            _trace("hgtv_pure_cenc_ok", episode_id=vid, elapsed_ms=round((_time.time() - t0) * 1000))
-        except Exception as e:
-            _trace("hgtv_pure_cenc_failed", episode_id=vid, err=str(e)[:140])
+            if _transcode_h264(ff, tmp, h264):
+                _os.replace(h264, tmp)
+                _trace("hgtv_transcoded", episode_id=vid, elapsed_ms=round((_time.time() - t0) * 1000))
+            else:
+                try:
+                    _os.remove(h264)
+                except OSError:
+                    pass
+
+        if not _verify_mp4(tmp):
+            _trace("hgtv_signed_verify_failed", episode_id=vid, quality=q)
             try:
-                _os.remove(enc)
+                _os.remove(tmp)
             except OSError:
                 pass
-            return None
-        try:
-            _os.remove(enc)
-        except OSError:
-            pass
-    if key and _is_encrypted(it) and ff:
-        enc = dst + ".enc.mp4"
-        _os.replace(tmp, enc)
-        try:
-            pr = _subprocess.run([ff, "-y", "-v", "error", "-decryption_key", key,
-                                  "-i", enc, "-c", "copy", "-movflags", "+faststart",
-                                  "-f", "mp4", tmp], capture_output=True, text=True, timeout=600)
-        except Exception as e:
-            _trace("hgtv_ffmpeg_exec_failed", episode_id=vid, err=str(e)[:120])
-            try:
-                _os.remove(enc)
-            except OSError:
-                pass
-            return None
-        try:
-            _os.remove(enc)
-        except OSError:
-            pass
-        if pr.returncode != 0 or not _os.path.exists(tmp):
-            _trace("hgtv_signed_decrypt_failed", episode_id=vid, err=(pr.stderr or "")[:160])
-            return None
+            continue
 
-    # 可选：HEVC -> H.264（老播放器黑屏时用 HGTV_TRANSCODE=1）
-    if _os.environ.get("HGTV_TRANSCODE") == "1" and ff:
-        h264 = dst + ".h264.mp4"
-        t0 = _time.time()
-        if _transcode_h264(ff, tmp, h264):
-            _os.replace(h264, tmp)
-            _trace("hgtv_transcoded", episode_id=vid, elapsed_ms=round((_time.time() - t0) * 1000))
-        else:
-            try:
-                _os.remove(h264)
-            except OSError:
-                pass
-
-    if not _verify_mp4(tmp):
-        _trace("hgtv_signed_verify_failed", episode_id=vid, quality=q)
-        try:
-            _os.remove(tmp)
-        except OSError:
-            pass
-        return None
-
-    _os.replace(tmp, dst)
-    return dst
+        _os.replace(tmp, dst)
+        return dst
+    return None
 
 
 class _DecHandler(_BHTTPH):
@@ -2986,6 +3160,16 @@ class Spider:
             global _DEC_DIR
             _DEC_DIR = _os.path.join(_os.path.realpath(data_dir), 'hgtv-python-cache')
         _trace('hgtv_init')
+
+    def clear_cache(self):
+        try:
+            self.cache.clear()
+        except Exception:
+            pass
+        try:
+            _SIGN_CACHE.clear()
+        except Exception:
+            pass
 
     def homeContent(self, filter=False):
         return {'class': [{'type_id': item['id'], 'type_name': item['title']} for item in self.catalog.categories()], 'filters': {}}
