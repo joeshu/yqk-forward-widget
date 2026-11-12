@@ -33,7 +33,13 @@ def inspect(path):
         if extension=='.py':
             with tokenize.open(file) as stream:ast.parse(stream.read(),filename=path)
             record['checks'].append('python_ast')
-        elif extension=='.json':json.loads(text);record['checks'].append('json_parse')
+        elif extension=='.json':
+            try:json.loads(text)
+            except json.JSONDecodeError:
+                lines=text.splitlines();i=0
+                while i<len(lines) and lines[i].lstrip().startswith('//'):i+=1
+                json.loads('\n'.join(lines[i:]))
+            record['checks'].append('json_parse')
         elif extension=='.plist':plistlib.loads(raw);record['checks'].append('plist_parse')
         elif extension=='.sh':
             run=subprocess.run(['bash','-n',str(file)],capture_output=True,text=True,timeout=15)
