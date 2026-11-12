@@ -42,9 +42,7 @@ static NSMutableDictionary<NSString *, NSDictionary *> *HLSRouteProbeCacheStore(
     if (bytes[0] == 0x47 && (len < 189 || bytes[188] == 0x47)) return @"mpegts";
     NSUInteger offset = 0;
     if (len >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF) offset = 3;
-    while (offset < len && (bytes[offset] == ' ' || bytes[offset] == '	' || bytes[offset] == '
-' || bytes[offset] == '
-')) offset++;
+    while (offset < len && (bytes[offset] == ' ' || bytes[offset] == '\t' || bytes[offset] == '\n' || bytes[offset] == '\r')) offset++;
     if (len - offset >= 7 && memcmp(bytes + offset, "#EXTM3U", 7) == 0) return @"hls";
     if (len - offset >= 4 && (memcmp(bytes + offset, "<MPD", 4) == 0 || memcmp(bytes + offset, "<?xm", 4) == 0)) return @"dash";
     return nil;

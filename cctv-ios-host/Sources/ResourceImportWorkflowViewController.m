@@ -928,7 +928,7 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
     if(!raw.length){[self showFailure:@"请先输入或粘贴资源链接、JSON 配置或脚本内容"];return;}
 
     // Support direct paste of raw JSON / M3U / WeBox / JS / Python content
-    BOOL looksLikeRawContent=ResourceContentIsHTML([raw dataUsingEncoding:NSUTF8StringEncoding])||([raw hasPrefix:@"{"]&&[raw hasSuffix:@"}"])||([raw hasPrefix:@"["]&&[raw hasSuffix:@"]"])||(([raw hasPrefix:@"//"]||[raw hasPrefix:@"/*"])&&[raw containsString:@""sites""]&&[raw hasSuffix:@"}"])||[raw hasPrefix:@"#EXTM3U"]||[raw containsString:@"#EXTINF:"]||[raw containsString:@"WeBox.define("]||[raw containsString:@"class Spider"]||[raw containsString:@"module.exports"]||[raw containsString:@"export default"];
+    BOOL looksLikeRawContent=ResourceContentIsHTML([raw dataUsingEncoding:NSUTF8StringEncoding])||([raw hasPrefix:@"{"]&&[raw hasSuffix:@"}"])||([raw hasPrefix:@"["]&&[raw hasSuffix:@"]"])||(([raw hasPrefix:@"//"]||[raw hasPrefix:@"/*"])&&[raw containsString:@"\"sites\""]&&[raw hasSuffix:@"}"])||[raw hasPrefix:@"#EXTM3U"]||[raw containsString:@"#EXTINF:"]||[raw containsString:@"WeBox.define("]||[raw containsString:@"class Spider"]||[raw containsString:@"module.exports"]||[raw containsString:@"export default"];
     if(looksLikeRawContent){
         [self.view endEditing:YES];self.restoredAddress=raw;self.taskKind=@"url";self.busy=YES;self.stage=@"正在识别粘贴内容…";NSUInteger generation=++self.generation;NSString *hint=[self runtimeHint];[self updateView];
         NSData *rawData=[raw dataUsingEncoding:NSUTF8StringEncoding];

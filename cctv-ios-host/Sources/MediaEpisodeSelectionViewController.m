@@ -413,7 +413,7 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
         act.state=(style==current)?UIMenuElementStateOn:UIMenuElementStateOff;
         [styleActions addObject:act];
     }
-    UIMenu *styleSubmenu=[UIMenu menuWithTitle:@"选集排列样式" options:UIMenuOptionsDisplayInline children:styleActions];
+    UIMenu *styleSubmenu=[UIMenu menuWithTitle:@"选集排列样式" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:styleActions];
     UIAction *badgeToggle=[UIAction actionWithTitle:@"显示分集备注与状态角标" image:[UIImage systemImageNamed:@"tag"] identifier:nil handler:^(__kindof UIAction * _Nonnull action){
         CCTVEpisodeSetShowRemarksBadgeEnabled(!showBadge);
         [weakSelf rebuildSelection];
