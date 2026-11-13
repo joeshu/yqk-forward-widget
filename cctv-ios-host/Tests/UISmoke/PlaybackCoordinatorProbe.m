@@ -20,7 +20,7 @@ static void drain(void){[NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithT
 BOOL PlaybackCoordinatorRunSmokeChecks(void){@autoreleasepool{
     coordinatorFailures=0;
     PlaybackCoordinator *coordinator=[PlaybackCoordinator shared];id<PlaybackSession> previous=coordinator.currentSession;if(previous)[coordinator releaseSession:previous];
-    check([coordinator play]==MPRemoteCommandHandlerNoSuchContent,@"no content returns an explicit status");
+    check([coordinator play]==MPRemoteCommandHandlerStatusNoSuchContent,@"no content returns an explicit status");
     FixtureSession *live=[FixtureSession new],*vod=[FixtureSession new];
     [coordinator acquireSession:live];[coordinator play];[coordinator play];check(live.playing,@"repeated play stays playing");
     [coordinator pause];[coordinator pause];check(!live.playing,@"repeated pause stays paused");
@@ -32,6 +32,6 @@ BOOL PlaybackCoordinatorRunSmokeChecks(void){@autoreleasepool{
     [NSNotificationCenter.defaultCenter postNotificationName:AVAudioSessionInterruptionNotification object:nil userInfo:@{AVAudioSessionInterruptionTypeKey:@(AVAudioSessionInterruptionTypeEnded),AVAudioSessionInterruptionOptionKey:@(AVAudioSessionInterruptionOptionShouldResume)}];drain();check(!vod.playing,@"explicit pause cancels automatic interruption resume");
     [coordinator play];[NSNotificationCenter.defaultCenter postNotificationName:AVAudioSessionRouteChangeNotification object:nil userInfo:@{AVAudioSessionRouteChangeReasonKey:@(AVAudioSessionRouteChangeReasonOldDeviceUnavailable)}];drain();check(!vod.playing,@"unplugged headphones pause playback");
     [NSNotificationCenter.defaultCenter postNotificationName:AVAudioSessionMediaServicesWereResetNotification object:nil];drain();check(vod.resets==1&&!vod.playing,@"audio reset does not silently restart playback");
-    [coordinator releaseSession:vod];check([coordinator pause]==MPRemoteCommandHandlerNoSuchContent,@"released content cannot be controlled");
+    [coordinator releaseSession:vod];check([coordinator pause]==MPRemoteCommandHandlerStatusNoSuchContent,@"released content cannot be controlled");
     if(previous)[coordinator acquireSession:previous];return coordinatorFailures==0;
 }}

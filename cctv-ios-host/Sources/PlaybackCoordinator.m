@@ -27,9 +27,9 @@
     self.interruptedSession=nil;self.resumeAfterInterruption=NO;
 }
 - (void)releaseSession:(id<PlaybackSession>)session {if(self.currentSession==session){self.currentSession=nil;MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo=nil;}}
-- (MPRemoteCommandHandlerStatus)play {if(!self.currentSession||![self.currentSession sessionHasContent])return MPRemoteCommandHandlerNoSuchContent;[self.currentSession sessionPlay];return MPRemoteCommandHandlerStatusSuccess;}
-- (MPRemoteCommandHandlerStatus)pause {self.resumeAfterInterruption=NO;if(!self.currentSession||![self.currentSession sessionHasContent])return MPRemoteCommandHandlerNoSuchContent;[self.currentSession sessionPause];return MPRemoteCommandHandlerStatusSuccess;}
-- (MPRemoteCommandHandlerStatus)step:(NSInteger)direction {return [self.currentSession sessionStep:direction]?MPRemoteCommandHandlerStatusSuccess:MPRemoteCommandHandlerNoSuchContent;}
+- (MPRemoteCommandHandlerStatus)play {if(!self.currentSession||![self.currentSession sessionHasContent])return MPRemoteCommandHandlerStatusNoSuchContent;[self.currentSession sessionPlay];return MPRemoteCommandHandlerStatusSuccess;}
+- (MPRemoteCommandHandlerStatus)pause {self.resumeAfterInterruption=NO;if(!self.currentSession||![self.currentSession sessionHasContent])return MPRemoteCommandHandlerStatusNoSuchContent;[self.currentSession sessionPause];return MPRemoteCommandHandlerStatusSuccess;}
+- (MPRemoteCommandHandlerStatus)step:(NSInteger)direction {return [self.currentSession sessionStep:direction]?MPRemoteCommandHandlerStatusSuccess:MPRemoteCommandHandlerStatusNoSuchContent;}
 - (MPRemoteCommandHandlerStatus)handlePlay:(MPRemoteCommandEvent *)event {return [self onMain:^MPRemoteCommandHandlerStatus(void){return [self play];}];}
 - (MPRemoteCommandHandlerStatus)handlePause:(MPRemoteCommandEvent *)event {return [self onMain:^MPRemoteCommandHandlerStatus(void){return [self pause];}];}
 - (MPRemoteCommandHandlerStatus)handleNext:(MPRemoteCommandEvent *)event {return [self onMain:^MPRemoteCommandHandlerStatus(void){return [self step:1];}];}
