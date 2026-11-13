@@ -55,5 +55,9 @@ export function prepareGlobals(payload){
     if(options.buffer===2)reply.content=Array.from(Buffer.from(reply.base64,'base64'))
     return reply
   }
-  g.request=(url,options)=>(g.req(url,options)).content
+  g.$js={toString:fn=>'js:('+String(fn)+')();'}
+  g.request=(url,options={})=>{
+    const reply=g.req(url,options)
+    return options.withHeaders?JSON.stringify({body:reply.content,statusCode:reply.code,headers:reply.headers||{},url:reply.url||String(url)}):reply.content
+  }
 }

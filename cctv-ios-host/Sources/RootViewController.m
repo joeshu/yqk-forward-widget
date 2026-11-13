@@ -814,7 +814,7 @@ configureCatalogNavigation;
 }
 
 - (void)installBundledMediaResourcesIfNeeded {
-    NSUserDefaults *preferences=NSUserDefaults.standardUserDefaults;NSString *seedKey=@"cctv.bundledMediaResources.v4";
+    NSUserDefaults *preferences=NSUserDefaults.standardUserDefaults;NSString *seedKey=@"cctv.bundledMediaResources.v5";
     if(self.bundledMediaSeedInProgress)return;
     BOOL alreadySeeded=[preferences boolForKey:seedKey];
     self.bundledMediaSeedInProgress=YES;
@@ -840,7 +840,9 @@ configureCatalogNavigation;
         }
         NSArray *scriptSpecs=@[
             @{@"file":@"hongguo-python",@"extension":@"py",@"runtime":@"python",@"id":@"builtin-hongguo-python",@"name":@"红果短剧 Python 版"},
-            @{@"file":@"hongguo-node",@"extension":@"js",@"runtime":@"node",@"id":@"builtin-hongguo-node",@"name":@"红果短剧 JS 版"}
+            @{@"file":@"hongguo-node",@"extension":@"js",@"runtime":@"node",@"id":@"builtin-hongguo-node",@"name":@"红果短剧 JS 版"},
+            @{@"file":@"dsx-python",@"extension":@"py",@"runtime":@"python",@"id":@"builtin-dsx-python",@"name":@"大师兄 Python 版"},
+            @{@"file":@"dsx-drpy",@"extension":@"js",@"runtime":@"",@"id":@"builtin-dsx-drpy",@"name":@"大师兄 JS 版"}
         ];
         NSArray *capabilities=@[@"home",@"category",@"search",@"detail",@"play",@"proxy"];
         for(NSDictionary *spec in scriptSpecs){
