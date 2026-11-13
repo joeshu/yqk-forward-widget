@@ -123,7 +123,8 @@ class ResourceInteractionContracts(unittest.TestCase):
 
     def test_five_tab_navigation_is_clear_and_pages_scroll_under_it(self):
         self.assertIn('self.bottomBarBackdrop.backgroundColor=UIColor.clearColor', self.root)
-        self.assertIn('self.bottomBar.backgroundColor=UIColor.clearColor', self.root)
+        self.assertIn('stack.backgroundColor=UIColor.clearColor', (ROOT / 'Sources/HostTabBarController.m').read_text())
+        self.assertIn('self.bottomBar=self.hostTabController.stackView', self.root)
         self.assertIn('CGFloat contentY=y+6+segmentHeight+4;CGFloat contentBottom=height', self.root)
         self.assertIn('tabContentInset=MAX(8,height-tabY+8)', self.root)
         self.assertIn('setBottomOverlayInset:tabContentInset', self.root)
@@ -360,7 +361,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('configureWithTransparentBackground', detail)
         self.assertIn('contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever', detail)
         self.assertIn('scrollView.topAnchor constraintEqualToAnchor:self.view.topAnchor', detail)
-        self.assertIn('heroSpacer.heightAnchor constraintGreaterThanOrEqualToAnchor:self.view.heightAnchor multiplier:0.36', detail)
+        self.assertIn('heroSpacer.heightAnchor constraintEqualToAnchor:self.view.heightAnchor multiplier:0.36', detail)
         self.assertIn('NSUInteger rowCount=(visibleCount+columnCount-1)/columnCount', detail)
         self.assertIn('UIView *spacer=[UIView new]', detail)
         self.assertIn('media-detail-page-status', detail)
@@ -747,7 +748,8 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('throughputPortraitTopConstraint.active=!landscape', player)
         self.assertIn('throughputLabel.topAnchor constraintEqualToAnchor:self.videoView.safeAreaLayoutGuide.topAnchor', player)
         self.assertIn('gestureFeedbackPortraitTopConstraint.active=!landscape', player)
-        self.assertIn('controlPanel.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor', player)
+        self.assertIn('panelViewport.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor', player)
+        self.assertIn('self.controlsViewport.contentLayoutGuide', player)
         self.assertIn('videoView.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor', player)
         self.assertIn('if(viewController==self)HostStyleNavigation(navigationController)', self.root)
 
@@ -1299,13 +1301,17 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('allHTTPHeaderFields=MediaPlaybackHeadersFromResult(self.result)', webview)
 
     def test_parser_marked_source_plays_inside_the_app_without_external_handoff(self):
-        route = self.playback[self.playback.index('BOOL directMedia='):
-                              self.playback.index('self.hasDiagnosticTimeControlStatus=NO;', self.playback.index('BOOL directMedia='))]
-        self.assertIn('result[@"parse"]', route)
-        self.assertIn('result[@"jx"]', route)
-        self.assertIn('MediaWebViewController *web=[[MediaWebViewController alloc] initWithResult:result', route)
-        self.assertIn('[[UINavigationController alloc] initWithRootViewController:web]', route)
-        self.assertIn('[self presentViewController:nav animated:YES completion:nil]', route)
+        route = self.playback[self.playback.index('MediaPlaybackDecodeRoute initialRoute='):
+                              self.playback.index('self.hasDiagnosticTimeControlStatus=NO;', self.playback.index('MediaPlaybackDecodeRoute initialRoute='))]
+        router = (ROOT / 'Sources/MediaPlaybackDecodeRouter.m').read_text()
+        self.assertIn('result[@"parse"]', router)
+        self.assertIn('result[@"jx"]', router)
+        self.assertIn('if(initialRoute==MediaPlaybackDecodeRouteWebView)', route)
+        self.assertIn('[self openWebPlaybackFallback]', route)
+        fallback = self.playback[self.playback.index('- (void)openWebPlaybackFallback {'):self.playback.index('- (void)openEpisodePageWebFallback {')]
+        self.assertIn('initWithResult:self.result', fallback)
+        self.assertIn('[[UINavigationController alloc] initWithRootViewController:web]', fallback)
+        self.assertIn('[self presentViewController:nav animated:YES completion:nil]', fallback)
         self.assertNotIn('openURL:', route)
 
     def test_no_media_error_offers_the_original_episode_page_without_exposing_its_url(self):
@@ -1360,11 +1366,12 @@ class ResourceInteractionContracts(unittest.TestCase):
 
     def test_tvbox_filters_and_playback_flags_survive_native_adaptation(self):
         client = (ROOT / 'Sources/MediaAPIClient.m').read_text()
+        router = (ROOT / 'Sources/MediaPlaybackDecodeRouter.m').read_text()
         self.assertIn('MediaTVBoxFilters(root)', client)
         self.assertIn('arguments[@"filters"]', client)
         self.assertIn('clearFilters', self.detail)
-        self.assertIn('result[@"jx"]', self.playback)
-        self.assertIn('result[@"requiresWebPlayback"]', self.playback)
+        self.assertIn('result[@"jx"]', router)
+        self.assertIn('result[@"requiresWebPlayback"]', router)
         self.assertNotIn('@"filters":@{}', client)
         self.assertIn('MediaTVBoxResolvedPoster', client)
         self.assertIn('TVBoxWebURL(resolved.absoluteString)', (ROOT / 'Sources/TVBoxCatalogStore.m').read_text())
@@ -1511,7 +1518,8 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('[catalogIDs containsObject:catalogID]', profiles)
         live_loader_start = self.root.index('- (void)subscribeLiveFromCatalog:')
         live_loader = self.root[live_loader_start:self.root.index('- (void)openTVBoxCatalog:', live_loader_start)]
-        self.assertIn('[self deleteSubscription:existingURL]', live_loader)
+        self.assertNotIn('[self deleteSubscription:existingURL]', live_loader)
+        self.assertIn('inlinePlaylist', live_loader)
         self.assertIn('tvboxLiveSelection.%@', live_loader)
         self.assertIn('tvboxCatalogID', live_loader)
 

@@ -20,6 +20,7 @@ static NSString * const HostThemePaletteDefaultIdentifier = @"midnight";
 @property (nonatomic, strong, readonly) UIColor *secondaryText;
 @property (nonatomic, strong, readonly) UIColor *accent;
 @property (nonatomic, strong, readonly) UIColor *onAccent;
+@property (nonatomic, strong, readonly) UIColor *accentFill;
 @property (nonatomic, strong, readonly) UIColor *mutedText;
 @property (nonatomic, strong, readonly) UIColor *glassTint;
 @property (nonatomic, strong, readonly) UIColor *border;

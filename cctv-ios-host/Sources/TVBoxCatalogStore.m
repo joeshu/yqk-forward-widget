@@ -858,6 +858,12 @@ static void TVBoxNotifyAdaptationMonitorCatalog(NSString *name, NSString *source
         json=merged.copy;
     }
     NSArray *sites=[json[@"sites"] isKindOfClass:NSArray.class]?json[@"sites"]:@[];
+    // MacCMS content lists are not site indexes, even though both use "list".
+    if(!sites.count && [json[@"list"] isKindOfClass:NSArray.class]){
+        for(id row in json[@"list"])if([row isKindOfClass:NSDictionary.class] && (row[@"vod_id"]||row[@"vod_name"]||row[@"vod_play_url"])){
+            if(error)*error=TVBoxError(@"这是 MacCMS 内容接口，不是 TVBox 合集");return nil;
+        }
+    }
     if (!sites.count) {
         for (NSString *altKey in @[@"sources",@"plugins",@"items",@"list",@"packages",@"modules",@"scripts",@"data"]) {
             if ([json[altKey] isKindOfClass:NSArray.class] && [json[altKey] count]) { sites=json[altKey]; break; }
@@ -960,24 +966,20 @@ static void TVBoxNotifyAdaptationMonitorCatalog(NSString *name, NSString *source
         else if ([value isKindOfClass:NSDictionary.class]) {
             name=TVBoxString(value[@"name"],256);
             url=TVBoxString(value[@"url"],8192);
+            // Preserve all inline channels and all their alternative URLs.
             if(!url.length&&[value[@"channels"] isKindOfClass:NSArray.class]){
-                for(id ch in (NSArray *)value[@"channels"]){
-                    if([ch isKindOfClass:NSDictionary.class]&&[ch[@"urls"] isKindOfClass:NSArray.class]&&[(NSArray *)ch[@"urls"] count]){
-                        NSString *cand=TVBoxString([(NSArray *)ch[@"urls"] firstObject],8192);
-                        if(cand.length){
-                            if([cand hasPrefix:@"proxy://"]&&[cand containsString:@"ext="]){
-                                NSRange extR=[cand rangeOfString:@"ext="];
-                                NSString *extPart=[cand substringFromIndex:NSMaxRange(extR)];
-                                extPart=[[extPart componentsSeparatedByString:@"&"] firstObject];
-                                NSData *b64=[[NSData alloc] initWithBase64EncodedString:extPart options:NSDataBase64DecodingIgnoreUnknownCharacters];
-                                NSString *dec=b64.length?[[NSString alloc] initWithData:b64 encoding:NSUTF8StringEncoding]:nil;
-                                if(TVBoxWebURL(dec))cand=dec;
-                            }
-                            url=cand;
-                            if(!name.length)name=TVBoxString(ch[@"name"]?:value[@"group"],256);
-                            break;
-                        }
+                NSMutableString *playlist=[NSMutableString stringWithString:@"#EXTM3U\n"];NSUInteger count=0;
+                for(id ch in value[@"channels"]){
+                    if(![ch isKindOfClass:NSDictionary.class]||![ch[@"urls"] isKindOfClass:NSArray.class])continue;
+                    NSString *channelName=TVBoxString(ch[@"name"],256)?:@"频道";channelName=[[channelName stringByReplacingOccurrencesOfString:@"\n" withString:@" "] stringByReplacingOccurrencesOfString:@"\r" withString:@" "];
+                    NSString *groupName=TVBoxString(value[@"group"]?:value[@"name"],256)?:@"合集";groupName=[[[groupName stringByReplacingOccurrencesOfString:@"\n" withString:@" "] stringByReplacingOccurrencesOfString:@"\r" withString:@" "] stringByReplacingOccurrencesOfString:@"\"" withString:@"'"];
+                    for(id raw in ch[@"urls"]){if(count>=5000)break;NSString *address=TVBoxString(raw,8192);NSURL *target=[NSURL URLWithString:address];if(!target.host.length||![@[@"http",@"https",@"rtmp",@"rtmps"] containsObject:target.scheme.lowercaseString]||[address rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location!=NSNotFound)continue;
+                        [playlist appendFormat:@"#EXTINF:-1 group-title=\"%@\",%@\n%@\n",groupName,channelName,address];count++;
                     }
+                }
+                if(count){NSString *identity=[NSString stringWithFormat:@"%@|%@|%lu",sourceURL?:@"local",name?:@"",(unsigned long)liveIndex];NSData *input=[identity dataUsingEncoding:NSUTF8StringEncoding];unsigned char digest[CC_SHA256_DIGEST_LENGTH];CC_SHA256(input.bytes,(CC_LONG)input.length,digest);NSMutableString *key=[NSMutableString string];for(NSUInteger i=0;i<sizeof(digest);i++)[key appendFormat:@"%02x",digest[i]];
+                    url=[@"https://inline.cctvhost.invalid/" stringByAppendingString:key];
+                    [cleanLives addObject:@{@"name":name?:@"内嵌频道",@"url":url,@"type":@"0",@"supported":@YES,@"status":[NSString stringWithFormat:@"内嵌直播 · %lu 条线路",(unsigned long)count],@"inlinePlaylist":playlist.copy,@"sourceIndex":@(liveIndex-1)}];continue;
                 }
             }
             type=TVBoxString(value[@"type"],32)?:@"0";

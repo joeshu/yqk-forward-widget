@@ -387,7 +387,18 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     NSDictionary *service=nil;BOOL isArchive=[file.pathExtension.lowercaseString isEqual:@"zip"]||(bytes.length>=4&&memcmp(bytes.bytes,"PK\003\004",4)==0);
     @try {
         if(ResourceContentIsHTML(bytes)){PackageError(error,@"此文件是 HTML 网页，请导入网页中的资源直链");return nil;}
-        if(isArchive){if(!ExtractZip(bytes,package,error))return nil;}
+        id connection=[NSJSONSerialization JSONObjectWithData:bytes options:0 error:NULL];
+        BOOL serverConnection=[connection isKindOfClass:NSDictionary.class]&&[connection[@"cctvhostServer"] isKindOfClass:NSNumber.class]&&[connection[@"cctvhostServer"] integerValue]==1;
+        if(serverConnection){
+            if(![@[@"emby",@"jellyfin",@"xtream",@"webdav"] containsObject:connection[@"type"]]){PackageError(error,@"不支持的媒体服务器类型");return nil;}
+            NSURL *url=[connection[@"url"] isKindOfClass:NSString.class]?[NSURL URLWithString:connection[@"url"]]:nil;
+            if(!url.host.length||![@[@"http",@"https"] containsObject:url.scheme.lowercaseString]||url.user.length||url.password.length){PackageError(error,@"服务器地址必须是 HTTP/HTTPS，账号请填写到独立字段");return nil;}
+            NSMutableDictionary *options=[NSMutableDictionary dictionary];for(NSString *key in @[@"type",@"url",@"name",@"username",@"password",@"apiKey",@"userId"]){id value=connection[key];if(value&&(![value isKindOfClass:NSString.class]||[value length]>8192)){PackageError(error,@"服务器配置字段无效");return nil;}if(value)options[key]=value;}
+            NSString *source=@"from host_media_servers import ServerSpider\nclass Spider(ServerSpider):\n    pass\n";
+            NSDictionary *manifest=@{@"schemaVersion":@1,@"runtime":@"python",@"protocol":@"python-spider",@"moduleType":@"script",@"entry":@"server.py",@"name":options[@"name"]?:connection[@"type"],@"options":options};
+            if(![[source dataUsingEncoding:NSUTF8StringEncoding] writeToFile:[package stringByAppendingPathComponent:@"server.py"] options:NSDataWritingAtomic error:error]||![[NSJSONSerialization dataWithJSONObject:manifest options:0 error:error] writeToFile:[package stringByAppendingPathComponent:@"cctvhost.json"] options:NSDataWritingAtomic error:error])return nil;
+        }
+        else if(isArchive){if(!ExtractZip(bytes,package,error))return nil;}
         else {
             NSString *name=file.lastPathComponent;
             NSString *detected=ResourceContentExtension(bytes,name);

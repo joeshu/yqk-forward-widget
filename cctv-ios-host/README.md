@@ -1,8 +1,10 @@
 # CCTVHost — iOS 频道与本机资源宿主
 
-本目录包含 Objective-C/UIKit iOS App，最低系统版本 iOS 15。当前代码包括频道与订阅浏览、原生及 AVPlayer 播放入口、EPG、资源导入、Python/JavaScript/Node 插件服务和独立日志中心。
+本目录包含 Objective-C/UIKit iOS App，当前完整 IPA 最低系统版本为 iOS 17（内嵌 JAR 运行时要求）；XcodeGen 开发工程和不含该运行时的 UI-only simulator smoke 目标为 iOS 15。代码包括频道与订阅浏览、原生及 AVPlayer 播放入口、EPG、资源导入、Python/JavaScript/Node 插件服务和独立日志中心。
 
 实现状态、测试证据、性能测量限制和真机验收清单见 [QUALITY-REVIEW-v0.18.0.md](QUALITY-REVIEW-v0.18.0.md)。代码存在不代表央视 SDK 真机起播、插件端口释放或媒体解码已经在设备上验证。
+
+CCTVHost 本轮三阶段改造和协议能力边界见 [全面审查与实施记录](Docs/OPTIMIZATION-IMPLEMENTATION.md)：包括播放所有权与请求头隔离、频道/播放器无障碍与布局、TXT/catch-up/LL-HLS、Emby/Jellyfin/Xtream/WebDAV、本机媒体库，以及 Linux 可运行验证和 macOS/真机验收项。能力表中的“可识别/路由”不等于设备已验证解码。
 
 ## 构建
 

@@ -222,6 +222,7 @@
     dispatch_once(&once,^{
         UIColor *(^rgb)(CGFloat,CGFloat,CGFloat)=^UIColor *(CGFloat r,CGFloat g,CGFloat b){return [UIColor colorWithRed:r/255.0 green:g/255.0 blue:b/255.0 alpha:1];};
         servers=@[
+            @{ @"id":@"media-server",@"title":@"添加媒体服务器",@"detail":@"Emby / Jellyfin / Xtream / WebDAV",@"icon":@"externaldrive.connected.to.line.below",@"color":rgb(45,127,164),@"option":@(ResourceImportOptionMediaServer)},
             @{ @"id":@"services",@"title":@"脚本与服务",@"detail":@"查看、启动和管理本机影视 / 直播服务",@"icon":@"slider.horizontal.3",@"color":rgb(229,43,105),@"option":@(ResourceImportOptionServices)}
         ];
         video=@[

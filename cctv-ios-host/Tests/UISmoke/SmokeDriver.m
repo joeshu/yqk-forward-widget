@@ -41,6 +41,10 @@
 #import <AVKit/AVKit.h>
 #import <objc/runtime.h>
 
+extern BOOL PlaybackCoordinatorRunSmokeChecks(void);
+extern BOOL PlaybackGestureRunSmokeChecks(void);
+extern BOOL ImportSnapshotRunSmokeChecks(void);
+extern BOOL CicadaBudgetRunSmokeChecks(void);
 @interface ResourceImportWorkflowViewController (SmokeImport)
 - (NSMutableDictionary *)candidateForData:(NSData *)data file:(NSURL *)file origin:(NSString *)origin companions:(NSDictionary *)companions hint:(NSString *)hint;
 - (void)saveSelected;
@@ -413,6 +417,10 @@ static void next(NSArray *steps, NSUInteger index) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       [UIView setAnimationsEnabled:NO];
       failures = [NSMutableArray array];
+      check(PlaybackCoordinatorRunSmokeChecks(),@"playback coordinator ownership, commands and interruptions");
+      check(PlaybackGestureRunSmokeChecks(),@"live volume displacement is independent of gesture event frequency");
+      check(ImportSnapshotRunSmokeChecks(),@"import snapshots restore blobs and retain the final queued revision");
+      check(CicadaBudgetRunSmokeChecks(),@"Cicada first-frame budget excludes paused time");
       check([CNPlayerCrashGuard install], @"CNPlayer thumbnail exception guard installs");
       check([CNPlayer smokeCicadaLicenseOverrideCount]==0,@"SDK setup preserves the Cicada core's built-in license endpoint without a host override");
       UIImage *guardedThumbnail=[[NSClassFromString(@"IJKFFMoviePlayerController") new]

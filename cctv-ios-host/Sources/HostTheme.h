@@ -88,7 +88,10 @@ static inline UIColor *HostHighlightedSurface(void) {
 static inline UIColor *HostSuccessSurface(void) {
     return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].successSurface;}];
 }
-static inline UIBlurEffect *HostGlassBlur(void) { return [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterial]; }
+static inline UIColor *HostAccentFill(void) {
+    return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits){return [HostThemePalette effectivePaletteForDark:traits.userInterfaceStyle==UIUserInterfaceStyleDark].accentFill;}];
+}
+static inline UIBlurEffect *HostGlassBlur(void) { return UIAccessibilityIsReduceTransparencyEnabled()?nil:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterial]; }
 static inline void HostSetLayerBorderColor(UIView *view, UIColor *color);
 
 static inline void HostInstallGlassBackdrop(UIView *target) {
@@ -121,6 +124,8 @@ static inline void HostStyleGlassCard(UIView *view, CGFloat radius) {
         [view insertSubview:glass atIndex:0];
         objc_setAssociatedObject(view,&HostGlassEffectAssociationKey,glass,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
+    glass.effect=HostGlassBlur();
+    glass.contentView.backgroundColor=UIAccessibilityIsReduceTransparencyEnabled()?HostCard():UIColor.clearColor;
     [view sendSubviewToBack:glass];
     if([view isKindOfClass:UIButton.class]){
         UIButton *btn=(UIButton *)view;
@@ -143,7 +148,7 @@ static inline void HostStyleGlassCard(UIView *view, CGFloat radius) {
     view.backgroundColor=UIColor.clearColor;
     view.layer.cornerRadius=radius;
     view.layer.cornerCurve=kCACornerCurveContinuous;
-    view.layer.borderWidth=.85;
+    view.layer.borderWidth=UIAccessibilityDarkerSystemColorsEnabled()?1.5:.85;
     HostSetLayerBorderColor(view,HostBorder());
     view.clipsToBounds=YES;
 }
@@ -189,11 +194,12 @@ static inline void HostSetLayerBorderColor(UIView *view, UIColor *color) {
 }
 static inline void HostRefreshAppearanceLayers(UIView *view) {
     if(!view)return;
+    UIVisualEffectView *effect=objc_getAssociatedObject(view,&HostGlassEffectAssociationKey);if(effect){effect.effect=HostGlassBlur();effect.contentView.backgroundColor=UIAccessibilityIsReduceTransparencyEnabled()?HostCard():UIColor.clearColor;}
     HostGlassBackdropView *backdrop=objc_getAssociatedObject(view,&HostAppearanceRefreshAssociationKey);if(backdrop)[backdrop refreshAppearance];
     CAGradientLayer *specularRim=objc_getAssociatedObject(view,&HostSpecularRimAssociationKey);
     if(specularRim)specularRim.frame=CGRectMake(0,0,CGRectGetWidth(view.bounds),MIN(1.2,CGRectGetHeight(view.bounds)));
     UIColor *border=objc_getAssociatedObject(view,&HostLayerBorderColorAssociationKey);
-    if(border)view.layer.borderColor=[[HostBorder() resolvedColorWithTraitCollection:view.traitCollection] CGColor];
+    if(border)view.layer.borderColor=[[border resolvedColorWithTraitCollection:view.traitCollection] CGColor];
     for(UIView *child in view.subviews)HostRefreshAppearanceLayers(child);
 }
 
@@ -232,10 +238,11 @@ static inline void HostStylePillButton(UIButton *button, BOOL primary) {
     button.layer.cornerCurve = kCACornerCurveContinuous;
     button.layer.borderWidth = primary ? 0.5 : 0.75;
     HostSetLayerBorderColor(button,primary?[HostOnAccent() colorWithAlphaComponent:0.24]:HostBorder());
-    button.backgroundColor = primary ? HostAccent() : HostNeutralSurface();
+    button.backgroundColor = primary ? HostAccentFill() : HostNeutralSurface();
     [button setTitleColor:primary?HostOnAccent():HostText() forState:UIControlStateNormal];
     [button setTitleColor:HostSecondaryText() forState:UIControlStateHighlighted];
-    button.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
+    button.titleLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];
+    button.titleLabel.adjustsFontForContentSizeCategory=YES;
     button.titleLabel.layer.shadowColor = primary ? [UIColor colorWithWhite:0 alpha:0.35].CGColor : UIColor.clearColor.CGColor;
     button.titleLabel.layer.shadowOffset = CGSizeMake(0, 0.5);
     button.titleLabel.layer.shadowRadius = primary ? 1.5 : 0;

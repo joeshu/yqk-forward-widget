@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "networkTransports": [
+    "http",
+    "https",
+    "rtmp",
+    "rtmps"
+  ],
+  "cicadaFormats": [
+    "flv",
+    "live_flv",
+    "mpd",
+    "dash",
+    "mpeg-dash",
+    "mkv",
+    "matroska",
+    "webm",
+    "3gp",
+    "3gpp",
+    "rtmp"
+  ],
+  "avFormats": [
+    "hls",
+    "m3u8",
+    "m3u",
+    "mpegurl",
+    "mp4",
+    "m4v",
+    "mov",
+    "mp3",
+    "m4a",
+    "aac",
+    "mpeg-ts",
+    "mpegts",
+    "ts",
+    "fmp4",
+    "cmaf",
+    "m4s",
+    "f4v",
+    "wav",
+    "flac",
+    "alac",
+    "ac3",
+    "eac3",
+    "application/vnd.apple.mpegurl",
+    "application/x-mpegurl",
+    "audio/mpegurl"
+  ],
+  "unsupportedContainers": [
+    "avi",
+    "wmv",
+    "asf",
+    "rm",
+    "rmvb"
+  ],
+  "unsupportedVideoCodecs": [
+    "vp8",
+    "vp9",
+    "av1",
+    "h263",
+    "wmv",
+    "rv"
+  ],
+  "verifiedNetworkTransports": []
+}

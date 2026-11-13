@@ -16,7 +16,7 @@ static NSArray<NSDictionary *> *HostThemePaletteDefinitions(void) {
     return @[
         @{@"id":@"midnight", @"name":@"午夜影院", @"tagline":@"深邃影院", @"dark":@YES,
           @"background":@"#0D0E13", @"card":@"#15161F", @"raised":@"#1C1F2A",
-          @"text":@"#FFFFFF", @"secondary":@"#9EA6B8", @"accent":@"#FF0024", @"onAccent":@"#FFFFFF", @"muted":@"#9EA6B8",
+          @"text":@"#FFFFFF", @"secondary":@"#9EA6B8", @"accent":@"#FF0024", @"accentFill":@"#DB0020", @"onAccent":@"#FFFFFF", @"muted":@"#9EA6B8",
           @"glass":@"#15171F", @"glassAlpha":@0.62, @"borderAlpha":@0.12, @"separatorAlpha":@0.11,
           @"neutral":@"#21242F", @"selectedAlpha":@0.18, @"highlightedAlpha":@0.20, @"success":@"#122E21"},
         @{@"id":@"obsidian", @"name":@"曜石黑", @"tagline":@"纯黑沉浸", @"dark":@YES,
@@ -66,6 +66,7 @@ static NSArray<NSDictionary *> *HostThemePaletteDefinitions(void) {
         _secondaryText = HostThemeColorFromHex(definition[@"secondary"], 1);
         _accent = HostThemeColorFromHex(definition[@"accent"], 1);
         _onAccent = HostThemeColorFromHex(definition[@"onAccent"], 1);
+        _accentFill = HostThemeColorFromHex(definition[@"accentFill"]?:definition[@"accent"],1);
         _mutedText = HostThemeColorFromHex(definition[@"muted"], 1);
         _glassTint = HostThemeColorFromHex(definition[@"glass"], [definition[@"glassAlpha"] doubleValue]);
         CGFloat edgeWhite = _dark ? 1 : 0;

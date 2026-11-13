@@ -30,11 +30,15 @@
         self.blueGradient.endPoint=CGPointMake(.58,.38);
         self.blueGradient.locations=@[@0,@1];
         [self.layer addSublayer:self.blueGradient];
+        [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(accessibilityAppearanceChanged:) name:UIAccessibilityReduceTransparencyStatusDidChangeNotification object:nil];
+        [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(accessibilityAppearanceChanged:) name:UIAccessibilityDarkerSystemColorsStatusDidChangeNotification object:nil];
         [self refreshAppearance];
     }
     return self;
 }
 
+- (void)dealloc {[NSNotificationCenter.defaultCenter removeObserver:self];}
+- (void)accessibilityAppearanceChanged:(NSNotification *)note {[self refreshAppearance];HostRefreshAppearanceLayers(self.superview);}
 - (void)layoutSubviews {
     [super layoutSubviews];
     CGRect bounds=self.bounds;
@@ -44,6 +48,7 @@
 }
 
 - (void)refreshAppearance {
+    BOOL opaque=UIAccessibilityIsReduceTransparencyEnabled();self.roseGradient.hidden=opaque;self.blueGradient.hidden=opaque;self.backgroundColor=HostBackground();
     UITraitCollection *traits=self.traitCollection;
     UIColor *(^resolved)(UIColor *)=^UIColor *(UIColor *value){return [value resolvedColorWithTraitCollection:traits];};
     self.baseGradient.colors=@[(id)resolved(HostBackground()).CGColor,(id)resolved(HostRaisedSurface()).CGColor];

@@ -6,6 +6,14 @@
 #import "MediaPlaybackHeaders.h"
 static void check(BOOL ok, NSString *message){if(!ok){NSLog(@"FAILED: %@",message);exit(1);}}
 int main(void){@autoreleasepool{
+    NSDictionary *scoped=MediaPlaybackHeadersScopedToURL(@{@"Authorization":@"private",@"X-API-Key":@"private",@"User-Agent":@"agent"},[NSURL URLWithString:@"https://one.test/live"],[NSURL URLWithString:@"https://two.test/replay"]);
+    check(!scoped[@"Authorization"]&&!scoped[@"X-API-Key"]&&[scoped[@"User-Agent"] isEqual:@"agent"],@"cross-origin replay cannot leak source credentials");
+    NSDictionary *sameOrigin=MediaPlaybackHeadersScopedToURL(@{@"Authorization":@"private",@"X-Session-Token":@"session"},[NSURL URLWithString:@"https://one.test/live"],[NSURL URLWithString:@"https://one.test/key"]);
+    check([sameOrigin[@"Authorization"] isEqual:@"private"]&&[sameOrigin[@"X-Session-Token"] isEqual:@"session"],@"same-origin media keys retain required credentials");
+    check(MediaPlaybackSniffContainerFormat([@"<?xml version=\"1.0\"?><tv></tv>" dataUsingEncoding:NSUTF8StringEncoding])==nil,@"XMLTV is not DASH");
+    check([MediaPlaybackSniffContainerFormat([@"<?xml version=\"1.0\"?><MPD xmlns=\"urn:mpeg:dash:schema:mpd:2011\"></MPD>" dataUsingEncoding:NSUTF8StringEncoding]) isEqual:@"dash"],@"MPD root is DASH");
+    check(MediaPlaybackDecodeRouteNextForResult(@{@"url":@"https://stream.test/a.avi"},0)==MediaPlaybackDecodeRouteNone,@"known unsupported containers do not loop through decoders");
+
     NSDictionary *headers=MediaPlaybackHeadersFromResult(@{@"ext":@{@"header":@{@"Referer":@"https://old.example/",@"Cookie":@"old=1"}},@"headers":@{@"referer":@"https://new.example/"},@"header":@"Referer:https://cdn.example/?token=$signed\nCookie$new=1",@"customHeaders":@{@"HOST":@"blocked.example",@"X-Bad":@"a\001b",@"X-OK":@"ok"}});
     check(headers.count==3&&[headers[@"Referer"] isEqual:@"https://cdn.example/?token=$signed"]&&[headers[@"Cookie"] isEqual:@"new=1"]&&[headers[@"X-OK"] isEqual:@"ok"],@"headers override case-insensitively, retain dollar in values, and reject controls/hop headers");
     check(MediaPlaybackHeadersFromResult((id)NSNull.null).count==0,@"malformed result does not crash header extraction");

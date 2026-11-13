@@ -7,3 +7,6 @@ FOUNDATION_EXPORT BOOL MediaPlaybackResultIsDirectMedia(NSDictionary * _Nullable
 FOUNDATION_EXPORT BOOL MediaPlaybackResultSupportsAVPlayer(NSDictionary * _Nullable result);
 FOUNDATION_EXPORT BOOL MediaPlaybackResultSupportsCicada(NSDictionary * _Nullable result);
 FOUNDATION_EXPORT BOOL MediaPlaybackResultSupportsNativePlayback(NSDictionary * _Nullable result);
+
+/// Retains credentials only for the same origin or a standard-port HTTP→HTTPS upgrade.
+FOUNDATION_EXPORT NSDictionary<NSString *,NSString *> *MediaPlaybackHeadersScopedToURL(NSDictionary *headers,NSURL *originURL,NSURL *targetURL);

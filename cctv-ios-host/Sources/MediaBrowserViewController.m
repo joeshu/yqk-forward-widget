@@ -1,3 +1,4 @@
+#import "LocalMediaViewController.h"
 #import "MediaBrowserViewController.h"
 #import "MediaFeedView.h"
 #import "MediaAPIClient.h"
@@ -351,7 +352,11 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
     self.heroTitle=[UILabel new];self.heroTitle.translatesAutoresizingMaskIntoConstraints=NO;self.heroTitle.font=HostRoundedFont(21,UIFontWeightBold,UIFontTextStyleTitle2);self.heroTitle.adjustsFontForContentSizeCategory=YES;self.heroTitle.textColor=UIColor.whiteColor;self.heroTitle.numberOfLines=2;self.heroTitle.layer.shadowColor=UIColor.blackColor.CGColor;self.heroTitle.layer.shadowOpacity=0.58;self.heroTitle.layer.shadowRadius=5.0;self.heroTitle.layer.shadowOffset=CGSizeMake(0,1.5);
     self.heroMetadata=[UILabel new];self.heroMetadata.translatesAutoresizingMaskIntoConstraints=NO;self.heroMetadata.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];self.heroMetadata.adjustsFontForContentSizeCategory=YES;self.heroMetadata.textColor=[UIColor.whiteColor colorWithAlphaComponent:0.88];self.heroMetadata.numberOfLines=1;self.heroMetadata.lineBreakMode=NSLineBreakByTruncatingTail;self.heroMetadata.layer.shadowColor=UIColor.blackColor.CGColor;self.heroMetadata.layer.shadowOpacity=0.45;self.heroMetadata.layer.shadowRadius=3.0;self.heroMetadata.layer.shadowOffset=CGSizeMake(0,1);
     [hero addSubview:self.status];[hero addSubview:self.heroTitle];[hero addSubview:self.heroMetadata];[self.scrollView insertSubview:hero belowSubview:self.contentStack];self.heroSpacer=[UIView new];self.heroSpacer.translatesAutoresizingMaskIntoConstraints=NO;self.heroSpacer.isAccessibilityElement=NO;[self.contentStack addArrangedSubview:self.heroSpacer];
-    [NSLayoutConstraint activateConstraints:@[[hero.leadingAnchor constraintEqualToAnchor:self.scrollView.contentLayoutGuide.leadingAnchor],[hero.trailingAnchor constraintEqualToAnchor:self.scrollView.contentLayoutGuide.trailingAnchor],[hero.topAnchor constraintEqualToAnchor:self.scrollView.contentLayoutGuide.topAnchor],[hero.bottomAnchor constraintEqualToAnchor:self.heroSpacer.bottomAnchor],[hero.heightAnchor constraintGreaterThanOrEqualToAnchor:self.view.heightAnchor multiplier:0.36],[hero.heightAnchor constraintLessThanOrEqualToConstant:300],[self.heroSpacer.heightAnchor constraintGreaterThanOrEqualToAnchor:self.view.heightAnchor multiplier:0.36],[self.heroSpacer.heightAnchor constraintLessThanOrEqualToConstant:300],
+    NSLayoutConstraint *heroPreferredHeight=[hero.heightAnchor constraintEqualToAnchor:self.view.heightAnchor multiplier:0.36];
+    heroPreferredHeight.priority=UILayoutPriorityDefaultHigh;
+    NSLayoutConstraint *spacerPreferredHeight=[self.heroSpacer.heightAnchor constraintEqualToAnchor:self.view.heightAnchor multiplier:0.36];
+    spacerPreferredHeight.priority=UILayoutPriorityDefaultHigh;
+    [NSLayoutConstraint activateConstraints:@[[hero.leadingAnchor constraintEqualToAnchor:self.scrollView.contentLayoutGuide.leadingAnchor],[hero.trailingAnchor constraintEqualToAnchor:self.scrollView.contentLayoutGuide.trailingAnchor],[hero.topAnchor constraintEqualToAnchor:self.scrollView.contentLayoutGuide.topAnchor],[hero.bottomAnchor constraintEqualToAnchor:self.heroSpacer.bottomAnchor],heroPreferredHeight,[hero.heightAnchor constraintLessThanOrEqualToConstant:300],spacerPreferredHeight,[self.heroSpacer.heightAnchor constraintLessThanOrEqualToConstant:300],
         [self.posterPlaceholder.leadingAnchor constraintEqualToAnchor:hero.leadingAnchor],[self.posterPlaceholder.trailingAnchor constraintEqualToAnchor:hero.trailingAnchor],[self.posterPlaceholder.topAnchor constraintEqualToAnchor:hero.topAnchor],[self.posterPlaceholder.bottomAnchor constraintEqualToAnchor:hero.bottomAnchor],
         [placeholderIcon.centerXAnchor constraintEqualToAnchor:self.posterPlaceholder.centerXAnchor],[placeholderIcon.centerYAnchor constraintEqualToAnchor:self.posterPlaceholder.centerYAnchor],[placeholderIcon.widthAnchor constraintEqualToConstant:42],[placeholderIcon.heightAnchor constraintEqualToConstant:42],
         [self.posterView.leadingAnchor constraintEqualToAnchor:hero.leadingAnchor],[self.posterView.trailingAnchor constraintEqualToAnchor:hero.trailingAnchor],[self.posterView.topAnchor constraintEqualToAnchor:hero.topAnchor],[self.posterView.bottomAnchor constraintEqualToAnchor:hero.bottomAnchor],
@@ -907,10 +912,10 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
 @implementation MediaFavoritesViewController
 - (instancetype)init {return [super initWithStyle:UITableViewStyleInsetGrouped];}
 - (void)viewDidLoad {
-    [super viewDidLoad];self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();self.title=@"影视收藏";self.view.backgroundColor=HostBackground();self.view.tintColor=HostAccent();self.tableView.backgroundColor=HostBackground();self.tableView.separatorColor=HostSeparator();self.tableView.rowHeight=92;self.tableView.estimatedRowHeight=92;
+    [super viewDidLoad];self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();self.title=@"影视收藏";self.view.backgroundColor=HostBackground();self.view.tintColor=HostAccent();self.tableView.backgroundColor=HostBackground();self.tableView.separatorColor=HostSeparator();self.tableView.rowHeight=MAX(92,24+2*[UIFont preferredFontForTextStyle:UIFontTextStyleHeadline].lineHeight+2*[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1].lineHeight);self.tableView.estimatedRowHeight=92;
     [self reloadFavoriteEntries];
 }
-- (void)reloadThemeAppearance {self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();if(!self.isViewLoaded)return;self.view.backgroundColor=HostBackground();self.view.tintColor=HostAccent();self.tableView.backgroundColor=HostBackground();self.tableView.separatorColor=HostSeparator();[self.tableView reloadData];}
+- (void)reloadThemeAppearance {self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();if(!self.isViewLoaded)return;self.view.backgroundColor=HostBackground();self.view.tintColor=HostAccent();self.tableView.backgroundColor=HostBackground();self.tableView.separatorColor=HostSeparator();self.tableView.rowHeight=MAX(92,24+2*[UIFont preferredFontForTextStyle:UIFontTextStyleHeadline].lineHeight+2*[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1].lineHeight);[self.tableView reloadData];}
 - (void)reloadFavoriteEntries {
     NSDictionary *saved=[NSUserDefaults.standardUserDefaults dictionaryForKey:@"cctv.mediaFavorites.v1"]?:@{};
     NSMutableArray<NSDictionary *> *rows=[NSMutableArray array];
@@ -961,11 +966,11 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
 @implementation MediaWatchHistoryViewController
 - (instancetype)init { return [super initWithStyle:UITableViewStyleInsetGrouped]; }
 - (void)viewDidLoad {
-    [super viewDidLoad];self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();self.title=@"观看历史";self.view.backgroundColor=HostBackground();self.view.tintColor=HostAccent();self.tableView.backgroundColor=HostBackground();self.tableView.separatorColor=HostSeparator();self.tableView.rowHeight=92;self.tableView.estimatedRowHeight=92;
+    [super viewDidLoad];self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();self.title=@"观看历史";self.view.backgroundColor=HostBackground();self.view.tintColor=HostAccent();self.tableView.backgroundColor=HostBackground();self.tableView.separatorColor=HostSeparator();self.tableView.rowHeight=MAX(92,24+2*[UIFont preferredFontForTextStyle:UIFontTextStyleHeadline].lineHeight+2*[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1].lineHeight);self.tableView.estimatedRowHeight=92;
     self.entries=MediaPlaybackStateStore.watchHistory;
     [self updateClearHistoryButton];
 }
-- (void)reloadThemeAppearance {self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();if(!self.isViewLoaded)return;self.view.backgroundColor=HostBackground();self.view.tintColor=HostAccent();self.tableView.backgroundColor=HostBackground();self.tableView.separatorColor=HostSeparator();[self.tableView reloadData];}
+- (void)reloadThemeAppearance {self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();if(!self.isViewLoaded)return;self.view.backgroundColor=HostBackground();self.view.tintColor=HostAccent();self.tableView.backgroundColor=HostBackground();self.tableView.separatorColor=HostSeparator();self.tableView.rowHeight=MAX(92,24+2*[UIFont preferredFontForTextStyle:UIFontTextStyleHeadline].lineHeight+2*[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1].lineHeight);[self.tableView reloadData];}
 - (void)updateClearHistoryButton {self.navigationItem.rightBarButtonItem=self.entries.count?[[UIBarButtonItem alloc] initWithTitle:@"清空" style:UIBarButtonItemStylePlain target:self action:@selector(confirmClearHistory)]:nil;}
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if(self.entries.count){self.tableView.backgroundView=nil;return self.entries.count;}
@@ -1477,7 +1482,7 @@ typedef NS_ENUM(NSInteger, MediaContentMode) { MediaContentModeFeatured, MediaCo
 }
 - (UIMenu *)homeActionsMenu {
     __weak typeof(self) weakSelf=self;
-    return [UIMenu menuWithChildren:@[[UIAction actionWithTitle:@"收藏" image:[UIImage systemImageNamed:@"heart"] identifier:nil handler:^(UIAction *a){[weakSelf openFavorites];}],[UIAction actionWithTitle:@"观看历史" image:[UIImage systemImageNamed:@"clock"] identifier:nil handler:^(UIAction *a){[weakSelf openHistory];}]]];
+    return [UIMenu menuWithChildren:@[[UIAction actionWithTitle:@"本地媒体" image:[UIImage systemImageNamed:@"folder"] identifier:nil handler:^(UIAction *action){[weakSelf pushMediaPage:[LocalMediaViewController new]];}],[UIAction actionWithTitle:@"收藏" image:[UIImage systemImageNamed:@"heart"] identifier:nil handler:^(UIAction *a){[weakSelf openFavorites];}],[UIAction actionWithTitle:@"观看历史" image:[UIImage systemImageNamed:@"clock"] identifier:nil handler:^(UIAction *a){[weakSelf openHistory];}]]];
 }
 - (void)pushMediaPage:(UIViewController *)page {
     if(!page||!self.navigationController)return;

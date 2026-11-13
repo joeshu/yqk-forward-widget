@@ -1,3 +1,4 @@
+#import "MediaCapabilityRegistry.h"
 #import "M3UParser.h"
 
 static const NSUInteger M3UMaximumChannels = 5000;
@@ -69,9 +70,37 @@ static NSURL *M3UNormalizedLoopbackURL(NSURL *url, NSURL *baseURL) {
 }
 
 @implementation M3UChannel
+- (NSURL *)catchupURLForStart:(NSDate *)start end:(NSDate *)end {
+    if(!self.catchupSource.length||!start||!end||[end timeIntervalSinceDate:start]<=0)return nil;
+    if(self.catchupDays>0&&[start timeIntervalSinceNow]<-self.catchupDays*86400)return nil;
+    NSTimeInterval shift=self.tvgShift*3600;
+    NSString *address=self.catchupSource;
+    NSDictionary *values=@{@"{utc}":[NSString stringWithFormat:@"%.0f",start.timeIntervalSince1970+shift],@"{utcend}":[NSString stringWithFormat:@"%.0f",end.timeIntervalSince1970+shift],@"{duration}":[NSString stringWithFormat:@"%.0f",[end timeIntervalSinceDate:start]],@"${start}":[NSString stringWithFormat:@"%.0f",start.timeIntervalSince1970+shift],@"${end}":[NSString stringWithFormat:@"%.0f",end.timeIntervalSince1970+shift]};
+    for(NSString *token in values)address=[address stringByReplacingOccurrencesOfString:token withString:values[token]];
+    NSDateFormatter *formatter=[NSDateFormatter new];formatter.locale=[NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];formatter.timeZone=[NSTimeZone timeZoneForSecondsFromGMT:0];NSDictionary *dateTokens=@{@"{Y}":@"yyyy",@"{m}":@"MM",@"{d}":@"dd",@"{H}":@"HH",@"{M}":@"mm",@"{S}":@"ss"};
+    for(NSString *token in dateTokens){formatter.dateFormat=dateTokens[token];address=[address stringByReplacingOccurrencesOfString:token withString:[formatter stringFromDate:[start dateByAddingTimeInterval:shift]]];}
+    if([address containsString:@"{"]||[address containsString:@"}"])return nil;
+    if([self.catchupMode isEqual:@"append"])address=[self.url stringByAppendingString:address];
+    NSURL *url=[NSURL URLWithString:address relativeToURL:[NSURL URLWithString:self.url]].absoluteURL;
+    return [@[@"http",@"https"] containsObject:url.scheme.lowercaseString]?url:nil;
+}
 @end
 
 @implementation M3UParser
++ (NSDictionary *)reportForText:(NSString *)text baseURL:(NSURL *)baseURL {
+    NSError *error=nil;NSArray *channels=[self parse:text baseURL:baseURL error:&error]?:@[];NSMutableDictionary *unsupported=[NSMutableDictionary dictionary];
+    if(!error&&![self isHLSManifest:text])[text enumerateLinesUsingBlock:^(NSString *raw,BOOL *stop){
+        NSString *line=[raw stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];if([line hasPrefix:@"#"])return;
+        NSRange comma=[line rangeOfString:@","];if(comma.location!=NSNotFound){NSString *tail=[line substringFromIndex:NSMaxRange(comma)];if([tail containsString:@"://"])line=tail;}
+        NSURLComponents *parts=[NSURLComponents componentsWithString:line];NSString *scheme=parts.scheme.lowercaseString;
+        if(scheme.length&&![MediaCapabilityNetworkTransports() containsObject:scheme]&&[line containsString:@"://"])unsupported[scheme]=@([unsupported[scheme] unsignedIntegerValue]+1);
+    }];
+    return @{@"channels":channels,@"recognizedCount":@(channels.count),@"unsupportedProtocols":unsupported.copy,@"error":error.localizedDescription?:@"",@"kind":[self isHLSManifest:text]?@"hls":@"iptv"};
+}
++ (BOOL)isHLSManifest:(NSString *)text {
+    for(NSString *tag in @[@"#EXT-X-STREAM-INF:",@"#EXT-X-TARGETDURATION:",@"#EXT-X-MEDIA-SEQUENCE:",@"#EXT-X-MAP:"])if([text containsString:tag])return YES;
+    return NO;
+}
 + (NSString *)epgURL:(NSString *)text baseURL:(NSURL *)baseURL {
     if(!text.length)return nil;
     if([text hasPrefix:@"\uFEFF"])text=[text substringFromIndex:1];
@@ -112,6 +141,14 @@ static NSURL *M3UNormalizedLoopbackURL(NSURL *url, NSURL *baseURL) {
 + (NSArray<M3UChannel *> *)parse:(NSString *)text baseURL:(NSURL *)baseURL error:(NSError **)error {
     NSMutableArray<M3UChannel *> *out = [NSMutableArray array];
     if (!text.length) return out;
+    if([text hasPrefix:@"\uFEFF"])text=[text substringFromIndex:1];
+    if([self isHLSManifest:text]){
+        if(baseURL.host.length){M3UChannel *channel=[M3UChannel new];channel.name=baseURL.lastPathComponent?:@"HLS";channel.url=baseURL.absoluteString;channel.group=@"直播";channel.headers=@{};[out addObject:channel];}
+        return out;
+    }
+    __block NSString *catchupMode=nil,*catchupSource=nil;
+    __block double catchupDays=0,tvgShift=0;
+    __block NSString *defaultMode=nil,*defaultSource=nil;__block double defaultDays=0,defaultShift=0;
 
     __block NSString *group = nil;
     __block NSString *pendingName = nil;
@@ -128,6 +165,7 @@ static NSURL *M3UNormalizedLoopbackURL(NSURL *url, NSURL *baseURL) {
         NSString *line = [raw stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
         if (!line.length) return;
 
+        if([line hasPrefix:@"#EXTM3U"]){defaultMode=[self attribute:@"catchup" in:line];defaultSource=[self attribute:@"catchup-source" in:line];defaultDays=[[self attribute:@"catchup-days" in:line] doubleValue];defaultShift=[[self attribute:@"tvg-shift" in:line] doubleValue];return;}
         if ([line hasPrefix:@"#EXTVLCOPT:"]) {
             M3UAddVLCOption(pendingHeaders, [line substringFromIndex:[@"#EXTVLCOPT:" length]]);
             return;
@@ -137,7 +175,15 @@ static NSURL *M3UNormalizedLoopbackURL(NSURL *url, NSURL *baseURL) {
             return;
         }
 
+        NSRange txtComma=[line rangeOfString:@","];
+        if(![line hasPrefix:@"#"]&&txtComma.location!=NSNotFound){
+            NSString *tail=[[line substringFromIndex:NSMaxRange(txtComma)] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+            NSString *label=[line substringToIndex:txtComma.location];
+            if([tail isEqual:@"#genre#"]){group=label;return;}
+            if([tail containsString:@"://"]){pendingName=label;line=tail;}
+        }
         if ([line hasPrefix:@"#EXTINF"]) {
+            catchupMode=[self attribute:@"catchup" in:line]?:defaultMode;catchupSource=[self attribute:@"catchup-source" in:line]?:defaultSource;NSString *days=[self attribute:@"catchup-days" in:line],*shift=[self attribute:@"tvg-shift" in:line];catchupDays=days.length?days.doubleValue:defaultDays;tvgShift=shift.length?shift.doubleValue:defaultShift;
             // Header directives belong to the next URL. Drop any directives
             // left behind by a malformed entry so they cannot leak to another
             // channel after a missing URL line.
@@ -153,6 +199,8 @@ static NSURL *M3UNormalizedLoopbackURL(NSURL *url, NSURL *baseURL) {
         }
         if ([line hasPrefix:@"#"]) return;
 
+        // Relative paths require an EXTINF entry; arbitrary script words are not channels.
+        if(!pendingName&&![line containsString:@"://"])return;
         if (!pendingName) pendingName = line.lastPathComponent.stringByDeletingPathExtension;
 
         NSURL *url = nil;
@@ -161,7 +209,7 @@ static NSURL *M3UNormalizedLoopbackURL(NSURL *url, NSURL *baseURL) {
             if (url.scheme.length == 0 && baseURL) url = [NSURL URLWithString:line relativeToURL:baseURL];
             NSURLComponents *parts = url ? [NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:YES] : nil;
             NSString *scheme = parts.scheme.lowercaseString;
-            if ((! [scheme isEqualToString:@"http"] && ![scheme isEqualToString:@"https"]) || !parts.host.length) url = nil;
+            if ((![MediaCapabilityNetworkTransports() containsObject:scheme]) || !parts.host.length) url = nil;
             else {
                 if ([[parts.host lowercaseString] isEqualToString:@"0.0.0.0"] || [[parts.host lowercaseString] isEqualToString:@"localhost"]) {
                     parts.host = @"127.0.0.1";
@@ -185,6 +233,8 @@ static NSURL *M3UNormalizedLoopbackURL(NSURL *url, NSURL *baseURL) {
         ch.epgID = pendingEPGID;
         ch.tvgName = pendingTVGName;
         ch.headers = pendingHeaders.copy ?: @{};
+        ch.catchupMode=catchupMode;ch.catchupSource=catchupSource;ch.catchupDays=catchupDays;ch.tvgShift=tvgShift;
+        catchupMode=nil;catchupSource=nil;catchupDays=0;tvgShift=0;
         [out addObject:ch];
         pendingName = nil;
         pendingLogo = nil;

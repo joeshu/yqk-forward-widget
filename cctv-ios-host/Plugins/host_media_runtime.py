@@ -3,6 +3,7 @@
 Only explicitly enabled packages are loaded. This module never resolves a stream
 by executing a plugin during import/inspection of an archive.
 """
+from host_media_capabilities import NETWORK_TRANSPORTS, CICADA_FORMATS, UNSUPPORTED_CONTAINERS, AV_FORMATS
 import builtins
 import collections
 import importlib
@@ -18,6 +19,39 @@ import urllib.parse
 import uuid
 import types
 from pathlib import Path
+
+def strip_media_credentials(headers):
+    return {k: v for k, v in headers.items() if k.lower() not in ('authorization', 'cookie', 'proxy-authorization') and not any(x in k.lower() for x in ('token', 'key', 'secret', 'signature', 'session', 'credential'))}
+
+
+def bounded_media_page(url, headers):
+    import requests
+    deadline = time.monotonic() + 8
+    headers = dict(headers)
+    for hop in range(6):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError('Media page request budget exceeded')
+        with requests.get(url, headers=headers, timeout=(min(3, remaining), min(3, remaining)), stream=True, allow_redirects=False) as response:
+            if response.status_code in (301, 302, 303, 307, 308):
+                target = urllib.parse.urljoin(response.url, response.headers.get('Location', ''))
+                a, b = urllib.parse.urlsplit(url), urllib.parse.urlsplit(target)
+                if b.scheme not in ('http', 'https') or not b.hostname or b.username or b.password or hop == 5 or (a.scheme == 'https' and b.scheme != 'https'):
+                    raise ValueError('Media page redirect rejected')
+                if (a.scheme.lower(), a.netloc.lower()) != (b.scheme.lower(), b.netloc.lower()):
+                    headers = strip_media_credentials(headers)
+                url = target
+                continue
+            if not 200 <= response.status_code < 300:
+                raise ValueError('Media page HTTP request failed')
+            data = bytearray()
+            for chunk in response.iter_content(16384):
+                data.extend(chunk)
+                if len(data) > 512 * 1024 or time.monotonic() > deadline:
+                    raise ValueError('Media page response budget exceeded')
+            return data.decode(response.encoding or 'utf-8', errors='replace'), response.url, headers
+    raise ValueError('Media page redirect limit exceeded')
+
 
 _CSP_ADAPTER_MODULE = None
 
@@ -363,17 +397,21 @@ def detail(value, identifier):
     return result
 
 
-def valid_media_url(value):
+def valid_media_url(value, transports=('http', 'https')):
     if (not isinstance(value, str) or len(value) > 8192 or
             any(ord(char) <= 32 or ord(char) == 127 for char in value)):
         return False
     try:
         parsed = urllib.parse.urlsplit(value)
         parsed.port  # Reject malformed or out-of-range ports before handing the URL to AVPlayer.
-        return (parsed.scheme.lower() in ('http', 'https') and bool(parsed.hostname)
+        return (parsed.scheme.lower() in transports and bool(parsed.hostname)
                 and not parsed.username and not parsed.password)
     except ValueError:
         return False
+
+
+def valid_playback_url(value):
+    return valid_media_url(value, NETWORK_TRANSPORTS)
 
 
 def valid_proxy_address(value):
@@ -638,7 +676,7 @@ def playback(value, _depth=0):
         choices = url.get('values') or url.get('list')
         if isinstance(choices, list):
             choices = [item for item in choices if isinstance(item, dict) and
-                       (valid_media_url(normalize_media_address(media_choice_address(item))) or
+                       (valid_playback_url(normalize_media_address(media_choice_address(item))) or
                         (enabled(value.get('proxy')) or enabled(item.get('proxy'))) and
                         valid_proxy_address(normalize_media_address(media_choice_address(item))))]
             first = choices[0] if choices else None
@@ -658,7 +696,7 @@ def playback(value, _depth=0):
             url = media_choice_address(url)
     if isinstance(url, list):
         if url and all(isinstance(item, dict) for item in url):
-            url = [item for item in url if valid_media_url(
+            url = [item for item in url if valid_playback_url(
                 normalize_media_address(media_choice_address(item))) or
                 (enabled(value.get('proxy')) or enabled(item.get('proxy'))) and
                 valid_proxy_address(normalize_media_address(media_choice_address(item)))]
@@ -695,10 +733,10 @@ def playback(value, _depth=0):
                 alternates.append(choice)
         else:
             strings = [normalize_media_address(str(item)) for item in url if item not in (None, '')]
-            if len(strings) == 1 and (valid_media_url(strings[0]) or
+            if len(strings) == 1 and (valid_playback_url(strings[0]) or
                                       proxy_requested and valid_proxy_address(strings[0])):
                 alternates = [{'name': '线路 1', 'url': strings[0]}]
-            elif strings and all(valid_media_url(item) or
+            elif strings and all(valid_playback_url(item) or
                                  proxy_requested and valid_proxy_address(item) for item in strings):
                 alternates = [{'name': f'线路 {index + 1}', 'url': address}
                               for index, address in enumerate(strings)]
@@ -706,7 +744,7 @@ def playback(value, _depth=0):
                 alternates = []
                 for index, item in enumerate(strings):
                     name, _, address = item.partition('$')
-                    if valid_media_url(address):
+                    if valid_playback_url(address):
                         alternates.append({'name': name or f'线路 {index + 1}', 'url': address})
             else:
                 alternates = [
@@ -722,7 +760,7 @@ def playback(value, _depth=0):
                 for cand in [normalize_media_address(media_choice_address(item))]
                 if (valid_proxy_address(cand)
                     if (enabled(item.get('proxy')) or proxy_requested)
-                    else valid_media_url(cand))
+                    else valid_playback_url(cand))
             ),
             alternates[0]['url'] if alternates else '',
         )
@@ -746,8 +784,8 @@ def playback(value, _depth=0):
     declared_mime = declared_type.split(';', 1)[0].strip()
     hls_formats = {'hls', 'm3u8', 'm3u', 'mpegurl', 'application/vnd.apple.mpegurl',
                    'application/x-mpegurl', 'audio/mpegurl'}
-    native_formats = hls_formats | {'mp4', 'm4v', 'mov', 'quicktime', 'mp3', 'm4a',
-                                    'aac', 'ts', 'mpeg-ts', 'mpegts'}
+    native_formats = AV_FORMATS
+
     native_mimes = {'application/vnd.apple.mpegurl', 'application/x-mpegurl', 'audio/mpegurl',
                     'video/mp4', 'application/mp4', 'video/quicktime', 'audio/mp4',
                     'audio/mpeg', 'audio/aac', 'video/mp2t'}
@@ -770,7 +808,7 @@ def playback(value, _depth=0):
         return address
 
     url = repair_url(url)
-    if not (valid_proxy_address(url) if proxy_requested else valid_media_url(url)):
+    if not (valid_proxy_address(url) if proxy_requested else valid_playback_url(url)):
         message = value.get('error') or value.get('message') or value.get('msg')
         raise MediaError('NO_MEDIA', str(message or ('来源未返回有效本机代理地址' if proxy_requested else '来源未返回有效 HTTP/HTTPS 媒体地址'))[:512])
     safe_alternates = []
@@ -781,7 +819,7 @@ def playback(value, _depth=0):
             candidate = normalize_media_address(media_choice_address(item))
             candidate = repair_url(candidate)
             item_proxy = enabled(item.get('proxy')) or proxy_requested
-            if valid_media_url(candidate) or item_proxy and valid_proxy_address(candidate):
+            if valid_playback_url(candidate) or item_proxy and valid_proxy_address(candidate):
                 choice = {'name': str(item.get('name') or item.get('n') or item.get('quality') or f'线路 {index + 1}')[:128], 'url': candidate}
                 choice_headers = merge_media_headers(item.get('headers', {}), item.get('header', {}),
                                                      item.get('customHeaders', {}))
@@ -823,16 +861,16 @@ def playback(value, _depth=0):
             extension = 'ts'
     native_extensions = {'m3u8', 'm3u', 'mp4', 'm4v', 'mov', 'mp3', 'm4a', 'aac', 'ts', 'fmp4', 'cmaf', 'm4s', 'f4v', 'wav', 'flac', 'ac3', 'eac3'}
     stream_extensions = native_extensions | {'mpd', 'flv', 'mkv', 'avi', 'webm', 'wmv', 'rmvb'}
-    cicada_extensions = {'mpd', 'flv', 'mkv', 'avi', 'webm', 'wmv', 'asf', 'rmvb', 'rm', 'mpg', 'mpeg', 'm2ts', '3gp'}
+    cicada_extensions = CICADA_FORMATS
     cicada_formats = cicada_extensions | {'dash', 'mpeg-dash', 'matroska', 'application/dash+xml'}
-    cicada_mimes = {'application/dash+xml', 'application/vnd.ms-sstr+xml', 'video/x-flv',
-                    'video/x-matroska', 'video/webm', 'video/x-msvideo', 'video/x-ms-wmv'}
+    cicada_mimes = {'application/dash+xml', 'video/x-flv',
+                    'video/x-matroska', 'video/webm'}
     declared_player = str(value.get('playerType') or '').strip().lower()
     app_player_hint = (declared_player in ('app', 'native', 'avplayer', 'cicada', 'system') and
                        not enabled(value.get('requiresWebPlayback')) and
                        not enabled(value.get('webPlayback')) and
                        not parse and not jx)
-    cicada_media = (extension in cicada_extensions or declared_format in cicada_formats or
+    cicada_media = (urllib.parse.urlsplit(url).scheme.lower() in ('rtmp', 'rtmps') or extension in cicada_extensions or declared_format in cicada_formats or
                     declared_mime in cicada_mimes)
     native_media = (extension in native_extensions or declared_format in native_formats or
                     declared_mime in native_mimes or (app_player_hint and not cicada_media))
@@ -856,6 +894,10 @@ def playback(value, _depth=0):
         result['format'] = declared_format[:64]
     if declared_type:
         result['contentType'] = declared_type[:128]
+    if extension in UNSUPPORTED_CONTAINERS or declared_format in UNSUPPORTED_CONTAINERS:
+        result['capabilityStatus'] = 'unsupported'
+        result['capabilityReason'] = 'unsupported_container'
+        result['nativePlayable'] = False
     if cicada_media:
         result['playbackEngine'] = 'cicada'
     for key in ('sessionID', 'expiresAt', 'refreshAfter', 'refreshInterval', 'isLive'):
@@ -1162,7 +1204,7 @@ class PythonSpider:
         methods = {'home': 'homeContent', 'category': 'categoryContent', 'search': 'searchContent',
                    'detail': 'detailContent', 'play': 'playerContent', 'proxy': 'localProxy'}
         return {'engine': 'CPython', 'protocol': 'python-spider',
-                'capabilities': [key for key, method in methods.items() if callable(getattr(self.spider, method, None))]}
+                'capabilities': [key for key, method in methods.items() if key in getattr(self.spider, 'supported_operations', methods) and callable(getattr(self.spider, method, None))]}
 
     def call(self, operation, args):
         wait_started = time.perf_counter()
@@ -1417,10 +1459,17 @@ class PythonSpider:
             if url.startswith(('http://', 'https://')) and not any(d in low for d in vip_domains) and '127.0.0.1' not in low and not is_dead_cdn:
                 try:
                     import requests
-                    resp = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
-                    sniffed = csp_adapter._extract_stream_from_html(resp.text, base_url=url)
+                    headers = media_headers(result.get('headers') or result.get('header') or {})
+                    headers.setdefault('User-Agent', 'Mozilla/5.0')
+                    page, final_page, headers = bounded_media_page(url, headers)
+                    sniffed = csp_adapter._extract_stream_from_html(page, base_url=final_page)
                     if sniffed and not any(dead in sniffed.lower() for dead in ('lzcdn', 'lzfile', 'lfthirtytwo')):
-                        return {'parse': 0, 'jx': 0, 'url': sniffed, 'header': {'User-Agent': 'Mozilla/5.0'}}
+                        a, b = urllib.parse.urlsplit(final_page), urllib.parse.urlsplit(sniffed)
+                        if (a.scheme.lower(), a.netloc.lower()) != (b.scheme.lower(), b.netloc.lower()):
+                            headers = strip_media_credentials(headers)
+                        headers['Referer'] = final_page
+                        return {'parse': 0, 'jx': 0, 'url': sniffed, 'header': headers}
+
                 except Exception:
                     pass
             # Preserve the selected source if page extraction cannot resolve

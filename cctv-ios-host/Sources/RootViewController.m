@@ -1,3 +1,10 @@
+#import "HostTabBarController.h"
+#import "HostChannelCatalogController.h"
+#import "PlaybackOverlayController.h"
+#import "MediaPlaybackCicadaAdapter.h"
+#import "MediaPlaybackDecodeRouter.h"
+#import "MediaCapabilityRegistry.h"
+#import "PlaybackCoordinator.h"
 #import "MediaJARSource.h"
 #import "MediaRelayDiagnostics.h"
 #import "RootViewController.h"
@@ -184,6 +191,7 @@ static NSArray<NSDictionary *> *CCTVPlaylistSnapshotRows(NSArray *channels,NSStr
         if([value isKindOfClass:NSDictionary.class]){if([NSPropertyListSerialization propertyList:value isValidForFormat:NSPropertyListBinaryFormat_v1_0])[rows addObject:[value copy]];continue;}
         if(![value isKindOfClass:M3UChannel.class])continue;
         M3UChannel *channel=value;NSMutableDictionary *row=[@{@"name":channel.name?:@"未命名频道",@"group":channel.group?:@"订阅",@"verified":@NO,@"remoteURL":channel.url?:@"",@"subscriptionSources":source.length?@[source]:@[]} mutableCopy];
+        if(channel.catchupSource.length){row[@"catchupSource"]=channel.catchupSource;row[@"catchupMode"]=channel.catchupMode?:@"default";row[@"catchupDays"]=@(channel.catchupDays);row[@"tvgShift"]=@(channel.tvgShift);}
         if(channel.epgID.length)row[@"epgID"]=channel.epgID;if(channel.tvgName.length)row[@"tvgName"]=channel.tvgName;if(channel.logo.length)row[@"logo"]=channel.logo;if(channel.headers.count)row[@"headers"]=channel.headers;
         if([NSPropertyListSerialization propertyList:row isValidForFormat:NSPropertyListBinaryFormat_v1_0])[rows addObject:row.copy];
     }
@@ -478,7 +486,15 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 }
 @end
 
-@interface RootViewController () <UITableViewDataSource, UITableViewDelegate, UISearchResultsUpdating, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout, UIDocumentPickerDelegate, AVPlayerViewControllerDelegate, UINavigationControllerDelegate>
+@interface RootViewController () <PlaybackSession, MediaPlaybackCicadaAdapterDelegate, UITableViewDataSource, UITableViewDelegate, UISearchResultsUpdating, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout, UIDocumentPickerDelegate, AVPlayerViewControllerDelegate, UINavigationControllerDelegate>
+@property(nonatomic,strong) HostTabBarController *hostTabController;
+@property(nonatomic,strong) HostChannelCatalogController *channelCatalogController;
+@property(nonatomic,strong) PlaybackOverlayController *liveControlsOverlay;
+@property(nonatomic) BOOL livePanActive;
+@property(nonatomic) BOOL livePanRightSide;
+@property(nonatomic) BOOL livePanIgnored;
+@property(nonatomic,strong) MediaPlaybackCicadaAdapter *remoteAdapter;
+@property(nonatomic) BOOL remoteTriedCicada;
 @property(nonatomic,strong) ResourceImportWorkflowViewController *resourceImportWorkflow;
 - (void)saveImportCandidate:(NSDictionary *)candidate update:(BOOL)update completion:(void (^)(NSError *error))completion;
 - (NSString *)importPlaylistData:(NSData *)data name:(NSString *)name metadata:(NSDictionary *)metadata;
@@ -753,6 +769,23 @@ configureCatalogNavigation;
 @end
 
 @implementation RootViewController
+- (BOOL)sessionHasContent {return self.currentPlayer||self.avPlayer||self.remoteAdapter||self.moviePlayer||self.playbackReadiness||(self.channelID.length&&(self.livePlaybackSuspendedForNavigation||self.remotePlaybackFailed||self.nativePlaybackFailed));}
+- (BOOL)sessionWantsPlayback {if(self.livePlaybackSuspendedForNavigation)return NO;if(self.avPlayer||self.remoteAdapter)return self.remotePlaybackWanted;return [self sessionIsPlaying]||(self.currentPlayer&&!self.firstRender&&!self.nativePlaybackFailed);}
+- (BOOL)sessionIsPlaying {
+    if(self.livePlaybackSuspendedForNavigation)return NO;
+    if(self.remoteAdapter)return self.remoteAdapter.state==MediaPlaybackCicadaAdapterStatePlaying;
+    if(self.moviePlayer)return self.moviePlayer.rate>0;
+    if(self.avPlayer)return self.remotePlaybackWanted;
+    @try{return [[self.currentPlayer valueForKey:@"isPlaying"] boolValue];}@catch(NSException *e){return NO;}
+}
+- (void)sessionPlay {if(self.remoteAdapter.state==MediaPlaybackCicadaAdapterStateCompleted){[self playRemote:@{@"remoteURL":self.currentRemoteURL?:@"",@"id":self.channelID?:@"",@"name":self.channelName?:@"直播",@"headers":self.currentRemoteHeaders?:@{}}];return;}if(self.remoteAdapter){self.remotePlaybackWanted=YES;[self.remoteAdapter start];}else if(![self sessionIsPlaying])[self togglePlayPause];[self updateNowPlaying];}
+- (void)sessionPause {
+    self.remotePlaybackWanted=NO;[self.remoteAdapter pause];[self.moviePlayer pause];[self.avPlayer pause];[self call:self.currentPlayer sel:@"pause"];
+    [self.playPauseBtn setTitle:@"继续" forState:UIControlStateNormal];[self updateNowPlaying];
+}
+- (BOOL)sessionStep:(NSInteger)direction {if(self.livePlaybackSuspendedForNavigation||!self.channelID.length)return NO;[self playAdjacentChannel:direction];return YES;}
+- (void)sessionMediaServicesReset {[self suspendLivePlaybackForReason:@"audio_services_reset"];}
+
 
 - (BOOL)shouldAutorotate { return YES; }
 - (UIInterfaceOrientationMask)supportedInterfaceOrientations { return UIInterfaceOrientationMaskPortrait; }
@@ -1054,7 +1087,7 @@ configureCatalogNavigation;
 - (void)onBackground {
     [(MediaBrowserViewController *)self.tabPages[@2] pauseForBackground];
     BOOL livePageRemainsVisible=self.activeTab<2&&self.navigationController.topViewController==self&&self.presentedViewController==nil;
-    [RuntimeDiagnostics.shared recordEvent:@"background_playback_policy" category:@"playback" fields:@{@"active_tab":@(self.activeTab),@"live_page_visible":@(livePageRemainsVisible),@"live_player_present":@(self.currentPlayer!=nil||self.avPlayer!=nil||self.cicadaPlayer!=nil),@"policy":livePageRemainsVisible?@"keep_live_playback":@"suspend_when_outside_live_page"}];
+    [RuntimeDiagnostics.shared recordEvent:@"background_playback_policy" category:@"playback" fields:@{@"active_tab":@(self.activeTab),@"live_page_visible":@(livePageRemainsVisible),@"live_player_present":@(self.currentPlayer!=nil||self.avPlayer!=nil||self.cicadaPlayer!=nil||self.remoteAdapter!=nil),@"policy":livePageRemainsVisible?@"keep_live_playback":@"suspend_when_outside_live_page"}];
     if(!livePageRemainsVisible)[self suspendLivePlaybackForReason:@"app_background_outside_live_page"];
     [self.nativePreloader cancel];
     [[HostImageLoader shared] cancelPending];
@@ -1253,7 +1286,8 @@ configureCatalogNavigation;
     self.castBtn = [self barButton:@"投屏" action:@selector(showCastingCenter)];
     self.castBtn.accessibilityIdentifier = @"player.control.cast";
     self.moreBtn = [self barButton:@"更多" action:@selector(showMorePlaybackActions)];
-    for (UIButton *b in @[self.playPauseBtn, self.muteBtn, self.routeBtn, self.epgBtn, self.castBtn, self.moreBtn]) {
+    UIButton *fullscreenControl=[self barButton:@"全屏" action:@selector(toggleFullscreen)];
+    for (UIButton *b in @[self.playPauseBtn, self.muteBtn, fullscreenControl, self.moreBtn]) {
         [self.controlBar addArrangedSubview:b];
     }
     self.hiddenRoutePicker = [[AVRoutePickerView alloc] initWithFrame:CGRectMake(-100, -100, 1, 1)];
@@ -1297,6 +1331,7 @@ configureCatalogNavigation;
     b.layer.cornerCurve = kCACornerCurveContinuous;
     b.layer.borderWidth = 0.65;
     b.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.22].CGColor;
+    if(UIContentSizeCategoryIsAccessibilityCategory(self.traitCollection.preferredContentSizeCategory))b.titleLabel.hidden=YES;
     b.titleLabel.layer.shadowColor = UIColor.blackColor.CGColor;
     b.titleLabel.layer.shadowOpacity = 0.72;
     b.titleLabel.layer.shadowRadius = 2.0;
@@ -1306,27 +1341,17 @@ configureCatalogNavigation;
     return b;
 }
 
-- (void)toggleOverlay {
-    BOOL nextHidden = !self.controlBar.hidden;
-    self.controlBar.hidden = nextHidden;
-    self.playerBottomScrim.hidden = nextHidden;
-    self.playerTopScrim.hidden = nextHidden;
-    self.titleLabel.hidden = nextHidden;
-    self.infoLabel.hidden = nextHidden;
-    if (!nextHidden && self.firstRender) {
-        [self refreshNowNext];
-        NSUInteger gen = self.playbackGeneration;
-        __weak typeof(self) weakSelf = self;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            RootViewController *owner = weakSelf;
-            if (!owner || owner.playbackGeneration != gen || !owner.firstRender || owner.nativeTimeShiftActive || owner.nativePlaybackFailed || owner.remotePlaybackFailed) return;
-            owner.titleLabel.hidden = YES;
-            owner.infoLabel.hidden = YES;
-            owner.playerTopScrim.hidden = YES;
-            owner.playerBottomScrim.hidden = YES;
-        });
-    }
+- (void)setLiveOverlayHidden:(BOOL)hidden {
+    self.controlBar.hidden=hidden;self.playerBottomScrim.hidden=hidden;self.playerTopScrim.hidden=hidden;self.titleLabel.hidden=hidden;self.infoLabel.hidden=hidden;
 }
+- (PlaybackOverlayController *)liveOverlayPolicy {
+    if(!self.liveControlsOverlay){self.liveControlsOverlay=[PlaybackOverlayController new];__weak typeof(self) weakSelf=self;
+        self.liveControlsOverlay.onVisibilityChanged=^(BOOL visible){[weakSelf setLiveOverlayHidden:!visible];};
+        self.liveControlsOverlay.canAutoHide=^BOOL{RootViewController *owner=weakSelf;return owner&&owner.firstRender&&[owner sessionIsPlaying]&&!owner.livePanActive&&!owner.nativeTimeShiftActive&&!owner.nativePlaybackFailed&&!owner.remotePlaybackFailed;};
+        if(self.controlBar.hidden)[self.liveControlsOverlay hide];else[self.liveControlsOverlay show];
+    }return self.liveControlsOverlay;
+}
+- (void)toggleOverlay {[[self liveOverlayPolicy] toggle];}
 
 #pragma mark - 列表
 
@@ -1346,10 +1371,10 @@ configureCatalogNavigation;
     self.groupControl = [[UISegmentedControl alloc] initWithItems:[self currentCatalogGroupTitles]];
     self.groupControl.frame = CGRectMake(8, y + 6, self.view.bounds.size.width - 16, 32);
     self.groupControl.selectedSegmentIndex = 0;
-    self.groupControl.tintColor = HostAccent();self.groupControl.selectedSegmentTintColor=HostAccent();NSDictionary *segmentNormal=@{NSForegroundColorAttributeName:HostMutedText(),NSFontAttributeName:[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:11 weight:UIFontWeightMedium]]},*segmentSelected=@{NSForegroundColorAttributeName:HostOnAccent(),NSFontAttributeName:[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]]};[self.groupControl setTitleTextAttributes:segmentNormal forState:UIControlStateNormal];[self.groupControl setTitleTextAttributes:segmentSelected forState:UIControlStateSelected];
+    self.groupControl.tintColor = HostAccent();self.groupControl.selectedSegmentTintColor=HostAccentFill();NSDictionary *segmentNormal=@{NSForegroundColorAttributeName:HostMutedText(),NSFontAttributeName:[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:11 weight:UIFontWeightMedium]]},*segmentSelected=@{NSForegroundColorAttributeName:HostOnAccent(),NSFontAttributeName:[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]]};[self.groupControl setTitleTextAttributes:segmentNormal forState:UIControlStateNormal];[self.groupControl setTitleTextAttributes:segmentSelected forState:UIControlStateSelected];
     [self.groupControl addTarget:self action:@selector(onGroupChanged) forControlEvents:UIControlEventValueChanged];
     [self.view addSubview:self.groupControl];
-    self.playerTabs=[[UISegmentedControl alloc] initWithItems:@[@"分类",@"频道",@"节目",@"线路"]];self.playerTabs.selectedSegmentIndex=1;self.playerTabs.selectedSegmentTintColor=HostAccent();[self.playerTabs setTitleTextAttributes:segmentNormal forState:UIControlStateNormal];[self.playerTabs setTitleTextAttributes:segmentSelected forState:UIControlStateSelected];[self.playerTabs addTarget:self action:@selector(selectPlayerPanel) forControlEvents:UIControlEventValueChanged];[self.view addSubview:self.playerTabs];
+    self.playerTabs=[[UISegmentedControl alloc] initWithItems:@[@"分类",@"频道",@"节目",@"线路"]];self.playerTabs.selectedSegmentIndex=1;self.playerTabs.selectedSegmentTintColor=HostAccentFill();[self.playerTabs setTitleTextAttributes:segmentNormal forState:UIControlStateNormal];[self.playerTabs setTitleTextAttributes:segmentSelected forState:UIControlStateSelected];[self.playerTabs addTarget:self action:@selector(selectPlayerPanel) forControlEvents:UIControlEventValueChanged];[self.view addSubview:self.playerTabs];
 
     self.versionLabel = [[UILabel alloc] initWithFrame:CGRectMake(8, y + 38, self.view.bounds.size.width - 16, 14)];
     self.versionLabel.textColor = HostSecondaryText();
@@ -1368,7 +1393,6 @@ configureCatalogNavigation;
     self.table.sectionHeaderTopPadding = 0;
     self.table.backgroundColor = HostBackground();
     self.table.separatorColor = HostSeparator();
-    [self.view addSubview:self.table];
 
     UIRefreshControl *rc = [[UIRefreshControl alloc] init];
     [rc addTarget:self action:@selector(onPullRefresh) forControlEvents:UIControlEventValueChanged];
@@ -1377,7 +1401,7 @@ configureCatalogNavigation;
     [self.table addGestureRecognizer:routePress];
     UICollectionViewFlowLayout *flow=[UICollectionViewFlowLayout new]; flow.minimumInteritemSpacing=6; flow.minimumLineSpacing=8; flow.sectionInset=UIEdgeInsetsMake(8,10,16,10);
     self.channelGrid=[[UICollectionView alloc] initWithFrame:CGRectZero collectionViewLayout:flow]; self.channelGrid.backgroundColor=HostBackground(); self.channelGrid.dataSource=self; self.channelGrid.delegate=self; self.channelGrid.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever;self.channelGrid.accessibilityIdentifier=@"channel.grid";
-    [self.channelGrid registerClass:UICollectionViewCell.class forCellWithReuseIdentifier:@"channel.card"]; [self.view addSubview:self.channelGrid];
+    [self.channelGrid registerClass:UICollectionViewCell.class forCellWithReuseIdentifier:@"channel.card"]; self.channelCatalogController=[[HostChannelCatalogController alloc] initWithTable:self.table grid:self.channelGrid];[self addChildViewController:self.channelCatalogController];self.channelCatalogController.view.frame=self.view.bounds;self.channelCatalogController.view.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;[self.view addSubview:self.channelCatalogController.view];[self.channelCatalogController didMoveToParentViewController:self];
     UIRefreshControl *gridRefresh=[UIRefreshControl new];[gridRefresh addTarget:self action:@selector(onPullRefresh) forControlEvents:UIControlEventValueChanged];self.channelGrid.refreshControl=gridRefresh;
     [self buildBottomBar];
 
@@ -1411,7 +1435,7 @@ configureCatalogNavigation;
 - (void)openDiagnosticLogForIdentifier:(NSString *)identifier name:(NSString *)name {
     if(identifier.length){
         PluginRunHistoryViewController *history=[PluginRunHistoryViewController new];history.serviceName=name;__weak typeof(self) weakSelf=self;NSString *scope=[identifier copy];NSString *scopeName=[name copy];
-        history.runRecordsProvider=^NSArray<NSDictionary *> *{if(![weakSelf.serviceOperations containsObject:scope]&&![PyHost isManagedServiceIdentifier:scope])[PluginLogStore.shared markUnmanagedRunsInterruptedForIdentifier:scope];return [PluginLogStore.shared runsForIdentifier:scope];};
+        history.runRecordsProvider=^NSArray<NSDictionary *> *{__block BOOL operating=NO;dispatch_block_t readState=^{operating=[weakSelf.serviceOperations containsObject:scope];};if(NSThread.isMainThread)readState();else dispatch_sync(dispatch_get_main_queue(),readState);if(!operating&&![PyHost isManagedServiceIdentifier:scope])[PluginLogStore.shared markUnmanagedRunsInterruptedForIdentifier:scope];return [PluginLogStore.shared runsForIdentifier:scope];};
         history.onSelectRun=^(NSDictionary *run){[weakSelf openPluginRunLogForIdentifier:scope name:scopeName?:@"服务" run:run];};
         history.onExportAll=^{[PluginLogStore.shared prepareExportForIdentifier:scope displayName:scopeName?:@"插件" completion:^(NSURL *url,NSError *error){if(!url){[weakSelf showServiceError:error.localizedDescription?:@"该脚本还没有可导出的日志。"];return;}[weakSelf shareDiagnosticLogAtURL:url];}];};
         history.onClearAll=^{[PluginLogStore.shared clearLogForIdentifier:scope completion:^{[[NSNotificationCenter defaultCenter] postNotificationName:CCTVHostDiagnosticLogDidUpdateNotification object:scope];}];};
@@ -1612,18 +1636,18 @@ configureCatalogNavigation;
     self.liveMiniPlayerResumeButton=[UIButton buttonWithType:UIButtonTypeSystem];[self.liveMiniPlayerResumeButton setTitle:@"继续直播" forState:UIControlStateNormal];HostStylePillButton(self.liveMiniPlayerResumeButton,YES);self.liveMiniPlayerResumeButton.layer.cornerRadius=14;self.liveMiniPlayerResumeButton.contentEdgeInsets=UIEdgeInsetsMake(5,12,5,12);self.liveMiniPlayerResumeButton.accessibilityIdentifier=@"live.mini-player.resume";[self.liveMiniPlayerResumeButton addTarget:self action:@selector(resumeSuspendedLiveFromMiniBar) forControlEvents:UIControlEventTouchUpInside];[self.liveMiniPlayerBar addSubview:self.liveMiniPlayerResumeButton];
     self.liveMiniPlayerCloseButton=[UIButton buttonWithType:UIButtonTypeSystem];[self.liveMiniPlayerCloseButton setImage:[UIImage systemImageNamed:@"xmark.circle.fill"] forState:UIControlStateNormal];self.liveMiniPlayerCloseButton.tintColor=HostSecondaryText();self.liveMiniPlayerCloseButton.accessibilityIdentifier=@"live.mini-player.close";self.liveMiniPlayerCloseButton.accessibilityLabel=@"关闭直播挂起提示";[self.liveMiniPlayerCloseButton addTarget:self action:@selector(dismissSuspendedLiveMiniBar) forControlEvents:UIControlEventTouchUpInside];[self.liveMiniPlayerBar addSubview:self.liveMiniPlayerCloseButton];
     [self.view addSubview:self.liveMiniPlayerBar];
-    self.bottomBar=[[UIStackView alloc] init]; self.bottomBar.axis=UILayoutConstraintAxisHorizontal; self.bottomBar.distribution=UIStackViewDistributionFillEqually; self.bottomBar.spacing=3; self.bottomBar.backgroundColor=UIColor.clearColor; self.bottomBar.layer.cornerRadius=27; self.bottomBar.layer.cornerCurve=kCACornerCurveContinuous; self.bottomBar.clipsToBounds=YES;
+    self.hostTabController=[HostTabBarController new];[self addChildViewController:self.hostTabController];self.bottomBar=self.hostTabController.stackView;__weak typeof(self) weakTabOwner=self;self.hostTabController.onSelect=^(UIButton *button){[weakTabOwner bottomTabTapped:button];};
     NSArray *titles=@[@"CCTV",@"频道",@"影视库",@"资源",@"设置"];
     NSArray *icons=@[@"tv.fill",@"play.rectangle.on.rectangle",@"house.fill",@"externaldrive.fill",@"gearshape"];
     for (NSInteger i=0;i<titles.count;i++) {
         UIButton *b=[UIButton buttonWithType:UIButtonTypeSystem]; b.tag=i;HostInstallPressFeedback(b);
-        UIButtonConfiguration *cfg=[UIButtonConfiguration plainButtonConfiguration]; cfg.title=titles[i]; cfg.image=[UIImage systemImageNamed:icons[i]]; cfg.imagePlacement=NSDirectionalRectEdgeTop; cfg.imagePadding=3; cfg.cornerStyle=UIButtonConfigurationCornerStyleCapsule; cfg.contentInsets=NSDirectionalEdgeInsetsMake(6,3,6,3); cfg.preferredSymbolConfigurationForImage=[UIImageSymbolConfiguration configurationWithPointSize:20 weight:UIImageSymbolWeightMedium]; cfg.baseForegroundColor=(i==0?HostOnAccent():HostMutedText()); cfg.background.backgroundColor=i==0?HostAccent():UIColor.clearColor; cfg.titleTextAttributesTransformer=^(NSDictionary<NSAttributedStringKey,id> *attributes){NSMutableDictionary *result=[attributes mutableCopy];result[NSFontAttributeName]=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]];return result;}; b.configuration=cfg;
+        UIButtonConfiguration *cfg=[UIButtonConfiguration plainButtonConfiguration]; cfg.title=titles[i]; cfg.image=[UIImage systemImageNamed:icons[i]]; cfg.imagePlacement=NSDirectionalRectEdgeTop; cfg.imagePadding=3; cfg.cornerStyle=UIButtonConfigurationCornerStyleCapsule; cfg.contentInsets=NSDirectionalEdgeInsetsMake(6,3,6,3); cfg.preferredSymbolConfigurationForImage=[UIImageSymbolConfiguration configurationWithPointSize:20 weight:UIImageSymbolWeightMedium]; cfg.baseForegroundColor=(i==0?HostOnAccent():HostMutedText()); cfg.background.backgroundColor=i==0?HostAccentFill():UIColor.clearColor; cfg.titleTextAttributesTransformer=^(NSDictionary<NSAttributedStringKey,id> *attributes){NSMutableDictionary *result=[attributes mutableCopy];result[NSFontAttributeName]=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]];return result;}; b.configuration=cfg;
         b.accessibilityLabel=titles[i]; b.accessibilityIdentifier=[NSString stringWithFormat:@"tab.%@",titles[i]];
         b.accessibilityHint=[NSString stringWithFormat:@"切换到%@页面",titles[i]];
         b.accessibilityTraits=UIAccessibilityTraitButton|(i==0?UIAccessibilityTraitSelected:0);b.accessibilityValue=i==0?@"已选中":@"未选中";
-        [b addTarget:self action:@selector(bottomTabTapped:) forControlEvents:UIControlEventTouchUpInside]; [self.bottomBar addArrangedSubview:b];
+        [self.hostTabController addTabButton:b];
     }
-    [self.view addSubview:self.bottomBar];
+    [self.view addSubview:self.hostTabController.view];[self.hostTabController didMoveToParentViewController:self];
     __weak typeof(self) weakSelf=self;
     self.resourceActionsButton=[UIButton buttonWithType:UIButtonTypeSystem];self.resourceActionsButton.accessibilityIdentifier=@"resource-floating-actions";self.resourceActionsButton.accessibilityLabel=@"脚本与服务及资源操作";
     UIButtonConfiguration *resourceButtonConfig=[UIButtonConfiguration plainButtonConfiguration];resourceButtonConfig.image=[UIImage systemImageNamed:@"slider.horizontal.3"];resourceButtonConfig.baseForegroundColor=HostText();resourceButtonConfig.background.backgroundColor=HostRaisedSurface();resourceButtonConfig.background.strokeColor=HostBorder();resourceButtonConfig.background.strokeWidth=.7;resourceButtonConfig.background.cornerRadius=29;resourceButtonConfig.contentInsets=NSDirectionalEdgeInsetsMake(12,12,12,12);self.resourceActionsButton.configuration=resourceButtonConfig;self.resourceActionsButton.hidden=YES;HostInstallPressFeedback(self.resourceActionsButton);
@@ -1654,7 +1678,7 @@ configureCatalogNavigation;
 }
 
 - (void)suspendLivePlaybackForReason:(NSString *)reason {
-    BOOL hasLivePlayback=self.currentPlayer!=nil||self.avPlayer!=nil||self.cicadaPlayer!=nil||self.playbackReadiness!=nil||self.remotePlaybackWanted;
+    BOOL hasLivePlayback=self.currentPlayer!=nil||self.avPlayer!=nil||self.cicadaPlayer!=nil||self.remoteAdapter!=nil||self.playbackReadiness!=nil||self.remotePlaybackWanted;
     BOOL hasActivePlayback=hasLivePlayback||self.moviePlayer!=nil;
     if(!hasActivePlayback)return;
     NSString *engine=self.avPlayer?@"avplayer":(self.cicadaPlayer?@"cicada":(self.currentPlayer?@"cnplayersdk":(self.moviePlayer?@"avplayer_controller":@"pending")));
@@ -1706,7 +1730,7 @@ configureCatalogNavigation;
         UIButtonConfiguration *configuration=button.configuration;
         BOOL selected=button.tag==self.activeTab;
         configuration.baseForegroundColor=selected?HostOnAccent():HostMutedText();
-        configuration.background.backgroundColor=selected?HostAccent():UIColor.clearColor;
+        configuration.background.backgroundColor=selected?HostAccentFill():UIColor.clearColor;
         configuration.background.strokeColor=selected?[HostAccent() colorWithAlphaComponent:0.35]:UIColor.clearColor;
         configuration.background.strokeWidth=selected?0.5:0;
         button.configuration=configuration;
@@ -2090,9 +2114,10 @@ configureCatalogNavigation;
     if(!catalog||!url.length||![live[@"supported"] boolValue]){[self showServiceError:@"这条直播清单无法从该资源合集中加载"];return;}
     BOOL belongs=NO;for(NSDictionary *entry in [TVBoxCatalogStore liveSourcesInCatalog:catalog])if([[self stableURLKey:entry[@"url"]] isEqual:url]){belongs=YES;break;}
     if(!belongs){[self showServiceError:@"直播清单与所选资源合集不匹配"];return;}
-    for(NSString *existingURL in self.subscriptionURLs.allObjects){if([existingURL isEqual:url])continue;NSDictionary *metadata=[ProfileStore metadata:existingURL];if([metadata[@"tvboxCatalogID"] isEqual:identifier])[self deleteSubscription:existingURL];}
+
     NSString *catalogName=[catalog[@"name"] isKindOfClass:NSString.class]?catalog[@"name"]:@"直播合集";NSString *liveName=[live[@"name"] isKindOfClass:NSString.class]?live[@"name"]:@"直播列表";
     NSMutableDictionary *metadata=[@{@"name":[NSString stringWithFormat:@"%@ · %@",catalogName,liveName],@"tvboxCatalogID":identifier,@"tvboxLiveEntryName":liveName,@"userAgent":live[@"ua"]?:@""} mutableCopy];
+    if([live[@"inlinePlaylist"] isKindOfClass:NSString.class])metadata[@"inlinePlaylist"]=live[@"inlinePlaylist"];
     [ProfileStore update:url values:metadata];if(![self.subscriptionURLs containsObject:url])[self.subscriptionURLs addObject:url];
     [NSUserDefaults.standardUserDefaults setObject:[ProfileStore orderedSources:self.subscriptionURLs.allObjects] forKey:@"subscriptions"];
     [NSUserDefaults.standardUserDefaults setObject:identifier forKey:@"selectedMediaCatalogID"];[NSUserDefaults.standardUserDefaults removeObjectForKey:@"selectedMediaSource"];
@@ -2556,6 +2581,7 @@ configureCatalogNavigation;
 #pragma mark - 播放
 
 - (void)playChannel:(NSDictionary *)ch route:(NSDictionary *)route {
+    [[PlaybackCoordinator shared] acquireSession:(id<PlaybackSession>)self];
     self.livePlaybackSuspendedForNavigation=NO;
     if([ch[@"remoteURL"] length]||[ProfileStore isHTTP:ch[@"id"]]){[self routePlayback:ch];return;}
     NSString *cid = ch[@"id"];
@@ -2768,6 +2794,7 @@ configureCatalogNavigation;
 }
 
 - (void)stopPlayback {
+    self.remoteAdapter.delegate=nil;[self.remoteAdapter destroy];self.remoteAdapter=nil;
     // Invalidate the native session first: any callback still in flight to the
     // old session delegate is dropped by its session check, and bumping the ID
     // keeps even a delegate retained by the SDK from forwarding again.
@@ -2839,6 +2866,7 @@ configureCatalogNavigation;
 }
 
 - (void)togglePlayPause {
+    if(self.remoteAdapter){if([self sessionIsPlaying])[self sessionPause];else[self sessionPlay];return;}
     if(self.livePlaybackSuspendedForNavigation){
         self.livePlaybackSuspendedForNavigation=NO;
         if(self.activeTab==1&&self.currentRemoteURL.length){[self playRemote:@{@"id":self.channelID?:self.currentRemoteURL,@"name":self.channelName?:@"直播",@"remoteURL":self.currentRemoteURL,@"headers":self.currentRemoteHeaders?:@{}}];return;}
@@ -2867,6 +2895,7 @@ configureCatalogNavigation;
 
 - (void)toggleMute {
     static BOOL muted = NO;
+    if(self.remoteAdapter){muted=!muted;[self.remoteAdapter setMuted:muted];[self.muteBtn setTitle:muted?@"发声":@"静音" forState:UIControlStateNormal];return;}
     if (self.avPlayer) {
         muted = !muted;
         self.avPlayer.muted = muted;
@@ -3095,7 +3124,7 @@ configureCatalogNavigation;
     [self.table reloadData];[self.channelGrid reloadData];
 }
 - (void)updateLiveScreenAwakeState {
-    BOOL isPlaying=self.currentPlayer!=nil||self.avPlayer!=nil||self.cicadaPlayer!=nil;
+    BOOL isPlaying=self.currentPlayer!=nil||self.avPlayer!=nil||self.cicadaPlayer!=nil||self.remoteAdapter!=nil;
     BOOL keepAwake=isPlaying && CCTVBoolPreference(@"cctv.mediaKeepScreenAwake",YES);
     if(self.activeTab<2){
         UIApplication.sharedApplication.idleTimerDisabled=keepAwake;
@@ -3111,8 +3140,8 @@ configureCatalogNavigation;
     HostSetLayerBorderColor(self.bottomDockGlass,HostBorder());
     self.catalogFloatingAirPlayPicker.activeTintColor=HostAccent();
     self.groupControl.tintColor=HostAccent();
-    self.groupControl.selectedSegmentTintColor=HostAccent();
-    self.playerTabs.selectedSegmentTintColor=HostAccent();
+    self.groupControl.selectedSegmentTintColor=HostAccentFill();
+    self.playerTabs.selectedSegmentTintColor=HostAccentFill();
     [self updateLiveResourceCapsule];
     for(NSInteger i=0;i<self.bottomBar.arrangedSubviews.count;i++){
         UIButton *b=(UIButton *)self.bottomBar.arrangedSubviews[i];
@@ -3120,7 +3149,7 @@ configureCatalogNavigation;
         b.selected=selected;
         UIButtonConfiguration *cfg=b.configuration;
         cfg.baseForegroundColor=selected?HostOnAccent():HostMutedText();
-        cfg.background.backgroundColor=selected?HostAccent():UIColor.clearColor;
+        cfg.background.backgroundColor=selected?HostAccentFill():UIColor.clearColor;
         cfg.background.strokeColor=selected?[HostAccent() colorWithAlphaComponent:0.35]:UIColor.clearColor;
         b.configuration=cfg;
     }
@@ -3395,7 +3424,7 @@ configureCatalogNavigation;
     }]];[self presentViewController:a animated:YES completion:nil];
 }
 - (PlaybackInfoViewController *)playbackInformationPage {
-    PlaybackInfoViewController *v=[PlaybackInfoViewController new];__weak typeof(self) w=self;v.rowsProvider=^{NSString *engine=w.avPlayer?@"AVPlayer":(w.cicadaPlayer?@"CicadaPlayer":(w.currentPlayer?NSStringFromClass([w.currentPlayer class]):@"等待播放"));NSMutableArray *r=[NSMutableArray arrayWithArray:@[@{@"title":@"频道名称",@"value":w.channelName?:@"未选台"},@{@"title":@"频道 ID",@"value":w.channelID?:@"—"},@{@"title":@"播放引擎",@"value":engine},@{@"title":@"线路方式",@"value":w.routeName?:@"自动"},@{@"title":@"首帧耗时",@"value":w.firstRender?[NSString stringWithFormat:@"%.2f 秒",w.firstFrameSeconds]:@"等待画面"},@{@"title":@"应用版本",@"value":CCTVBuildTag()}]];
+    PlaybackInfoViewController *v=[PlaybackInfoViewController new];__weak typeof(self) w=self;v.rowsProvider=^{NSString *engine=w.remoteAdapter?@"CicadaPlayer":(w.avPlayer?@"AVPlayer":(w.cicadaPlayer?@"CicadaPlayer":(w.currentPlayer?NSStringFromClass([w.currentPlayer class]):@"等待播放")));NSMutableArray *r=[NSMutableArray arrayWithArray:@[@{@"title":@"频道名称",@"value":w.channelName?:@"未选台"},@{@"title":@"频道 ID",@"value":w.channelID?:@"—"},@{@"title":@"播放引擎",@"value":engine},@{@"title":@"线路方式",@"value":w.routeName?:@"自动"},@{@"title":@"首帧耗时",@"value":w.firstRender?[NSString stringWithFormat:@"%.2f 秒",w.firstFrameSeconds]:@"等待画面"},@{@"title":@"应用版本",@"value":CCTVBuildTag()}]];
         if(w.requestedNativeRoute[@"url"])[r addObject:@{@"title":@"所选线路完整地址",@"value":[w displaySafeSourceURL:w.requestedNativeRoute[@"url"]]}];AVPlayerItem *item=w.avPlayer.currentItem;if(item){CGSize size=item.presentationSize;[r addObject:@{@"title":@"视频分辨率",@"value":size.width>0?[NSString stringWithFormat:@"%.0f × %.0f",size.width,size.height]:@"等待视频信息"}];AVPlayerItemAccessLogEvent *event=item.accessLog.events.lastObject;if(event)[r addObject:@{@"title":@"观测带宽",@"value":[NSString stringWithFormat:@"%.2f Mbps",event.observedBitrate/1000000.0]}];}else if(w.currentPlayer)[r addObject:@{@"title":@"SDK 报告节点",@"value":[NativeCDNPreference observedCDNDescriptionForPlayer:w.currentPlayer]}];return r;};return v;
 }
 - (NSString *)displaySafeSourceURL:(NSString *)raw {
@@ -3998,43 +4027,17 @@ configureCatalogNavigation;
 }
 
 - (void)onPan:(UIPanGestureRecognizer *)g {
-    CGPoint p = [g locationInView:self.playerBox];
-    CGFloat dy = [g translationInView:self.playerBox].y;
-    BOOL rightSide = p.x > self.playerBox.bounds.size.width / 2;
-    if (g.state == UIGestureRecognizerStateBegan) {
-        self.titleLabel.hidden = NO;
-        self.infoLabel.hidden = NO;
-        self.controlBar.hidden = NO;
+    if(g.state==UIGestureRecognizerStateBegan||!self.livePanActive){
+        CGPoint velocity=[g velocityInView:self.playerBox];self.livePanIgnored=fabs(velocity.x)>fabs(velocity.y)&&fabs(velocity.x)>0;
+        self.livePanRightSide=[g locationInView:self.playerBox].x>self.playerBox.bounds.size.width/2;self.livePanActive=YES;
+        if(!self.livePanIgnored)[[self liveOverlayPolicy] show];
     }
-    CGFloat delta = -dy / 220.0;   // 上滑增大
-    if (rightSide) {
-        UISlider *slider = [self systemVolumeSlider];
-        if (slider) {
-            float v = MIN(1.0, MAX(0.0, slider.value + delta * 0.35));
-            [slider setValue:v animated:NO];
-            [slider sendActionsForControlEvents:UIControlEventTouchUpInside];
-            self.titleLabel.text = [NSString stringWithFormat:@"音量 %d%%", (int)(v * 100)];
-        }
-    } else {
-        CGFloat b = MIN(1.0, MAX(0.0, UIScreen.mainScreen.brightness + delta * 0.5));
-        UIScreen.mainScreen.brightness = b;
-        self.titleLabel.text = [NSString stringWithFormat:@"亮度 %d%%", (int)(b * 100)];
+    CGFloat dy=[g translationInView:self.playerBox].y;[g setTranslation:CGPointZero inView:self.playerBox];
+    if(!self.livePanIgnored){CGFloat delta=-dy/220.0;
+        if(self.livePanRightSide){UISlider *slider=[self systemVolumeSlider];if(slider){float value=MIN(1,MAX(0,slider.value+delta*.35));[slider setValue:value animated:NO];[slider sendActionsForControlEvents:UIControlEventTouchUpInside];self.titleLabel.text=[NSString stringWithFormat:@"音量 %d%%",(int)(value*100)];}}
+        else {CGFloat value=MIN(1,MAX(0,UIScreen.mainScreen.brightness+delta*.5));UIScreen.mainScreen.brightness=value;self.titleLabel.text=[NSString stringWithFormat:@"亮度 %d%%",(int)(value*100)];}
     }
-    if (g.state == UIGestureRecognizerStateEnded || g.state == UIGestureRecognizerStateCancelled) {
-        [g setTranslation:CGPointZero inView:self.playerBox];
-        self.titleLabel.text = self.channelName;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            if (![self.titleLabel.text isEqualToString:self.channelName]) return;
-            if (self.firstRender && !self.nativeTimeShiftActive && !self.nativePlaybackFailed && !self.remotePlaybackFailed) {
-                self.titleLabel.hidden = YES;
-                self.infoLabel.hidden = YES;
-                self.playerTopScrim.hidden = YES;
-                self.playerBottomScrim.hidden = YES;
-            } else {
-                self.controlBar.hidden = NO;
-            }
-        });
-    }
+    if(g.state==UIGestureRecognizerStateEnded||g.state==UIGestureRecognizerStateCancelled||g.state==UIGestureRecognizerStateFailed){self.livePanActive=NO;self.titleLabel.text=self.channelName;if(!self.livePanIgnored)[[self liveOverlayPolicy] show];}
 }
 
 - (void)setupRemoteCommands {
@@ -4052,27 +4055,17 @@ configureCatalogNavigation;
     [c.pauseCommand removeTarget:self];
     [c.nextTrackCommand removeTarget:self];
     [c.previousTrackCommand removeTarget:self];
-    [c.playCommand addTarget:self action:@selector(togglePlayPauseForRemoteCommand:)];
-    [c.pauseCommand addTarget:self action:@selector(togglePlayPauseForRemoteCommand:)];
-    [c.nextTrackCommand addTarget:self action:@selector(stepToNextChannelForRemoteCommand:)];
-    [c.previousTrackCommand addTarget:self action:@selector(stepToPreviousChannelForRemoteCommand:)];
+    (void)[PlaybackCoordinator shared];
 }
 
 - (MPRemoteCommandHandlerStatus)togglePlayPauseForRemoteCommand:(MPRemoteCommandEvent *)event {
-    [self togglePlayPause];
-    return MPRemoteCommandHandlerStatusSuccess;
+    return event.command==MPRemoteCommandCenter.sharedCommandCenter.pauseCommand?[[PlaybackCoordinator shared] pause]:[[PlaybackCoordinator shared] play];
 }
-- (MPRemoteCommandHandlerStatus)stepToNextChannelForRemoteCommand:(MPRemoteCommandEvent *)event {
-    // 锁屏 / 耳机 / 车载的下一首即下一个频道；与播放暂停用同一签名要求。
-    [self playAdjacentChannel:1];
-    return MPRemoteCommandHandlerStatusSuccess;
-}
-- (MPRemoteCommandHandlerStatus)stepToPreviousChannelForRemoteCommand:(MPRemoteCommandEvent *)event {
-    [self playAdjacentChannel:-1];
-    return MPRemoteCommandHandlerStatusSuccess;
-}
+- (MPRemoteCommandHandlerStatus)stepToNextChannelForRemoteCommand:(MPRemoteCommandEvent *)event {return [[PlaybackCoordinator shared] step:1];}
+- (MPRemoteCommandHandlerStatus)stepToPreviousChannelForRemoteCommand:(MPRemoteCommandEvent *)event {return [[PlaybackCoordinator shared] step:-1];}
 
 - (void)updateNowPlaying {
+    if([PlaybackCoordinator shared].currentSession!=(id<PlaybackSession>)self)return;
     NSMutableDictionary *info = [NSMutableDictionary dictionary];
     info[MPMediaItemPropertyTitle] = self.channelName ?: @"CCTVHost";
     info[MPMediaItemPropertyArtist] = @"CCTVHost";
@@ -4080,6 +4073,8 @@ configureCatalogNavigation;
         CMTime d = self.avPlayer.currentItem.duration;
         if (CMTIME_IS_NUMERIC(d)) info[MPMediaItemPropertyPlaybackDuration] = @(CMTimeGetSeconds(d));
     }
+    info[MPNowPlayingInfoPropertyPlaybackRate]=@([self sessionIsPlaying]?1:0);
+    double position=self.remoteAdapter?self.remoteAdapter.currentPosition:CMTimeGetSeconds(self.avPlayer.currentTime);if(isfinite(position)&&position>=0)info[MPNowPlayingInfoPropertyElapsedPlaybackTime]=@(position);
     MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo = info;
 }
 
@@ -4435,7 +4430,7 @@ configureCatalogNavigation;
         NSURLComponents *components = [NSURLComponents componentsWithString:urlString];
         if (!components) return nil;
         NSString *scheme = components.scheme.lowercaseString;
-        if (![scheme isEqualToString:@"http"] && ![scheme isEqualToString:@"https"]) return nil;
+        if (![MediaCapabilityNetworkTransports() containsObject:scheme]) return nil;
         if (!components.host.length || !components.URL) return nil;
         components.scheme = scheme;
         components.host = components.host.lowercaseString;
@@ -4470,6 +4465,9 @@ configureCatalogNavigation;
 }
 
 - (void)fetchSubscription:(NSString *)urlString silent:(BOOL)silent {
+    NSString *inlinePlaylist=[ProfileStore metadata:urlString][@"inlinePlaylist"];
+    if([inlinePlaylist isKindOfClass:NSString.class]&&inlinePlaylist.length){[self applyPlaylistText:inlinePlaylist source:urlString];return;}
+
     NSString *sourceKey=[ProfileStore isHTTP:urlString]?[self stableURLKey:urlString]:([ProfileStore isSource:urlString]?urlString:nil);
     if (!sourceKey.length) return;
     BOOL isHTTPSource=[ProfileStore isHTTP:sourceKey];
@@ -4667,6 +4665,8 @@ configureCatalogNavigation;
                     if (c.tvgName.length) entry[@"tvgName"]=c.tvgName; else [entry removeObjectForKey:@"tvgName"];
                     if (c.logo.length) entry[@"logo"] = c.logo; else [entry removeObjectForKey:@"logo"];
                     if (c.headers.count) entry[@"headers"] = c.headers; else [entry removeObjectForKey:@"headers"];
+                    for(NSString *key in @[@"catchupSource",@"catchupMode",@"catchupDays",@"tvgShift"])[entry removeObjectForKey:key];
+                    if(c.catchupSource.length){entry[@"catchupSource"]=c.catchupSource;entry[@"catchupMode"]=c.catchupMode?:@"default";entry[@"catchupDays"]=@(c.catchupDays);entry[@"tvgShift"]=@(c.tvgShift);}
                     entry[@"remoteURL"] = c.url;
                     if(c.epgID.length)entry[@"epgID"]=c.epgID;else[entry removeObjectForKey:@"epgID"];
                     merged[existingIndex.unsignedIntegerValue] = entry;
@@ -4681,6 +4681,7 @@ configureCatalogNavigation;
                     if (c.tvgName.length) entry[@"tvgName"]=c.tvgName;
                     if (c.logo.length) entry[@"logo"] = c.logo;
                     if (c.headers.count) entry[@"headers"] = c.headers;
+                    if(c.catchupSource.length){entry[@"catchupSource"]=c.catchupSource;entry[@"catchupMode"]=c.catchupMode?:@"default";entry[@"catchupDays"]=@(c.catchupDays);entry[@"tvgShift"]=@(c.tvgShift);}
                     urlIndexes[stable] = @(merged.count);
                     [merged addObject:entry];
                     added++;
@@ -4716,7 +4717,7 @@ configureCatalogNavigation;
     NSString *traceID=NSUUID.UUID.UUIDString.lowercaseString;
     NSUInteger byteCount=[[text dataUsingEncoding:NSUTF8StringEncoding] length];
     [RuntimeDiagnostics.shared recordEvent:@"subscription_text_parse_started" category:@"subscription" fields:@{@"source_type":@"imported_text", @"correlation_id":traceID, @"input_bytes":@(byteCount)}];
-    NSArray *list=[M3UParser parse:text baseURL:nil];
+    NSDictionary *report=[M3UParser reportForText:text baseURL:nil];NSArray *list=report[@"channels"];[ProfileStore update:sourceKey values:@{@"unsupportedProtocols":report[@"unsupportedProtocols"]?:@{}}];
     if(!list.count){
         [RuntimeDiagnostics.shared recordEvent:@"subscription_refresh_failed" category:@"subscription" fields:@{@"source_type":@"imported_text", @"correlation_id":traceID, @"input_bytes":@(byteCount), @"channel_count":@0, @"failure_stage":text.length?@"no_valid_channels":@"empty_input"}];
         [ProfileStore update:sourceKey values:@{@"status":@"无有效 HTTP/HTTPS 频道，保留上次频道"}];
@@ -4738,6 +4739,7 @@ configureCatalogNavigation;
     [self startRemoteChannel:ch];
 }
 - (void)startRemoteChannel:(NSDictionary *)ch {
+    self.remoteTriedCicada=NO;
     NSString *u=[self stableURLKey:ch[@"remoteURL"]];if(!u.length)return;
     [self.remoteAttemptedURLs addObject:u];
     [self.nativePreloader cancel];
@@ -4810,8 +4812,29 @@ configureCatalogNavigation;
 - (void)failRemoteReadiness:(NSError *)error generation:(NSUInteger)generation {
     if(generation!=self.playbackGeneration)return;NSDictionary *service=[self localServiceForURL:[NSURL URLWithString:self.currentRemoteURL?:@""]];NSMutableDictionary *fields=[@{@"correlation_id":self.currentPlaybackTraceID?:@"", @"playback_generation":@(generation), @"failure_stage":error.code==1?@"health_probe_timeout":@"service_start_or_state", @"service_id":service[@"id"]?:@"", @"service_name":service[@"name"]?:@"", @"engine":service[@"engine"]?:@"unknown", @"port":service[@"port"]?:@0, @"error_domain":error.domain?:@"", @"error_code":@(error.code), @"error_message":error.localizedDescription?:@""} mutableCopy];[fields addEntriesFromDictionary:CCTVDiagnosticURLFields([NSURL URLWithString:self.currentRemoteURL?:@""])];[RuntimeDiagnostics.shared recordEvent:@"playback_readiness_failed" category:@"service" fields:fields];self.remotePlaybackFailed=YES;[self endPlaybackPriority];[self.spinner stopAnimating];self.titleLabel.text=[NSString stringWithFormat:@"%@ · 服务未就绪",self.channelName];self.titleLabel.hidden=NO;self.infoLabel.hidden=NO;[self.playPauseBtn setTitle:@"重试" forState:UIControlStateNormal];self.playPauseBtn.enabled=YES;NSString *reason=[HostLogRedactor redactText:error.localizedDescription?:@""];if(service)[self logPluginLine:[NSString stringWithFormat:@"播放接口未就绪 · %@",reason.length?reason:@"无可用错误详情"] identifier:service[@"id"] name:service[@"name"]];[self log:@"本机续播失败 %@",reason];self.infoLabel.text=reason.length?[NSString stringWithFormat:@"%@\n查看该服务日志后重试。",reason]:@"服务未就绪。查看该服务日志后重试。";
 }
+- (BOOL)startRemoteCicada:(NSString *)address generation:(NSUInteger)generation {
+    if(generation!=self.playbackGeneration||self.remoteTriedCicada||![MediaPlaybackCicadaAdapter isAvailable])return NO;
+    [self stopPlayback];self.remoteTriedCicada=YES;self.remotePlaybackWanted=YES;
+    MediaPlaybackCicadaAdapter *adapter=[[MediaPlaybackCicadaAdapter alloc] initWithURL:[NSURL URLWithString:address] headers:self.currentRemoteHeaders networkTimeout:12];
+    self.remoteAdapter=adapter;adapter.delegate=self;adapter.playerView.frame=self.playerBox.bounds;adapter.playerView.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;[self.playerBox insertSubview:adapter.playerView atIndex:0];
+    [adapter prepare];[adapter start];[self updateLiveScreenAwakeState];return YES;
+}
+- (void)cicadaAdapterDidShowFirstFrame:(id)adapter {
+    if(adapter!=self.remoteAdapter)return;self.firstRender=YES;self.remotePlaybackFailed=NO;self.firstFrameSeconds=CACurrentMediaTime()-self.playStartedAt;
+    [RuntimeDiagnostics.shared recordEvent:@"playback_first_frame_ready" category:@"playback" fields:@{@"player":@"CicadaPlayer",@"playback_attempt_id":self.currentRemotePlaybackAttemptID?:@"",@"correlation_id":self.currentPlaybackTraceID?:@"",@"elapsed_ms":@(MAX(0,self.firstFrameSeconds*1000))}];
+    [self.spinner stopAnimating];self.titleLabel.text=self.channelName;[self recordStartupStage:@"frame"];[self endPlaybackPriority];[self updateNowPlaying];
+}
+- (void)cicadaAdapter:(id)adapter didFailWithError:(NSError *)error {
+    if(adapter!=self.remoteAdapter)return;[RuntimeDiagnostics.shared recordEvent:@"playback_failed" category:@"playback" fields:@{@"player":@"CicadaPlayer",@"playback_attempt_id":self.currentRemotePlaybackAttemptID?:@"",@"error_domain":error.domain?:@"",@"error_code":@(error.code)}];self.remotePlaybackFailed=YES;self.remotePlaybackWanted=NO;[self.spinner stopAnimating];
+    self.titleLabel.hidden=NO;self.titleLabel.text=@"播放失败 · 可重试或切换线路";self.infoLabel.hidden=NO;self.infoLabel.text=error.localizedDescription;self.playPauseBtn.enabled=YES;[self.playPauseBtn setTitle:@"重试" forState:UIControlStateNormal];
+    self.remoteAdapter.delegate=nil;[self.remoteAdapter destroy];self.remoteAdapter=nil;[self setLiveOverlayHidden:NO];[self endPlaybackPriority];
+}
+- (void)cicadaAdapterDidComplete:(id)adapter {if(adapter!=self.remoteAdapter)return;self.remotePlaybackWanted=NO;[self.playPauseBtn setTitle:@"重播" forState:UIControlStateNormal];self.infoLabel.text=@"播放已结束 · 可重新连接";[self setLiveOverlayHidden:NO];[self updateNowPlaying];}
 - (void)startRemoteURL:(NSString *)url generation:(NSUInteger)generation {
     if(generation!=self.playbackGeneration)return;
+    [[PlaybackCoordinator shared] acquireSession:(id<PlaybackSession>)self];
+    NSDictionary *descriptor=@{@"url":url?:@""};
+    if(MediaPlaybackDecodeRouteNextForResult(descriptor,0)==MediaPlaybackDecodeRouteCicadaPlayer&&[self startRemoteCicada:url generation:generation])return;
     NSDictionary *headers=self.nativePlainRouteActive?@{@"User-Agent":@"qqlive",@"Referer":@"https://live.cctv.cn/"}:(self.currentRemoteHeaders?:@{});
     AVURLAsset *asset=[AVURLAsset URLAssetWithURL:[NSURL URLWithString:url] options:headers.count?@{@"AVURLAssetHTTPHeaderFieldsKey":headers,@"AVURLAssetPreferPreciseDurationAndTimingKey":@NO}:@{@"AVURLAssetPreferPreciseDurationAndTimingKey":@NO}];
     AVPlayerItem *item=[AVPlayerItem playerItemWithAsset:asset];item.preferredForwardBufferDuration=0;
@@ -4851,6 +4874,7 @@ configureCatalogNavigation;
 }
 
 - (void)recoverRemoteFailureForItem:(AVPlayerItem *)item error:(NSError *)error {
+    if(item==self.avPlayer.currentItem&&self.remotePlaybackWanted&&[self startRemoteCicada:self.currentRemoteURL generation:self.playbackGeneration])return;
     if(!item || item!=self.avPlayer.currentItem || !self.remotePlaybackWanted || self.remoteFailureRecoveryPending)return;
     BOOL retrySameURL=self.remoteRetryCount<1&&CCTVRemotePlaybackErrorCanRetrySameURL(error);
     NSMutableDictionary *failureFields=[@{@"player":@"AVPlayer", @"stage":@"item_failure", @"error_domain":error.domain?:@"", @"error_code":@(error.code), @"error_message":error.localizedDescription?:@"", @"retry_count":@(self.remoteRetryCount), @"recovery_action":retrySameURL?@"retry_same_url":@"try_alternate_or_stop", @"playback_attempt_id":self.currentRemotePlaybackAttemptID?:@"", @"correlation_id":self.currentPlaybackTraceID?:@"", @"playback_generation":@(self.playbackGeneration)} mutableCopy];[failureFields addEntriesFromDictionary:MediaPlaybackDiagnosticHeaderFields(self.currentRemoteHeaders)];[failureFields addEntriesFromDictionary:CCTVDiagnosticURLFields([NSURL URLWithString:self.currentRemoteURL])];CCTVAddAVPlayerFailureFields(failureFields,item,self.avPlayer,error);
@@ -5349,6 +5373,12 @@ configureCatalogNavigation;
             [owner seekNativeStart:[program[@"start"] doubleValue] end:[program[@"end"] doubleValue]];
         };
     }
+    if([channel[@"catchupSource"] isKindOfClass:NSString.class]&&[channel[@"catchupSource"] length]){
+        M3UChannel *catchup=[M3UChannel new];catchup.url=channel[@"remoteURL"];catchup.catchupSource=channel[@"catchupSource"];catchup.catchupMode=channel[@"catchupMode"]?:@"default";catchup.catchupDays=[channel[@"catchupDays"] doubleValue];catchup.tvgShift=[channel[@"tvgShift"] doubleValue];
+        page.canReplay=^BOOL(NSDictionary *program){return [catchup catchupURLForStart:[NSDate dateWithTimeIntervalSince1970:[program[@"start"] doubleValue]] end:[NSDate dateWithTimeIntervalSince1970:[program[@"end"] doubleValue]]]!=nil;};
+        __weak typeof(self) weakSelf=self;
+        page.onReplay=^(NSDictionary *program){RootViewController *owner=weakSelf;NSURL *url=[catchup catchupURLForStart:[NSDate dateWithTimeIntervalSince1970:[program[@"start"] doubleValue]] end:[NSDate dateWithTimeIntervalSince1970:[program[@"end"] doubleValue]]];if(!owner||!url)return;NSMutableDictionary *replay=[channel mutableCopy];replay[@"remoteURL"]=url.absoluteString;replay[@"headers"]=MediaPlaybackHeadersScopedToURL(channel[@"headers"],[NSURL URLWithString:channel[@"remoteURL"]?:@""],url);[owner.navigationController popToViewController:owner animated:YES];[owner playRemote:replay];};
+    }
     return page;
 }
 - (void)showNativeTimeshiftActions {
@@ -5552,6 +5582,8 @@ configureCatalogNavigation;
 
 - (void)showMorePlaybackActions {
     UIAlertController *sheet=[UIAlertController alertControllerWithTitle:self.channelName ?: @"播放操作" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"线路" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[self showRoutes];}]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"节目单" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[self openEPG];}]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"投屏中心（AirPlay / 局域网电视）" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){ [self showCastingCenter]; }]];
     [sheet addAction:[UIAlertAction actionWithTitle:self.fullscreen?@"退出全屏":@"全屏" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){ [self toggleFullscreen]; }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"上一个频道" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[self playAdjacentChannel:-1];}]];

@@ -1,3 +1,4 @@
+#import "MediaCapabilityRegistry.h"
 #import "MediaPlaybackHeaders.h"
 
 static BOOL MediaPlaybackHeaderNameIsAllowed(NSString *name) {
@@ -85,7 +86,7 @@ BOOL MediaPlaybackResultSupportsAVPlayer(NSDictionary *result) {
     if([engine isEqual:@"cicada"]||MediaPlaybackResultSupportsCicada(result))return NO;
     if([result[@"nativePlayable"] respondsToSelector:@selector(boolValue)]&&[result[@"nativePlayable"] boolValue])return YES;
     if([result[@"drmKey"] isKindOfClass:NSString.class]&&[(NSString *)result[@"drmKey"] length])return YES;
-    NSSet *formats=[NSSet setWithArray:@[@"hls",@"m3u8",@"m3u",@"mpegurl",@"application/vnd.apple.mpegurl",@"application/x-mpegurl",@"audio/mpegurl",@"mp4",@"m4v",@"mov",@"quicktime",@"mp3",@"m4a",@"aac",@"mpeg-ts",@"mpegts",@"ts",@"fmp4",@"cmaf",@"m4s",@"f4v",@"wav",@"flac",@"alac",@"ac3",@"eac3"]];
+    NSSet *formats=[NSSet setWithArray:MediaCapabilityAvFormats()];
     NSSet *mimes=[NSSet setWithArray:@[@"application/vnd.apple.mpegurl",@"application/x-mpegurl",@"audio/mpegurl",@"video/mp4",@"application/mp4",@"video/quicktime",@"audio/mp4",@"audio/x-m4a",@"audio/mpeg",@"audio/aac",@"audio/wav",@"audio/flac",@"video/x-m4v",@"video/mp2t"]];
     if([formats containsObject:format]||[mimes containsObject:mime])return YES;
     NSString *raw=[result[@"originalURL"] isKindOfClass:NSString.class]?result[@"originalURL"]:result[@"url"];
@@ -112,7 +113,7 @@ BOOL MediaPlaybackResultSupportsCicada(NSDictionary *result) {
     NSString *extension=components.path.pathExtension.lowercaseString?:@"";
     // Match the bundled demuxers documented in MediaPlaybackDecodeRouter.m.
     // A container hint does not establish codec support (notably WebM).
-    NSSet *formats=[NSSet setWithArray:@[@"mpd",@"dash",@"mpeg-dash",@"flv",@"live_flv",@"mkv",@"matroska",@"webm",@"3gp",@"3gpp",@"rtmp"]];
+    NSSet *formats=[NSSet setWithArray:MediaCapabilityCicadaFormats()];
     NSSet *extensions=[NSSet setWithArray:@[@"mpd",@"flv",@"mkv",@"webm",@"3gp",@"3gpp"]];
     NSSet *mimes=[NSSet setWithArray:@[@"application/dash+xml",@"video/x-flv",@"video/x-matroska",@"video/webm",@"video/3gpp",@"video/3gpp2",@"application/x-rtmp"]];
     NSString *scheme=components.scheme.lowercaseString;
@@ -140,4 +141,14 @@ BOOL MediaPlaybackResultIsDirectMedia(NSDictionary *result) {
         if([lowerRaw containsString:@".m3u8"]||[lowerRaw containsString:@".mp4"]||[lowerRaw containsString:@".flv"]||[lowerRaw containsString:@".mpd"])return YES;
     }
     return NO;
+}
+
+NSDictionary<NSString *,NSString *> *MediaPlaybackHeadersScopedToURL(NSDictionary *headers,NSURL *originURL,NSURL *targetURL) {
+    NSMutableDictionary *safe=[MediaPlaybackHeadersFromResult(@{@"headers":headers?:@{}}) mutableCopy];
+    NSString *a=originURL.scheme.lowercaseString,*b=targetURL.scheme.lowercaseString;
+    NSInteger ap=originURL.port?originURL.port.integerValue:([a isEqual:@"https"]?443:80),bp=targetURL.port?targetURL.port.integerValue:([b isEqual:@"https"]?443:80);
+    BOOL sameHost=originURL.host.length&&[originURL.host.lowercaseString isEqual:targetURL.host.lowercaseString];
+    BOOL trusted=sameHost&&(([a isEqual:b]&&ap==bp)||([a isEqual:@"http"]&&[b isEqual:@"https"]&&ap==80&&bp==443));
+    if(!trusted)for(NSString *key in safe.allKeys){NSString *name=key.lowercaseString;if([@[@"authorization",@"cookie",@"proxy-authorization"] containsObject:name]||[name containsString:@"token"]||[name containsString:@"api-key"]||[name containsString:@"apikey"]||[name containsString:@"signature"]||[name containsString:@"secret"]||[name containsString:@"session"]||[name containsString:@"credential"])[safe removeObjectForKey:key];}
+    return safe.copy;
 }

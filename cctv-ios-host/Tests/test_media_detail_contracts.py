@@ -97,7 +97,9 @@ class MediaDetailContracts(unittest.TestCase):
 
     def test_detail_hero_grows_with_large_text(self):
         # 413 是覆盖式 hero，高度按 view 高度算（main 的栈内 hero 按 hero 宽度算）。
-        self.assertIn('[hero.heightAnchor constraintGreaterThanOrEqualToAnchor:self.view.heightAnchor multiplier:0.36]', self.impl)
+        self.assertIn('[hero.heightAnchor constraintEqualToAnchor:self.view.heightAnchor multiplier:0.36]', self.impl)
+        self.assertIn('heroPreferredHeight.priority=UILayoutPriorityDefaultHigh', self.impl)
+        self.assertIn('spacerPreferredHeight.priority=UILayoutPriorityDefaultHigh', self.impl)
         self.assertIn('multiplier:0.36', self.impl)
 
 

@@ -6,6 +6,7 @@
 @property(nonatomic,copy) NSArray<NSDictionary *> *runs;
 @property(nonatomic,strong) UILabel *emptyLabel;
 @property(nonatomic,assign) BOOL refreshScheduled;
+@property(nonatomic) BOOL refreshingRuns;
 @end
 
 @implementation PluginRunHistoryViewController
@@ -28,7 +29,16 @@
 - (void)dealloc {[NSNotificationCenter.defaultCenter removeObserver:self];}
 - (void)viewWillAppear:(BOOL)animated {[super viewWillAppear:animated];[self refreshRuns];}
 - (void)scheduleRefresh {if(!NSThread.isMainThread){__weak typeof(self) weakSelf=self;dispatch_async(dispatch_get_main_queue(),^{[weakSelf scheduleRefresh];});return;}if(self.refreshScheduled)return;self.refreshScheduled=YES;__weak typeof(self) weakSelf=self;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,250*NSEC_PER_MSEC),dispatch_get_main_queue(),^{weakSelf.refreshScheduled=NO;[weakSelf refreshRuns];});}
-- (void)refreshRuns {if(!NSThread.isMainThread){__weak typeof(self) weakSelf=self;dispatch_async(dispatch_get_main_queue(),^{[weakSelf refreshRuns];});return;}NSArray *runs=self.runRecordsProvider?self.runRecordsProvider():@[];self.runs=[runs isKindOfClass:NSArray.class]?runs:@[];self.emptyLabel.hidden=self.runs.count>0;self.tableView.backgroundView.hidden=self.runs.count>0;[self.tableView reloadData];}
+- (void)refreshRuns {
+    if(!NSThread.isMainThread){dispatch_async(dispatch_get_main_queue(),^{[self refreshRuns];});return;}
+    if(self.refreshingRuns)return;self.refreshingRuns=YES;
+    NSArray *(^provider)(void)=[self.runRecordsProvider copy];__weak typeof(self) weakSelf=self;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{NSArray *runs=provider?provider():@[];dispatch_async(dispatch_get_main_queue(),^{
+        PluginRunHistoryViewController *owner=weakSelf;if(!owner)return;owner.refreshingRuns=NO;
+        owner.runs=[runs isKindOfClass:NSArray.class]?runs:@[];owner.emptyLabel.hidden=owner.runs.count>0;owner.tableView.backgroundView.hidden=owner.runs.count>0;[owner.tableView reloadData];
+    });});
+}
+
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {return 1;}
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {return self.runs.count;}
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {return self.runs.count?[NSString stringWithFormat:@"%lu 次运行 · 点开查看本次日志",(unsigned long)self.runs.count]:nil;}

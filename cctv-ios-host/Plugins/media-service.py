@@ -857,6 +857,8 @@ class Handler(BaseHTTPRequestHandler):
                 base_headers = result.get('baseHeaders') if isinstance(result.get('baseHeaders'), dict) else headers
                 diagnostic_id = correlation_id or request_id
                 def relay_media_url(address, request_headers, expected_hls=False):
+                    if urllib.parse.urlsplit(address).scheme.lower() not in ('http', 'https'):
+                        return address
                     token = self.server.relay.register(address, request_headers,
                         diagnostic_id=diagnostic_id, expected_hls=expected_hls, resource_scope=request_id)
                     return f'http://127.0.0.1:{self.server.server_port}/media/{token}'

@@ -369,7 +369,7 @@
     cell.detailTextLabel.text = range;
     cell.detailTextLabel.textColor = HostSecondaryText();
 
-    BOOL replayable=self.onReplay && end<=now;
+    BOOL replayable=self.onReplay && end<=now && (!self.canReplay||self.canReplay(row));
     cell.accessoryType=replayable?UITableViewCellAccessoryDisclosureIndicator:UITableViewCellAccessoryNone;
     cell.selectionStyle=(replayable||start>now)?UITableViewCellSelectionStyleDefault:UITableViewCellSelectionStyleNone;
     BOOL live = (now >= start && now < end);
@@ -411,7 +411,7 @@
     if(indexPath.row>=self.rows.count)return;
     NSDictionary *program=self.rows[indexPath.row];NSTimeInterval now=NSDate.date.timeIntervalSince1970;
     if([program[@"start"] doubleValue]>now){[self toggleReminderForProgram:program];return;}
-    if(!self.onReplay || [program[@"end"] doubleValue]>now)return;
+    if(!self.onReplay || [program[@"end"] doubleValue]>now || (self.canReplay&&!self.canReplay(program)))return;
     self.onReplay(program);
 }
 

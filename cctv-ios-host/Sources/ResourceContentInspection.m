@@ -99,3 +99,25 @@ NSArray<NSDictionary *> *ResourceContentPageLinks(NSData *data,NSURL *origin) {
     }];
     return links.copy;
 }
+
+@implementation ResourceDetectionResult
++ (instancetype)inspectData:(NSData *)data filename:(NSString *)filename {
+    ResourceDetectionResult *result=[self new];NSString *extension=ResourceContentExtension(data,filename);NSString *kind=@"unknown",*reason=@"没有匹配到明确的资源结构";
+    if([extension isEqual:@"html"]){kind=@"html";reason=@"HTML 文档签名";}
+    else if([@[@"zip",@"jar"] containsObject:extension]){kind=extension;reason=@"ZIP 容器签名及文件类型";}
+    else if([extension isEqual:@"py"]){kind=@"python";reason=@"Python 入口特征或文件类型";}
+    else if([@[@"js",@"mjs",@"cjs",@"hjs"] containsObject:extension]){kind=@"javascript";reason=@"JavaScript 入口特征或文件类型";}
+    else if([extension isEqual:@"json"]){
+        id json=[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
+        if([json isKindOfClass:NSDictionary.class]){
+            if([json[@"cctvhostServer"] isKindOfClass:NSNumber.class]&&[json[@"cctvhostServer"] integerValue]==1){kind=@"media-server";reason=@"媒体服务器配置声明";}
+            else if([json[@"sites"] isKindOfClass:NSArray.class]||[json[@"lives"] isKindOfClass:NSArray.class]){kind=@"tvbox";reason=@"TVBox sites/lives 结构";}
+            else if([json[@"list"] isKindOfClass:NSArray.class]){for(id row in json[@"list"])if([row isKindOfClass:NSDictionary.class]&&(row[@"vod_id"]||row[@"vod_name"])){kind=@"maccms";reason=@"MacCMS vod 字段";break;}}
+        }
+    }else if([extension isEqual:@"m3u"]||[extension isEqual:@"m3u8"]){
+        NSString *text=ResourceContentText(data);BOOL hls=[text containsString:@"#EXT-X-TARGETDURATION:"]||[text containsString:@"#EXT-X-STREAM-INF:"]||[text containsString:@"#EXT-X-MEDIA-SEQUENCE:"]||[text containsString:@"#EXT-X-MAP:"];
+        kind=hls?@"hls":@"iptv";reason=hls?@"HLS 媒体清单标签":@"M3U 频道清单";
+    }
+    result->_kind=kind;result->_evidence=@[reason];return result;
+}
+@end

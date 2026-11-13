@@ -1,3 +1,5 @@
+#import <QuartzCore/QuartzCore.h>
+#import <limits.h>
 // MediaPlaybackCicadaAdapter.m
 //
 // 实现说明与证据链：
@@ -224,6 +226,9 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
 @property (nonatomic) BOOL destroyed;
 @property (nonatomic) BOOL enableHardwareDecoder;
 @property (nonatomic, copy) NSString *pendingVideoGravity;
+@property(nonatomic) BOOL pendingMuted;
+@property(nonatomic) NSTimeInterval firstFrameRemaining;
+@property(nonatomic) CFTimeInterval firstFrameBudgetStarted;
 @end
 
 @implementation MediaPlaybackCicadaAdapter
@@ -244,6 +249,7 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
         _state = MediaPlaybackCicadaAdapterStateIdle;
         _pendingRate = 1.0f;
         _pendingVideoGravity = AVLayerVideoGravityResizeAspect;
+        _firstFrameRemaining=self.firstFrameTimeout;
     }
     return self;
 }
@@ -330,16 +336,17 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
     CicadaCallVoidObject(player, NSSelectorFromString(@"setDelegate:"), self);
     CicadaCallVoidObject(player, NSSelectorFromString(@"setUrlSource:"), source);
     CicadaCallVoidObject(player, NSSelectorFromString(@"setPlayerView:"), self.playerView);
-    [self applyVideoGravity:self.pendingVideoGravity];
+    [self applyVideoGravity:self.pendingVideoGravity];[self setMuted:self.pendingMuted];
     CicadaCallVoid(player, NSSelectorFromString(@"prepare"));
 }
 
 - (void)armFirstFrameWatchdog {
     if(self.firstFrameWatchdog||self.firstFrameReported||self.destroyed)return;
     __weak typeof(self) weakSelf=self;NSUInteger generation=self.generation;
-    self.firstFrameWatchdog=[NSTimer scheduledTimerWithTimeInterval:self.firstFrameTimeout repeats:NO block:^(NSTimer *timer){
+    self.firstFrameBudgetStarted=CACurrentMediaTime();
+    self.firstFrameWatchdog=[NSTimer scheduledTimerWithTimeInterval:MAX(.01,self.firstFrameRemaining) repeats:NO block:^(NSTimer *timer){
         MediaPlaybackCicadaAdapter *owner=weakSelf;if(!owner||generation!=owner.generation||owner.destroyed)return;
-        owner.firstFrameWatchdog=nil;
+        owner.firstFrameWatchdog=nil;owner.firstFrameRemaining=0;
         if(owner.playbackRequested&&!owner.firstFrameReported&&owner.state!=MediaPlaybackCicadaAdapterStateFailed&&owner.state!=MediaPlaybackCicadaAdapterStateCompleted)[owner reportErrorWithCode:-1001 message:[NSString stringWithFormat:@"CicadaPlayer %.0f 秒内未显示首帧",owner.firstFrameTimeout]];
     }];
 }
@@ -377,6 +384,7 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
 
 - (void)pause {
     if (self.destroyed || !self.player || self.state==MediaPlaybackCicadaAdapterStateFailed || self.state==MediaPlaybackCicadaAdapterStateCompleted || self.state==MediaPlaybackCicadaAdapterStateIdle) return;
+    if(self.firstFrameWatchdog)self.firstFrameRemaining=MAX(0,self.firstFrameRemaining-(CACurrentMediaTime()-self.firstFrameBudgetStarted));
     self.startRequested=NO;self.playbackRequested=NO;[self.firstFrameWatchdog invalidate];self.firstFrameWatchdog=nil;
     [self.pollTimer invalidate]; self.pollTimer = nil;
     CicadaCallVoid(self.player, NSSelectorFromString(@"pause"));
@@ -479,6 +487,23 @@ static dispatch_queue_t MediaPlaybackCicadaQuarantineQueue(void) {
     CicadaCallVoidDouble(self.player, NSSelectorFromString(@"setRate:"), (double)self.pendingRate);
 }
 
+- (void)setMuted:(BOOL)muted {self.pendingMuted=muted;CicadaCallVoidBool(self.player,NSSelectorFromString(@"setMuted:"),muted);}
+- (BOOL)canSelectTracks {return !self.destroyed&&[self.player respondsToSelector:NSSelectorFromString(@"getMediaInfo")]&&[self.player respondsToSelector:NSSelectorFromString(@"selectTrack:")];}
+- (NSArray<NSDictionary *> *)availableTracks {
+    if(![self canSelectTracks])return @[];
+    @try {
+        id info=[self.player valueForKey:@"mediaInfo"];id tracks=[info valueForKey:@"tracks"];if(![tracks isKindOfClass:NSArray.class])return @[];
+        NSMutableArray *result=[NSMutableArray array];
+        for(id track in tracks){if(result.count>=128)break;NSNumber *index=[track valueForKey:@"trackIndex"],*type=[track valueForKey:@"trackType"];if(![index respondsToSelector:@selector(integerValue)]||![type respondsToSelector:@selector(integerValue)]||index.integerValue<0||index.integerValue>INT_MAX)continue;
+            NSString *kind=type.integerValue==1?@"audio":(type.integerValue==2?@"subtitle":@"video");NSString *name=MediaPlaybackCicadaStringFromModel(track,@[@"title",@"audioLang",@"subtitleLang",@"language"]);if(!name.length)name=[NSString stringWithFormat:@"%@ %ld",kind,(long)index.integerValue];[result addObject:@{@"index":index,@"type":kind,@"name":name}];
+        }return result.copy;
+    }@catch(NSException *error){return @[];}
+}
+- (BOOL)selectTrackWithIndex:(NSInteger)index {
+    if(![self canSelectTracks])return NO;
+    for(NSDictionary *track in [self availableTracks])if([track[@"index"] integerValue]==index){CicadaCallVoidInt(self.player,NSSelectorFromString(@"selectTrack:"),(int)index);return YES;}
+    return NO;
+}
 - (void)applyVideoGravity:(NSString *)gravity {
     self.pendingVideoGravity = [gravity copy] ?: AVLayerVideoGravityResizeAspect;
     if (!self.player) return;

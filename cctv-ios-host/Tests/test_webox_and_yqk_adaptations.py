@@ -312,7 +312,8 @@ const fn = {fn_code};
         self.assertNotIn("cmsEpisodeCache", mp_src)
         self.assertIn("prefetchNextEpisodeIfNeeded", mp_src)
         self.assertIn("prefetchedEpisodeResult", mp_src)
-        self.assertIn("loaderKeyCache", mp_src)
+        self.assertIn("MediaKeyRequest", mp_src)
+        self.assertNotIn("loaderKeyCache", mp_src)
 
         api_src = (ROOT / "Sources/MediaAPIClient.m").read_text(encoding="utf-8")
         self.assertIn("configuration.HTTPMaximumConnectionsPerHost=6;", api_src)

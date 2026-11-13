@@ -22,6 +22,36 @@ import uuid
 import zlib
 
 
+def ll_hls_upstream_url(url, request_path):
+    """Forward only LL-HLS delivery directives, preserving signed query bytes."""
+    if not isinstance(request_path, str):
+        return url
+    incoming = urllib.parse.parse_qs(urllib.parse.urlsplit(request_path).query, max_num_fields=32)
+    controls = {}
+    for name in ('_HLS_msn', '_HLS_part', '_HLS_skip'):
+        values = incoming.get(name)
+        if not values:
+            continue
+        if len(values) != 1 or len(values[0]) > 20:
+            raise ValueError('invalid_ll_hls_directive')
+        value = values[0]
+        if (name == '_HLS_skip' and value not in ('YES', 'v2')) or (name != '_HLS_skip' and not value.isascii()) or (name != '_HLS_skip' and not value.isdigit()):
+            raise ValueError('invalid_ll_hls_directive')
+        controls[name] = value
+    if not controls:
+        return url
+    parts = urllib.parse.urlsplit(url)
+    # Preserve the bytes of every non-delivery query item (signed URLs).
+    query = '&'.join(item for item in parts.query.split('&') if item and urllib.parse.unquote(item.split('=', 1)[0]) not in controls)
+    query += ('&' if query else '') + urllib.parse.urlencode(controls)
+    return urllib.parse.urlunsplit(parts._replace(query=query))
+
+
+def sensitive_header(name):
+    name = name.lower()
+    return name in ('authorization', 'cookie', 'proxy-authorization') or any(part in name for part in ('token', 'api-key', 'apikey', 'signature', 'session', 'secret', 'credential'))
+
+
 class ScopedRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, request, response, code, message, headers, new_url):
         new_url = http_url(new_url)
@@ -32,7 +62,7 @@ class ScopedRedirect(urllib.request.HTTPRedirectHandler):
             redirected.method = 'HEAD'
         if redirected is not None and (urllib.parse.urlsplit(request.full_url).scheme.lower(), urllib.parse.urlsplit(request.full_url).netloc.lower()) != (urllib.parse.urlsplit(new_url).scheme.lower(), urllib.parse.urlsplit(new_url).netloc.lower()):
             for name in list(redirected.headers):
-                if name.lower() in ('authorization', 'cookie'):
+                if sensitive_header(name):
                     redirected.remove_header(name)
         return redirected
 
@@ -636,6 +666,8 @@ class MediaRelay:
                 refresh=None, refresh_after=0, refresh_interval=0,
                 refresh_relative_base=None, resource_scope=None):
         parent = urllib.parse.urlsplit(url)
+        # Delivery directives apply to manifest reloads, not media/key requests.
+        inherited_query = '&'.join(item for item in parent.query.split('&') if item and urllib.parse.unquote(item.split('=', 1)[0]) not in ('_HLS_msn', '_HLS_part', '_HLS_skip'))
         segment_count = 0
         warmup_key_token = None
         warmup_map_token = None
@@ -656,9 +688,9 @@ class MediaRelay:
             # Cross-origin references and children with their own query keep
             # their source-authored URL unchanged to avoid credential leaks.
             fallback_url = None
-            if parent.query and not resolved.query and self._same_origin(parent, resolved):
+            if inherited_query and not resolved.query and self._same_origin(parent, resolved):
                 fallback_url = target
-                target = self._with_query(target, parent.query)
+                target = self._with_query(target, inherited_query)
             if resolved.scheme.lower() not in ('http', 'https') or not resolved.hostname:
                 return value
             is_manifest=manifest or resolved.path.lower().endswith(('.m3u8','.m3u'))
@@ -944,7 +976,7 @@ class MediaRelay:
             parsed = urllib.parse.urlsplit(url)
             headers = dict(pairs)
             if (parsed.scheme.lower(), parsed.netloc.lower()) != origin:
-                headers = {k: v for k, v in headers.items() if k.lower() not in ('authorization', 'cookie')}
+                headers = {k: v for k, v in headers.items() if not sensitive_header(k)}
             headers['Accept-Encoding'] = 'identity'
             req = urllib.request.Request(http_url(url), headers=headers, method='GET')
             resp = None
@@ -1127,9 +1159,11 @@ class MediaRelay:
                     'request_id': diagnostic_id, 'upstream_host': parsed.hostname or '',
                     'scheme': parsed.scheme.lower()}, separators=(',', ':')))
             if (parsed.scheme.lower(), parsed.netloc.lower()) != origin:
-                headers = {k: v for k, v in headers.items() if k.lower() not in ('authorization', 'cookie')}
+                headers = {k: v for k, v in headers.items() if not sensitive_header(k)}
             headers['Accept-Encoding'] = 'identity'
             manifest_request = expected_hls or parsed.path.lower().endswith(('.m3u8', '.m3u'))
+            if manifest_request:
+                url = ll_hls_upstream_url(url, getattr(handler, 'path', ''))
             if manifest_request:
                 # Rewritten playlists have different byte offsets. Fetch the
                 # full source manifest; range requests still apply to media.
@@ -1223,7 +1257,7 @@ class MediaRelay:
                     headers=dict(pairs)
                     parsed=urllib.parse.urlsplit(url)
                     if (parsed.scheme.lower(),parsed.netloc.lower())!=origin:
-                        headers={k:v for k,v in headers.items() if k.lower() not in ('authorization','cookie')}
+                        headers={k:v for k,v in headers.items() if not sensitive_header(k)}
                     headers['Accept-Encoding']='identity'
                     manifest_request = expected_hls or parsed.path.lower().endswith(('.m3u8', '.m3u'))
                     if manifest_request:headers={k:v for k,v in headers.items() if k.lower()!='range'}

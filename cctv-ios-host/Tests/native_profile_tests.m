@@ -12,6 +12,21 @@ static NSData *encode(id obj){return [NSJSONSerialization dataWithJSONObject:obj
 static NSData *gzip(NSData *data){z_stream s={0};check(deflateInit2(&s,6,Z_DEFLATED,31,8,Z_DEFAULT_STRATEGY)==Z_OK,@"gzip init");NSMutableData *out=[NSMutableData dataWithLength:compressBound(data.length)+64];s.next_in=(Bytef *)data.bytes;s.avail_in=(uInt)data.length;s.next_out=out.mutableBytes;s.avail_out=(uInt)out.length;check(deflate(&s,Z_FINISH)==Z_STREAM_END,@"gzip fixture");out.length=s.total_out;deflateEnd(&s);return out;}
 static BOOL waitUntil(BOOL (^ready)(void),double seconds){NSDate *end=[NSDate dateWithTimeIntervalSinceNow:seconds];while(!ready()&&[end timeIntervalSinceNow]>0)[NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];return ready();}
 int main(int argc,const char **argv){@autoreleasepool{
+    NSArray *txt=[M3UParser parse:@"新闻,#genre#\n频道甲,https://stream.test/live.m3u8\n频道乙,rtmp://stream.test/live/key" baseURL:nil];
+    check(txt.count==2&&[[(M3UChannel *)txt[0] name] isEqual:@"频道甲"]&&[[(M3UChannel *)txt[0] group] isEqual:@"新闻"],@"IPTV TXT preserves group, name and RTMP entries");
+    check([M3UParser parse:@"class Spider:\n    pass" baseURL:[NSURL URLWithString:@"https://source.test/script"]].count==0,@"script words cannot become relative channel URLs");
+    NSArray *hls=[M3UParser parse:@"#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6,\na.ts\n#EXTINF:6,\nb.ts" baseURL:[NSURL URLWithString:@"https://stream.test/live.m3u8"]];
+    check(hls.count==1&&[[(M3UChannel *)hls[0] url] isEqual:@"https://stream.test/live.m3u8"],@"HLS segments stay inside a single media resource");
+    NSDictionary *report=[M3UParser reportForText:@"udp://239.1.1.1:1234\nrtsp://camera.test/live\nhttps://stream.test/a.m3u8" baseURL:nil];
+    check([report[@"recognizedCount"] integerValue]==1&&[report[@"unsupportedProtocols"] count]==2,@"unsupported transports are reported, not silently counted as success");
+    M3UChannel *catchup=[M3UChannel new];catchup.url=@"https://stream.test/live";catchup.catchupMode=@"append";catchup.catchupSource=@"?utc={utc}&duration={duration}";catchup.catchupDays=7;
+    NSDate *start=[NSDate dateWithTimeIntervalSinceNow:-3600];NSURL *replay=[catchup catchupURLForStart:start end:[start dateByAddingTimeInterval:1800]];
+    check([replay.query containsString:@"duration=1800"],@"catchup expands the requested EPG interval");
+    check(![catchup catchupURLForStart:[NSDate dateWithTimeIntervalSinceNow:-8*86400] end:start],@"catchup enforces the declared retention window");
+    check(![TVBoxCatalogStore parseData:encode(@{@"list":@[@{@"vod_id":@"1",@"vod_name":@"电影"}]}) sourceURL:@"https://api.test/vod" error:NULL],@"MacCMS content list is not a TVBox site index");
+    NSDictionary *inlineCatalog=[TVBoxCatalogStore parseData:encode(@{@"lives":@[@{@"name":@"直播",@"channels":@[@{@"name":@"频道",@"urls":@[@"https://stream.test/one.m3u8",@"https://stream.test/two.m3u8"]}]}]}) sourceURL:@"https://source.test/catalog.json" error:NULL];
+    NSString *inlineText=inlineCatalog[@"lives"][0][@"inlinePlaylist"];check([inlineText containsString:@"one.m3u8"]&&[inlineText containsString:@"two.m3u8"],@"inline live channels retain all alternative URLs");
+
     NSDictionary *tvboxJSON=@{@"name":@"API fixtures",@"sites":@[
         @{@"key":@"api1",@"name":@"type one",@"api":@"https://example.com/api.php?token=visible",@"type":@1},
         @{@"key":@"api4",@"name":@"type four",@"api":@"https://example.com/api.php",@"type":@4,@"ext":@{@"region":@"cn"}},

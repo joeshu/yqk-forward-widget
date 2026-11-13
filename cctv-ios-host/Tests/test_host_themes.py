@@ -81,9 +81,9 @@ class HostThemePaletteContracts(unittest.TestCase):
                 self.assertGreaterEqual(contrast(colors["text"], colors["background"]), 7.0)
                 self.assertGreaterEqual(contrast(colors["secondary"], colors["background"]), 4.5)
                 self.assertGreaterEqual(contrast(colors["accent"], colors["background"]), 4.5)
-                self.assertGreaterEqual(contrast(colors["onAccent"], colors["accent"]), 3.0)
-                if theme["id"] != "midnight":
-                    self.assertGreaterEqual(contrast(colors["onAccent"], colors["accent"]), 4.5)
+                fill = colors.get("accentFill", colors["accent"])
+                self.assertGreaterEqual(contrast(colors["onAccent"], fill), 4.5)
+
 
     def test_theme_engine_hooks(self):
         header = PALETTE_HEADER.read_text(encoding="utf-8")

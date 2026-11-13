@@ -228,7 +228,8 @@ class DashSession:
             video = [t for t in tracks if t['kind'] == 'video']
             for i, t in enumerate(audio if video else []):
                 uri = self.relay.dash_track_url(self, t['id'], base)
-                lines.append(f'#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="Audio {i+1}",DEFAULT={"YES" if i == 0 else "NO"},AUTOSELECT=YES,URI="{uri}"')
+                language = str(t.get('language') or 'und').replace('"', '').replace('\r', '').replace('\n', '')[:32]
+                lines.append(f'#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="{language} {i+1}",LANGUAGE="{language}",DEFAULT={"YES" if i == 0 else "NO"},AUTOSELECT=YES,URI="{uri}"')
             for t in video or audio:
                 attrs = ['BANDWIDTH=' + str(t['bandwidth'] + (max(x['bandwidth'] for x in audio) if video and audio else 0))]
                 codecs = ','.join(dict.fromkeys([t['codecs']] + ([x['codecs'] for x in audio] if video else []))).strip(',')

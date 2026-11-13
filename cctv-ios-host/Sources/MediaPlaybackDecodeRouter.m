@@ -1,3 +1,4 @@
+#import "MediaCapabilityRegistry.h"
 // MediaPlaybackDecodeRouter.m
 //
 // 解码能力依据（证据链，勿凭印象改表）：
@@ -61,7 +62,10 @@ NSString *MediaPlaybackSniffContainerFormat(NSData *headerBytes) {
     NSUInteger offset = (len >= 3 && b[0] == 0xEF && b[1] == 0xBB && b[2] == 0xBF) ? 3 : 0;
     while (offset < len && (b[offset] == ' ' || b[offset] == '\t' || b[offset] == '\r' || b[offset] == '\n')) offset++;
     if (len - offset >= 7 && memcmp(b + offset, "#EXTM3U", 7) == 0) return @"hls";
-    if (len - offset >= 4 && (memcmp(b + offset, "<MPD", 4) == 0 || memcmp(b + offset, "<?xm", 4) == 0)) return @"dash";
+    // Inspect the XML root, not the declaration shared by XMLTV and error pages.
+    NSString *prefix=[[NSString alloc] initWithBytes:b+offset length:MIN(len-offset,(NSUInteger)4096) encoding:NSUTF8StringEncoding];
+    NSRegularExpression *mpd=[NSRegularExpression regularExpressionWithPattern:@"^\\s*(?:<\\?xml[^>]*>\\s*)?(?:<!--[^>]*-->\\s*)*<(?:[A-Za-z_][A-Za-z0-9_.-]*:)?MPD(?:\\s|>)" options:0 error:NULL];
+    if(prefix&&[mpd firstMatchInString:prefix options:0 range:NSMakeRange(0,prefix.length)])return @"dash";
     return nil;
 }
 
@@ -89,7 +93,7 @@ BOOL MediaPlaybackResultSupportsCicadaPlayer(NSDictionary *result) {
     NSString *format = MediaPlaybackDecodeResultFormat(result);
     NSString *mime = MediaPlaybackDecodeResultMIME(result);
     // format 词：flv / live_flv / mpd / dash / mkv / matroska / webm / 3gp / rtmp
-    NSSet *formats = [NSSet setWithArray:@[@"flv", @"live_flv", @"mpd", @"dash", @"mpeg-dash", @"mkv", @"matroska", @"webm", @"3gp", @"3gpp", @"rtmp"]];
+    NSSet *formats=[NSSet setWithArray:MediaCapabilityCicadaFormats()];
     // mime 词：video/x-flv、application/dash+xml、video/x-matroska、video/webm、
     // video/3gpp、application/x-rtmp。video/mp2t 归 AVPlayer，不列入。
     NSSet *mimes = [NSSet setWithArray:@[@"video/x-flv", @"application/dash+xml", @"video/x-matroska", @"video/webm", @"video/3gpp", @"video/3gpp2", @"application/x-rtmp"]];
@@ -108,7 +112,7 @@ BOOL MediaPlaybackResultRequiresWebViewOnly(NSDictionary *result) {
     // AVI：无 avi demuxer；WMV/ASF：无 asf demuxer、无 wmv 解码器；
     // RM/RMVB：无 rm demuxer、无 rv 解码器。AVPlayer 同样不支持这些容器。
     // 此函数保留历史名称，仅表示原生能力限制；不承诺 WebView 能播放。
-    NSSet *formats = [NSSet setWithArray:@[@"avi", @"wmv", @"asf", @"rm", @"rmvb"]];
+    NSSet *formats=[NSSet setWithArray:MediaCapabilityUnsupportedContainers()];
     NSSet *mimes = [NSSet setWithArray:@[@"video/x-msvideo", @"video/x-ms-wmv", @"video/x-ms-asf", @"application/vnd.rn-realmedia", @"audio/x-pn-realaudio", @"video/vnd.rn-realvideo"]];
     if ([formats containsObject:format] || [mimes containsObject:mime]) return YES;
     NSString *extension = MediaPlaybackDecodeResultExtension(result);
@@ -127,6 +131,7 @@ NSString *MediaPlaybackDecodeRouteName(MediaPlaybackDecodeRoute route) {
 MediaPlaybackDecodeRoute MediaPlaybackDecodeRouteNextForResult(NSDictionary *result, NSUInteger attemptedRoutes) {
     if (![result isKindOfClass:NSDictionary.class]) return MediaPlaybackDecodeRouteNone;
     BOOL webOnly = MediaPlaybackResultRequiresWebViewOnly(result);
+    if(webOnly)return MediaPlaybackDecodeRouteNone;
     BOOL directMedia = MediaPlaybackResultIsDirectMedia(result);
     BOOL avSupported = MediaPlaybackResultSupportsAVPlayer(result);
     BOOL cicadaSupported = MediaPlaybackResultSupportsCicadaPlayer(result);

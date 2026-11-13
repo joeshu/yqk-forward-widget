@@ -85,6 +85,11 @@ typedef NS_ENUM(NSInteger, MediaPlaybackCicadaAdapterState) {
 // seekMode 传 CICADA_SEEKMODE_ACCURATE（0x01，见 CicadaSDK.h）。
 - (void)seekToTime:(NSTimeInterval)time completion:(nullable void (^)(BOOL finished))completion;
 - (void)setRate:(float)rate;
+- (void)setMuted:(BOOL)muted;
+/// Runtime-checked SDK track metadata; empty is not a claim about the source.
+- (NSArray<NSDictionary *> *)availableTracks;
+- (BOOL)canSelectTracks;
+- (BOOL)selectTrackWithIndex:(NSInteger)index;
 // 长按手势会请求 3.0x：上限放宽到 3.0（设置菜单的持久倍速仍由调用方
 // 钳制在 2.0 以内，见 MediaPlaybackViewController setPlaybackRate:）。
 // gravity 取 AVLayerVideoGravityResizeAspect / ResizeAspectFill / Resize；

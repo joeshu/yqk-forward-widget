@@ -20,6 +20,14 @@ static NSString *CCTVResourceUnifiedKeyForProfile(NSDictionary *profile) {
     return @"";
 }
 
+@interface HostResourceActionLabel : UILabel
+@property(nonatomic,copy) BOOL (^activation)(void);
+@end
+@implementation HostResourceActionLabel
+- (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {CGFloat dy=MAX(0,(44-self.bounds.size.height)/2);return CGRectContainsPoint(CGRectInset(self.bounds,0,-dy),point);}
+- (BOOL)accessibilityActivate {return self.activation?self.activation():NO;}
+@end
+
 @interface CCTVResourceProfileCell : UITableViewCell
 @property(nonatomic,strong) UIView *iconBadgeContainer;
 @property(nonatomic,strong) UIImageView *profileIconView;
@@ -46,7 +54,9 @@ static NSString *CCTVResourceUnifiedKeyForProfile(NSDictionary *profile) {
         self.profileTitleLabel=[UILabel new];self.profileTitleLabel.translatesAutoresizingMaskIntoConstraints=NO;self.profileTitleLabel.numberOfLines=2;self.profileTitleLabel.lineBreakMode=NSLineBreakByTruncatingTail;self.profileTitleLabel.adjustsFontForContentSizeCategory=YES;
         self.profileDetailLabel=[UILabel new];self.profileDetailLabel.translatesAutoresizingMaskIntoConstraints=NO;self.profileDetailLabel.numberOfLines=0;self.profileDetailLabel.lineBreakMode=NSLineBreakByCharWrapping;self.profileDetailLabel.adjustsFontForContentSizeCategory=YES;
         self.protocolBadge=[UILabel new];self.protocolBadge.translatesAutoresizingMaskIntoConstraints=NO;self.protocolBadge.font=HostMonospacedDigitFont(10.5,UIFontWeightBold,UIFontTextStyleCaption2);self.protocolBadge.textAlignment=NSTextAlignmentCenter;self.protocolBadge.layer.cornerRadius=6.5;self.protocolBadge.layer.cornerCurve=kCACornerCurveContinuous;self.protocolBadge.layer.borderWidth=0.5;HostSetLayerBorderColor(self.protocolBadge,[HostAccent() colorWithAlphaComponent:0.32]);self.protocolBadge.clipsToBounds=YES;self.protocolBadge.backgroundColor=HostSelectedSurface();self.protocolBadge.textColor=HostAccent();self.protocolBadge.accessibilityIdentifier=@"resource.protocol.badge";
-        self.latencyBadge=[UILabel new];self.latencyBadge.translatesAutoresizingMaskIntoConstraints=NO;self.latencyBadge.font=HostMonospacedDigitFont(10.5,UIFontWeightSemibold,UIFontTextStyleCaption2);self.latencyBadge.textAlignment=NSTextAlignmentCenter;self.latencyBadge.layer.cornerRadius=6.5;self.latencyBadge.layer.cornerCurve=kCACornerCurveContinuous;self.latencyBadge.layer.borderWidth=0.5;HostSetLayerBorderColor(self.latencyBadge,HostBorder());self.latencyBadge.clipsToBounds=YES;self.latencyBadge.backgroundColor=HostRaisedSurface();self.latencyBadge.textColor=HostSecondaryText();self.latencyBadge.userInteractionEnabled=YES;self.latencyBadge.accessibilityIdentifier=@"resource.latency.badge";
+        self.latencyBadge=[HostResourceActionLabel new];self.latencyBadge.translatesAutoresizingMaskIntoConstraints=NO;self.latencyBadge.font=HostMonospacedDigitFont(10.5,UIFontWeightSemibold,UIFontTextStyleCaption2);self.latencyBadge.textAlignment=NSTextAlignmentCenter;self.latencyBadge.layer.cornerRadius=6.5;self.latencyBadge.layer.cornerCurve=kCACornerCurveContinuous;self.latencyBadge.layer.borderWidth=0.5;HostSetLayerBorderColor(self.latencyBadge,HostBorder());self.latencyBadge.clipsToBounds=YES;self.latencyBadge.backgroundColor=HostRaisedSurface();self.latencyBadge.textColor=HostSecondaryText();self.latencyBadge.userInteractionEnabled=YES;self.latencyBadge.accessibilityIdentifier=@"resource.latency.badge";
+        self.latencyBadge.isAccessibilityElement=YES;self.latencyBadge.accessibilityTraits=UIAccessibilityTraitButton;__weak typeof(self) weakLatencyCell=self;
+        ((HostResourceActionLabel *)self.latencyBadge).activation=^BOOL{CCTVResourceProfileCell *owner=weakLatencyCell;if(!owner.onTapLatency||!owner.profileSource.length)return NO;[owner handleLatencyBadgeTap];return YES;};
         UITapGestureRecognizer *latencyTap=[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleLatencyBadgeTap)];[self.latencyBadge addGestureRecognizer:latencyTap];
         self.statusBadge=[UILabel new];self.statusBadge.translatesAutoresizingMaskIntoConstraints=NO;self.statusBadge.font=HostMonospacedDigitFont(10.5,UIFontWeightSemibold,UIFontTextStyleCaption2);self.statusBadge.textAlignment=NSTextAlignmentCenter;self.statusBadge.layer.cornerRadius=6.5;self.statusBadge.layer.cornerCurve=kCACornerCurveContinuous;self.statusBadge.layer.borderWidth=0.5;HostSetLayerBorderColor(self.statusBadge,HostBorder());self.statusBadge.clipsToBounds=YES;self.statusBadge.backgroundColor=HostNeutralSurface();self.statusBadge.textColor=HostSecondaryText();self.statusBadge.accessibilityIdentifier=@"resource.status.badge";
         self.detailDivider=[UIView new];self.detailDivider.translatesAutoresizingMaskIntoConstraints=NO;self.detailDivider.backgroundColor=[HostSeparator() colorWithAlphaComponent:0.42];

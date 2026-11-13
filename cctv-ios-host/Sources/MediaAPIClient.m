@@ -448,6 +448,7 @@ static BOOL MediaParserResponseIsDirectMedia(NSURLResponse *response) {
     NSURL *url=response.URL;NSString *extension=url.pathExtension.lowercaseString?:@"";
     BOOL mediaMIME=[mime hasPrefix:@"video/"]||[mime hasPrefix:@"audio/"]||[@[@"application/vnd.apple.mpegurl",@"application/x-mpegurl",@"audio/mpegurl",@"application/dash+xml"] containsObject:mime];
     BOOL mediaExtension=[@[@"m3u8",@"m3u",@"mp4",@"m4v",@"mov",@"m4a",@"mp3",@"aac",@"ts",@"mpd"] containsObject:extension];
+    if([mime isEqualToString:@"application/dash+xml"])return YES;
     if([mime containsString:@"json"]||[mime containsString:@"html"]||[mime containsString:@"xml"])return NO;
     return mediaMIME||mediaExtension;
 }
