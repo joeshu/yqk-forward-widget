@@ -162,7 +162,7 @@ static NSDictionary *ResourceImportReadSnapshot(void) {
     id value=[NSPropertyListSerialization propertyListWithData:data options:NSPropertyListImmutable format:NULL error:NULL];
     if(![value isKindOfClass:NSDictionary.class]||![@[@1,@2] containsObject:value[@"version"]])return nil;
     NSUInteger bytes=0,total=data.length;NSError *error=nil;NSMutableSet *references=[NSMutableSet set];id restored=ResourceImportSnapshotBlobs(value,NO,references,&bytes,&error);if(error||!restored)return nil;
-    for(NSString *name in references){NSNumber *size=nil;NSURL *blob=[[ResourceImportBlobDirectory() URLByAppendingPathComponent:name] standardizedFileURL];[blob getResourceValue:&size forKey:NSURLFileSizeKey error:&error];if(error||NSUIntegerMax-total<size.unsignedIntegerValue)return nil;total+=size.unsignedIntegerValue;if(total>maximumBytes)return nil;}
+    for(NSString *name in references){NSNumber *size=nil;NSURL *blob=[ResourceImportBlobDirectory() URLByAppendingPathComponent:name];[blob getResourceValue:&size forKey:NSURLFileSizeKey error:&error];if(error||NSUIntegerMax-total<size.unsignedIntegerValue)return nil;total+=size.unsignedIntegerValue;if(total>maximumBytes)return nil;}
     return total<=maximumBytes?restored:nil;
 }
 static BOOL ResourceImportWriteSnapshot(NSDictionary *snapshot,NSError **writeError) {
