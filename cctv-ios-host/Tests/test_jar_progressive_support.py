@@ -27,6 +27,12 @@ from csp_adapter import (
 
 
 class AndroidJARProgressiveSupportTests(unittest.TestCase):
+    def test_jar_smoke_server_serializes_concurrent_jsonl_records(self):
+        source = (ROOT / 'Tests' / 'JARSmoke' / 'server.py').read_text(encoding='utf-8')
+        self.assertIn('log_lock=threading.Lock()', source)
+        self.assertIn("sys.stdout.write(json.dumps(value,separators=(',',':'))+'\\n')", source)
+        self.assertIn('with log_lock:', source)
+
     def test_yqk_signed_request_reaches_transport_and_preserves_parameters(self):
         from unittest.mock import Mock, patch
         import hashlib
