@@ -12,6 +12,7 @@
 @property(nonatomic,strong) UILabel *summaryLabel;
 - (void)updateEmptyState;
 - (void)updateCatalogSummary;
+- (void)presentCatalogAlert:(UIAlertController *)alert sourceView:(nullable UIView *)sourceView sourceRect:(CGRect)sourceRect;
 @end
 
 @implementation TVBoxCatalogViewController
@@ -52,6 +53,35 @@
     empty.text=self.searchText.length?@"没有匹配的站点或直播源，请修改搜索词":(scope>0?@"当前筛选分类下暂无站点或直播列表":@"此合集暂无站点与直播列表");
     empty.numberOfLines=0;empty.textAlignment=NSTextAlignmentCenter;empty.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];empty.adjustsFontForContentSizeCategory=YES;empty.textColor=HostSecondaryText();self.tableView.backgroundView=empty;
 }
+- (UIViewController *)visiblePresentationController {
+    UIWindow *window=self.viewIfLoaded.window;
+    if(!window){
+        for(UIScene *scene in UIApplication.sharedApplication.connectedScenes){
+            if(scene.activationState!=UISceneActivationStateForegroundActive)continue;
+            for(UIWindow *candidate in ((UIWindowScene *)scene).windows)if(candidate.isKeyWindow){window=candidate;break;}
+            if(window)break;
+        }
+    }
+    UIViewController *controller=window.rootViewController;
+    while(controller){
+        if(controller.presentedViewController&&!controller.presentedViewController.isBeingDismissed){controller=controller.presentedViewController;continue;}
+        if([controller isKindOfClass:UINavigationController.class]){UIViewController *top=((UINavigationController *)controller).topViewController;if(top&&top!=controller){controller=top;continue;}}
+        if([controller isKindOfClass:UITabBarController.class]){UIViewController *selected=((UITabBarController *)controller).selectedViewController;if(selected&&selected!=controller){controller=selected;continue;}}
+        break;
+    }
+    return controller.viewIfLoaded.window==window&&!controller.isBeingDismissed?controller:nil;
+}
+- (void)presentCatalogAlert:(UIAlertController *)alert sourceView:(UIView *)sourceView sourceRect:(CGRect)sourceRect {
+    UIViewController *presenter=[self visiblePresentationController];
+    if(!presenter)return;
+    UIPopoverPresentationController *popover=alert.popoverPresentationController;
+    if(popover){
+        UIView *anchor=sourceView.window==presenter.view.window?sourceView:presenter.view;
+        popover.sourceView=anchor;
+        popover.sourceRect=anchor==sourceView?sourceRect:CGRectMake(CGRectGetMidX(anchor.bounds),CGRectGetMidY(anchor.bounds),1,1);
+    }
+    [presenter presentViewController:alert animated:YES completion:nil];
+}
 - (void)viewDidLoad {
     [super viewDidLoad];self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();NSString *catalogName=[self.catalog[@"name"] isKindOfClass:NSString.class]?self.catalog[@"name"]:@"";self.title=(!catalogName.length||[catalogName isEqual:@"TVBox 资源目录"]||[catalogName isEqual:@"TVBox资源目录"])?@"资源合集":catalogName;self.navigationItem.prompt=@"点按需要的站点按需加载 · 不必全量导入";self.tableView.backgroundColor=HostBackground();self.tableView.rowHeight=UITableViewAutomaticDimension;self.tableView.estimatedRowHeight=88;
     self.searchController=[[UISearchController alloc] initWithSearchResultsController:nil];self.searchController.searchResultsUpdater=self;self.searchController.obscuresBackgroundDuringPresentation=NO;self.searchController.searchBar.placeholder=@"搜索合集中的站点、协议或 URL";self.searchController.searchBar.autocapitalizationType=UITextAutocapitalizationTypeNone;self.searchController.searchBar.autocorrectionType=UITextAutocorrectionTypeNo;self.navigationItem.searchController=self.searchController;self.navigationItem.hidesSearchBarWhenScrolling=NO;self.definesPresentationContext=YES;
@@ -66,11 +96,11 @@
             UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"全量影视导入（较慢）" message:message preferredStyle:UIAlertControllerStyleAlert];
             [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
             [alert addAction:[UIAlertAction actionWithTitle:@"仍然导入影视脚本" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){if(owner.onImportCompatibleContents)owner.onImportCompatibleContents();}]];
-            [owner presentViewController:alert animated:YES completion:nil];
+            [owner presentCatalogAlert:alert sourceView:nil sourceRect:CGRectZero];
         }]},
         @{@"icon":@"square.and.arrow.up",@"title":@"导出完整合集 JSON",@"action":[UIAction actionWithHandler:^(UIAction *a){if(weakSelf.onExportCatalog)weakSelf.onExportCatalog(@"json");}]},
         @{@"icon":@"archivebox",@"title":@"导出资源 ZIP（含可获取的 PY / JS）",@"action":[UIAction actionWithHandler:^(UIAction *a){if(weakSelf.onExportCatalog)weakSelf.onExportCatalog(@"zip");}]},
-        @{@"icon":@"trash",@"title":@"移除资源合集",@"action":[UIAction actionWithHandler:^(UIAction *a){UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"移除资源合集？" message:@"仅移除这份集合索引；已导入的脚本和直播订阅会保留。" preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[alert addAction:[UIAlertAction actionWithTitle:@"移除合集" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *x){if(weakSelf.onRemove)weakSelf.onRemove();}]];[weakSelf presentViewController:alert animated:YES completion:nil];}]}
+        @{@"icon":@"trash",@"title":@"移除资源合集",@"action":[UIAction actionWithHandler:^(UIAction *a){UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"移除资源合集？" message:@"仅移除这份集合索引；已导入的脚本和直播订阅会保留。" preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[alert addAction:[UIAlertAction actionWithTitle:@"移除合集" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *x){if(weakSelf.onRemove)weakSelf.onRemove();}]];[weakSelf presentCatalogAlert:alert sourceView:nil sourceRect:CGRectZero];}]}
     ];
     UIAction *json=resourceActions[1][@"action"],*zip=resourceActions[2][@"action"],*bulk=resourceActions[0][@"action"],*remove=resourceActions[3][@"action"];
     json.title=@"导出完整合集 JSON";zip.title=@"导出资源 ZIP（含可获取的 PY / JS）";bulk.title=@"全量导入影视脚本";remove.title=@"移除资源合集";remove.attributes=UIMenuElementAttributesDestructive;
@@ -159,7 +189,6 @@
     if(existing){[alert addAction:[UIAlertAction actionWithTitle:@"启动并打开资源" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){if(self.onUseImportedService)self.onUseImportedService(existing);}]];[alert addAction:[UIAlertAction actionWithTitle:@"查看能力与设置" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){if(self.onOpenImportedService)self.onOpenImportedService(existing);}]];}
     else {[alert addAction:[UIAlertAction actionWithTitle:@"导入并打开资源" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){if(self.onImportSite)self.onImportSite(row,YES);}]];[alert addAction:[UIAlertAction actionWithTitle:@"仅导入到资源页" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){if(self.onImportSite)self.onImportSite(row,NO);}]];}
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    if(alert.popoverPresentationController){UITableViewCell *cell=[tableView cellForRowAtIndexPath:ip];alert.popoverPresentationController.sourceView=cell?:self.view;alert.popoverPresentationController.sourceRect=cell?cell.bounds:CGRectMake(CGRectGetMidX(self.view.bounds),CGRectGetMidY(self.view.bounds),1,1);}
-    [self presentViewController:alert animated:YES completion:nil];
+    UITableViewCell *cell=[tableView cellForRowAtIndexPath:ip];[self presentCatalogAlert:alert sourceView:cell sourceRect:cell.bounds];
 }
 @end

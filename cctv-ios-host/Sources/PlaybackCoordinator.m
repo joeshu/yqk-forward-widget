@@ -37,11 +37,12 @@
 - (MPRemoteCommandHandlerStatus)onMain:(MPRemoteCommandHandlerStatus(^)(void))action {if(NSThread.isMainThread)return action();__block MPRemoteCommandHandlerStatus result;dispatch_sync(dispatch_get_main_queue(),^{result=action();});return result;}
 - (void)interruption:(NSNotification *)note {
     NSDictionary *info=note.userInfo;
-    dispatch_async(dispatch_get_main_queue(),^{
+    void (^apply)(void)=^{
         if([info[AVAudioSessionInterruptionTypeKey] unsignedIntegerValue]==AVAudioSessionInterruptionTypeBegan){self.interruptedSession=self.currentSession;self.resumeAfterInterruption=[self.currentSession respondsToSelector:@selector(sessionWantsPlayback)]?[self.currentSession sessionWantsPlayback]:[self.currentSession sessionIsPlaying];[self.currentSession sessionPause];}
         else {BOOL resume=self.resumeAfterInterruption&&self.interruptedSession==self.currentSession&&([info[AVAudioSessionInterruptionOptionKey] unsignedIntegerValue]&AVAudioSessionInterruptionOptionShouldResume);self.resumeAfterInterruption=NO;self.interruptedSession=nil;if(resume)[self.currentSession sessionPlay];}
-    });
+    };
+    if(NSThread.isMainThread)apply();else dispatch_async(dispatch_get_main_queue(),apply);
 }
-- (void)routeChanged:(NSNotification *)note {if([note.userInfo[AVAudioSessionRouteChangeReasonKey] unsignedIntegerValue]==AVAudioSessionRouteChangeReasonOldDeviceUnavailable)dispatch_async(dispatch_get_main_queue(),^{[self pause];});}
-- (void)mediaReset:(NSNotification *)note {dispatch_async(dispatch_get_main_queue(),^{id<PlaybackSession> session=self.currentSession;self.resumeAfterInterruption=NO;[session sessionPause];if([session respondsToSelector:@selector(sessionMediaServicesReset)])[session sessionMediaServicesReset];});}
+- (void)routeChanged:(NSNotification *)note {if([note.userInfo[AVAudioSessionRouteChangeReasonKey] unsignedIntegerValue]!=AVAudioSessionRouteChangeReasonOldDeviceUnavailable)return;void (^apply)(void)=^{[self pause];};if(NSThread.isMainThread)apply();else dispatch_async(dispatch_get_main_queue(),apply);}
+- (void)mediaReset:(NSNotification *)note {void (^apply)(void)=^{id<PlaybackSession> session=self.currentSession;self.resumeAfterInterruption=NO;[session sessionPause];if([session respondsToSelector:@selector(sessionMediaServicesReset)])[session sessionMediaServicesReset];};if(NSThread.isMainThread)apply();else dispatch_async(dispatch_get_main_queue(),apply);}
 @end

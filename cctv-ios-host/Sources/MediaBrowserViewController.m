@@ -1482,7 +1482,7 @@ typedef NS_ENUM(NSInteger, MediaContentMode) { MediaContentModeFeatured, MediaCo
 }
 - (UIMenu *)homeActionsMenu {
     __weak typeof(self) weakSelf=self;
-    return [UIMenu menuWithChildren:@[[UIAction actionWithTitle:@"本地媒体" image:[UIImage systemImageNamed:@"folder"] identifier:nil handler:^(UIAction *action){[weakSelf pushMediaPage:[LocalMediaViewController new]];}],[UIAction actionWithTitle:@"收藏" image:[UIImage systemImageNamed:@"heart"] identifier:nil handler:^(UIAction *a){[weakSelf openFavorites];}],[UIAction actionWithTitle:@"观看历史" image:[UIImage systemImageNamed:@"clock"] identifier:nil handler:^(UIAction *a){[weakSelf openHistory];}]]];
+    return [UIMenu menuWithChildren:@[[UIAction actionWithTitle:@"收藏" image:[UIImage systemImageNamed:@"heart"] identifier:nil handler:^(UIAction *a){[weakSelf openFavorites];}],[UIAction actionWithTitle:@"观看历史" image:[UIImage systemImageNamed:@"clock"] identifier:nil handler:^(UIAction *a){[weakSelf openHistory];}]]];
 }
 - (void)pushMediaPage:(UIViewController *)page {
     if(!page||!self.navigationController)return;

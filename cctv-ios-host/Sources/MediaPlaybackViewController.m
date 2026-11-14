@@ -448,6 +448,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 - (void)watchAVPlayerFirstFrameForItem:(AVPlayerItem *)item generation:(NSUInteger)playerGeneration url:(NSURL *)url sourceURL:(NSURL *)sourceURL;
 - (BOOL)isApplicationActiveForAVFirstFrameWatchdog;
 - (void)teardownCicadaAdapter;
+- (void)teardownCicadaAdapterUpdatingUI:(BOOL)updateUI;
 - (void)advanceFromCicadaFailureWithError:(NSError *)error;
 - (void)handleCicadaFirstFrameTimeoutForAdapter:(id)adapter;
 - (void)offerResumeForCicada;
@@ -970,7 +971,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     if(self.idleTimerOverrideActive){BOOL previousIdleTimerDisabled=self.previousIdleTimerDisabled;if(NSThread.isMainThread)UIApplication.sharedApplication.idleTimerDisabled=previousIdleTimerDisabled;else dispatch_async(dispatch_get_main_queue(),^{UIApplication.sharedApplication.idleTimerDisabled=previousIdleTimerDisabled;});}
     if(self.observingPlayer){@try{[self.player removeObserver:self forKeyPath:@"timeControlStatus" context:CCTVPlayerTimeControlContext];}@catch(NSException *exception){}}
     [self stopObservingCurrentPlayback];
-    [NSNotificationCenter.defaultCenter removeObserver:self];[self.client cancel];[self.hedgedClient cancel];self.hedgedClient=nil;self.prefetchGeneration++;[self.prefetchClient cancel];[self.prefetchedAsset cancelLoading];[self.player pause];[self teardownCicadaAdapter];
+    [NSNotificationCenter.defaultCenter removeObserver:self];[self.client cancel];[self.hedgedClient cancel];self.hedgedClient=nil;self.prefetchGeneration++;[self.prefetchClient cancel];[self.prefetchedAsset cancelLoading];[self.player pause];[self teardownCicadaAdapterUpdatingUI:NO];
 }
 - (void)updateEstimatedThroughput {
     if(!self.throughputLabel||self.embeddedMode)return;
@@ -1857,12 +1858,15 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     {if(!self.playbackSuspendedForVisibility)[self.player play];}
 }
 - (void)teardownCicadaAdapter {
+    [self teardownCicadaAdapterUpdatingUI:YES];
+}
+- (void)teardownCicadaAdapterUpdatingUI:(BOOL)updateUI {
     MediaPlaybackCicadaAdapter *adapter=self.cicadaAdapter;self.cicadaAdapter=nil;
-    self.cicadaScrubbing=NO;[self refreshCicadaControls];
+    self.cicadaScrubbing=NO;if(updateUI)[self refreshCicadaControls];
     if(!adapter)return;
     [adapter.playerView removeFromSuperview];
     [adapter destroy];
-    [self.playerController.view setHidden:NO];
+    if(updateUI)[self.playerController.view setHidden:NO];
 }
 - (void)markCicadaFirstFrameReady {
     if(self.videoFrameReady)return;
