@@ -522,6 +522,7 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('startFields[@"sdk_channel_id"]',startup)
         self.assertIn('failureFields[@"sdk_channel_id"]',failure)
         self.assertIn('failureFields[@"sdk_reported_node"]',failure)
+        self.assertIn('[self.channelGrid reloadData];[self.table reloadData];',failure)
         self.assertIn('if(![ProfileStore isHTTP:cid]&&cid.length<=128)',startup)
         self.assertIn('if(![ProfileStore isHTTP:self.channelID]',failure)
 

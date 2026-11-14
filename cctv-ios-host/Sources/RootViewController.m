@@ -5343,6 +5343,7 @@ configureCatalogNavigation;
     self.titleLabel.text=error.code?[NSString stringWithFormat:@"%@ · %@ (%ld)",channel,stage,(long)error.code]:[NSString stringWithFormat:@"%@ · %@",channel,stage];
     self.titleLabel.hidden=NO;NSString *failureDetail=error.localizedDescription.length?[HostLogRedactor redactText:error.localizedDescription]:nil;self.infoLabel.text=failureDetail?[NSString stringWithFormat:@"%@ · 点按“重试”再次播放，或点“线路”换源后重试",failureDetail]:@"点按“重试”再次播放，或点“线路”换源后重试";self.infoLabel.hidden=NO;self.controlBar.hidden=NO;
     [self.playPauseBtn setTitle:@"重试" forState:UIControlStateNormal];self.playPauseBtn.enabled=YES;
+    [self.channelGrid reloadData];[self.table reloadData];
 }
 
 - (void)player:(id)player vdnRequestFailed:(NSError *)error {
