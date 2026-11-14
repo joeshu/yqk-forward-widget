@@ -13,7 +13,9 @@ class NativeMediaKeyTests(unittest.TestCase):
         class Handler(BaseHTTPRequestHandler):
             def log_message(self,*args):pass
             def do_GET(self):
-                seen.append((self.server.server_port,self.path,dict(self.headers)))
+                seen.append((self.server.server_port,self.path,{name.lower():value for name,value in self.headers.items()}))
+                if self.path in ('/same','/loop'):
+                    self.send_response(302);self.send_header('Location','/same-key' if self.path=='/same' else '/loop');self.send_header('Content-Length','0');self.end_headers();return
                 if self.path=='/redirect':
                     self.send_response(302);self.send_header('Location',f'http://127.0.0.1:{second.server_port}/key');self.send_header('Content-Length','0');self.end_headers();return
                 body=b'0123456789abcdef' if self.path!='/large' else b'x'*4097
@@ -33,8 +35,12 @@ class NativeMediaKeyTests(unittest.TestCase):
                 redirected=[headers for port,path,headers in seen if port==second.server_port]
                 self.assertTrue(redirected)
                 for headers in redirected:
-                    for name in ('Authorization','X-API-Key','X-Auth','X-Session','Referer','Origin'):
+                    for name in ('authorization','x-api-key','x-auth','x-session','referer','origin'):
                         self.assertNotIn(name,headers)
+                same=[headers for port,path,headers in seen if path=='/same-key']
+                self.assertTrue(same)
+                self.assertEqual(same[0].get('x-api-key'),'private')
+                self.assertLessEqual(sum(path=='/loop' for _,path,_ in seen),6)
         finally:
             for server in (first,second):server.shutdown();server.server_close()
             for thread in threads:thread.join()
