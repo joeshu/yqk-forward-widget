@@ -2391,7 +2391,7 @@ configureCatalogNavigation;
     else {cell.accessoryView=nil;cell.accessoryType=UITableViewCellAccessoryDisclosureIndicator;}
     cell.accessibilityIdentifier=[@"channel-row-" stringByAppendingString:cid];
     cell.accessibilityLabel=[ch[@"name"] isKindOfClass:NSString.class]?ch[@"name"]:cid;
-    cell.accessibilityValue=playing?@"正在播放":@"频道";
+    cell.accessibilityValue=[self telemetryAccessibilityValueForChannel:ch selected:playing];
     cell.accessibilityHint=@"轻点播放，长按选择线路与节目单";
     NSString *logo = [ch[@"logo"] isKindOfClass:NSString.class] ? ch[@"logo"] : @"";
     BOOL showChannelLogo = [ProfileStore isChannelLogoEnabledForChannel:ch];
@@ -3625,12 +3625,15 @@ configureCatalogNavigation;
     return @"可达";
 }
 - (NSString *)telemetryAccessibilityValueForChannel:(NSDictionary *)channel selected:(BOOL)selected {
-    if(![ProfileStore isChannelTelemetryEnabledForChannel:channel])return selected?@"正在播放":@"频道";
     NSMutableArray<NSString *> *details=[NSMutableArray array];
-    if(selected&&self.firstRender){
-        NSString *firstFrame=self.firstFrameSeconds>0?[NSString stringWithFormat:@"首帧 %.1f 秒",self.firstFrameSeconds]:@"正在播放";
-        [details addObject:firstFrame];
+    if(selected){
+        if(self.nativePlaybackFailed||self.remotePlaybackFailed)[details addObject:@"当前频道，播放失败，可重试"];
+        else if(self.firstRender)[details addObject:[self sessionIsPlaying]?@"正在播放":@"当前频道，已暂停"];
+        else if([self sessionHasContent]||CACurrentMediaTime()<self.playbackPriorityUntil)[details addObject:@"当前频道，正在连接"];
+        else [details addObject:@"当前频道"];
+        if(self.firstRender&&self.firstFrameSeconds>0)[details addObject:[NSString stringWithFormat:@"首帧 %.1f 秒",self.firstFrameSeconds]];
     }
+    if(![ProfileStore isChannelTelemetryEnabledForChannel:channel])return details.count?[details componentsJoinedByString:@"；"]:@"频道";
     NSString *cid=[channel[@"id"] isKindOfClass:NSString.class]?channel[@"id"]:@"";
     NSDictionary *entry=self.channelTelemetryStore[cid];
     NSString *url=[self primaryProbeURLForChannel:channel];
@@ -3645,7 +3648,7 @@ configureCatalogNavigation;
         NSString *sample=bytes?[NSString stringWithFormat:@"样本 %.1f KB，样本吞吐 %.0f KB/s",bytes/1024.0,kbps]:@"服务器接受了连接，但未返回样本数据";
         [details addObject:[NSString stringWithFormat:@"连接可达，HTTP %ld，响应头 %.0f 毫秒，%@",(long)[entry[@"status"] integerValue],[entry[@"requestMs"] doubleValue],sample]];
     }
-    return details.count?[details componentsJoinedByString:@"；"]:(selected?@"正在播放":@"频道");
+    return details.count?[details componentsJoinedByString:@"；"]:@"频道";
 }
 - (void)probeTelemetryForChannel:(NSDictionary *)channel {
     if(CACurrentMediaTime()<self.playbackPriorityUntil)return;

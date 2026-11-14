@@ -120,6 +120,7 @@
 - AVPlayer AES-128 key 重定向复用播放头作用域白名单，跨源重定向移除 Authorization、Cookie、Referer、Origin、自定义认证头；WebDAV UTF-8/UTF-16 DTD 和实体用例加入回归。
 - M3U 无效/本地文件 URL 被拒绝时同步清除该条目的 catch-up 配置，避免下一条裸 URL 继承错误的回放模板。
 - 点播恢复提示现在在 Cicada seek 完成后校验播放意图、视图挂起状态和当前播放所有者；锁屏/耳机媒体命令新增 toggle play/pause。
+- 频道 VoiceOver 值在首位描述正在播放、已暂停、正在连接或播放失败可重试，再补充首帧时间与连接探测结果；播放失败时保留当前频道标记但不再误报“正在播放”。
 - 全屏网页嗅探超限时停止提取；直播底部玻璃层、频道悬浮控件、通用工具栏和资源头部统一注册 Reduce Transparency 实色刷新；大字号标签栏改为图标显示并保留完整 VoiceOver 标签，频道网格维持 4 列。
 - UI-only smoke 改为经 RootViewController 的真实影视库标签打开测试页面，并覆盖 iPhone SE/常规 iPhone、默认/AX XXXL 字号、浅色/深色组合。Xcode workflow 对同一 ref 的构建串行，新 main 提交会取消旧运行；release job 发布前再核对 main HEAD，跳过过期构建。
 
