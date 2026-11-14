@@ -10,6 +10,7 @@ import unittest
 from unittest import mock
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit
 import zlib
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'Plugins'))
@@ -35,6 +36,12 @@ class RelayTransportTests(unittest.TestCase):
 
             def respond(self, head):
                 owner.seen.append((self.command, self.path, dict(self.headers)))
+                if self.path.startswith('/stale.m3u8'):
+                    self.send_response(401);self.send_header('Content-Length','0');self.end_headers();return
+                if self.path.startswith('/fresh.m3u8'):
+                    manifest=b'#EXTM3U\n#EXT-X-ENDLIST\n';self.send_response(200);self.send_header('Content-Type','application/vnd.apple.mpegurl');self.send_header('Content-Length',str(len(manifest)));self.end_headers()
+                    if not head:self.wfile.write(manifest)
+                    return
                 if self.path.startswith('/redirect/'):
                     self.send_response(int(self.path.rsplit('/', 1)[1]))
                     # Host change also exercises credential scoping on redirect.
@@ -66,10 +73,10 @@ class RelayTransportTests(unittest.TestCase):
                 pass
 
             def do_HEAD(self):
-                owner.relay.serve(self, self.path.rsplit('/', 1)[1], head=True)
+                owner.relay.serve(self, urlsplit(self.path).path.rsplit('/', 1)[1], head=True)
 
             def do_GET(self):
-                owner.relay.serve(self, self.path.rsplit('/', 1)[1])
+                owner.relay.serve(self, urlsplit(self.path).path.rsplit('/', 1)[1])
 
         self.upstream = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Upstream)
         self.server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), RelayHandler)
@@ -110,6 +117,19 @@ class RelayTransportTests(unittest.TestCase):
                 self.assertEqual([call[0] for call in self.seen], ['HEAD', 'HEAD'])
                 self.assertNotIn('Cookie', self.seen[-1][2])
                 self.assertNotIn('Authorization', self.seen[-1][2])
+
+    def test_ll_hls_delivery_directives_survive_forced_manifest_refresh(self):
+        base=f'http://127.0.0.1:{self.upstream.server_port}'
+        token=self.relay.register(base+'/stale.m3u8',{},refresh=lambda:{'url':base+'/fresh.m3u8?sig=a%2Bb'},expected_hls=True)
+        client=http.client.HTTPConnection('127.0.0.1',self.server.server_port,timeout=3)
+        try:
+            client.request('GET',f'/media/{token}?_HLS_msn=12&_HLS_part=3&_HLS_skip=v2')
+            response=client.getresponse();body=response.read()
+            self.assertEqual((response.status,body),(200,b'#EXTM3U\n#EXT-X-ENDLIST\n'))
+        finally:client.close()
+        refreshed=[path for _,path,_ in self.seen if urlsplit(path).path=='/fresh.m3u8']
+        self.assertEqual(len(refreshed),1)
+        self.assertEqual(refreshed[0],'/fresh.m3u8?sig=a%2Bb&_HLS_msn=12&_HLS_part=3&_HLS_skip=v2')
 
     def test_partial_media_keeps_original_bytes_and_offsets(self):
         token = self.relay.register(f'http://127.0.0.1:{self.upstream.server_port}/media.ts', {}, segment=True)

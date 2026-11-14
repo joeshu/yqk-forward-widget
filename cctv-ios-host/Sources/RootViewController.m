@@ -58,6 +58,7 @@
 #import "PluginResourceDetailViewController.h"
 #import "MediaPlaybackViewController.h"
 #import "MediaPlaybackHeaders.h"
+#import "MediaChannelProbe.h"
 #import "TVBoxCatalogStore.h"
 #import "TVBoxCatalogPackageExporter.h"
 #import "TVBoxCatalogBulkImporter.h"
@@ -514,7 +515,7 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 @property (nonatomic, strong) NSMutableDictionary<NSString *, UIImage *> *channelPreviewSnapshots;
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSDictionary *> *channelTelemetryStore;
 @property (nonatomic, strong) NSMutableSet<NSString *> *channelTelemetryInflight;
-@property (nonatomic, strong) NSURLSession *channelTelemetrySession;
+@property (nonatomic, strong) NSMutableDictionary<NSString *, MediaChannelProbe *> *channelTelemetryTasks;
 @property (nonatomic, strong) UIStackView *controlBar;
 @property (nonatomic, strong) UIButton *liveResourceCapsule;
 @property (nonatomic, strong) UIButton *playPauseBtn;
@@ -1636,7 +1637,7 @@ configureCatalogNavigation;
 - (void)buildBottomBar {
     self.bottomBarBackdrop=[UIView new];self.bottomBarBackdrop.backgroundColor=UIColor.clearColor;self.bottomBarBackdrop.opaque=NO;self.bottomBarBackdrop.userInteractionEnabled=NO;self.bottomBarBackdrop.layer.cornerRadius=0;self.bottomBarBackdrop.clipsToBounds=NO;
     self.bottomDockFadeGradient=[CAGradientLayer layer];self.bottomDockFadeGradient.colors=@[(id)[HostBackground() colorWithAlphaComponent:0.0].CGColor,(id)[HostBackground() colorWithAlphaComponent:0.78].CGColor,(id)[HostBackground() colorWithAlphaComponent:0.96].CGColor];self.bottomDockFadeGradient.locations=@[@0,@0.42,@1];[self.bottomBarBackdrop.layer addSublayer:self.bottomDockFadeGradient];
-    self.bottomDockGlass=[[UIVisualEffectView alloc] initWithEffect:HostGlassBlur()];self.bottomDockGlass.userInteractionEnabled=NO;self.bottomDockGlass.layer.cornerRadius=27;self.bottomDockGlass.layer.cornerCurve=kCACornerCurveContinuous;self.bottomDockGlass.clipsToBounds=YES;self.bottomDockGlass.layer.borderWidth=0.85;HostSetLayerBorderColor(self.bottomDockGlass,HostBorder());
+    self.bottomDockGlass=[[UIVisualEffectView alloc] initWithEffect:HostGlassBlur()];HostRegisterGlassEffectView(self.bottomDockGlass);self.bottomDockGlass.userInteractionEnabled=NO;self.bottomDockGlass.layer.cornerRadius=27;self.bottomDockGlass.layer.cornerCurve=kCACornerCurveContinuous;self.bottomDockGlass.clipsToBounds=YES;self.bottomDockGlass.layer.borderWidth=0.85;HostSetLayerBorderColor(self.bottomDockGlass,HostBorder());
     UIView *dockTint=[[UIView alloc] initWithFrame:self.bottomDockGlass.contentView.bounds];dockTint.backgroundColor=HostGlassTint();dockTint.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;dockTint.userInteractionEnabled=NO;[self.bottomDockGlass.contentView addSubview:dockTint];
     [self.bottomBarBackdrop addSubview:self.bottomDockGlass];
     [self.view addSubview:self.bottomBarBackdrop];
@@ -1667,6 +1668,7 @@ configureCatalogNavigation;
     self.resourceActionsButton.menu=[UIMenu menuWithChildren:@[services,import,refresh,home]];self.resourceActionsButton.showsMenuAsPrimaryAction=NO;[self.resourceActionsButton addTarget:self action:@selector(openServicesPage) forControlEvents:UIControlEventTouchUpInside];[self.view addSubview:self.resourceActionsButton];
 
     UIVisualEffectView *catalogControls=[[UIVisualEffectView alloc] initWithEffect:HostGlassBlur()];
+    HostRegisterGlassEffectView(catalogControls);
     catalogControls.accessibilityIdentifier=@"channel.catalog.floating-controls";catalogControls.layer.cornerRadius=27;catalogControls.clipsToBounds=YES;catalogControls.layer.borderWidth=0.7;catalogControls.layer.borderColor=HostBorder().CGColor;
     UIView *catalogTint=[[UIView alloc] initWithFrame:catalogControls.contentView.bounds];catalogTint.backgroundColor=HostGlassTint();catalogTint.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;catalogTint.userInteractionEnabled=NO;[catalogControls.contentView addSubview:catalogTint];
     self.catalogFloatingControls=catalogControls;
@@ -1735,9 +1737,12 @@ configureCatalogNavigation;
 }
 
 - (void)updateBottomBarSelection {
+    NSArray<NSString *> *titles=@[@"CCTV",@"频道",@"影视库",@"资源",@"设置"];
+    BOOL accessibilitySize=UIContentSizeCategoryIsAccessibilityCategory(self.traitCollection.preferredContentSizeCategory);
     for (UIButton *button in self.bottomBar.arrangedSubviews) {
         UIButtonConfiguration *configuration=button.configuration;
         BOOL selected=button.tag==self.activeTab;
+        if(button.tag>=0&&button.tag<titles.count){configuration.title=accessibilitySize?@"":titles[button.tag];__weak typeof(self) weakSelf=self;configuration.titleTextAttributesTransformer=^NSDictionary<NSAttributedStringKey,id> *(NSDictionary<NSAttributedStringKey,id> *attributes){NSMutableDictionary *result=[attributes mutableCopy];RootViewController *owner=weakSelf;UITraitCollection *traits=owner?owner.traitCollection:UITraitCollection.currentTraitCollection;result[NSFontAttributeName]=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold] compatibleWithTraitCollection:traits];return result;};}
         configuration.baseForegroundColor=selected?HostOnAccent():HostMutedText();
         configuration.background.backgroundColor=selected?HostAccentFill():UIColor.clearColor;
         configuration.background.strokeColor=selected?[HostAccent() colorWithAlphaComponent:0.35]:UIColor.clearColor;
@@ -2283,7 +2288,7 @@ configureCatalogNavigation;
         telemetryBadge.text=nil;
     }
     number.text=[NSString stringWithFormat:@"%03lu",(unsigned long)ip.item+1];title.textColor=selected?HostAccent():HostText();cell.contentView.backgroundColor=selected?HostSelectedSurface():UIColor.clearColor;
-    cell.accessibilityIdentifier=[@"channel-card-" stringByAppendingString:channelID];cell.accessibilityLabel=name;cell.accessibilityValue=selected?@"正在播放":@"频道";cell.accessibilityHint=@"轻点播放，长按选择线路与节目单";
+    cell.accessibilityIdentifier=[@"channel-card-" stringByAppendingString:channelID];cell.accessibilityLabel=name;cell.accessibilityValue=[self telemetryAccessibilityValueForChannel:ch selected:selected];cell.accessibilityHint=@"轻点播放，长按选择线路与节目单";
     NSString *xmlSource=[ProfileStore epgSourceForChannel:ch];if(xmlSource.length && !self.epgCache[ch[@"id"]])[self cacheXMLRows:[[XMLTVStore shared] cachedRowsForSource:xmlSource channel:[ProfileStore epgIDForChannel:ch]] channel:ch[@"id"]];subtitle.text=[self catalogSubtitleForChannel:ch];return cell;
 }
 - (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:(NSIndexPath *)ip { if(ip.item<0||ip.item>=(NSInteger)self.shownChannels.count)return;HostAnimateSelection([collectionView cellForItemAtIndexPath:ip]);[self selectChannel:self.shownChannels[ip.item]]; }
@@ -2386,7 +2391,7 @@ configureCatalogNavigation;
     else {cell.accessoryView=nil;cell.accessoryType=UITableViewCellAccessoryDisclosureIndicator;}
     cell.accessibilityIdentifier=[@"channel-row-" stringByAppendingString:cid];
     cell.accessibilityLabel=[ch[@"name"] isKindOfClass:NSString.class]?ch[@"name"]:cid;
-    cell.accessibilityValue=playing?@"正在播放":@"频道";
+    cell.accessibilityValue=[self telemetryAccessibilityValueForChannel:ch selected:playing];
     cell.accessibilityHint=@"轻点播放，长按选择线路与节目单";
     NSString *logo = [ch[@"logo"] isKindOfClass:NSString.class] ? ch[@"logo"] : @"";
     BOOL showChannelLogo = [ProfileStore isChannelLogoEnabledForChannel:ch];
@@ -2431,6 +2436,7 @@ configureCatalogNavigation;
             listCell.telemetryBadgeLabel.text=[NSString stringWithFormat:@" %@ ",tText?:@""];
             listCell.telemetryBadgeLabel.textColor=tColor?:HostSecondaryText();
             listCell.telemetryBadgeLabel.backgroundColor=[HostRaisedSurface() colorWithAlphaComponent:0.88];
+            cell.accessibilityValue=[self telemetryAccessibilityValueForChannel:ch selected:[cid isEqualToString:self.channelID]];
             if(tText.length&&![cell.detailTextLabel.text containsString:tText]){
                 cell.detailTextLabel.text=[NSString stringWithFormat:@"%@ · %@",cell.detailTextLabel.text?:@"",tText];
             }
@@ -2998,6 +3004,7 @@ configureCatalogNavigation;
     if(previousTraitCollection && ![previousTraitCollection.preferredContentSizeCategory isEqualToString:self.traitCollection.preferredContentSizeCategory]){
         [self applyFontSizeOverride];
         [self updatePlaybackControlAccessibility];
+        [self updateBottomBarSelection];
         [self.channelGrid.collectionViewLayout invalidateLayout];
         [self.channelGrid reloadData];
         [self.table reloadData];
@@ -3149,6 +3156,7 @@ configureCatalogNavigation;
     self.bottomBarBackdrop.backgroundColor=UIColor.clearColor;
     self.bottomDockFadeGradient.colors=@[(id)[HostBackground() colorWithAlphaComponent:0.0].CGColor,(id)[HostBackground() colorWithAlphaComponent:0.78].CGColor,(id)[HostBackground() colorWithAlphaComponent:0.96].CGColor];
     self.bottomDockGlass.effect=HostGlassBlur();
+    self.bottomDockGlass.contentView.backgroundColor=UIAccessibilityIsReduceTransparencyEnabled()?HostCard():UIColor.clearColor;
     HostSetLayerBorderColor(self.bottomDockGlass,HostBorder());
     self.catalogFloatingAirPlayPicker.activeTintColor=HostAccent();
     self.groupControl.tintColor=HostAccent();
@@ -3602,36 +3610,45 @@ configureCatalogNavigation;
 }
 - (NSString *)telemetryBadgeTextForChannel:(NSDictionary *)channel color:(UIColor * __autoreleasing *)colorOut {
     NSString *cid=[channel[@"id"] isKindOfClass:NSString.class]?channel[@"id"]:@"";
-    BOOL isPlaying=[cid isEqualToString:self.channelID]&&self.firstRender;
     NSDictionary *entry=cid.length?self.channelTelemetryStore[cid]:nil;
-    double latencyMs=[entry[@"latencyMs"] doubleValue];
-    double speedKBps=[entry[@"speedKBps"] doubleValue];
-    if(isPlaying){
-        if(latencyMs<=0&&self.firstFrameSeconds>0)latencyMs=MIN(999,MAX(12,self.firstFrameSeconds*180.0));
-        if(self.avPlayer.currentItem){
-            AVPlayerItemAccessLogEvent *ev=self.avPlayer.currentItem.accessLog.events.lastObject;
-            if(ev&&ev.observedBitrate>0)speedKBps=ev.observedBitrate/8000.0;
-        }
-        if(speedKBps<=0)speedKBps=860.0;
-    }
-    if(entry&&![entry[@"ok"] boolValue]){
+    NSString *url=[self primaryProbeURLForChannel:channel];
+    if(!url.length)return @"未测";
+    if([self.channelTelemetryInflight containsObject:cid])return @"检测";
+    BOOL sameURL=[entry[@"probeURL"] isEqual:url];
+    if(!entry||!sameURL)return @"未测";
+    if(NSDate.date.timeIntervalSince1970-[entry[@"ts"] doubleValue]>=60.0)return @"过期";
+    if(![entry[@"ok"] boolValue]){
         if(colorOut)*colorOut=[UIColor colorWithRed:1.0 green:0.32 blue:0.28 alpha:1.0];
-        return @"超时";
+        return @"失败";
     }
-    if(latencyMs<=0||speedKBps<=0){
-        NSUInteger h=2166136261u;
-        for(NSUInteger i=0;i<cid.length;i++){h^=[cid characterAtIndex:i];h*=16777619u;}
-        BOOL isOfficial=![channel[@"remoteURL"] length];
-        latencyMs=isOfficial?(24.0+(h%32)):(42.0+(h%68));
-        NSArray *routes=[channel[@"routes"] isKindOfClass:NSArray.class]?channel[@"routes"]:@[];
-        NSDictionary *firstRoute=[routes.firstObject isKindOfClass:NSDictionary.class]?routes.firstObject:nil;
-        NSInteger rw=[firstRoute[@"w"] integerValue];
-        speedKBps=rw>=1280?(780.0+(h%420)):(rw>0?(480.0+(h%260)):(640.0+(h%520)));
+    if(colorOut)*colorOut=[UIColor colorWithRed:0.19 green:0.82 blue:0.35 alpha:1.0];
+    return @"可达";
+}
+- (NSString *)telemetryAccessibilityValueForChannel:(NSDictionary *)channel selected:(BOOL)selected {
+    NSMutableArray<NSString *> *details=[NSMutableArray array];
+    if(selected){
+        if(self.nativePlaybackFailed||self.remotePlaybackFailed)[details addObject:@"当前频道，播放失败，可重试"];
+        else if(self.firstRender)[details addObject:[self sessionIsPlaying]?@"正在播放":@"当前频道，已暂停"];
+        else if([self sessionHasContent]||CACurrentMediaTime()<self.playbackPriorityUntil)[details addObject:@"当前频道，正在连接"];
+        else [details addObject:@"当前频道"];
+        if(self.firstRender&&self.firstFrameSeconds>0)[details addObject:[NSString stringWithFormat:@"首帧 %.1f 秒",self.firstFrameSeconds]];
     }
-    UIColor *color=latencyMs<180?[UIColor colorWithRed:0.19 green:0.82 blue:0.35 alpha:1.0]:(latencyMs<450?UIColor.systemOrangeColor:[UIColor colorWithRed:1.0 green:0.32 blue:0.28 alpha:1.0]);
-    if(colorOut)*colorOut=color;
-    NSString *speedStr=speedKBps>=1024.0?[NSString stringWithFormat:@"%.1fMB/s",speedKBps/1024.0]:[NSString stringWithFormat:@"%.0fKB/s",speedKBps];
-    return [NSString stringWithFormat:@"%.0fms·%@",latencyMs,speedStr];
+    if(![ProfileStore isChannelTelemetryEnabledForChannel:channel])return details.count?[details componentsJoinedByString:@"；"]:@"频道";
+    NSString *cid=[channel[@"id"] isKindOfClass:NSString.class]?channel[@"id"]:@"";
+    NSDictionary *entry=self.channelTelemetryStore[cid];
+    NSString *url=[self primaryProbeURLForChannel:channel];
+    if(!url.length)[details addObject:@"连接检测不可用"];
+    else if([self.channelTelemetryInflight containsObject:cid])[details addObject:@"连接检测中"];
+    else if(!entry||![entry[@"probeURL"] isEqual:url])[details addObject:@"连接尚未检测"];
+    else if(NSDate.date.timeIntervalSince1970-[entry[@"ts"] doubleValue]>=60.0)[details addObject:@"连接检测已过期"];
+    else if(![entry[@"ok"] boolValue])[details addObject:[NSString stringWithFormat:@"连接检测失败，HTTP 状态 %ld",(long)[entry[@"status"] integerValue]]];
+    else {
+        NSUInteger bytes=[entry[@"sampleBytes"] unsignedIntegerValue];
+        double kbps=[entry[@"sampleKBps"] doubleValue];
+        NSString *sample=bytes?[NSString stringWithFormat:@"样本 %.1f KB，样本吞吐 %.0f KB/s",bytes/1024.0,kbps]:@"服务器接受了连接，但未返回样本数据";
+        [details addObject:[NSString stringWithFormat:@"连接可达，HTTP %ld，响应头 %.0f 毫秒，%@",(long)[entry[@"status"] integerValue],[entry[@"requestMs"] doubleValue],sample]];
+    }
+    return details.count?[details componentsJoinedByString:@"；"]:@"频道";
 }
 - (void)probeTelemetryForChannel:(NSDictionary *)channel {
     if(CACurrentMediaTime()<self.playbackPriorityUntil)return;
@@ -3639,37 +3656,27 @@ configureCatalogNavigation;
     if(!cid.length)return;
     if(!self.channelTelemetryStore)self.channelTelemetryStore=[NSMutableDictionary dictionary];
     if(!self.channelTelemetryInflight)self.channelTelemetryInflight=[NSMutableSet set];
-    NSDictionary *existing=self.channelTelemetryStore[cid];
-    NSTimeInterval now=NSDate.date.timeIntervalSince1970;
-    if(existing&&(now-[existing[@"ts"] doubleValue])<60.0)return;
-    if([self.channelTelemetryInflight containsObject:cid]||self.channelTelemetryInflight.count>=3)return;
+    if(!self.channelTelemetryTasks)self.channelTelemetryTasks=[NSMutableDictionary dictionary];
     NSString *probeURLStr=[self primaryProbeURLForChannel:channel];
     NSURL *probeURL=probeURLStr.length?[NSURL URLWithString:probeURLStr]:nil;
     if(!probeURL||!probeURL.host.length)return;
+    NSDictionary *existing=self.channelTelemetryStore[cid];
+    NSTimeInterval now=NSDate.date.timeIntervalSince1970;
+    if(existing&&[existing[@"probeURL"] isEqual:probeURLStr]&&(now-[existing[@"ts"] doubleValue])<60.0)return;
+    if(![existing[@"probeURL"] isEqual:probeURLStr])[self.channelTelemetryStore removeObjectForKey:cid];
+    if([self.channelTelemetryInflight containsObject:cid]||self.channelTelemetryInflight.count>=3)return;
     [self.channelTelemetryInflight addObject:cid];
-    if(!self.channelTelemetrySession){
-        NSURLSessionConfiguration *cfg=[NSURLSessionConfiguration ephemeralSessionConfiguration];
-        cfg.timeoutIntervalForRequest=3.0;cfg.timeoutIntervalForResource=3.5;
-        cfg.HTTPMaximumConnectionsPerHost=2;cfg.URLCache=nil;
-        self.channelTelemetrySession=[NSURLSession sessionWithConfiguration:cfg];
-    }
-    NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:probeURL cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:3.0];
-    req.HTTPMethod=@"GET";
-    [req setValue:@"bytes=0-4095" forHTTPHeaderField:@"Range"];
-    CFTimeInterval started=CACurrentMediaTime();
     __weak typeof(self) weakSelf=self;
-    [[self.channelTelemetrySession dataTaskWithRequest:req completionHandler:^(NSData *data,NSURLResponse *resp,NSError *err){
-        double elapsedMs=MAX(8.0,(CACurrentMediaTime()-started)*1000.0);
-        NSInteger status=[resp isKindOfClass:NSHTTPURLResponse.class]?[(NSHTTPURLResponse *)resp statusCode]:0;
-        BOOL ok=!err&&status>=200&&status<400;
-        double kbPerSec=data.length>0?MAX(120.0,(data.length/1024.0)/MAX(0.005,(elapsedMs/1000.0))):680.0;
+    MediaChannelProbe *probe=[MediaChannelProbe new];self.channelTelemetryTasks[cid]=probe;
+    [probe startWithURL:probeURL completion:^(NSDictionary<NSString *,id> *result){
         dispatch_async(dispatch_get_main_queue(),^{
             RootViewController *owner=weakSelf;if(!owner)return;
-            [owner.channelTelemetryInflight removeObject:cid];
+            [owner.channelTelemetryInflight removeObject:cid];[owner.channelTelemetryTasks removeObjectForKey:cid];
             if(owner.channelTelemetryStore.count>=256)[owner.channelTelemetryStore removeAllObjects];
-            owner.channelTelemetryStore[cid]=@{@"ok":@(ok),@"latencyMs":@(elapsedMs),@"speedKBps":@(kbPerSec),@"ts":@(NSDate.date.timeIntervalSince1970)};
+            NSMutableDictionary *entry=[result mutableCopy];entry[@"probeURL"]=probeURLStr;entry[@"ts"]=@(NSDate.date.timeIntervalSince1970);owner.channelTelemetryStore[cid]=entry;
+            [owner.channelGrid reloadData];[owner.table reloadData];
         });
-    }] resume];
+    }];
 }
 - (void)applyResourceChannelLogoToggleForSource:(NSString *)source enabled:(BOOL)enabled cornerOnly:(BOOL)cornerOnly {
     NSDictionary *service=[self resourceServiceForSource:source];
@@ -5336,6 +5343,7 @@ configureCatalogNavigation;
     self.titleLabel.text=error.code?[NSString stringWithFormat:@"%@ · %@ (%ld)",channel,stage,(long)error.code]:[NSString stringWithFormat:@"%@ · %@",channel,stage];
     self.titleLabel.hidden=NO;NSString *failureDetail=error.localizedDescription.length?[HostLogRedactor redactText:error.localizedDescription]:nil;self.infoLabel.text=failureDetail?[NSString stringWithFormat:@"%@ · 点按“重试”再次播放，或点“线路”换源后重试",failureDetail]:@"点按“重试”再次播放，或点“线路”换源后重试";self.infoLabel.hidden=NO;self.controlBar.hidden=NO;
     [self.playPauseBtn setTitle:@"重试" forState:UIControlStateNormal];self.playPauseBtn.enabled=YES;
+    [self.channelGrid reloadData];[self.table reloadData];
 }
 
 - (void)player:(id)player vdnRequestFailed:(NSError *)error {

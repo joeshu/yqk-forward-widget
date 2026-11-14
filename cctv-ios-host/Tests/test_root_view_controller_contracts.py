@@ -167,7 +167,8 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn("- (MPRemoteCommandHandlerStatus)handlePause:", coordinator)
         self.assertIn("[self.currentSession sessionPlay]", coordinator)
         self.assertIn("[self.currentSession sessionPause]", coordinator)
-        self.assertNotIn("togglePlayPause", coordinator)
+        self.assertIn("[commands.togglePlayPauseCommand addTarget:self action:@selector(handleTogglePlayPause:)]", coordinator)
+        self.assertIn("- (MPRemoteCommandHandlerStatus)handleTogglePlayPause:", coordinator)
 
     def test_sdk_callbacks_go_through_session_delegate(self):
         session = (SOURCE.parent / "CNPlayerSessionDelegate.m").read_text(encoding="utf-8")
@@ -455,7 +456,7 @@ class RootViewControllerSourceContracts(unittest.TestCase):
     def test_m3u_parser_catches_invalid_url_lines(self):
         parser = (SOURCE.parent / "M3UParser.m").read_text(encoding="utf-8")
         self.assertIn('@catch (NSException *exception)', parser)
-        self.assertIn('pendingName = nil; pendingLogo = nil; pendingEPGID = nil; pendingTVGName = nil; [pendingHeaders removeAllObjects]; return;', parser)
+        self.assertIn('pendingName = nil; pendingLogo = nil; pendingEPGID = nil; pendingTVGName = nil; catchupMode=nil;catchupSource=nil;catchupDays=0;tvgShift=0;[pendingHeaders removeAllObjects]; return;', parser)
         self.assertIn('ch.tvgName = pendingTVGName', parser)
         self.assertIn('ch.headers = pendingHeaders.copy', parser)
 
@@ -521,6 +522,7 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('startFields[@"sdk_channel_id"]',startup)
         self.assertIn('failureFields[@"sdk_channel_id"]',failure)
         self.assertIn('failureFields[@"sdk_reported_node"]',failure)
+        self.assertIn('[self.channelGrid reloadData];[self.table reloadData];',failure)
         self.assertIn('if(![ProfileStore isHTTP:cid]&&cid.length<=128)',startup)
         self.assertIn('if(![ProfileStore isHTTP:self.channelID]',failure)
 
@@ -587,8 +589,9 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('channel.grid.columns.toggle', TEXT)
         self.assertNotIn('width>=900?5', TEXT)
         self.assertIn('selected?HostAccent():HostBorder()', TEXT)
-        self.assertIn('cell.accessibilityValue=selected?@"正在播放":@"频道"', TEXT)
-        self.assertIn('cell.accessibilityValue=playing?@"正在播放":@"频道"', TEXT)
+        self.assertIn('cell.accessibilityValue=[self telemetryAccessibilityValueForChannel:ch selected:selected]', TEXT)
+        self.assertIn('cell.accessibilityValue=[self telemetryAccessibilityValueForChannel:ch selected:playing]', TEXT)
+        self.assertIn('当前频道，播放失败，可重试', TEXT)
         self.assertIn('self.subscriptionCatalog?@"刷新播放列表":@"刷新当前列表"', TEXT)
         self.assertIn('contextMenuConfigurationForItemAtIndexPath', TEXT)
         self.assertIn('onLongPress:', TEXT)

@@ -198,7 +198,7 @@ class PlaybackOwnershipAndMediaUIContracts(unittest.TestCase):
         self.assertIn("if(!self.isViewLoaded)return", resume_visibility)
         self.assertNotIn("self.view.window", resume_visibility)
         self.assertIn("pendingGeneration==self.generation", resume_visibility)
-        self.assertIn("if(self.playbackWantsPlayback&&!self.resolving&&self.player.currentItem)[self playActiveEngine]", resume_visibility)
+        self.assertIn("if(self.playbackWantsPlayback&&!self.resolving&&(self.player.currentItem||self.cicadaAdapter))[self playActiveEngine]", resume_visibility)
         self.assertIn('inline_playback_visibility_resume_checked', resume_visibility)
         self.assertIn("[self.inlinePlaybackController resumeAfterVisibilityChange]", BROWSER_SOURCE)
         self.assertIn("owner.playbackWantsPlayback=YES;owner.context=context;owner.lineIndex=[context[@\"lineIndex\"] integerValue]", PLAYBACK_SOURCE)

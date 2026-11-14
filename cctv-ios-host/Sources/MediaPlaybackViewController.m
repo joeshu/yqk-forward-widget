@@ -10,6 +10,7 @@
 #import <WebKit/WebKit.h>
 #import "MediaEpisodeSelectionViewController.h"
 #import "MediaPlaybackHeaders.h"
+#import "MediaPlaybackSniffFetch.h"
 #import "MediaPlaybackDecodeRouter.h"
 #import "MediaPlaybackCicadaAdapter.h"
 #import "MediaPlaybackBufferPolicy.h"
@@ -322,7 +323,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 @property(nonatomic) NSUInteger generation;
 @property(nonatomic,strong,nullable) MediaPlaybackCicadaAdapter *cicadaAdapter;
 @property(nonatomic,strong,nullable) WKWebView *hiddenSnifferWebView;
-@property(nonatomic,strong,nullable) NSURLSessionDataTask *streamSniffTask;
+@property(nonatomic,strong,nullable) MediaPlaybackSniffFetch *streamSniffTask;
 @property(nonatomic,strong,nullable) MediaAPIClient *hedgedClient;
 @property(nonatomic,copy,nullable) NSDictionary *hedgedEpisodeResult;
 @property(nonatomic) NSInteger hedgedLineIndex;
@@ -897,7 +898,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     if(pendingGenerationMatches){self.playbackSuspendedForVisibility=NO;[self playResult:pending];return;}
     if(self.awaitingWebPlaybackReturn||!self.embeddedMode||!self.playbackSuspendedForVisibility)return;
     self.playbackSuspendedForVisibility=NO;
-    if(self.playbackWantsPlayback&&!self.resolving&&self.player.currentItem)[self playActiveEngine];
+    if(self.playbackWantsPlayback&&!self.resolving&&(self.player.currentItem||self.cicadaAdapter))[self playActiveEngine];
 }
 - (void)viewWillDisappear:(BOOL)animated {
     [self persistPlaybackProgress];
@@ -1118,14 +1119,19 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     self.resumePromptShown=YES;self.resumePromptPending=YES;[self.player pause];
     NSString *episode=entry[@"episodeName"]?:@"上次分集";NSUInteger generation=self.playerGeneration;__weak typeof(self) weakSelf=self;
     UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"继续上次播放？" message:[NSString stringWithFormat:@"%@ · %@",episode,[self formatMediaTime:position]] preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"从头播放" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){MediaPlaybackViewController *owner=weakSelf;if(!owner||generation!=owner.playerGeneration||item!=owner.player.currentItem)return;owner.resumePromptPending=NO;owner.pendingPlaybackResumeEntry=nil;[owner.player seekToTime:kCMTimeZero toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero completionHandler:^(BOOL finished){dispatch_async(dispatch_get_main_queue(),^{if(generation==owner.playerGeneration&&item==owner.player.currentItem){if(!finished){owner.status.text=@"未能定位到请求进度 · 可重试或从头播放";[owner setRetryAvailable:YES];return;}[owner markAutoSkipFlagsForCurrentPosition];owner.player.defaultRate=(float)([NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaPlaybackRate"]?[NSUserDefaults.standardUserDefaults doubleForKey:@"cctv.mediaPlaybackRate"]:1.0);{if(!owner.playbackSuspendedForVisibility)[owner.player play];}[RuntimeDiagnostics.shared recordEvent:@"media_resume_declined" category:@"playback" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"",@"line_index":@(owner.lineIndex),@"episode_index":@(owner.episodeIndex)}];}});}];}]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"继续观看" style:UIAlertActionStyleCancel handler:^(UIAlertAction *action){MediaPlaybackViewController *owner=weakSelf;if(!owner||generation!=owner.playerGeneration||item!=owner.player.currentItem)return;owner.resumePromptPending=NO;owner.pendingPlaybackResumeEntry=nil;CMTime target=CMTimeMakeWithSeconds(MAX(0,position),600);[owner.player seekToTime:target toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero completionHandler:^(BOOL finished){dispatch_async(dispatch_get_main_queue(),^{if(generation==owner.playerGeneration&&item==owner.player.currentItem){if(!finished){owner.status.text=@"未能定位到请求进度 · 可重试或从头播放";[owner setRetryAvailable:YES];return;}[owner markAutoSkipFlagsForCurrentPosition];owner.player.defaultRate=(float)([NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaPlaybackRate"]?[NSUserDefaults.standardUserDefaults doubleForKey:@"cctv.mediaPlaybackRate"]:1.0);{if(!owner.playbackSuspendedForVisibility)[owner.player play];}[owner.status setText:@"已从上次进度继续播放"];[RuntimeDiagnostics.shared recordEvent:@"media_resume_accepted" category:@"playback" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"",@"line_index":@(owner.lineIndex),@"episode_index":@(owner.episodeIndex)}];}});}];}]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"从头播放" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){MediaPlaybackViewController *owner=weakSelf;if(!owner||generation!=owner.playerGeneration||item!=owner.player.currentItem)return;owner.resumePromptPending=NO;owner.pendingPlaybackResumeEntry=nil;owner.playbackSuspendedForVisibility=NO;owner.playbackWantsPlayback=YES;[owner.player seekToTime:kCMTimeZero toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero completionHandler:^(BOOL finished){dispatch_async(dispatch_get_main_queue(),^{if(generation==owner.playerGeneration&&item==owner.player.currentItem){if(!finished){owner.status.text=@"未能定位到请求进度 · 可重试或从头播放";[owner setRetryAvailable:YES];return;}[owner markAutoSkipFlagsForCurrentPosition];owner.player.defaultRate=(float)([NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaPlaybackRate"]?[NSUserDefaults.standardUserDefaults doubleForKey:@"cctv.mediaPlaybackRate"]:1.0);if(owner.playbackWantsPlayback&&!owner.playbackSuspendedForVisibility&&[PlaybackCoordinator shared].currentSession==(id<PlaybackSession>)owner)[owner playActiveEngine];[RuntimeDiagnostics.shared recordEvent:@"media_resume_declined" category:@"playback" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"",@"line_index":@(owner.lineIndex),@"episode_index":@(owner.episodeIndex)}];}});}];}]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"继续观看" style:UIAlertActionStyleCancel handler:^(UIAlertAction *action){MediaPlaybackViewController *owner=weakSelf;if(!owner||generation!=owner.playerGeneration||item!=owner.player.currentItem)return;owner.resumePromptPending=NO;owner.pendingPlaybackResumeEntry=nil;owner.playbackSuspendedForVisibility=NO;owner.playbackWantsPlayback=YES;CMTime target=CMTimeMakeWithSeconds(MAX(0,position),600);[owner.player seekToTime:target toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero completionHandler:^(BOOL finished){dispatch_async(dispatch_get_main_queue(),^{if(generation==owner.playerGeneration&&item==owner.player.currentItem){if(!finished){owner.status.text=@"未能定位到请求进度 · 可重试或从头播放";[owner setRetryAvailable:YES];return;}[owner markAutoSkipFlagsForCurrentPosition];owner.player.defaultRate=(float)([NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaPlaybackRate"]?[NSUserDefaults.standardUserDefaults doubleForKey:@"cctv.mediaPlaybackRate"]:1.0);if(owner.playbackWantsPlayback&&!owner.playbackSuspendedForVisibility&&[PlaybackCoordinator shared].currentSession==(id<PlaybackSession>)owner)[owner playActiveEngine];[owner.status setText:@"已从上次进度继续播放"];[RuntimeDiagnostics.shared recordEvent:@"media_resume_accepted" category:@"playback" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"",@"line_index":@(owner.lineIndex),@"episode_index":@(owner.episodeIndex)}];}});}];}]];
     [self presentViewController:alert animated:YES completion:nil];
 }
 - (void)applyPendingPlaybackSeekForItem:(AVPlayerItem *)item {
     NSNumber *pending=self.pendingPlaybackSeekTime;if(!pending||item!=self.observedItem||item!=self.player.currentItem)return;
     self.pendingPlaybackSeekTime=nil;NSTimeInterval position=MAX(0,pending.doubleValue);NSUInteger generation=self.playerGeneration;__weak typeof(self) weakSelf=self;
     [self.player seekToTime:CMTimeMakeWithSeconds(position,600) toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero completionHandler:^(BOOL finished){dispatch_async(dispatch_get_main_queue(),^{MediaPlaybackViewController *owner=weakSelf;if(!owner||generation!=owner.playerGeneration||item!=owner.player.currentItem)return;if(!finished){owner.status.text=@"未能定位到请求进度 · 可重试或从头播放";[owner setRetryAvailable:YES];return;}[owner markAutoSkipFlagsForCurrentPosition];owner.player.defaultRate=(float)([NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaPlaybackRate"]?[NSUserDefaults.standardUserDefaults doubleForKey:@"cctv.mediaPlaybackRate"]:1.0);BOOL shouldResume=(!owner.pendingQualityRestorePlaybackState||owner.pendingQualityWasPlaying)&&owner.playbackWantsPlayback;owner.pendingQualityRestorePlaybackState=NO;if(shouldResume){if(!owner.playbackSuspendedForVisibility)[owner.player play];}else[owner.player pause];[owner updateSkipButtonForCurrentPosition];});}];
+}
+- (void)resumeActiveEngineIfWantedForGeneration:(NSUInteger)generation {
+    if(generation!=self.playerGeneration||!self.cicadaAdapter||!self.playbackWantsPlayback||self.playbackSuspendedForVisibility)return;
+    if([PlaybackCoordinator shared].currentSession!=(id<PlaybackSession>)self)return;
+    [self playActiveEngine];
 }
 - (void)offerResumeForCicada {
     NSDictionary *entry=self.pendingPlaybackResumeEntry;if(!entry||self.resumePromptShown||!self.cicadaAdapter)return;
@@ -1135,8 +1141,8 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     self.resumePromptShown=YES;self.resumePromptPending=YES;[self pauseActiveEngine];
     NSString *episode=entry[@"episodeName"]?:@"上次分集";NSUInteger generation=self.playerGeneration;__weak typeof(self) weakSelf=self;
     UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"继续上次播放？" message:[NSString stringWithFormat:@"%@ · %@",episode,[self formatMediaTime:position]] preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"从头播放" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){MediaPlaybackViewController *owner=weakSelf;if(!owner||generation!=owner.playerGeneration||!owner.cicadaAdapter)return;owner.resumePromptPending=NO;owner.pendingPlaybackResumeEntry=nil;[owner seekActiveEngineToTime:0 completion:^(BOOL finished){dispatch_async(dispatch_get_main_queue(),^{if(generation==owner.playerGeneration&&owner.cicadaAdapter){if(!finished){owner.status.text=@"未能定位到请求进度 · 可重试或从头播放";[owner setRetryAvailable:YES];return;}[owner markAutoSkipFlagsForCurrentPosition];[owner setActiveEngineRate:(float)([NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaPlaybackRate"]?[NSUserDefaults.standardUserDefaults doubleForKey:@"cctv.mediaPlaybackRate"]:1.0)];[owner playActiveEngine];[RuntimeDiagnostics.shared recordEvent:@"media_resume_declined" category:@"playback" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"",@"line_index":@(owner.lineIndex),@"episode_index":@(owner.episodeIndex)}];}});}];}]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"继续观看" style:UIAlertActionStyleCancel handler:^(UIAlertAction *action){MediaPlaybackViewController *owner=weakSelf;if(!owner||generation!=owner.playerGeneration||!owner.cicadaAdapter)return;owner.resumePromptPending=NO;owner.pendingPlaybackResumeEntry=nil;[owner seekActiveEngineToTime:MAX(0,position) completion:^(BOOL finished){dispatch_async(dispatch_get_main_queue(),^{if(generation==owner.playerGeneration&&owner.cicadaAdapter){if(!finished){owner.status.text=@"未能定位到请求进度 · 可重试或从头播放";[owner setRetryAvailable:YES];return;}[owner markAutoSkipFlagsForCurrentPosition];[owner setActiveEngineRate:(float)([NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaPlaybackRate"]?[NSUserDefaults.standardUserDefaults doubleForKey:@"cctv.mediaPlaybackRate"]:1.0)];[owner playActiveEngine];[owner.status setText:@"已从上次进度继续播放"];[RuntimeDiagnostics.shared recordEvent:@"media_resume_accepted" category:@"playback" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"",@"line_index":@(owner.lineIndex),@"episode_index":@(owner.episodeIndex)}];}});}];}]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"从头播放" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){MediaPlaybackViewController *owner=weakSelf;if(!owner||generation!=owner.playerGeneration||!owner.cicadaAdapter)return;owner.resumePromptPending=NO;owner.pendingPlaybackResumeEntry=nil;owner.playbackSuspendedForVisibility=NO;owner.playbackWantsPlayback=YES;[owner seekActiveEngineToTime:0 completion:^(BOOL finished){dispatch_async(dispatch_get_main_queue(),^{if(generation==owner.playerGeneration&&owner.cicadaAdapter){if(!finished){owner.playbackWantsPlayback=NO;owner.status.text=@"未能定位到请求进度 · 可重试或从头播放";[owner setRetryAvailable:YES];return;}[owner markAutoSkipFlagsForCurrentPosition];[owner setActiveEngineRate:(float)([NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaPlaybackRate"]?[NSUserDefaults.standardUserDefaults doubleForKey:@"cctv.mediaPlaybackRate"]:1.0)];[owner resumeActiveEngineIfWantedForGeneration:generation];[RuntimeDiagnostics.shared recordEvent:@"media_resume_declined" category:@"playback" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"",@"line_index":@(owner.lineIndex),@"episode_index":@(owner.episodeIndex)}];}});}];}]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"继续观看" style:UIAlertActionStyleCancel handler:^(UIAlertAction *action){MediaPlaybackViewController *owner=weakSelf;if(!owner||generation!=owner.playerGeneration||!owner.cicadaAdapter)return;owner.resumePromptPending=NO;owner.pendingPlaybackResumeEntry=nil;owner.playbackSuspendedForVisibility=NO;owner.playbackWantsPlayback=YES;[owner seekActiveEngineToTime:MAX(0,position) completion:^(BOOL finished){dispatch_async(dispatch_get_main_queue(),^{if(generation==owner.playerGeneration&&owner.cicadaAdapter){if(!finished){owner.playbackWantsPlayback=NO;owner.status.text=@"未能定位到请求进度 · 可重试或从头播放";[owner setRetryAvailable:YES];return;}[owner markAutoSkipFlagsForCurrentPosition];[owner setActiveEngineRate:(float)([NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaPlaybackRate"]?[NSUserDefaults.standardUserDefaults doubleForKey:@"cctv.mediaPlaybackRate"]:1.0)];[owner resumeActiveEngineIfWantedForGeneration:generation];[owner.status setText:@"已从上次进度继续播放"];[RuntimeDiagnostics.shared recordEvent:@"media_resume_accepted" category:@"playback" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"",@"line_index":@(owner.lineIndex),@"episode_index":@(owner.episodeIndex)}];}});}];}]];
     [self presentViewController:alert animated:YES completion:nil];
 }
 - (void)applyPendingPlaybackSeekForCicada {
@@ -1468,19 +1474,25 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
         direct[@"_nativeSniffed"]=@YES;direct[@"requiresWebPlayback"]=@NO;direct[@"parse"]=@0;direct[@"jx"]=@0;
         [self playResult:direct.copy];return;
     }
+    NSString *targetScheme=targetURL.scheme.lowercaseString;
+    if(!targetURL.host.length||(![targetScheme isEqual:@"http"]&&![targetScheme isEqual:@"https"])){
+        [self finishNativeStreamSniffFailureForGeneration:playerGeneration];return;
+    }
     self.status.text=@"正在后台提取原生流地址…";self.status.accessibilityLabel=self.status.text;[self.spinner startAnimating];
     NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:targetURL cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:3.5];
     NSDictionary *headers=MediaPlaybackHeadersFromResult(result);
     for(NSString *k in headers)[req setValue:headers[k] forHTTPHeaderField:k];
     if(![req valueForHTTPHeaderField:@"User-Agent"])[req setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
     __weak typeof(self) weakSelf=self;
-    self.streamSniffTask=[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data,NSURLResponse *response,NSError *err){
+    MediaPlaybackSniffFetch *sniffFetcher=[MediaPlaybackSniffFetch new];self.streamSniffTask=sniffFetcher;
+    [sniffFetcher startWithRequest:req completion:^(NSData *data,NSURLResponse *response,NSError *err){
         NSString *extracted=@"";
+        if(err){dispatch_async(dispatch_get_main_queue(),^{MediaPlaybackViewController *owner=weakSelf;if(!owner||owner.playerGeneration!=playerGeneration)return;owner.streamSniffTask=nil;[owner finishNativeStreamSniffFailureForGeneration:playerGeneration];});return;}
         NSString *mime=response.MIMEType.lowercaseString?:@"";
         if([mime hasPrefix:@"video/"]||[mime hasPrefix:@"audio/"]||[mime containsString:@"mpegurl"]||[mime containsString:@"dash+xml"]){
             extracted=response.URL.absoluteString?:raw;
         }
-        if(!extracted.length&&data.length&&data.length<=2*1024*1024){
+        if(!extracted.length&&data.length){
             NSString *body=[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
             if(!body){NSStringEncoding gbk=CFStringConvertEncodingToNSStringEncoding(kCFStringEncodingGB_18030_2000);body=[[NSString alloc] initWithData:data encoding:gbk];}
             if(body.length){
@@ -1577,7 +1589,6 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
             });
         });
     }];
-    [self.streamSniffTask resume];
 }
 - (void)finishNativeStreamSniffFailureForGeneration:(NSUInteger)playerGeneration {
     if(playerGeneration!=self.playerGeneration)return;

@@ -19,6 +19,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)releaseSession:(id<PlaybackSession>)session;
 - (MPRemoteCommandHandlerStatus)play;
 - (MPRemoteCommandHandlerStatus)pause;
+- (MPRemoteCommandHandlerStatus)togglePlayPause;
 - (MPRemoteCommandHandlerStatus)step:(NSInteger)direction;
 @end
 NS_ASSUME_NONNULL_END

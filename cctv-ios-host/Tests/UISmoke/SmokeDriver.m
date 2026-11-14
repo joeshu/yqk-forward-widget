@@ -406,6 +406,9 @@ static void next(NSArray *steps, NSUInteger index) {
         class_getInstanceMethod(self, @selector(smokeApplication:didFinishLaunchingWithOptions:)));
 }
 - (BOOL)smokeApplication:(UIApplication *)app didFinishLaunchingWithOptions:(NSDictionary *)options {
+    NSArray<NSString *> *arguments=NSProcessInfo.processInfo.arguments;
+    NSUInteger appearanceIndex=[arguments indexOfObject:@"--ui-appearance"];
+    if(appearanceIndex!=NSNotFound&&appearanceIndex+1<arguments.count&&[@[@"light",@"dark",@"system"] containsObject:arguments[appearanceIndex+1]])[NSUserDefaults.standardUserDefaults setObject:arguments[appearanceIndex+1] forKey:HostThemeModePreferenceKey];
     [NSUserDefaults.standardUserDefaults setBool:NO forKey:@"preloadNativeChannel"];
     [NSUserDefaults.standardUserDefaults setBool:NO forKey:@"resumeLastChannel"];
     [NSUserDefaults.standardUserDefaults setInteger:4 forKey:@"cctv.channelGridColumns.v1"];
@@ -435,6 +438,8 @@ static void next(NSArray *steps, NSUInteger index) {
       ImportSnapshotRunSmokeChecksAsync(^(BOOL passed){importSnapshotProbePassed=passed;importSnapshotProbeReady=YES;});
       UINavigationController *nav = (id)self.window.rootViewController;
       RootViewController *root = (id)nav.viewControllers.firstObject;
+      NSUInteger contentSizeIndex=[NSProcessInfo.processInfo.arguments indexOfObject:@"--ui-content-size"];
+      if(contentSizeIndex!=NSNotFound&&contentSizeIndex+1<NSProcessInfo.processInfo.arguments.count){NSString *requested=NSProcessInfo.processInfo.arguments[contentSizeIndex+1];NSDictionary *aliases=@{@"large":UIContentSizeCategoryLarge,@"xxxl":UIContentSizeCategoryExtraExtraExtraLarge,@"accessibility-xxxl":UIContentSizeCategoryAccessibilityExtraExtraExtraLarge};NSString *category=aliases[requested];if(category.length){UITraitCollection *configured=[UITraitCollection traitCollectionWithPreferredContentSizeCategory:category];[nav setOverrideTraitCollection:configured forChildViewController:root];}}
       UIStackView *tabs = [root valueForKey:@"bottomBar"];
       __block id retainedWrapper = nil;
       __block id oldWrapper = nil;
@@ -776,6 +781,8 @@ static void next(NSArray *steps, NSUInteger index) {
             [nav popToRootViewControllerAnimated:NO];
             NSString *redacted=[HostLogRedactor redactText:@"GET https://example.test/live.m3u8?access_token=abc123&channel=1\nAuthorization: Bearer header-secret\nCookie: sid=cookie-secret"];
             check(![redacted containsString:@"abc123"] && ![redacted containsString:@"header-secret"] && ![redacted containsString:@"cookie-secret"], @"diagnostic logs redact URL credentials, authorization and cookies");
+            NSString *redactedURL=[HostLogRedactor redactURL:@"https://alice:password@example.test/live/private-user/private-pass/1.m3u8?access_token=secret-token&quality=hd#fragment-secret"];
+            check([redactedURL containsString:@"example.test"]&&![redactedURL containsString:@"alice"]&&![redactedURL containsString:@"password"]&&![redactedURL containsString:@"secret-token"]&&![redactedURL containsString:@"fragment-secret"]&&![redactedURL containsString:@"private-user"],@"diagnostic URL export removes userinfo, Xtream path credentials, query values and fragments");
             [PluginLogStore.shared beginRunForIdentifier:@"ui-smoke-plugin"];
             [root logPluginLine:@"第一次运行日志" identifier:@"ui-smoke-plugin" name:@"UI Smoke Plugin"];
             [PluginLogStore.shared finishRunForIdentifier:@"ui-smoke-plugin" status:@"已停止"];
@@ -809,7 +816,7 @@ static void next(NSArray *steps, NSUInteger index) {
             check([[root valueForKey:@"firstRender"] boolValue], @"legacy native first frame received");
             check([[root valueForKey:@"activeTab"] integerValue]==0, @"native playback opens CCTV page");
             check([root.title isEqual:@"CCTV-1 综合"]&&nav.navigationBarHidden, @"expanded live playback retains its channel title while replacing the opaque navigation/search header with immersive video");UIView *livePlayerBox=[root valueForKey:@"playerBox"];UILabel *livePlayerTitle=[root valueForKey:@"titleLabel"];UIButton *cctvResourceCapsule=(id)[root valueForKey:@"liveResourceCapsule"];check(fabs(CGRectGetMinY(livePlayerBox.frame)-root.view.safeAreaInsets.top-44)<1.5&&fabs(CGRectGetHeight(livePlayerBox.frame)-CGRectGetWidth(livePlayerBox.frame)*9.0/16.0)<1.5&&fabs(CGRectGetMinY(livePlayerTitle.frame)-8)<1.5&&CGRectGetMaxY(cctvResourceCapsule.frame)<CGRectGetMinY(livePlayerBox.frame),@"expanded CCTV video has a distinct resource capsule row above the player with status-safe title controls");check(!cctvResourceCapsule.hidden&&[cctvResourceCapsule.configuration.title isEqual:@"央视直播"]&&!cctvResourceCapsule.menu,@"CCTV playback identifies its official live resource without offering unrelated playlist switching");
-            NSArray *shown=[root valueForKey:@"shownChannels"];NSUInteger selectedIndex=NSNotFound;for(NSUInteger index=0;index<shown.count;index++)if([shown[index][@"id"] isEqual:@"cctv1"]){selectedIndex=index;break;}UICollectionView *grid=[root valueForKey:@"channelGrid"];NSIndexPath *selectedPath=selectedIndex==NSNotFound?nil:[NSIndexPath indexPathForItem:selectedIndex inSection:0];if(selectedPath){[grid scrollToItemAtIndexPath:selectedPath atScrollPosition:UICollectionViewScrollPositionCenteredVertically animated:NO];[grid layoutIfNeeded];}selectedLiveCard=selectedPath?[grid cellForItemAtIndexPath:selectedPath]:nil;selectedLiveMark=(id)[selectedLiveCard.contentView viewWithTag:4107];check(selectedLiveCard&&[selectedLiveCard.accessibilityValue isEqual:@"正在播放"]&&selectedLiveMark&&!selectedLiveMark.hidden,[NSString stringWithFormat:@"selected channel remains marked in the compact grid while playing (index=%lu visible=%@)",(unsigned long)selectedIndex,selectedLiveMark&&!selectedLiveMark.hidden?@"yes":@"no"]);UITableView *selectionList=[root valueForKey:@"table"];UITableViewCell *selectedRow=selectedIndex==NSNotFound?nil:[root tableView:selectionList cellForRowAtIndexPath:[NSIndexPath indexPathForRow:selectedIndex inSection:0]];check([selectedRow.accessibilityValue isEqual:@"正在播放"]&&selectedRow.accessoryView&&selectedRow.accessoryType==UITableViewCellAccessoryNone,@"selected channel keeps a persistent playing checkmark in list-row mode");
+            NSArray *shown=[root valueForKey:@"shownChannels"];NSUInteger selectedIndex=NSNotFound;for(NSUInteger index=0;index<shown.count;index++)if([shown[index][@"id"] isEqual:@"cctv1"]){selectedIndex=index;break;}UICollectionView *grid=[root valueForKey:@"channelGrid"];NSIndexPath *selectedPath=selectedIndex==NSNotFound?nil:[NSIndexPath indexPathForItem:selectedIndex inSection:0];if(selectedPath){[grid scrollToItemAtIndexPath:selectedPath atScrollPosition:UICollectionViewScrollPositionCenteredVertically animated:NO];[grid layoutIfNeeded];}selectedLiveCard=selectedPath?[grid cellForItemAtIndexPath:selectedPath]:nil;selectedLiveMark=(id)[selectedLiveCard.contentView viewWithTag:4107];check(selectedLiveCard&&[selectedLiveCard.accessibilityValue containsString:@"正在播放"]&&selectedLiveMark&&!selectedLiveMark.hidden,[NSString stringWithFormat:@"selected channel remains marked in the compact grid while playing (index=%lu visible=%@)",(unsigned long)selectedIndex,selectedLiveMark&&!selectedLiveMark.hidden?@"yes":@"no"]);UITableView *selectionList=[root valueForKey:@"table"];UITableViewCell *selectedRow=selectedIndex==NSNotFound?nil:[root tableView:selectionList cellForRowAtIndexPath:[NSIndexPath indexPathForRow:selectedIndex inSection:0]];check([selectedRow.accessibilityValue containsString:@"正在播放"]&&selectedRow.accessoryView&&selectedRow.accessoryType==UITableViewCellAccessoryNone,@"selected channel keeps a persistent playing checkmark in list-row mode");
             UIButton *liveMore=(id)[root valueForKey:@"catalogMoreButton"];
             NSArray *liveActionTitles=[liveMore.menu.children valueForKey:@"title"];
             BOOL hasCurrentFavoriteAction=[liveActionTitles containsObject:@"收藏当前频道"]||[liveActionTitles containsObject:@"取消收藏当前频道"];
@@ -825,7 +832,7 @@ static void next(NSArray *steps, NSUInteger index) {
             check([[[root valueForKey:@"playPauseBtn"] titleForState:UIControlStateNormal] isEqual:@"重试"],
                   @"terminal playback error exposes an explicit retry action");
             UICollectionView *failedGrid=(id)[root valueForKey:@"channelGrid"];NSIndexPath *failedSelectionPath=[root indexPathForChannelID:@"cctv1"];if(failedGrid&&failedSelectionPath){[failedGrid scrollToItemAtIndexPath:failedSelectionPath atScrollPosition:UICollectionViewScrollPositionCenteredVertically animated:NO];[failedGrid layoutIfNeeded];selectedLiveCard=[failedGrid cellForItemAtIndexPath:failedSelectionPath];selectedLiveMark=(id)[selectedLiveCard.contentView viewWithTag:4107];}
-            check([selectedLiveCard.accessibilityValue isEqual:@"正在播放"]&&selectedLiveMark&&!selectedLiveMark.hidden,@"selected channel marker remains visible through a terminal playback failure and retry state");
+            check([selectedLiveCard.accessibilityValue containsString:@"播放失败"]&&selectedLiveMark&&!selectedLiveMark.hidden,@"selected channel remains marked and exposes playback failure and retry status");
             [root togglePlayPause];
           },
           ^{
@@ -1133,7 +1140,9 @@ static void next(NSArray *steps, NSUInteger index) {
                 check([pythonCrypto[@"port"] integerValue]>0&&[pythonCrypto[@"listening"] boolValue]&&[nodeChecks[@"pythonStopped"] boolValue],[NSString stringWithFormat:@"Python smoke listener uses port 0 and stops cleanly (stop=%@)",nodeChecks[@"pythonStopError"]?:@""]);
             }else check(![nodeChecks[@"pythonStarted"] boolValue],@"UI-only simulator target omits CPython; the embedded-Python AES probe is not run here");
             NSData *diagnostic=[NSJSONSerialization dataWithJSONObject:nodeChecks options:NSJSONWritingPrettyPrinted error:NULL];[diagnostic writeToFile:[outputDir stringByAppendingPathComponent:@"node-runtime.json"] atomically:YES];
-            mediaPage=[MediaBrowserViewController new];
+            if(nav.topViewController!=root)[nav popToViewController:root animated:NO];
+            [root selectBottomTab:(id)tabs.arrangedSubviews[2]];
+            mediaPage=(id)[root valueForKey:@"tabPage"];
             NSInteger port=[NSProcessInfo.processInfo.arguments[([NSProcessInfo.processInfo.arguments indexOfObject:@"--smoke-port"]+1)] integerValue];
             mediaSourceID=[NSString stringWithFormat:@"media-ui-%@",NSUUID.UUID.UUIDString];
             mediaPage.sourcesProvider=^NSArray *{return @[@{@"id":mediaSourceID,@"name":@"本机影视测试",@"port":@(port),@"engine":@"node",@"url":[NSString stringWithFormat:@"http://127.0.0.1:%ld/media.js?token=visible",(long)port]}];};
@@ -1141,13 +1150,14 @@ static void next(NSArray *steps, NSUInteger index) {
             mediaPage.onImportCatalogSite=^(NSDictionary *site,NSString *identifier){catalogSiteSelectedFromMediaSelector=[identifier isEqual:@"smoke-catalog"]&&[site[@"key"] isEqual:@"smoke-site"];};
             mediaPage.onActivateService=^(NSDictionary *service,void (^done)(NSError *)){done(nil);};
             mediaPage.onPlay=^(NSDictionary *result,NSDictionary *context){mediaPlayback=[MediaPlaybackViewController new];mediaPlayback.result=result;mediaPlayback.context=context;[nav pushViewController:mediaPlayback animated:NO];};
-            [nav pushViewController:mediaPage animated:NO];
+            [mediaPage openSourceIdentifier:mediaSourceID];
           }},
           @{ @"until":^BOOL{return mediaPage&&mediaPage.isHomeMode&&![[mediaPage valueForKey:@"loading"] boolValue]&&[[mediaPage valueForKey:@"items"] count]==4;},@"timeout":@100,@"run":^{
             MediaFeedView *feed=[mediaPage valueForKey:@"grid"];UIStackView *selectors=[mediaPage valueForKey:@"selectionRow"];UIButton *source=[mediaPage valueForKey:@"sourceSelectButton"],*provider=[mediaPage valueForKey:@"providerSelectButton"],*my=[mediaPage valueForKey:@"homeMenuButton"];[mediaPage.view layoutIfNeeded];
             check(feed==[mediaPage valueForKey:@"homeScroll"]&&feed.sections.count>0,@"media automatically loads only its selected site into one vertical feed");
             check(!source.hidden&&!provider.hidden&&selectors.arrangedSubviews.count==3&&my.menu.children.count>=2&&[[(UIAction *)my.menu.children.lastObject identifier] isEqual:@"media.local"],@"unified media keeps independent resource/site selectors and exposes Local Media in its My menu");
             check(CGRectGetMinY(feed.frame)<1.5&&[mediaPage valueForKey:@"homeTopImmersiveGradient"]!=nil,@"media content extends under a readable immersive status region");
+            check(nav.topViewController==root&&[root valueForKey:@"tabPage"]==mediaPage&&nav.navigationBarHidden,@"media home screenshot uses the real root tab without a pushed page or overlapping navigation chrome");
             check(CGRectGetHeight(source.frame)>=44&&CGRectGetHeight(provider.frame)>=44&&feed.contentInset.bottom>=[[mediaPage valueForKey:@"bottomOverlayInset"] doubleValue],@"media selectors have 44 pt hit targets and safe bottom scrolling space");
             capture(self.window,@"16-media-unified");[provider sendActionsForControlEvents:UIControlEventTouchUpInside];
           }},
@@ -1182,7 +1192,7 @@ static void next(NSArray *steps, NSUInteger index) {
           }},
           @{ @"until":^BOOL{return SmokePresentedController(@[mediaPage,nav,root])==nil&&[[mediaPage valueForKey:@"selectedCatalogID"] isEqual:@"smoke-catalog"]&&[mediaPage valueForKey:@"source"]==nil&&![[mediaPage valueForKey:@"loading"] boolValue]&&[[mediaPage valueForKey:@"items"] count]==0;},@"run":^{
             UIButton *sourceSelector=[mediaPage valueForKey:@"sourceSelectButton"];UIButton *providerSelector=[mediaPage valueForKey:@"providerSelectButton"];
-            check([sourceSelector.currentTitle containsString:@"影视测试合集"]&&[providerSelector.currentTitle containsString:@"选择站点"]&&nav.topViewController==mediaPage,@"selecting an aggregate keeps one parent resource selected in the media page");[providerSelector sendActionsForControlEvents:UIControlEventTouchUpInside];
+            check([sourceSelector.currentTitle containsString:@"影视测试合集"]&&[providerSelector.currentTitle containsString:@"选择站点"]&&nav.topViewController==root&&[root valueForKey:@"tabPage"]==mediaPage,@"selecting an aggregate keeps one parent resource selected in the real media tab");[providerSelector sendActionsForControlEvents:UIControlEventTouchUpInside];
           }},
           @{ @"until":^BOOL{return SmokePresentedController(@[mediaPage,nav,root])!=nil;},@"run":^{
             UINavigationController *sheet=SmokePresentedNavigation(@[mediaPage,nav,root],@"provider selector");if(!sheet)return;UITableViewController *picker=(id)sheet.topViewController;[picker.tableView layoutIfNeeded];UIStackView *scopeStack=[picker valueForKey:@"scopeStack"];

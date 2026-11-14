@@ -2,7 +2,7 @@ name: Build CCTVHost unsigned IPA
 
 on:
   push:
-    branches: [main, codex/cctv-fast-switch, codex/cctv-aptv-ui, codex/cctv-startup-recovery, codex/cctv-aptv-core-017, 'fix/cctv-playback-subscriptions-*', 'perf/cctv-jar-*']
+    branches: [main, codex/cctv-fast-switch, codex/cctv-aptv-ui, codex/cctv-startup-recovery, codex/cctv-aptv-core-017, 'fix/cctv-playback-subscriptions-*', 'perf/cctv-jar-*', 'feat/cctvhost-next-phase-ui-*']
     paths:
       - 'cctv-ios-host/**'
       - '.github/workflows/cctv-ios-host.yml'
@@ -21,6 +21,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: cctv-ios-host-${{ github.ref }}
+  cancel-in-progress: true
 
 
 jobs:
@@ -326,7 +330,20 @@ jobs:
         with:
           name: CCTVHost-full-unsigned-ipa
           path: cctv-ios-host/build
+      - name: Check that this build is still the latest main commit
+        id: freshness
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          latest=$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)
+          if [ "$latest" = "$GITHUB_SHA" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping release for stale commit $GITHUB_SHA; main is now $latest"
+          fi
       - name: Publish verified release assets
+        if: steps.freshness.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -373,6 +390,23 @@ jobs:
   ui-preview:
     runs-on: macos-15
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: se-default-light
+            device: iPhone SE (3rd generation)
+            content_size: large
+            appearance: light
+          - id: iphone-16-accessibility-dark
+            device: iPhone 16
+            content_size: accessibility-xxxl
+            appearance: dark
+    env:
+      CCTV_UI_DEVICE_NAME: ${{ matrix.device }}
+      CCTV_UI_CONTENT_SIZE: ${{ matrix.content_size }}
+      CCTV_UI_APPEARANCE: ${{ matrix.appearance }}
+      CCTV_UI_OUT: ui-preview-${{ matrix.id }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/cache@v4
@@ -386,13 +420,13 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: CCTVHost-UI-preview-${{ github.sha }}
+          name: CCTVHost-UI-preview-${{ matrix.id }}-${{ github.sha }}
           path: |
-            cctv-ios-host/ui-preview/*.png
-            cctv-ios-host/ui-preview/*.json
-            cctv-ios-host/ui-preview/*.log
-            cctv-ios-host/ui-preview/*.txt
-            cctv-ios-host/ui-preview/*.ips
-            cctv-ios-host/ui-preview/*.crash
-            cctv-ios-host/ui-preview/*.hang
+            cctv-ios-host/ui-preview-${{ matrix.id }}/*.png
+            cctv-ios-host/ui-preview-${{ matrix.id }}/*.json
+            cctv-ios-host/ui-preview-${{ matrix.id }}/*.log
+            cctv-ios-host/ui-preview-${{ matrix.id }}/*.txt
+            cctv-ios-host/ui-preview-${{ matrix.id }}/*.ips
+            cctv-ios-host/ui-preview-${{ matrix.id }}/*.crash
+            cctv-ios-host/ui-preview-${{ matrix.id }}/*.hang
           if-no-files-found: error

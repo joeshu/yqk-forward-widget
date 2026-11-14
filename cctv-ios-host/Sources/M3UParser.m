@@ -222,7 +222,7 @@ static NSURL *M3UNormalizedLoopbackURL(NSURL *url, NSURL *baseURL) {
         } @catch (NSException *exception) {
             url = nil;
         }
-        if (!url) { pendingName = nil; pendingLogo = nil; pendingEPGID = nil; pendingTVGName = nil; [pendingHeaders removeAllObjects]; return; }
+        if (!url) { pendingName = nil; pendingLogo = nil; pendingEPGID = nil; pendingTVGName = nil; catchupMode=nil;catchupSource=nil;catchupDays=0;tvgShift=0;[pendingHeaders removeAllObjects]; return; }
         if(out.count>=M3UMaximumChannels){limitError=M3ULimitError(@"频道数量超过 5000 条安全上限；已保留上次有效订阅");*stop=YES;return;}
 
         M3UChannel *ch = [M3UChannel new];

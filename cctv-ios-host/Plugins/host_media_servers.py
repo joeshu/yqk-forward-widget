@@ -4,7 +4,7 @@ import json
 import posixpath
 import time
 import urllib.parse
-import xml.etree.ElementTree as ET
+from defusedxml import ElementTree as ET
 
 _MEDIA = ('.mp4', '.m4v', '.mov', '.mkv', '.webm', '.flv', '.m3u8', '.mp3', '.m4a', '.aac', '.ts')
 WEBDAV_ROOT_ID = '__webdav_root__'
@@ -133,12 +133,14 @@ class ServerSpider:
     def _dav(self, path=''):
         content = self._request(path, method='PROPFIND', xml=True,
             body=b'<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:displayname/><d:resourcetype/></d:prop></d:propfind>')
-        if b'<!DOCTYPE' in content.upper() or b'<!ENTITY' in content.upper():
-            raise ValueError('Unsupported WebDAV XML declaration')
+        try:
+            xml_root = ET.fromstring(content, forbid_dtd=True, forbid_entities=True, forbid_external=True)
+        except Exception as error:
+            raise ValueError('Invalid or unsafe WebDAV XML response') from error
         result = []
         current = urllib.parse.unquote(urllib.parse.urlsplit(self._url(path)).path).rstrip('/')
         root_path = urllib.parse.unquote(urllib.parse.urlsplit(self.base).path).rstrip('/') + '/'
-        for response in ET.fromstring(content).findall('{DAV:}response'):
+        for response in xml_root.findall('{DAV:}response'):
             href = response.findtext('{DAV:}href') or ''
             url = self._url(href)
             decoded = urllib.parse.unquote(urllib.parse.urlsplit(url).path)

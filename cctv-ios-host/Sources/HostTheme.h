@@ -94,6 +94,14 @@ static inline UIColor *HostAccentFill(void) {
 static inline UIBlurEffect *HostGlassBlur(void) { return UIAccessibilityIsReduceTransparencyEnabled()?nil:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterial]; }
 static inline void HostSetLayerBorderColor(UIView *view, UIColor *color);
 
+static inline void HostRegisterGlassEffectView(UIVisualEffectView *effectView) {
+    if(!effectView)return;
+    // Mark the view itself for appearance refresh without retaining itself.
+    objc_setAssociatedObject(effectView,&HostGlassEffectAssociationKey,@YES,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    effectView.effect=HostGlassBlur();
+    effectView.contentView.backgroundColor=UIAccessibilityIsReduceTransparencyEnabled()?HostCard():UIColor.clearColor;
+}
+
 static inline void HostInstallGlassBackdrop(UIView *target) {
     if(!target||objc_getAssociatedObject(target,&HostAppearanceRefreshAssociationKey))return;
     HostGlassBackdropView *backdrop=[HostGlassBackdropView new];
@@ -109,7 +117,8 @@ static inline void HostInstallGlassBackdrop(UIView *target) {
 
 static inline void HostStyleGlassCard(UIView *view, CGFloat radius) {
     if(!view)return;
-    UIVisualEffectView *glass=objc_getAssociatedObject(view,&HostGlassEffectAssociationKey);
+    id association=objc_getAssociatedObject(view,&HostGlassEffectAssociationKey);
+    UIVisualEffectView *glass=[association isKindOfClass:UIVisualEffectView.class]?(UIVisualEffectView *)association:nil;
     if(!glass){
         glass=[[UIVisualEffectView alloc] initWithEffect:HostGlassBlur()];
         glass.frame=view.bounds;
@@ -194,7 +203,9 @@ static inline void HostSetLayerBorderColor(UIView *view, UIColor *color) {
 }
 static inline void HostRefreshAppearanceLayers(UIView *view) {
     if(!view)return;
-    UIVisualEffectView *effect=objc_getAssociatedObject(view,&HostGlassEffectAssociationKey);if(effect){effect.effect=HostGlassBlur();effect.contentView.backgroundColor=UIAccessibilityIsReduceTransparencyEnabled()?HostCard():UIColor.clearColor;}
+    id association=objc_getAssociatedObject(view,&HostGlassEffectAssociationKey);
+    UIVisualEffectView *effect=[association isKindOfClass:UIVisualEffectView.class]?(UIVisualEffectView *)association:([view isKindOfClass:UIVisualEffectView.class]&&[association isEqual:@YES]?(UIVisualEffectView *)view:nil);
+    if(effect){effect.effect=HostGlassBlur();effect.contentView.backgroundColor=UIAccessibilityIsReduceTransparencyEnabled()?HostCard():UIColor.clearColor;}
     HostGlassBackdropView *backdrop=objc_getAssociatedObject(view,&HostAppearanceRefreshAssociationKey);if(backdrop)[backdrop refreshAppearance];
     CAGradientLayer *specularRim=objc_getAssociatedObject(view,&HostSpecularRimAssociationKey);
     if(specularRim)specularRim.frame=CGRectMake(0,0,CGRectGetWidth(view.bounds),MIN(1.2,CGRectGetHeight(view.bounds)));
