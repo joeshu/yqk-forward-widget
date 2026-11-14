@@ -890,7 +890,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 }
 - (void)resumeAfterVisibilityChange {
     if(!NSThread.isMainThread){dispatch_async(dispatch_get_main_queue(),^{[self resumeAfterVisibilityChange];});return;}
-    if(!self.isViewLoaded||!self.view.window)return;
+    if(!self.isViewLoaded)return;
     NSDictionary *pending=self.pendingEpisodeResult;NSUInteger pendingGeneration=self.pendingEpisodeGeneration;self.pendingEpisodeResult=nil;self.pendingEpisodeGeneration=0;
     if(pending&&pendingGeneration==self.generation){self.playbackSuspendedForVisibility=NO;[self playResult:pending];return;}
     if(self.awaitingWebPlaybackReturn||!self.embeddedMode||!self.playbackSuspendedForVisibility)return;

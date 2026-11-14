@@ -195,6 +195,8 @@ class PlaybackOwnershipAndMediaUIContracts(unittest.TestCase):
         self.assertIn("self.ignorePausedTimeControlUntilPlaying=NO;self.hasReportedPlaying=YES", player_observer)
         self.assertIn("!self.ignorePausedTimeControlUntilPlaying", player_observer)
         resume_visibility = method_body(PLAYBACK_SOURCE, "- (void)resumeAfterVisibilityChange")
+        self.assertIn("if(!self.isViewLoaded)return", resume_visibility)
+        self.assertNotIn("self.view.window", resume_visibility)
         self.assertIn("pendingGeneration==self.generation", resume_visibility)
         self.assertIn("if(self.playbackWantsPlayback&&!self.resolving&&self.player.currentItem)[self playActiveEngine]", resume_visibility)
         self.assertIn("[self.inlinePlaybackController resumeAfterVisibilityChange]", BROWSER_SOURCE)
