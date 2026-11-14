@@ -130,6 +130,9 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('default: false', workflow)
         self.assertEqual(workflow.count('plistlib.loads(sys.stdin.buffer.read())'), 2)
         self.assertNotIn('plistlib.load(sys.stdin.buffer)', workflow)
+        self.assertIn('gh release view "$tag" --repo "$GITHUB_REPOSITORY"', workflow)
+        self.assertIn('gh release upload "$tag" --repo "$GITHUB_REPOSITORY"', workflow)
+        self.assertIn('gh release create "$tag" --repo "$GITHUB_REPOSITORY"', workflow)
 
     def test_resource_return_layout_reuses_filters_and_measures_variable_rows(self):
         self.assertIn('@interface CCTVResourceProfileCell : UITableViewCell', self.catalog)
