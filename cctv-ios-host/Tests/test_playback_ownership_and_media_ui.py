@@ -201,6 +201,7 @@ class PlaybackOwnershipAndMediaUIContracts(unittest.TestCase):
         self.assertIn("if(self.playbackWantsPlayback&&!self.resolving&&self.player.currentItem)[self playActiveEngine]", resume_visibility)
         self.assertIn('inline_playback_visibility_resume_checked', resume_visibility)
         self.assertIn("[self.inlinePlaybackController resumeAfterVisibilityChange]", BROWSER_SOURCE)
+        self.assertIn("owner.playbackWantsPlayback=YES;owner.context=context;owner.lineIndex=[context[@\"lineIndex\"] integerValue]", PLAYBACK_SOURCE)
         selection_play = method_body(EPISODE_SOURCE, "- (void)selectEpisode:")
         self.assertIn("page.onPlaybackReturn", PLAYBACK_SOURCE)
         self.assertIn("[navigation popViewControllerAnimated:YES]", selection_play)
