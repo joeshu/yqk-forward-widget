@@ -1,4 +1,5 @@
 #import "MediaKeyRequest.h"
+#import "MediaPlaybackHeaders.h"
 @interface MediaKeyRequest ()
 @property(nonatomic,strong) NSURLSession *session;
 @property(nonatomic,strong) NSMutableData *data;
@@ -27,9 +28,8 @@
     NSURL *from=response.URL,*to=request.URL;
     if(++self.redirects>5||([from.scheme.lowercaseString isEqual:@"https"]&&![to.scheme.lowercaseString isEqual:@"https"])){self.failure=[NSError errorWithDomain:@"CCTVHostKey" code:3 userInfo:@{NSLocalizedDescriptionKey:@"密钥重定向被拒绝"}];completion(nil);return;}
     NSMutableURLRequest *safe=[request mutableCopy];
-    if(![from.host.lowercaseString isEqual:to.host.lowercaseString]||![(from.port?:@([from.scheme isEqual:@"https"]?443:80)) isEqual:(to.port?:@([to.scheme isEqual:@"https"]?443:80))]||![from.scheme.lowercaseString isEqual:to.scheme.lowercaseString]){
-        for(NSString *name in safe.allHTTPHeaderFields.allKeys){NSString *lower=name.lowercaseString;if([@[@"authorization",@"cookie",@"proxy-authorization"] containsObject:lower]||[lower containsString:@"token"]||[lower containsString:@"key"]||[lower containsString:@"secret"]||[lower containsString:@"signature"])[safe setValue:nil forHTTPHeaderField:name];}
-    }completion(safe);
+    safe.allHTTPHeaderFields=MediaPlaybackHeadersScopedToURL(request.allHTTPHeaderFields?:@{},from,to);
+    completion(safe);
 }
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
     void (^completion)(NSData *,NSError *)=self.completion;self.completion=nil;

@@ -95,7 +95,7 @@
 - RTMP/RTMPS 频道保留为单条流。M3U8 被识别为一个 HLS 媒体资源，不把分片当作独立 IPTV 频道。
 - 支持从全局默认值继承 catch-up source/mode/days/tvg-shift，并生成 `start/end`、duration 或 UTC 日期模板地址；未解析模板标记和超出保留天数的请求会拒绝。
 - TVBox 内嵌直播分组与频道逐项保存为内嵌播放列表，不再伪造远程来源 URL，也不会因追加第二组而删除前一组。
-- LL-HLS relay 只接收经过校验的 `_HLS_msn`、`_HLS_part`、`_HLS_skip` 控制参数，保留签名查询串原始编码，并避免把直播轮询控制参数泄漏到媒体分片和密钥请求。
+- LL-HLS relay 只接收经过校验的 `_HLS_msn`、`_HLS_part`、`_HLS_skip` 控制参数，保留签名查询串原始编码；初次清单请求与凭据刷新后的重试都会重新应用本次轮询参数，并避免把参数泄漏到媒体分片和密钥请求。
 
 ### 媒体服务器适配器
 
@@ -103,14 +103,25 @@
 
 - **Emby / Jellyfin**：用户名密码登录或 API Key，读取用户媒体库、分类、分页、搜索、详情/剧集和静态播放 URL；认证、响应 8 MiB、单请求 15 秒读取期限和 5 次重定向均有边界。
 - **Xtream**：认证检查、直播/VOD/剧集分类、分页、剧集详情与播放 URL。此协议没有统一的全库分页搜索接口，因此明确显示未提供搜索，不虚报支持。
-- **WebDAV**：Basic Auth、Depth 1 分页目录枚举和可逐层打开的文件夹浏览。XML 禁止 DOCTYPE/ENTITY；路径限制在配置根目录，禁止离开来源站点的重定向。它不提供通用服务端搜索。
+- **WebDAV**：Basic Auth、Depth 1 分页目录枚举和可逐层打开的文件夹浏览。使用 `defusedxml` 严格禁用 DTD、实体和外部实体解析，包括 UTF-16 输入；路径限制在配置根目录，禁止离开来源站点的重定向。它不提供通用服务端搜索。
 - 所有适配器只允许 HTTP(S) 基础地址，基础地址不能嵌入 URL 用户名密码、查询参数或片段；跨源跳转拒绝，停止会话会释放已保存 token。
 
 配置由固定类型和表单字段生成 CCTVHost server 资源，账号密码保存在本机资源设置中；不接受远程返回的 Python 代码作为适配器执行。真实 API 字段、认证插件、服务器版本差异仍需用用户自己的服务端验收。
 
 ### 本机媒体库
 
-“影视库 → 我的菜单 → 本地媒体”支持多选视频/音频文件，将用户所选资源复制到 CCTVHost App Support，再由现有影视播放器按 file URL 播放。列表可删除本机副本；删除不会修改原始文件。应用卸载会删除沙盒内副本。
+“影视库 → 我的菜单 → 本地媒体”支持多选视频/音频文件，将用户所选资源在串行后台队列内协调复制到 App Support 的隐藏暂存文件，再用同卷原子改名发布为完整文件。用户请求停止时当前文件完成后停止后续文件；目录快照不暴露未完成副本。列表可删除本机副本；删除不会修改原始文件。应用卸载会删除沙盒内副本。
+
+## 复核后落地的边界修复
+
+- 频道健康徽标不再按频道 ID 伪造延迟/速度，也不再把首帧等待时间冒充网络 RTT。检测使用无 Cookie、无认证头的 HTTP(S) Range 请求，最多读取 4 KiB、3.5 秒超时、最多 3 个并发；状态标成“未测 / 检测 / 可达 / 失败 / 过期”，完整请求时间、HTTP 状态和实际样本量留给 VoiceOver 读取。
+- 点播网页嗅探改用有界流式读取：普通页面最多 2 MiB、请求 3.5 秒/总计 8 秒、最多 5 次跳转并拒绝 HTTPS 降级；明确的媒体 MIME 在响应头到达后立即取消正文下载。失败与超限结果不再缓存到播放器状态。
+- 媒体适配诊断记录在新写入和启动恢复时统一脱敏：URL 凭据、片段及查询值会隐藏；provider URL 只保留主机名，错误文本和其他字符串字段经过敏感字段过滤。
+- AVPlayer AES-128 key 重定向复用播放头作用域白名单，跨源重定向移除 Authorization、Cookie、Referer、Origin、自定义认证头；WebDAV UTF-8/UTF-16 DTD 和实体用例加入回归。
+- M3U 无效/本地文件 URL 被拒绝时同步清除该条目的 catch-up 配置，避免下一条裸 URL 继承错误的回放模板。
+- 点播恢复提示现在在 Cicada seek 完成后校验播放意图、视图挂起状态和当前播放所有者；锁屏/耳机媒体命令新增 toggle play/pause。
+- 全屏网页嗅探超限时停止提取；直播底部玻璃层、频道悬浮控件、通用工具栏和资源头部统一注册 Reduce Transparency 实色刷新；大字号标签栏改为图标显示并保留完整 VoiceOver 标签，频道网格维持 4 列。
+- UI-only smoke 改为经 RootViewController 的真实影视库标签打开测试页面，并覆盖 iPhone SE/常规 iPhone、默认/AX XXXL 字号、浅色/深色组合。Xcode workflow 对同一 ref 的构建串行，新 main 提交会取消旧运行；release job 发布前再核对 main HEAD，跳过过期构建。
 
 ## 本轮回归修复补充
 
@@ -133,7 +144,7 @@ python3 Scripts/generate_media_capabilities.py --check
 git diff --check
 ```
 
-本轮最终复跑结果记录为：Python **925 项，858 通过、67 跳过、0 失败**；JavaScript 插件测试 3 个 suite 全通过；能力表生成检查、Python 语法检查、工作流 YAML 解析与 `git diff --check` 通过。67 项跳过包括 macOS Foundation 原生密钥测试、原生/IPA 检查及原有附件样本。Python loopback 测试覆盖 Emby/Jellyfin、Xtream、WebDAV、HTTP 重定向、认证、分页和运行时归一化，不访问公共真实服务。
+本轮最终复跑结果记录为：Python **936 项，869 通过、67 跳过、0 失败**；JavaScript 插件测试 3 个 suite 全通过；能力表生成检查、Python 语法检查、shell 语法、工作流 YAML 解析、全量源清单审计（664 个文件、0 错误）与 `git diff --check` 通过。67 项跳过包括 macOS Foundation 原生密钥测试、原生/IPA 检查及原有附件样本。Python loopback 测试覆盖 Emby/Jellyfin、Xtream、WebDAV、HTTP 重定向、认证、分页和运行时归一化，不访问公共真实服务。
 
 Linux 环境没有 `xcodebuild`、`xcrun` 或 iOS SDK，未编译任何 Objective-C/UIKit/AVFoundation 源，也未运行 `Tests/UISmoke`。静态源契约通过不是 Objective-C 编译证明。
 

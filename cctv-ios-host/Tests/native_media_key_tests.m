@@ -4,7 +4,7 @@ static void check(BOOL value,NSString *message){if(!value){NSLog(@"FAILED %@",me
 static void run(NSString *address,BOOL success,BOOL cancel) {
     __block NSUInteger calls=0;__block NSData *result;__block NSError *failure;
     MediaKeyRequest *request=[MediaKeyRequest new];
-    [request loadURL:[NSURL URLWithString:address] headers:@{@"Authorization":@"private",@"X-API-Key":@"private"} completion:^(NSData *data,NSError *error){calls++;result=data;failure=error;}];
+    [request loadURL:[NSURL URLWithString:address] headers:@{@"Authorization":@"private",@"X-API-Key":@"private",@"X-Auth":@"private",@"X-Session":@"private",@"Referer":@"https://origin.test/watch",@"Origin":@"https://origin.test"} completion:^(NSData *data,NSError *error){calls++;result=data;failure=error;}];
     if(cancel)[request cancel];
     NSDate *deadline=[NSDate dateWithTimeIntervalSinceNow:8];while(!calls&&[deadline timeIntervalSinceNow]>0)[NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.01]];
     check(calls==1,@"request completes once within its deadline");

@@ -280,6 +280,7 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
             owner.restoringSnapshot=NO;
             if(smoke)NSLog(@"IMPORT_RESTORE_FINISHED controller=%p snapshot=%d untouched=%d elapsed=%.2f",owner,snapshot!=nil,untouched,NSProcessInfo.processInfo.systemUptime-restoreStarted);
             if(snapshot&&untouched)[owner restoreSnapshot:snapshot];
+            else if(owner.editRevision!=restoreEditRevision)[owner persistSnapshot];
         });});
     }return self;
 }
@@ -557,7 +558,7 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
     NSDictionary *immutable=snapshot.copy;NSUInteger revision=self.snapshotRevision;ResourceImportBackgroundTaskToken *task=nil;if(UIApplication.sharedApplication.applicationState==UIApplicationStateBackground){task=[ResourceImportBackgroundTaskToken new];__block ResourceImportBackgroundTaskToken *taskToken=task;task.identifier=[UIApplication.sharedApplication beginBackgroundTaskWithName:@"cctv.resourceImport.snapshot" expirationHandler:^{[taskToken endIfNeeded];}];}__weak typeof(self) weakSelf=self;ResourceImportEnqueueSnapshot(immutable,task,^(BOOL success){ResourceImportWorkflowViewController *owner=weakSelf;if(!owner||owner.snapshotRevision!=revision)return;owner.persistentSnapshotAvailable=success&&!blank;if(!success){[RuntimeDiagnostics.shared recordEvent:@"resource_import_snapshot_write_failed" category:@"resource_import" fields:@{@"revision":@(revision)}];}});
 }
 - (void)applicationDidEnterBackground:(NSNotification *)notification {[self persistSnapshot];}
-- (void)textViewDidChange:(UITextView *)textView {if(!self.restoringSnapshot)self.editRevision++;self.restoredAddress=textView.text?:@"";self.addressPlaceholder.hidden=textView.text.length>0;self.clearAddressButton.hidden=textView.text.length==0&&self.candidates.count==0;[self refreshSmartClipboardAndPresets];[self persistSnapshot];}
+- (void)textViewDidChange:(UITextView *)textView {self.editRevision++;self.restoredAddress=textView.text?:@"";self.addressPlaceholder.hidden=textView.text.length>0;self.clearAddressButton.hidden=textView.text.length==0&&self.candidates.count==0;[self refreshSmartClipboardAndPresets];[self persistSnapshot];}
 - (void)runtimeChanged:(UISegmentedControl *)sender {self.editRevision++;self.restoredRuntimeSelection=sender.selectedSegmentIndex;[self persistSnapshot];}
 - (void)duplicatePolicyChanged:(UISegmentedControl *)sender {self.editRevision++;self.finished=NO;[self updateView];}
 - (void)minimize {[self.view endEditing:YES];[self.navigationController dismissViewControllerAnimated:YES completion:nil];}

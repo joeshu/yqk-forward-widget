@@ -1,3 +1,4 @@
+import codecs
 import importlib.util
 import json
 from pathlib import Path
@@ -39,6 +40,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_PROPFIND(self):
         self.rfile.read(int(self.headers.get('Content-Length',0)))
         path=urlsplit(self.path).path
+        if path.startswith('/dav/unsafe-'):
+            xml='''<?xml version="1.0" encoding="UTF-16"?><!DOCTYPE x [<!ENTITY test "blocked">]><d:multistatus xmlns:d="DAV:"><d:response><d:href>/dav/&test;</d:href></d:response></d:multistatus>'''
+            if path=='/dav/unsafe-utf16le':encoded=codecs.BOM_UTF16_LE+xml.encode('utf-16le')
+            elif path=='/dav/unsafe-utf16be':encoded=codecs.BOM_UTF16_BE+xml.encode('utf-16be')
+            else:encoded=xml.encode('utf-8')
+            return self.send(encoded,207)
         if path.rstrip('/')=='/dav/Shows':
             body=b'<d:multistatus xmlns:d="DAV:"><d:response><d:href>/dav/Shows/</d:href><d:propstat><d:prop><d:displayname>Shows</d:displayname><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat></d:response><d:response><d:href>/dav/Shows/S01E01.mkv</d:href><d:propstat><d:prop><d:displayname>Episode One</d:displayname><d:resourcetype/></d:prop></d:propstat></d:response></d:multistatus>'
         else:
@@ -70,6 +77,11 @@ class MediaServerTests(unittest.TestCase):
         nested=spider.categoryContent(folder['id'],'1');self.assertEqual(nested['categoryName'],'Shows');self.assertEqual(nested['parentID'],WEBDAV_ROOT_ID);media_row=next(row for row in nested['list'] if not row.get('directory'))
         result=spider.playerContent('',media_row['vod_id']);self.assertTrue(result['url'].endswith('/dav/Shows/S01E01.mkv'));self.assertEqual(result['header']['Authorization'],'Basic dTpw')
         with self.assertRaises(ValueError):spider.categoryContent(self.base+'outside/','1')
+    def test_webdav_rejects_dtd_and_entities_in_utf8_and_utf16(self):
+        spider=self.spider('webdav');spider.base=self.base+'dav/'
+        for path in ('unsafe-utf8','unsafe-utf16le','unsafe-utf16be'):
+            with self.subTest(path=path),self.assertRaisesRegex(ValueError,'unsafe WebDAV XML'):
+                spider._dav(path)
     def test_rejects_cross_origin_redirect(self):
         with self.assertRaises(ValueError):self.spider()._request('redirect')
     def test_cross_origin_scope_keeps_only_safe_transport_headers(self):

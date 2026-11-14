@@ -12,6 +12,7 @@
         MPRemoteCommandCenter *commands=MPRemoteCommandCenter.sharedCommandCenter;
         [commands.playCommand addTarget:self action:@selector(handlePlay:)];
         [commands.pauseCommand addTarget:self action:@selector(handlePause:)];
+        [commands.togglePlayPauseCommand addTarget:self action:@selector(handleTogglePlayPause:)];
         [commands.nextTrackCommand addTarget:self action:@selector(handleNext:)];
         [commands.previousTrackCommand addTarget:self action:@selector(handlePrevious:)];
         NSNotificationCenter *nc=NSNotificationCenter.defaultCenter;
@@ -29,9 +30,11 @@
 - (void)releaseSession:(id<PlaybackSession>)session {if(self.currentSession==session){self.currentSession=nil;MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo=nil;}}
 - (MPRemoteCommandHandlerStatus)play {if(!self.currentSession||![self.currentSession sessionHasContent])return MPRemoteCommandHandlerStatusNoSuchContent;[self.currentSession sessionPlay];return MPRemoteCommandHandlerStatusSuccess;}
 - (MPRemoteCommandHandlerStatus)pause {self.resumeAfterInterruption=NO;if(!self.currentSession||![self.currentSession sessionHasContent])return MPRemoteCommandHandlerStatusNoSuchContent;[self.currentSession sessionPause];return MPRemoteCommandHandlerStatusSuccess;}
+- (MPRemoteCommandHandlerStatus)togglePlayPause {id<PlaybackSession> session=self.currentSession;if(!session||![session sessionHasContent])return MPRemoteCommandHandlerStatusNoSuchContent;BOOL wants=[session respondsToSelector:@selector(sessionWantsPlayback)]?[session sessionWantsPlayback]:[session sessionIsPlaying];return wants?[self pause]:[self play];}
 - (MPRemoteCommandHandlerStatus)step:(NSInteger)direction {return [self.currentSession sessionStep:direction]?MPRemoteCommandHandlerStatusSuccess:MPRemoteCommandHandlerStatusNoSuchContent;}
 - (MPRemoteCommandHandlerStatus)handlePlay:(MPRemoteCommandEvent *)event {return [self onMain:^MPRemoteCommandHandlerStatus(void){return [self play];}];}
 - (MPRemoteCommandHandlerStatus)handlePause:(MPRemoteCommandEvent *)event {return [self onMain:^MPRemoteCommandHandlerStatus(void){return [self pause];}];}
+- (MPRemoteCommandHandlerStatus)handleTogglePlayPause:(MPRemoteCommandEvent *)event {return [self onMain:^MPRemoteCommandHandlerStatus(void){return [self togglePlayPause];}];}
 - (MPRemoteCommandHandlerStatus)handleNext:(MPRemoteCommandEvent *)event {return [self onMain:^MPRemoteCommandHandlerStatus(void){return [self step:1];}];}
 - (MPRemoteCommandHandlerStatus)handlePrevious:(MPRemoteCommandEvent *)event {return [self onMain:^MPRemoteCommandHandlerStatus(void){return [self step:-1];}];}
 - (MPRemoteCommandHandlerStatus)onMain:(MPRemoteCommandHandlerStatus(^)(void))action {if(NSThread.isMainThread)return action();__block MPRemoteCommandHandlerStatus result;dispatch_sync(dispatch_get_main_queue(),^{result=action();});return result;}

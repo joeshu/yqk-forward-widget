@@ -7,6 +7,7 @@ static inline UIBarButtonItem *HostToolbar(NSArray<NSDictionary *> *actions) {
     CGFloat width = stackWidth + 8;
     UIStackView *stack=[UIStackView new];stack.axis=UILayoutConstraintAxisHorizontal;stack.distribution=UIStackViewDistributionFillEqually;stack.spacing=4;stack.layoutMarginsRelativeArrangement=YES;stack.layoutMargins=UIEdgeInsetsMake(2,4,2,4);stack.frame=CGRectMake(0,0,width,48);stack.backgroundColor=UIColor.clearColor;stack.layer.cornerRadius=24;stack.layer.cornerCurve=kCACornerCurveContinuous;stack.clipsToBounds=YES;
     UIVisualEffectView *glass=[[UIVisualEffectView alloc] initWithEffect:HostGlassBlur()];glass.frame=stack.bounds;glass.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
+    HostRegisterGlassEffectView(glass);
     UIView *tint=[[UIView alloc] initWithFrame:glass.contentView.bounds];tint.backgroundColor=HostGlassTint();tint.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;[glass.contentView addSubview:tint];
     [stack insertSubview:glass atIndex:0];
     for(NSDictionary *a in actions){

@@ -1288,7 +1288,9 @@ class MediaRelay:
                     parsed=urllib.parse.urlsplit(url)
                     headers['Accept-Encoding']='identity'
                     manifest_request = expected_hls or parsed.path.lower().endswith(('.m3u8', '.m3u'))
-                    if manifest_request:headers={k:v for k,v in headers.items() if k.lower()!='range'}
+                    if manifest_request:
+                        url=ll_hls_upstream_url(url,getattr(handler,'path',''))
+                        headers={k:v for k,v in headers.items() if k.lower()!='range'}
                     elif handler.headers.get('Range'):headers['Range']=handler.headers['Range']
                     refreshed_request=urllib.request.Request(http_url(url),headers=headers,method='HEAD' if head else 'GET')
                     response=_open_with_timeout_retry(refreshed_request, diagnostic_id)

@@ -406,6 +406,9 @@ static void next(NSArray *steps, NSUInteger index) {
         class_getInstanceMethod(self, @selector(smokeApplication:didFinishLaunchingWithOptions:)));
 }
 - (BOOL)smokeApplication:(UIApplication *)app didFinishLaunchingWithOptions:(NSDictionary *)options {
+    NSArray<NSString *> *arguments=NSProcessInfo.processInfo.arguments;
+    NSUInteger appearanceIndex=[arguments indexOfObject:@"--ui-appearance"];
+    if(appearanceIndex!=NSNotFound&&appearanceIndex+1<arguments.count&&[@[@"light",@"dark",@"system"] containsObject:arguments[appearanceIndex+1]])[NSUserDefaults.standardUserDefaults setObject:arguments[appearanceIndex+1] forKey:HostThemeModePreferenceKey];
     [NSUserDefaults.standardUserDefaults setBool:NO forKey:@"preloadNativeChannel"];
     [NSUserDefaults.standardUserDefaults setBool:NO forKey:@"resumeLastChannel"];
     [NSUserDefaults.standardUserDefaults setInteger:4 forKey:@"cctv.channelGridColumns.v1"];
@@ -435,6 +438,8 @@ static void next(NSArray *steps, NSUInteger index) {
       ImportSnapshotRunSmokeChecksAsync(^(BOOL passed){importSnapshotProbePassed=passed;importSnapshotProbeReady=YES;});
       UINavigationController *nav = (id)self.window.rootViewController;
       RootViewController *root = (id)nav.viewControllers.firstObject;
+      NSUInteger contentSizeIndex=[NSProcessInfo.processInfo.arguments indexOfObject:@"--ui-content-size"];
+      if(contentSizeIndex!=NSNotFound&&contentSizeIndex+1<NSProcessInfo.processInfo.arguments.count){NSString *requested=NSProcessInfo.processInfo.arguments[contentSizeIndex+1];NSDictionary *aliases=@{@"large":UIContentSizeCategoryLarge,@"xxxl":UIContentSizeCategoryExtraExtraExtraLarge,@"accessibility-xxxl":UIContentSizeCategoryAccessibilityExtraExtraExtraLarge};NSString *category=aliases[requested];if(category.length){UITraitCollection *configured=[UITraitCollection traitCollectionWithPreferredContentSizeCategory:category];[nav setOverrideTraitCollection:configured forChildViewController:root];}}
       UIStackView *tabs = [root valueForKey:@"bottomBar"];
       __block id retainedWrapper = nil;
       __block id oldWrapper = nil;
@@ -776,6 +781,8 @@ static void next(NSArray *steps, NSUInteger index) {
             [nav popToRootViewControllerAnimated:NO];
             NSString *redacted=[HostLogRedactor redactText:@"GET https://example.test/live.m3u8?access_token=abc123&channel=1\nAuthorization: Bearer header-secret\nCookie: sid=cookie-secret"];
             check(![redacted containsString:@"abc123"] && ![redacted containsString:@"header-secret"] && ![redacted containsString:@"cookie-secret"], @"diagnostic logs redact URL credentials, authorization and cookies");
+            NSString *redactedURL=[HostLogRedactor redactURL:@"https://alice:password@example.test/live/private-user/private-pass/1.m3u8?access_token=secret-token&quality=hd#fragment-secret"];
+            check([redactedURL containsString:@"example.test"]&&![redactedURL containsString:@"alice"]&&![redactedURL containsString:@"password"]&&![redactedURL containsString:@"secret-token"]&&![redactedURL containsString:@"fragment-secret"]&&![redactedURL containsString:@"private-user"],@"diagnostic URL export removes userinfo, Xtream path credentials, query values and fragments");
             [PluginLogStore.shared beginRunForIdentifier:@"ui-smoke-plugin"];
             [root logPluginLine:@"第一次运行日志" identifier:@"ui-smoke-plugin" name:@"UI Smoke Plugin"];
             [PluginLogStore.shared finishRunForIdentifier:@"ui-smoke-plugin" status:@"已停止"];
@@ -1133,7 +1140,9 @@ static void next(NSArray *steps, NSUInteger index) {
                 check([pythonCrypto[@"port"] integerValue]>0&&[pythonCrypto[@"listening"] boolValue]&&[nodeChecks[@"pythonStopped"] boolValue],[NSString stringWithFormat:@"Python smoke listener uses port 0 and stops cleanly (stop=%@)",nodeChecks[@"pythonStopError"]?:@""]);
             }else check(![nodeChecks[@"pythonStarted"] boolValue],@"UI-only simulator target omits CPython; the embedded-Python AES probe is not run here");
             NSData *diagnostic=[NSJSONSerialization dataWithJSONObject:nodeChecks options:NSJSONWritingPrettyPrinted error:NULL];[diagnostic writeToFile:[outputDir stringByAppendingPathComponent:@"node-runtime.json"] atomically:YES];
-            mediaPage=[MediaBrowserViewController new];
+            if(nav.topViewController!=root)[nav popToViewController:root animated:NO];
+            [root selectBottomTab:(id)tabs.arrangedSubviews[2]];
+            mediaPage=(id)[root valueForKey:@"tabPage"];
             NSInteger port=[NSProcessInfo.processInfo.arguments[([NSProcessInfo.processInfo.arguments indexOfObject:@"--smoke-port"]+1)] integerValue];
             mediaSourceID=[NSString stringWithFormat:@"media-ui-%@",NSUUID.UUID.UUIDString];
             mediaPage.sourcesProvider=^NSArray *{return @[@{@"id":mediaSourceID,@"name":@"本机影视测试",@"port":@(port),@"engine":@"node",@"url":[NSString stringWithFormat:@"http://127.0.0.1:%ld/media.js?token=visible",(long)port]}];};
@@ -1141,13 +1150,14 @@ static void next(NSArray *steps, NSUInteger index) {
             mediaPage.onImportCatalogSite=^(NSDictionary *site,NSString *identifier){catalogSiteSelectedFromMediaSelector=[identifier isEqual:@"smoke-catalog"]&&[site[@"key"] isEqual:@"smoke-site"];};
             mediaPage.onActivateService=^(NSDictionary *service,void (^done)(NSError *)){done(nil);};
             mediaPage.onPlay=^(NSDictionary *result,NSDictionary *context){mediaPlayback=[MediaPlaybackViewController new];mediaPlayback.result=result;mediaPlayback.context=context;[nav pushViewController:mediaPlayback animated:NO];};
-            [nav pushViewController:mediaPage animated:NO];
+            [mediaPage openSourceIdentifier:mediaSourceID];
           }},
           @{ @"until":^BOOL{return mediaPage&&mediaPage.isHomeMode&&![[mediaPage valueForKey:@"loading"] boolValue]&&[[mediaPage valueForKey:@"items"] count]==4;},@"timeout":@100,@"run":^{
             MediaFeedView *feed=[mediaPage valueForKey:@"grid"];UIStackView *selectors=[mediaPage valueForKey:@"selectionRow"];UIButton *source=[mediaPage valueForKey:@"sourceSelectButton"],*provider=[mediaPage valueForKey:@"providerSelectButton"],*my=[mediaPage valueForKey:@"homeMenuButton"];[mediaPage.view layoutIfNeeded];
             check(feed==[mediaPage valueForKey:@"homeScroll"]&&feed.sections.count>0,@"media automatically loads only its selected site into one vertical feed");
             check(!source.hidden&&!provider.hidden&&selectors.arrangedSubviews.count==3&&my.menu.children.count>=2&&[[(UIAction *)my.menu.children.lastObject identifier] isEqual:@"media.local"],@"unified media keeps independent resource/site selectors and exposes Local Media in its My menu");
             check(CGRectGetMinY(feed.frame)<1.5&&[mediaPage valueForKey:@"homeTopImmersiveGradient"]!=nil,@"media content extends under a readable immersive status region");
+            check(nav.topViewController==root&&[root valueForKey:@"tabPage"]==mediaPage&&nav.navigationBarHidden,@"media home screenshot uses the real root tab without a pushed page or overlapping navigation chrome");
             check(CGRectGetHeight(source.frame)>=44&&CGRectGetHeight(provider.frame)>=44&&feed.contentInset.bottom>=[[mediaPage valueForKey:@"bottomOverlayInset"] doubleValue],@"media selectors have 44 pt hit targets and safe bottom scrolling space");
             capture(self.window,@"16-media-unified");[provider sendActionsForControlEvents:UIControlEventTouchUpInside];
           }},

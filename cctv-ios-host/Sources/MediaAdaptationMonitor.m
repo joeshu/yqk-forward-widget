@@ -1,4 +1,5 @@
 #import "MediaAdaptationMonitor.h"
+#import "HostLogRedactor.h"
 #import "HostTheme.h"
 #import "RuntimeDiagnostics.h"
 #import "TVBoxCatalogStore.h"
@@ -20,33 +21,20 @@ static NSString *CCTVMonitorSafeString(id value) {
 }
 
 static NSString *CCTVMonitorRedactURL(NSString *rawURL) {
-    NSString *trimmed = CCTVMonitorSafeString(rawURL);
-    if (!trimmed.length) return @"";
-    if ([trimmed.lowercaseString hasPrefix:@"cenc://"]) return trimmed;
-    NSURLComponents *parts = [NSURLComponents componentsWithString:trimmed];
-    if (!parts || !parts.scheme.length) {
-        return trimmed.length > 240 ? [[trimmed substringToIndex:240] stringByAppendingString:@"…"] : trimmed;
+    return [HostLogRedactor redactURL:CCTVMonitorSafeString(rawURL)];
+}
+
+static NSDictionary *CCTVMonitorSanitizedRecord(NSDictionary *record) {
+    NSMutableDictionary *safe=[record mutableCopy];
+    NSSet *urlKeys=[NSSet setWithArray:@[@"url",@"resolvedURL",@"originalURL",@"streamURL",@"sourceURL",@"finalURL",@"apiURL"]];
+    for(NSString *key in safe.allKeys.copy){
+        id value=safe[key];if(![value isKindOfClass:NSString.class])continue;
+        NSURLComponents *parts=[NSURLComponents componentsWithString:value];
+        if([urlKeys containsObject:key])safe[key]=CCTVMonitorRedactURL(value);
+        else if([key isEqual:@"provider"]&&parts.host.length)safe[key]=parts.host.lowercaseString;
+        else safe[key]=[HostLogRedactor redactText:value];
     }
-    parts.user = nil;
-    parts.password = nil;
-    if (parts.queryItems.count) {
-        NSMutableArray<NSURLQueryItem *> *safeItems = [NSMutableArray array];
-        for (NSURLQueryItem *item in parts.queryItems) {
-            NSString *k = item.name.lowercaseString ?: @"";
-            if ([k containsString:@"token"] || [k containsString:@"sign"] || [k containsString:@"auth"] ||
-                [k containsString:@"key"] || [k containsString:@"secret"] || [k containsString:@"password"] ||
-                [k containsString:@"cookie"] || [k isEqualToString:@"spade_a"]) {
-                [safeItems addObject:[NSURLQueryItem queryItemWithName:item.name value:@"***"]];
-            } else {
-                NSString *v = item.value ?: @"";
-                if (v.length > 36) v = [[v substringToIndex:36] stringByAppendingString:@"…"];
-                [safeItems addObject:[NSURLQueryItem queryItemWithName:item.name value:v]];
-            }
-        }
-        parts.queryItems = safeItems;
-    }
-    NSString *out = parts.string ?: trimmed;
-    return out.length > 260 ? [[out substringToIndex:260] stringByAppendingString:@"…"] : out;
+    return safe.copy;
 }
 
 static NSString *CCTVMonitorExtractHost(NSString *rawURL) {
@@ -101,13 +89,17 @@ static NSString *CCTVMonitorInferFormat(NSString *url, NSDictionary *result) {
         _timeFormatter = [[NSDateFormatter alloc] init];
         _timeFormatter.dateFormat = @"MM-dd HH:mm:ss";
         NSArray *saved = [NSUserDefaults.standardUserDefaults arrayForKey:CCTVMediaAdaptationMonitorRecordsKey];
+        BOOL sanitizedSavedRecords=NO;
         if ([saved isKindOfClass:NSArray.class]) {
             for (id item in saved) {
                 if ([item isKindOfClass:NSDictionary.class]) {
-                    [_records addObject:item];
+                    NSDictionary *safe=CCTVMonitorSanitizedRecord(item);
+                    sanitizedSavedRecords|=![safe isEqual:item];
+                    [_records addObject:safe];
                 }
             }
         }
+        if(sanitizedSavedRecords)[NSUserDefaults.standardUserDefaults setObject:[_records copy] forKey:CCTVMediaAdaptationMonitorRecordsKey];
     }
     return self;
 }
@@ -133,7 +125,7 @@ static NSString *CCTVMonitorInferFormat(NSString *url, NSDictionary *result) {
     if (!enriched[@"timeText"]) enriched[@"timeText"] = [self.timeFormatter stringFromDate:[NSDate dateWithTimeIntervalSince1970:now]] ?: @"";
     NSString *advice = [self diagnosisAndRecommendationForRecord:enriched];
     if (advice.length) enriched[@"advice"] = advice;
-    NSDictionary *immutable = [enriched copy];
+    NSDictionary *immutable = CCTVMonitorSanitizedRecord(enriched);
     dispatch_async(self.queue, ^{
         [self.records insertObject:immutable atIndex:0];
         while (self.records.count > CCTVMediaAdaptationMonitorMaxRecords) {
@@ -1014,7 +1006,7 @@ static NSString *CCTVMonitorInferFormat(NSString *url, NSDictionary *result) {
         if (![cat isKindOfClass:NSDictionary.class]) continue;
         [catalogSummaries addObject:@{
             @"name": cat[@"name"] ?: @"",
-            @"sourceURL": cat[@"sourceURL"] ?: @"",
+            @"sourceURL": CCTVMonitorRedactURL(CCTVMonitorSafeString(cat[@"sourceURL"])),
             @"bundleType": cat[@"bundleType"] ?: @"remote-json",
             @"jarVerified": @([cat[@"jarVerified"] boolValue]),
             @"siteCount": @([cat[@"sites"] isKindOfClass:NSArray.class] ? [cat[@"sites"] count] : 0),

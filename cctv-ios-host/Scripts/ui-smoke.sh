@@ -3,7 +3,7 @@
 # by a test stub; this target makes no playback or DRM validation claims.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-OUT=ui-preview
+OUT="${CCTV_UI_OUT:-ui-preview}"
 APP="$OUT/CCTVHostUI.app"
 mkdir -p "$APP"
 python3 -u Tests/UISmoke/fixture_server.py "$OUT/fixture-port.txt" > "$OUT/fixture.log" 2>&1 &
@@ -51,11 +51,12 @@ p.pop('UIRequiredDeviceCapabilities',None)
 with open(sys.argv[1],'wb') as f:plistlib.dump(p,f)
 PY
 codesign --force --sign - "$APP"
-SIM=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(v["udid"] for k,vs in d["devices"].items() if "iOS" in k for v in vs if v["name"].startswith("iPhone")))')
+SIM=$(xcrun simctl list devices available -j | python3 -c 'import json,os,sys; d=json.load(sys.stdin); devices=[v for k,vs in d["devices"].items() if "iOS" in k for v in vs if v["name"].startswith("iPhone")]; requested=os.environ.get("CCTV_UI_DEVICE_NAME",""); selected=next((v for v in devices if v["name"]==requested),None) if requested else (devices[0] if devices else None); selected or sys.exit("Requested iOS simulator is unavailable: "+requested); print(selected["udid"])')
 xcrun simctl boot "$SIM" || true
 xcrun simctl bootstatus "$SIM" -b
+xcrun simctl ui "$SIM" appearance "${CCTV_UI_APPEARANCE:-dark}"
 xcrun simctl install "$SIM" "$APP"
-APP_LAUNCH=$(xcrun simctl launch "$SIM" com.example.cctvhost.uismoke --smoke-port "$FIXTURE_PORT")
+APP_LAUNCH=$(xcrun simctl launch "$SIM" com.example.cctvhost.uismoke --smoke-port "$FIXTURE_PORT" --ui-content-size "${CCTV_UI_CONTENT_SIZE:-large}" --ui-appearance "${CCTV_UI_APPEARANCE:-dark}")
 echo "$APP_LAUNCH"
 SMOKE_APP_PID=$(printf '%s\n' "$APP_LAUNCH" | sed -nE 's/.*: ([0-9]+)$/\1/p' | tail -n 1)
 CONTAINER=$(xcrun simctl get_app_container "$SIM" com.example.cctvhost.uismoke data)
