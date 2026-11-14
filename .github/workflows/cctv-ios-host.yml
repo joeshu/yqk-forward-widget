@@ -334,10 +334,10 @@ jobs:
           tag="cctv-ios-host-${GITHUB_SHA:0:12}-${GITHUB_RUN_ID}"
           version=$(unzip -p CCTVHost-unsigned.ipa Payload/CCTVHost.app/Info.plist | python3 -c 'import plistlib,sys; print(plistlib.loads(sys.stdin.buffer.read())["CFBundleShortVersionString"])')
           build=$(unzip -p CCTVHost-unsigned.ipa Payload/CCTVHost.app/Info.plist | python3 -c 'import plistlib,sys; print(plistlib.loads(sys.stdin.buffer.read())["CFBundleVersion"])')
-          if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" CCTVHost-unsigned.ipa CCTVHost-unsigned.ipa.sha256 --clobber
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" --repo "$GITHUB_REPOSITORY" CCTVHost-unsigned.ipa CCTVHost-unsigned.ipa.sha256 --clobber
           else
-            gh release create "$tag" \
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" \
               CCTVHost-unsigned.ipa CCTVHost-unsigned.ipa.sha256 \
               --target "$GITHUB_SHA" \
               --title "CCTVHost ${version} (${build})" \
