@@ -43,7 +43,7 @@
 
 extern BOOL PlaybackCoordinatorRunSmokeChecks(void);
 extern BOOL PlaybackGestureRunSmokeChecks(void);
-extern BOOL ImportSnapshotRunSmokeChecks(void);
+extern void ImportSnapshotRunSmokeChecksAsync(void (^completion)(BOOL passed));
 extern BOOL CicadaBudgetRunSmokeChecks(void);
 @interface ResourceImportWorkflowViewController (SmokeImport)
 - (NSMutableDictionary *)candidateForData:(NSData *)data file:(NSURL *)file origin:(NSString *)origin companions:(NSDictionary *)companions hint:(NSString *)hint;
@@ -419,7 +419,6 @@ static void next(NSArray *steps, NSUInteger index) {
       failures = [NSMutableArray array];
       check(PlaybackCoordinatorRunSmokeChecks(),@"playback coordinator ownership, commands and interruptions");
       check(PlaybackGestureRunSmokeChecks(),@"live volume displacement is independent of gesture event frequency");
-      check(ImportSnapshotRunSmokeChecks(),@"import snapshots restore blobs and retain the final queued revision");
       check(CicadaBudgetRunSmokeChecks(),@"Cicada first-frame budget excludes paused time");
       check([CNPlayerCrashGuard install], @"CNPlayer thumbnail exception guard installs");
       check([CNPlayer smokeCicadaLicenseOverrideCount]==0,@"SDK setup preserves the Cicada core's built-in license endpoint without a host override");
@@ -431,6 +430,8 @@ static void next(NSArray *steps, NSUInteger index) {
                               withIntermediateDirectories:YES
                                                attributes:nil
                                                     error:NULL];
+      __block BOOL importSnapshotProbeReady=NO,importSnapshotProbePassed=NO;
+      ImportSnapshotRunSmokeChecksAsync(^(BOOL passed){importSnapshotProbePassed=passed;importSnapshotProbeReady=YES;});
       UINavigationController *nav = (id)self.window.rootViewController;
       RootViewController *root = (id)nav.viewControllers.firstObject;
       UIStackView *tabs = [root valueForKey:@"bottomBar"];
@@ -468,6 +469,7 @@ static void next(NSArray *steps, NSUInteger index) {
       __block MediaPlaybackViewController *mediaPlayback;
       __block NSDate *stalePlaybackDeadline;
       __block ResourceImportWorkflowViewController *importProbe;
+      __block TVBoxCatalogViewController *catalogSmokePage;
       __block NSUInteger importSaveCount=0;
       __block NSUInteger batchRetrySaveCount=0;
       __block ServiceEditorViewController *editorProbe;
@@ -475,6 +477,7 @@ static void next(NSArray *steps, NSUInteger index) {
       __block BOOL replacementFinished=NO,replacementFailureKept=NO;
       __block NSString *replacementOriginal,*replacementTarget;
       NSArray *steps = @[
+          @{ @"timeout":@90, @"until":^BOOL{return importSnapshotProbeReady;}, @"run":^{check(importSnapshotProbeReady&&importSnapshotProbePassed,@"import snapshots restore blobs and retain the final queued revision");} },
           ^{
             UICollectionView *grid = [root valueForKey:@"channelGrid"];
             check([grid numberOfItemsInSection:0] > 20, @"home catalog populated");
@@ -1247,18 +1250,21 @@ static void next(NSArray *steps, NSUInteger index) {
             check(![catalog[@"sites"][1][@"supported"] boolValue],@"unsupported TVBox JAR API is shown as unavailable");
             check([catalog[@"lives"] count]==1,@"TVBox live-list URL remains a separate subscription entry");
             if(catalog)[TVBoxCatalogStore saveCatalog:catalog];
-            TVBoxCatalogViewController *catalogPage=[TVBoxCatalogViewController new];catalogPage.catalog=[TVBoxCatalogStore catalogForID:catalog[@"id"]]?:catalog;[nav pushViewController:catalogPage animated:NO];
+            TVBoxCatalogViewController *catalogPage=[TVBoxCatalogViewController new];catalogSmokePage=catalogPage;catalogPage.catalog=[TVBoxCatalogStore catalogForID:catalog[@"id"]]?:catalog;[nav pushViewController:catalogPage animated:NO];
             check([catalogPage.tableView numberOfSections]==2&&[catalogPage.tableView numberOfRowsInSection:0]==2,@"resource collection separates script sites from live lists");
             UIMenu *collectionActions=catalogPage.navigationItem.rightBarButtonItem.menu;UIMenu *exports=(id)collectionActions.children.firstObject;NSString *jsonAction=exports.children.count>0?((UIAction *)exports.children[0]).title:@"",*zipAction=exports.children.count>1?((UIAction *)exports.children[1]).title:@"";UIContextMenuConfiguration *singleResourceMenu=[catalogPage tableView:catalogPage.tableView contextMenuConfigurationForRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0] point:CGPointZero];check([jsonAction isEqual:@"导出完整合集 JSON"]&&[zipAction isEqual:@"导出资源 ZIP（含可获取的 PY / JS）"]&&singleResourceMenu!=nil,@"resource collection offers complete JSON, report-aware PY/JS ZIP and per-item export");
             UISearchController *catalogSearch=[catalogPage valueForKey:@"searchController"];catalogSearch.searchBar.text=@"index.js";[catalogSearch.searchResultsUpdater updateSearchResultsForSearchController:catalogSearch];check([catalogPage.tableView numberOfRowsInSection:0]==1,@"large resource collections can find one script by URL");catalogSearch.searchBar.text=@"";[catalogSearch.searchResultsUpdater updateSearchResultsForSearchController:catalogSearch];
             catalogPage.serviceForSite=^NSDictionary *(NSDictionary *site){return [site[@"key"] isEqual:@"js-site"]?@{@"id":@"fixture-js",@"name":@"Fixture JS",@"enabled":@YES}:nil;};
             NSIndexPath *siteIndex=[NSIndexPath indexPathForRow:0 inSection:0];UITableViewCell *siteCell=[catalogPage tableView:catalogPage.tableView cellForRowAtIndexPath:siteIndex];check([siteCell.detailTextLabel.text containsString:@"服务已导入"]&&[siteCell.detailTextLabel.text containsString:@"点按启动并打开资源"],@"an enabled saved configuration is not presented as a running process");check(![siteCell.detailTextLabel.text containsString:@"token=kept"]&&[catalogPage.catalog[@"sites"][0][@"api"] containsString:@"token=kept"],@"collection masks credentials in display while preserving the original URL");
-            [catalogPage.tableView.delegate tableView:catalogPage.tableView didSelectRowAtIndexPath:siteIndex];UIViewController *presented=SmokePresentedController(@[catalogPage,nav,root]);UIAlertController *existingActions=[presented isKindOfClass:UIAlertController.class]?(UIAlertController *)presented:nil;NSArray *existingTitles=[existingActions.actions valueForKey:@"title"]?:@[];check([existingTitles containsObject:@"启动并打开资源"],[NSString stringWithFormat:@"an imported collection script offers direct browse (presented=%@ actions=%@)",presented?NSStringFromClass(presented.class):@"none",existingTitles]);[catalogPage dismissViewControllerAnimated:NO completion:nil];capture(self.window,@"21-tvbox-catalog");
+            [catalogPage.tableView.delegate tableView:catalogPage.tableView didSelectRowAtIndexPath:siteIndex];capture(self.window,@"21-tvbox-catalog");
+          }},
+          @{ @"timeout":@8, @"until":^BOOL{UIAlertController *alert=(id)SmokePresentedController(@[catalogSmokePage,nav,root]);return [alert isKindOfClass:UIAlertController.class]&&[[alert.actions valueForKey:@"title"] containsObject:@"启动并打开资源"];}, @"run":^{
+            UIAlertController *alert=(id)SmokePresentedController(@[catalogSmokePage,nav,root]);NSArray *titles=[alert.actions valueForKey:@"title"]?:@[];check([titles containsObject:@"启动并打开资源"],[NSString stringWithFormat:@"an imported collection script offers direct browse (presented=%@ actions=%@)",alert?NSStringFromClass(alert.class):@"none",titles]);[catalogSmokePage dismissViewControllerAnimated:NO completion:nil];
           }},
           @{ @"until":^BOOL{return SmokePresentedController(@[(UIViewController *)nav.topViewController,nav,root])==nil;}, @"run":^{
             TVBoxCatalogViewController *catalogPage=(id)nav.topViewController;catalogPage.serviceForSite=nil;NSIndexPath *siteIndex=[NSIndexPath indexPathForRow:0 inSection:0];[catalogPage.tableView.delegate tableView:catalogPage.tableView didSelectRowAtIndexPath:siteIndex];
           }},
-          @{ @"until":^BOOL{return [SmokePresentedController(@[(UIViewController *)nav.topViewController,nav,root]) isKindOfClass:UIAlertController.class];}, @"run":^{
+          @{ @"timeout":@8, @"until":^BOOL{UIAlertController *alert=(id)SmokePresentedController(@[(UIViewController *)nav.topViewController,nav,root]);NSArray *titles=[alert.actions valueForKey:@"title"]?:@[];return [titles containsObject:@"导入并打开资源"]&&[titles containsObject:@"仅导入到资源页"];}, @"run":^{
             TVBoxCatalogViewController *catalogPage=(id)nav.topViewController;UIAlertController *newActions=(id)SmokePresentedController(@[catalogPage,nav,root]);NSArray *newTitles=[newActions.actions valueForKey:@"title"];check([newTitles containsObject:@"导入并打开资源"]&&[newTitles containsObject:@"仅导入到资源页"],@"an unimported script offers explicit import-and-browse or import-only flow");[catalogPage dismissViewControllerAnimated:NO completion:nil];[TVBoxCatalogStore removeCatalog:catalogPage.catalog[@"id"]];[nav popViewControllerAnimated:NO];
           }},
           ^{

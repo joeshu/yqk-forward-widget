@@ -13,6 +13,7 @@
 - (void)updateEmptyState;
 - (void)updateCatalogSummary;
 - (void)presentCatalogAlert:(UIAlertController *)alert sourceView:(nullable UIView *)sourceView sourceRect:(CGRect)sourceRect;
+- (void)presentCatalogAlert:(UIAlertController *)alert sourceView:(nullable UIView *)sourceView sourceRect:(CGRect)sourceRect retryCount:(NSUInteger)retryCount;
 @end
 
 @implementation TVBoxCatalogViewController
@@ -78,8 +79,21 @@
     return nil;
 }
 - (void)presentCatalogAlert:(UIAlertController *)alert sourceView:(UIView *)sourceView sourceRect:(CGRect)sourceRect {
+    [self presentCatalogAlert:alert sourceView:sourceView sourceRect:sourceRect retryCount:0];
+}
+- (void)presentCatalogAlert:(UIAlertController *)alert sourceView:(UIView *)sourceView sourceRect:(CGRect)sourceRect retryCount:(NSUInteger)retryCount {
     UIViewController *presenter=[self visiblePresentationController];
-    if(!presenter){if([NSProcessInfo.processInfo.arguments containsObject:@"--smoke-port"])NSLog(@"TVBOX_ALERT_NO_PRESENTER originWindow=%d navWindow=%d sceneCount=%lu",self.viewIfLoaded.window!=nil,self.navigationController.viewIfLoaded.window!=nil,(unsigned long)UIApplication.sharedApplication.connectedScenes.count);return;}
+    if(!presenter){
+        UINavigationController *navigation=self.navigationController;
+        BOOL waitingForNavigationAttach=navigation&&navigation.topViewController==self&&navigation.viewIfLoaded.window;
+        if(waitingForNavigationAttach&&retryCount<10){
+            if([NSProcessInfo.processInfo.arguments containsObject:@"--smoke-port"])NSLog(@"TVBOX_ALERT_RETRY count=%lu originWindow=%d navWindow=%d",(unsigned long)retryCount,self.viewIfLoaded.window!=nil,navigation.viewIfLoaded.window!=nil);
+            __weak typeof(self) weakSelf=self;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,100*NSEC_PER_MSEC),dispatch_get_main_queue(),^{TVBoxCatalogViewController *owner=weakSelf;if(owner)[owner presentCatalogAlert:alert sourceView:sourceView sourceRect:sourceRect retryCount:retryCount+1];});
+            return;
+        }
+        if([NSProcessInfo.processInfo.arguments containsObject:@"--smoke-port"])NSLog(@"TVBOX_ALERT_NO_PRESENTER originWindow=%d navWindow=%d sceneCount=%lu",self.viewIfLoaded.window!=nil,self.navigationController.viewIfLoaded.window!=nil,(unsigned long)UIApplication.sharedApplication.connectedScenes.count);return;
+    }
     UIPopoverPresentationController *popover=alert.popoverPresentationController;
     if(popover){
         UIView *anchor=sourceView.window==presenter.view.window?sourceView:presenter.view;
