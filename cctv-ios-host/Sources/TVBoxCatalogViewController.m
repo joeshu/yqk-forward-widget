@@ -54,10 +54,13 @@
     empty.numberOfLines=0;empty.textAlignment=NSTextAlignmentCenter;empty.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];empty.adjustsFontForContentSizeCategory=YES;empty.textColor=HostSecondaryText();self.tableView.backgroundView=empty;
 }
 - (UIViewController *)visiblePresentationController {
-    UIWindow *window=self.viewIfLoaded.window;
+    UIWindow *window=self.viewIfLoaded.window?:self.navigationController.viewIfLoaded.window;
+    UIViewController *navigationTop=self.navigationController.topViewController;
+    if(window&&navigationTop.viewIfLoaded.window==window&&!navigationTop.isBeingDismissed)return navigationTop;
+    if(window&&self.viewIfLoaded.window==window&&!self.isBeingDismissed)return self;
     if(!window){
         for(UIScene *scene in UIApplication.sharedApplication.connectedScenes){
-            if(scene.activationState!=UISceneActivationStateForegroundActive)continue;
+            if(scene.activationState!=UISceneActivationStateForegroundActive&&scene.activationState!=UISceneActivationStateForegroundInactive)continue;
             for(UIWindow *candidate in ((UIWindowScene *)scene).windows)if(candidate.isKeyWindow){window=candidate;break;}
             if(window)break;
         }
@@ -69,17 +72,21 @@
         if([controller isKindOfClass:UITabBarController.class]){UIViewController *selected=((UITabBarController *)controller).selectedViewController;if(selected&&selected!=controller){controller=selected;continue;}}
         break;
     }
-    return controller.viewIfLoaded.window==window&&!controller.isBeingDismissed?controller:nil;
+    if(controller.viewIfLoaded.window==window&&!controller.isBeingDismissed)return controller;
+    if(navigationTop.viewIfLoaded.window==window&&!navigationTop.isBeingDismissed)return navigationTop;
+    if(self.viewIfLoaded.window==window&&!self.isBeingDismissed)return self;
+    return nil;
 }
 - (void)presentCatalogAlert:(UIAlertController *)alert sourceView:(UIView *)sourceView sourceRect:(CGRect)sourceRect {
     UIViewController *presenter=[self visiblePresentationController];
-    if(!presenter)return;
+    if(!presenter){if([NSProcessInfo.processInfo.arguments containsObject:@"--smoke-port"])NSLog(@"TVBOX_ALERT_NO_PRESENTER originWindow=%d navWindow=%d sceneCount=%lu",self.viewIfLoaded.window!=nil,self.navigationController.viewIfLoaded.window!=nil,(unsigned long)UIApplication.sharedApplication.connectedScenes.count);return;}
     UIPopoverPresentationController *popover=alert.popoverPresentationController;
     if(popover){
         UIView *anchor=sourceView.window==presenter.view.window?sourceView:presenter.view;
         popover.sourceView=anchor;
         popover.sourceRect=anchor==sourceView?sourceRect:CGRectMake(CGRectGetMidX(anchor.bounds),CGRectGetMidY(anchor.bounds),1,1);
     }
+    if([NSProcessInfo.processInfo.arguments containsObject:@"--smoke-port"])NSLog(@"TVBOX_ALERT_PRESENT presenter=%@ origin=%@ navTop=%@ window=%d",NSStringFromClass(presenter.class),NSStringFromClass(self.class),NSStringFromClass(self.navigationController.topViewController.class),presenter.viewIfLoaded.window!=nil);
     [presenter presentViewController:alert animated:YES completion:nil];
 }
 - (void)viewDidLoad {

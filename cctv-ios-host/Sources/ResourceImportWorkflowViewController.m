@@ -247,11 +247,15 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
 - (instancetype)init {
     if((self=[super initWithStyle:UITableViewStyleInsetGrouped])){
         self.candidates=[NSMutableArray array];self.batchRetryIndices=[NSMutableArray array];self.stage=@"粘贴地址，或选择本地文件";self.retryCandidateIndex=NSNotFound;self.selectedImportCategory=-1;self.restoringSnapshot=YES;
-        __weak typeof(self) weakSelf=self;
-        dispatch_async(ResourceImportSnapshotQueue(),^{NSDictionary *snapshot=ResourceImportReadSnapshot();dispatch_async(dispatch_get_main_queue(),^{
+        __weak typeof(self) weakSelf=self;BOOL smoke=[NSProcessInfo.processInfo.arguments containsObject:@"--smoke-port"];NSTimeInterval restoreStarted=NSProcessInfo.processInfo.systemUptime;
+        if(smoke)NSLog(@"IMPORT_RESTORE_QUEUED controller=%p",self);
+        dispatch_async(ResourceImportSnapshotQueue(),^{NSDictionary *snapshot=ResourceImportReadSnapshot();
+            if(smoke)NSLog(@"IMPORT_RESTORE_READ controller=%p snapshot=%d elapsed=%.2f",weakSelf,snapshot!=nil,NSProcessInfo.processInfo.systemUptime-restoreStarted);
+            dispatch_async(dispatch_get_main_queue(),^{
             ResourceImportWorkflowViewController *owner=weakSelf;if(!owner)return;
             BOOL untouched=owner.generation==0&&!owner.busy&&!owner.address.text.length&&!owner.candidates.count;
             owner.restoringSnapshot=NO;
+            if(smoke)NSLog(@"IMPORT_RESTORE_FINISHED controller=%p snapshot=%d untouched=%d elapsed=%.2f",owner,snapshot!=nil,untouched,NSProcessInfo.processInfo.systemUptime-restoreStarted);
             if(snapshot&&untouched)[owner restoreSnapshot:snapshot];
         });});
     }return self;

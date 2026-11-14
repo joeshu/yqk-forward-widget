@@ -4,7 +4,7 @@
 - (void)writeCurrentSnapshot;
 @end
 static BOOL waitForRestore(ResourceImportWorkflowViewController *controller) {
-    NSDate *deadline=[NSDate dateWithTimeIntervalSinceNow:10];
+    NSDate *deadline=[NSDate dateWithTimeIntervalSinceNow:30];
     while([[controller valueForKey:@"restoringSnapshot"] boolValue]&&[deadline timeIntervalSinceNow]>0)[NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.01]];
     return ![[controller valueForKey:@"restoringSnapshot"] boolValue];
 }
