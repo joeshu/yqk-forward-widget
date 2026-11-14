@@ -23,7 +23,7 @@ import zlib
 
 
 def ll_hls_upstream_url(url, request_path):
-    """Forward only LL-HLS delivery directives, preserving signed query bytes."""
+    """Forward current LL-HLS delivery directives, preserving signed query bytes."""
     if not isinstance(request_path, str):
         return url
     incoming = urllib.parse.parse_qs(urllib.parse.urlsplit(request_path).query, max_num_fields=32)
@@ -38,18 +38,51 @@ def ll_hls_upstream_url(url, request_path):
         if (name == '_HLS_skip' and value not in ('YES', 'v2')) or (name != '_HLS_skip' and not value.isascii()) or (name != '_HLS_skip' and not value.isdigit()):
             raise ValueError('invalid_ll_hls_directive')
         controls[name] = value
-    if not controls:
-        return url
     parts = urllib.parse.urlsplit(url)
-    # Preserve the bytes of every non-delivery query item (signed URLs).
-    query = '&'.join(item for item in parts.query.split('&') if item and urllib.parse.unquote(item.split('=', 1)[0]) not in controls)
-    query += ('&' if query else '') + urllib.parse.urlencode(controls)
+    delivery_controls = ('_HLS_msn', '_HLS_part', '_HLS_skip')
+    # A manifest URL may itself contain directives from a previous reload.
+    # Drop all three before adding this request's current set, otherwise stale
+    # part/skip values can conflict with the newer media sequence.
+    query = '&'.join(item for item in parts.query.split('&') if item and urllib.parse.unquote(item.split('=', 1)[0]) not in delivery_controls)
+    if controls:
+        query += ('&' if query else '') + urllib.parse.urlencode(controls)
+    if query == parts.query:
+        return url
     return urllib.parse.urlunsplit(parts._replace(query=query))
 
 
-def sensitive_header(name):
-    name = name.lower()
-    return name in ('authorization', 'cookie', 'proxy-authorization') or any(part in name for part in ('token', 'api-key', 'apikey', 'signature', 'session', 'secret', 'credential'))
+_CROSS_ORIGIN_SAFE_HEADERS = frozenset((
+    'accept', 'accept-encoding', 'accept-language', 'cache-control',
+    'if-range', 'range', 'user-agent',
+))
+
+
+def _origin_identity(value):
+    """Return an effective HTTP origin, including default-port normalization."""
+    if isinstance(value, tuple) and len(value) == 2:
+        scheme, authority = value
+        parsed = urllib.parse.urlsplit(str(scheme) + '://' + str(authority))
+    elif isinstance(value, str):
+        parsed = urllib.parse.urlsplit(value)
+    else:
+        return None
+    scheme = parsed.scheme.lower()
+    host = (parsed.hostname or '').lower()
+    try:
+        port = parsed.port
+    except ValueError:
+        return None
+    if port is None:
+        port = {'http': 80, 'https': 443}.get(scheme)
+    return (scheme, host, port) if scheme and host else None
+
+
+def scoped_headers(headers, origin, url):
+    """Keep source-specific headers on their origin and safe transport headers elsewhere."""
+    if _origin_identity(origin) == _origin_identity(url):
+        return dict(headers)
+    return {name: value for name, value in headers.items()
+            if name.lower() in _CROSS_ORIGIN_SAFE_HEADERS}
 
 
 class ScopedRedirect(urllib.request.HTTPRedirectHandler):
@@ -60,9 +93,9 @@ class ScopedRedirect(urllib.request.HTTPRedirectHandler):
         # turns HEAD into GET and can download the media during a probe.
         if redirected is not None and request.get_method() == 'HEAD':
             redirected.method = 'HEAD'
-        if redirected is not None and (urllib.parse.urlsplit(request.full_url).scheme.lower(), urllib.parse.urlsplit(request.full_url).netloc.lower()) != (urllib.parse.urlsplit(new_url).scheme.lower(), urllib.parse.urlsplit(new_url).netloc.lower()):
+        if redirected is not None and _origin_identity(request.full_url) != _origin_identity(new_url):
             for name in list(redirected.headers):
-                if sensitive_header(name):
+                if name.lower() not in _CROSS_ORIGIN_SAFE_HEADERS:
                     redirected.remove_header(name)
         return redirected
 
@@ -365,6 +398,7 @@ def safe_error_summary(error):
     text = str(error or '')
     text = re.sub(r'(?i)https?://[^\s\"\'<>]+', '[URL redacted]', text)
     text = re.sub(r'(?i)([?&][^=&#\s]*(?:access[_-]?token|refresh[_-]?token|token|auth|signature|sign|ticket|api[_-]?key|secret|password|cookie|session|credential)[^=&#\s]*=)[^&#\s]*', r'\1[redacted]', text)
+    text = re.sub(r'(?i)(/(?:live|movie|series)/)[^/?#\s]+/[^/?#\s]+/', r'\1[redacted]/[redacted]/', text)
     text = re.sub(r'(?i)/(?:private/var|var/mobile|Users)/[^\s,;]+', '[path redacted]', text)
     return text[:180]
 
@@ -974,9 +1008,7 @@ class MediaRelay:
                     if cache_key in self.prefetched_segment_streams:
                         continue
             parsed = urllib.parse.urlsplit(url)
-            headers = dict(pairs)
-            if (parsed.scheme.lower(), parsed.netloc.lower()) != origin:
-                headers = {k: v for k, v in headers.items() if not sensitive_header(k)}
+            headers = scoped_headers(dict(pairs), origin, url)
             headers['Accept-Encoding'] = 'identity'
             req = urllib.request.Request(http_url(url), headers=headers, method='GET')
             resp = None
@@ -1148,7 +1180,7 @@ class MediaRelay:
             key, _, diagnostic_id = record[:3]
             url, pairs, origin, fallback_url, _ = key[:5]
             expected_hls = bool(key[5]) if len(key) > 5 else False
-            headers = dict(pairs)
+            headers = scoped_headers(dict(pairs), origin, url)
             parsed = urllib.parse.urlsplit(url)
             with self.lock:
                 first_manifest = not head and (expected_hls or parsed.path.lower().endswith(('.m3u8', '.m3u'))) and token not in self.diagnosed_manifests
@@ -1158,8 +1190,6 @@ class MediaRelay:
                 print('[CCTVHostMediaRelay] ' + json.dumps({'event': 'media_relay_manifest_requested',
                     'request_id': diagnostic_id, 'upstream_host': parsed.hostname or '',
                     'scheme': parsed.scheme.lower()}, separators=(',', ':')))
-            if (parsed.scheme.lower(), parsed.netloc.lower()) != origin:
-                headers = {k: v for k, v in headers.items() if not sensitive_header(k)}
             headers['Accept-Encoding'] = 'identity'
             manifest_request = expected_hls or parsed.path.lower().endswith(('.m3u8', '.m3u'))
             if manifest_request:
@@ -1254,10 +1284,8 @@ class MediaRelay:
                     key, _, diagnostic_id = record[:3]
                     url, pairs, origin, fallback_url, _ = key[:5]
                     expected_hls = bool(key[5]) if len(key) > 5 else False
-                    headers=dict(pairs)
+                    headers=scoped_headers(dict(pairs), origin, url)
                     parsed=urllib.parse.urlsplit(url)
-                    if (parsed.scheme.lower(),parsed.netloc.lower())!=origin:
-                        headers={k:v for k,v in headers.items() if not sensitive_header(k)}
                     headers['Accept-Encoding']='identity'
                     manifest_request = expected_hls or parsed.path.lower().endswith(('.m3u8', '.m3u'))
                     if manifest_request:headers={k:v for k,v in headers.items() if k.lower()!='range'}

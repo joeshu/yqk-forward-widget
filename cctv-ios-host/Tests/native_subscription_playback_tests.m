@@ -6,8 +6,8 @@
 #import "MediaPlaybackHeaders.h"
 static void check(BOOL ok, NSString *message){if(!ok){NSLog(@"FAILED: %@",message);exit(1);}}
 int main(void){@autoreleasepool{
-    NSDictionary *scoped=MediaPlaybackHeadersScopedToURL(@{@"Authorization":@"private",@"X-API-Key":@"private",@"User-Agent":@"agent"},[NSURL URLWithString:@"https://one.test/live"],[NSURL URLWithString:@"https://two.test/replay"]);
-    check(!scoped[@"Authorization"]&&!scoped[@"X-API-Key"]&&[scoped[@"User-Agent"] isEqual:@"agent"],@"cross-origin replay cannot leak source credentials");
+    NSDictionary *scoped=MediaPlaybackHeadersScopedToURL(@{@"Authorization":@"private",@"X-API-Key":@"private",@"X-Auth":@"private",@"X-Access-Key":@"private",@"User-Agent":@"agent",@"Range":@"bytes=0-"},[NSURL URLWithString:@"https://one.test/live"],[NSURL URLWithString:@"https://two.test/replay"]);
+    check(!scoped[@"Authorization"]&&!scoped[@"X-API-Key"]&&!scoped[@"X-Auth"]&&!scoped[@"X-Access-Key"]&&[scoped[@"User-Agent"] isEqual:@"agent"]&&[scoped[@"Range"] isEqual:@"bytes=0-"],@"cross-origin replay retains only safe standard transport headers");
     NSDictionary *sameOrigin=MediaPlaybackHeadersScopedToURL(@{@"Authorization":@"private",@"X-Session-Token":@"session"},[NSURL URLWithString:@"https://one.test/live"],[NSURL URLWithString:@"https://one.test/key"]);
     check([sameOrigin[@"Authorization"] isEqual:@"private"]&&[sameOrigin[@"X-Session-Token"] isEqual:@"session"],@"same-origin media keys retain required credentials");
     check(MediaPlaybackSniffContainerFormat([@"<?xml version=\"1.0\"?><tv></tv>" dataUsingEncoding:NSUTF8StringEncoding])==nil,@"XMLTV is not DASH");

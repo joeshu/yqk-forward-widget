@@ -28,6 +28,7 @@
 #import <WebKit/WebKit.h>
 #import "MediaEpisodeSelectionViewController.h"
 #import "TVBoxCatalogStore.h"
+#import "M3UParser.h"
 #import "TVBoxCatalogViewController.h"
 #import "CNPlayerCrashGuard.h"
 #import "LogCenterViewController.h"
@@ -575,7 +576,7 @@ static void next(NSArray *steps, NSUInteger index) {
             [mediaHome.view layoutIfNeeded];UIStackView *homeSelectors=[mediaHome valueForKey:@"selectionRow"];UIButton *homeSource=[mediaHome valueForKey:@"sourceSelectButton"],*homeProvider=[mediaHome valueForKey:@"providerSelectButton"],*homeMenu=[mediaHome valueForKey:@"homeMenuButton"];MediaFeedView *feed=[mediaHome valueForKey:@"grid"];UIScrollView *home=[mediaHome valueForKey:@"homeScroll"];
             check(feed==home&&[feed isKindOfClass:MediaFeedView.class],@"media uses one reusable vertical feed for featured and category content");CGFloat safeTop=mediaHome.view.safeAreaInsets.top+4;
             check(fabs(CGRectGetMinY(homeSelectors.frame)-safeTop)<1.5&&fabs(homeSelectors.spacing-8)<.1,@"unified media selectors stay inside the safe area with stable spacing");
-            check(homeSource.isAccessibilityElement&&homeProvider.isAccessibilityElement&&homeMenu.menu.children.count==2,@"unified media exposes resource, site and a focused favorites/history menu");
+            check(homeSource.isAccessibilityElement&&homeProvider.isAccessibilityElement&&homeMenu.menu.children.count==3&&[[(UIAction *)homeMenu.menu.children.lastObject identifier] isEqual:@"media.local"],@"unified media exposes resource, site and favorites/history/local media actions");
             check(SmokeViewWithAccessibilityIdentifier(mediaHome.view,@"media-home-browse-button")==nil&&SmokeViewWithAccessibilityIdentifier(mediaHome.view,@"media-home-search-button")==nil&&[mediaHome valueForKey:@"floatingHomeSearchButton"]!=nil,@"media keeps one floating search entry and removes the home-library toggle");
             check(homeSource.titleLabel.lineBreakMode==NSLineBreakByTruncatingTail&&home.contentInset.bottom>=actualMediaOverlayInset,@"media selector labels remain accessible and final posters can scroll above navigation");
             navigationProbe=[UIViewController new];navigationProbe.title=@"交互返回取消测试";[nav pushViewController:navigationProbe animated:NO];
@@ -1145,7 +1146,7 @@ static void next(NSArray *steps, NSUInteger index) {
           @{ @"until":^BOOL{return mediaPage&&mediaPage.isHomeMode&&![[mediaPage valueForKey:@"loading"] boolValue]&&[[mediaPage valueForKey:@"items"] count]==4;},@"timeout":@100,@"run":^{
             MediaFeedView *feed=[mediaPage valueForKey:@"grid"];UIStackView *selectors=[mediaPage valueForKey:@"selectionRow"];UIButton *source=[mediaPage valueForKey:@"sourceSelectButton"],*provider=[mediaPage valueForKey:@"providerSelectButton"],*my=[mediaPage valueForKey:@"homeMenuButton"];[mediaPage.view layoutIfNeeded];
             check(feed==[mediaPage valueForKey:@"homeScroll"]&&feed.sections.count>0,@"media automatically loads only its selected site into one vertical feed");
-            check(!source.hidden&&!provider.hidden&&selectors.arrangedSubviews.count==3&&my.menu.children.count==2,@"unified media keeps independent resource and site selectors with one My entry");
+            check(!source.hidden&&!provider.hidden&&selectors.arrangedSubviews.count==3&&my.menu.children.count>=2&&[[(UIAction *)my.menu.children.lastObject identifier] isEqual:@"media.local"],@"unified media keeps independent resource/site selectors and exposes Local Media in its My menu");
             check(CGRectGetMinY(feed.frame)<1.5&&[mediaPage valueForKey:@"homeTopImmersiveGradient"]!=nil,@"media content extends under a readable immersive status region");
             check(CGRectGetHeight(source.frame)>=44&&CGRectGetHeight(provider.frame)>=44&&feed.contentInset.bottom>=[[mediaPage valueForKey:@"bottomOverlayInset"] doubleValue],@"media selectors have 44 pt hit targets and safe bottom scrolling space");
             capture(self.window,@"16-media-unified");[provider sendActionsForControlEvents:UIControlEventTouchUpInside];
@@ -1235,7 +1236,7 @@ static void next(NSArray *steps, NSUInteger index) {
             AVPlayer *player=[mediaPlayback valueForKey:@"player"];AVURLAsset *asset=(AVURLAsset *)player.currentItem.asset;check([asset.URL.absoluteString containsString:@"play=fast"],@"late slow parse cannot replace the latest selected episode");UILabel *playingEpisode=(id)[mediaPlayback valueForKey:@"episodeTitle"];check([playingEpisode.text containsString:@"正在播放"]&&[playingEpisode.text containsString:@"快速切换"],@"player episode label follows the latest selected episode after rapid switching");UILabel *floatingEpisodeLabel=(id)[mediaPlayback valueForKey:@"inlineNowPlayingLabel"];check([floatingEpisodeLabel.text containsString:@"快速切换"],@"floating now-playing badge follows rapid episode changes");capture(self.window,@"20-media-fast-switch");UIStackView *routes=[mediaPlayback valueForKey:@"lineButtons"];if(routes.arrangedSubviews.count>1){[(UIButton *)routes.arrangedSubviews[1] sendActionsForControlEvents:UIControlEventTouchUpInside];UILabel *lineStatus=[mediaPlayback valueForKey:@"status"];check([[mediaPlayback valueForKey:@"episodeIndex"] integerValue]==-1&&[mediaPlayback valueForKey:@"result"]==nil&&[lineStatus.text containsString:@"无法确认对应分集"],@"switching to a line without the current episode stops playback instead of selecting an unrelated episode");[mediaPlayback openEpisodeSelection];UIViewController *picker=nav.topViewController;if([picker isKindOfClass:MediaEpisodeSelectionViewController.class]){[picker loadViewIfNeeded];NSArray *lineEpisodes=[picker valueForKey:@"episodeButtons"];if(lineEpisodes.count)[(UIButton *)lineEpisodes[0] sendActionsForControlEvents:UIControlEventTouchUpInside];else check(NO,@"the user can explicitly choose an episode from the newly selected route");}else check(NO,@"an unmatched route offers the shared episode selector");}else check(NO,@"film player offers the second source route for HLS compatibility check");
           }},
           @{ @"timeout":@16,@"until":^BOOL{AVPlayer *player=[mediaPlayback valueForKey:@"player"];UILabel *status=[mediaPlayback valueForKey:@"status"];AVURLAsset *asset=(AVURLAsset *)player.currentItem.asset;return player.currentItem.status==AVPlayerItemStatusReadyToPlay&&[asset.URL.pathExtension.lowercaseString isEqual:@"m3u8"]&&[status.text containsString:@"视频首帧已就绪"];},@"run":^{
-            AVPlayer *player=[mediaPlayback valueForKey:@"player"];UILabel *status=[mediaPlayback valueForKey:@"status"];AVURLAsset *asset=(AVURLAsset *)player.currentItem.asset;NSDictionary *result=[mediaPlayback valueForKey:@"result"];check([result[@"parse"] boolValue]&&[result[@"format"] isEqual:@"hls"],@"legacy parse=1 HLS media result is routed to AVPlayer when the returned URL is a real HLS manifest");check([asset.URL.pathExtension.lowercaseString isEqual:@"m3u8"],@"plugin HLS route remains a native HLS asset");check([status.text containsString:@"视频首帧已就绪"],@"AVPlayer decodes and displays a real frame from the imported-source HLS fixture");[mediaPlayback seekActiveEngineToTime:0 completion:nil];check(player.currentItem.status==AVPlayerItemStatusReadyToPlay,@"the native player accepts seeking without a caller completion block");capture(self.window,@"20b-media-hls-first-frame");[nav popToViewController:mediaPage animated:NO];
+            AVPlayer *player=[mediaPlayback valueForKey:@"player"];UILabel *status=[mediaPlayback valueForKey:@"status"];AVURLAsset *asset=(AVURLAsset *)player.currentItem.asset;NSDictionary *result=[mediaPlayback valueForKey:@"result"];check([[mediaPlayback valueForKey:@"playbackWantsPlayback"] boolValue],@"explicit episode selection resumes playback after a paused route");check([result[@"parse"] boolValue]&&[result[@"format"] isEqual:@"hls"],@"legacy parse=1 HLS media result is routed to AVPlayer when the returned URL is a real HLS manifest");check([asset.URL.pathExtension.lowercaseString isEqual:@"m3u8"],@"plugin HLS route remains a native HLS asset");check([status.text containsString:@"视频首帧已就绪"],@"AVPlayer decodes and displays a real frame from the imported-source HLS fixture");[mediaPlayback seekActiveEngineToTime:0 completion:nil];check(player.currentItem.status==AVPlayerItemStatusReadyToPlay,@"the native player accepts seeking without a caller completion block");capture(self.window,@"20b-media-hls-first-frame");[nav popToViewController:mediaPage animated:NO];
             SmokePlaybackStartupLifecycle();
             SmokePlaybackPrefetchReuse();
             SmokeDetailCacheLifecycle();
@@ -1249,6 +1250,28 @@ static void next(NSArray *steps, NSUInteger index) {
             check([catalog[@"sites"][0][@"supported"] boolValue]&&[catalog[@"sites"][0][@"api"] isEqual:@"https://provider.test/index.js?token=kept"],@"TVBox direct script retains its complete source URL");
             check(![catalog[@"sites"][1][@"supported"] boolValue],@"unsupported TVBox JAR API is shown as unavailable");
             check([catalog[@"lives"] count]==1,@"TVBox live-list URL remains a separate subscription entry");
+            NSDictionary *inlineFixture=@{
+                @"name":@"Inline Fixture",
+                @"lives":@[@{
+                    @"name":@"Inline Live",
+                    @"ua":@"Global Fixture Agent",
+                    @"epg":@"https://guide.test/{name}.xml",
+                    @"logo":@"https://logo.test/{name}.png",
+                    @"channels":@[@{
+                        @"name":@"CCTV 1",
+                        @"epgID":@"cctv1",
+                        @"logo":@"https://logo.test/cctv1.png",
+                        @"urls":@[@"https://live.test/cctv1.m3u8"],
+                        @"headers":@{@"X-Channel-Key":@"fixture-secret"}
+                    }]
+                }]
+            };
+            NSData *inlineData=[NSJSONSerialization dataWithJSONObject:inlineFixture options:0 error:NULL];
+            NSDictionary *inlineCatalog=[TVBoxCatalogStore parseData:inlineData sourceURL:@"https://provider.test/inline.json" error:NULL];
+            NSDictionary *inlineLive=[inlineCatalog[@"lives"] firstObject];
+            NSArray<M3UChannel *> *parsedInline=[M3UParser parse:inlineLive[@"inlinePlaylist"] baseURL:nil];
+            M3UChannel *inlineChannel=parsedInline.firstObject;
+            check([inlineLive[@"ua"] isEqual:@"Global Fixture Agent"]&&[inlineLive[@"epg"] isEqual:@"https://guide.test/{name}.xml"]&&[inlineLive[@"logo"] isEqual:@"https://logo.test/{name}.png"]&&[inlineChannel.headers[@"User-Agent"] isEqual:@"Global Fixture Agent"]&&[inlineChannel.headers[@"X-Channel-Key"] isEqual:@"fixture-secret"]&&[inlineChannel.epgID isEqual:@"cctv1"]&&[inlineChannel.logo isEqual:@"https://logo.test/cctv1.png"],@"TVBox inline live keeps UA, per-channel headers, EPG and logo metadata through playlist parsing");
             if(catalog)[TVBoxCatalogStore saveCatalog:catalog];
             TVBoxCatalogViewController *catalogPage=[TVBoxCatalogViewController new];catalogSmokePage=catalogPage;catalogPage.catalog=[TVBoxCatalogStore catalogForID:catalog[@"id"]]?:catalog;[nav pushViewController:catalogPage animated:NO];
             check([catalogPage.tableView numberOfSections]==2&&[catalogPage.tableView numberOfRowsInSection:0]==2,@"resource collection separates script sites from live lists");

@@ -10,6 +10,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic,copy) NSDictionary *detail;
 @property(nonatomic,strong) MediaAPIClient *client;
 @property(nonatomic,copy) void (^onSelectEpisode)(NSDictionary *result,NSDictionary *context);
+@property(nonatomic,copy) dispatch_block_t onPlaybackReturn;
 @property(nonatomic) NSInteger selectedLineIndex;
 @property(nonatomic) NSInteger selectedEpisodeIndex;
 @property(nonatomic) NSInteger selectedSeasonIndex;

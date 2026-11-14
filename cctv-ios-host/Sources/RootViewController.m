@@ -474,15 +474,14 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
         self.previewThumbView.frame=CGRectMake(MAX(textX+60,width-accessorySpace-54),MAX(4,floor((height-30)/2)),48,30);
         rightExtra+=54;
     }
-    CGFloat textWidth=MAX(0,width-textX-accessorySpace-rightExtra);
-    self.textLabel.frame=CGRectMake(textX,top,textWidth,titleHeight);
-    self.detailTextLabel.frame=CGRectMake(textX,top+titleHeight+3,textWidth,detailHeight);
+    CGFloat textWidth=MAX(0,width-textX-accessorySpace-rightExtra),badgeWidth=0,badgeX=0;
     if(!self.telemetryBadgeLabel.hidden&&self.telemetryBadgeLabel.text.length){
         CGSize fit=[self.telemetryBadgeLabel sizeThatFits:CGSizeMake(130,16)];
-        CGFloat bw=MIN(126,MAX(44,ceil(fit.width)+8));
-        CGFloat bx=MAX(textX+40,width-accessorySpace-rightExtra-bw-4);
-        self.telemetryBadgeLabel.frame=CGRectMake(bx,top,bw,MIN(16,titleHeight));
+        badgeWidth=MIN(126,MAX(44,ceil(fit.width)+8));badgeX=MAX(textX+40,width-accessorySpace-rightExtra-badgeWidth-4);
+        textWidth=MIN(textWidth,MAX(0,badgeX-textX-4));self.telemetryBadgeLabel.frame=CGRectMake(badgeX,top,badgeWidth,MIN(16,titleHeight));
     }
+    self.textLabel.frame=CGRectMake(textX,top,textWidth,titleHeight);
+    self.detailTextLabel.frame=CGRectMake(textX,top+titleHeight+3,MAX(0,width-textX-accessorySpace-rightExtra),detailHeight);
 }
 @end
 
@@ -520,6 +519,7 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 @property (nonatomic, strong) UIButton *liveResourceCapsule;
 @property (nonatomic, strong) UIButton *playPauseBtn;
 @property (nonatomic, strong) UIButton *muteBtn;
+@property (nonatomic, strong) UIButton *fullscreenBtn;
 @property (nonatomic, strong) UIButton *routeBtn;
 @property (nonatomic, strong) UIButton *epgBtn;
 @property (nonatomic, strong) UIButton *castBtn;
@@ -1286,10 +1286,11 @@ configureCatalogNavigation;
     self.castBtn = [self barButton:@"投屏" action:@selector(showCastingCenter)];
     self.castBtn.accessibilityIdentifier = @"player.control.cast";
     self.moreBtn = [self barButton:@"更多" action:@selector(showMorePlaybackActions)];
-    UIButton *fullscreenControl=[self barButton:@"全屏" action:@selector(toggleFullscreen)];
-    for (UIButton *b in @[self.playPauseBtn, self.muteBtn, fullscreenControl, self.moreBtn]) {
+    self.fullscreenBtn=[self barButton:@"全屏" action:@selector(toggleFullscreen)];self.fullscreenBtn.accessibilityIdentifier=@"player.control.fullscreen";
+    for (UIButton *b in @[self.playPauseBtn, self.muteBtn, self.fullscreenBtn, self.moreBtn]) {
         [self.controlBar addArrangedSubview:b];
     }
+    [self updatePlaybackControlAccessibility];
     self.hiddenRoutePicker = [[AVRoutePickerView alloc] initWithFrame:CGRectMake(-100, -100, 1, 1)];
     self.hiddenRoutePicker.prioritizesVideoDevices = YES;
     self.hiddenRoutePicker.alpha = 0.01;
@@ -1316,9 +1317,10 @@ configureCatalogNavigation;
 - (UIButton *)barButton:(NSString *)title action:(SEL)action {
     UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
     [b setTitle:title forState:UIControlStateNormal];
-    NSDictionary<NSString *,NSString *> *symbols=@{@"暂停":@"pause.fill",@"播放":@"play.fill",@"继续播放":@"play.circle.fill",@"静音":@"speaker.wave.2.fill",@"线路":@"antenna.radiowaves.left.and.right",@"节目单":@"list.bullet.rectangle",@"投屏":@"airplayvideo",@"投屏中":@"tv.and.mediabox.fill",@"更多":@"ellipsis.circle"};
+    NSDictionary<NSString *,NSString *> *symbols=@{@"暂停":@"pause.fill",@"播放":@"play.fill",@"继续播放":@"play.circle.fill",@"静音":@"speaker.wave.2.fill",@"线路":@"antenna.radiowaves.left.and.right",@"节目单":@"list.bullet.rectangle",@"投屏":@"airplayvideo",@"投屏中":@"tv.and.mediabox.fill",@"更多":@"ellipsis.circle",@"全屏":@"arrow.up.left.and.arrow.down.right",@"退出全屏":@"arrow.down.right.and.arrow.up.left"};
     NSString *symbol=symbols[title];
     if(symbol){UIImageSymbolConfiguration *sc=[UIImageSymbolConfiguration configurationWithPointSize:11 weight:UIImageSymbolWeightSemibold];[b setImage:[UIImage systemImageNamed:symbol withConfiguration:sc] forState:UIControlStateNormal];b.imageEdgeInsets=UIEdgeInsetsMake(0,-2,0,3);}
+    b.accessibilityLabel=title;
     b.titleLabel.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold]];
     b.titleLabel.adjustsFontForContentSizeCategory = YES;
     // 大字体下 5 个等宽按钮放不下 12pt 放大标题：允许缩到 60% 而不是截断。
@@ -1331,7 +1333,7 @@ configureCatalogNavigation;
     b.layer.cornerCurve = kCACornerCurveContinuous;
     b.layer.borderWidth = 0.65;
     b.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.22].CGColor;
-    if(UIContentSizeCategoryIsAccessibilityCategory(self.traitCollection.preferredContentSizeCategory))b.titleLabel.hidden=YES;
+    b.titleLabel.hidden=UIContentSizeCategoryIsAccessibilityCategory(self.traitCollection.preferredContentSizeCategory);
     b.titleLabel.layer.shadowColor = UIColor.blackColor.CGColor;
     b.titleLabel.layer.shadowOpacity = 0.72;
     b.titleLabel.layer.shadowRadius = 2.0;
@@ -1339,6 +1341,13 @@ configureCatalogNavigation;
     HostInstallPressFeedback(b);
     [b addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
     return b;
+}
+
+- (void)updatePlaybackControlAccessibility {
+    BOOL large=UIContentSizeCategoryIsAccessibilityCategory(self.traitCollection.preferredContentSizeCategory);
+    NSMutableArray<UIButton *> *buttons=[NSMutableArray array];for(UIButton *button in @[self.playPauseBtn?:NSNull.null,self.muteBtn?:NSNull.null,self.fullscreenBtn?:NSNull.null,self.moreBtn?:NSNull.null])if([button isKindOfClass:UIButton.class])[buttons addObject:button];for(UIButton *button in buttons)button.titleLabel.hidden=large;
+    self.fullscreenBtn.accessibilityLabel=self.fullscreen?@"退出全屏":@"全屏";
+    self.fullscreenBtn.accessibilityHint=self.fullscreen?@"返回频道播放页面":@"全屏显示当前频道";
 }
 
 - (void)setLiveOverlayHidden:(BOOL)hidden {
@@ -2988,6 +2997,7 @@ configureCatalogNavigation;
     }
     if(previousTraitCollection && ![previousTraitCollection.preferredContentSizeCategory isEqualToString:self.traitCollection.preferredContentSizeCategory]){
         [self applyFontSizeOverride];
+        [self updatePlaybackControlAccessibility];
         [self.channelGrid.collectionViewLayout invalidateLayout];
         [self.channelGrid reloadData];
         [self.table reloadData];
@@ -2997,6 +3007,7 @@ configureCatalogNavigation;
 
 - (void)toggleFullscreen {
     self.fullscreen = !self.fullscreen;
+    NSString *title=self.fullscreen?@"退出全屏":@"全屏";[self.fullscreenBtn setTitle:title forState:UIControlStateNormal];NSString *symbol=self.fullscreen?@"arrow.down.right.and.arrow.up.left":@"arrow.up.left.and.arrow.down.right";[self.fullscreenBtn setImage:[UIImage systemImageNamed:symbol] forState:UIControlStateNormal];self.fullscreenBtn.accessibilityLabel=title;self.fullscreenBtn.accessibilityHint=self.fullscreen?@"返回频道播放页面":@"全屏显示当前频道";
     if (self.fullscreen) {
         // 防御：播放器可能在非展开态被隐藏，全屏时必须可见；具体布局由
         // viewDidLayoutSubviews 接管（全屏分支给 playerBox 全屏 frame）。
@@ -3005,6 +3016,7 @@ configureCatalogNavigation;
         self.tabPage.view.hidden=NO;
     }
     [self configureCatalogNavigation];
+    [self updatePlaybackControlAccessibility];
     [self setNeedsStatusBarAppearanceUpdate];
     [self.view setNeedsLayout];
     [self relayoutPlayer];

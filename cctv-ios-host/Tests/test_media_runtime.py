@@ -475,11 +475,20 @@ class Spider:
                                                 'header': {'X-Quality': 'specific'}}]})
         self.assertEqual(value['alternates'][0]['headers'], {'X-Quality': 'specific'})
 
+    def test_quality_alternates_preserve_codec_capability_metadata(self):
+        value = media.playback({'url': 'https://a.test/default.m3u8', 'alternates': [
+            {'name': 'VP9', 'url': 'https://a.test/vp9.webm', 'videoCodec': 'VP9'},
+            {'name': 'H264', 'url': 'https://a.test/h264.mp4', 'videoCodec': 'AVC1'}]})
+        self.assertEqual([row['videoCodec'] for row in value['alternates']], ['VP9', 'AVC1'])
+
     def test_plugin_error_summary_keeps_reason_but_redacts_signed_urls(self):
         value = safe_error_summary('source timeout at https://cdn.test/session?access_token=private-value')
         self.assertIn('source timeout', value)
         self.assertNotIn('cdn.test', value)
         self.assertNotIn('private-value', value)
+        xtream = safe_error_summary('failed /movie/xtream-user/private-password/42.mp4')
+        self.assertNotIn('xtream-user', xtream)
+        self.assertNotIn('private-password', xtream)
         self.assertLessEqual(len(safe_error_summary('x' * 500)), 180)
 
     def test_busy_spider_does_not_execute_concurrently(self):

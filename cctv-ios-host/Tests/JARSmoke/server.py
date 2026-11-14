@@ -3,8 +3,16 @@ import http.server
 import json
 from pathlib import Path
 import sys
+import threading
 
 root=Path(__file__).resolve().parents[1]/'JARFixture'
+log_lock=threading.Lock()
+
+def log_record(value):
+    with log_lock:
+        sys.stdout.write(json.dumps(value,separators=(',',':'))+'\n')
+        sys.stdout.flush()
+
 class Fixture(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path=='/fixture.jar':
@@ -26,7 +34,7 @@ class Fixture(http.server.BaseHTTPRequestHandler):
         self.send_header('Content-Length',str(end-start+1))
         if status==206:self.send_header('Content-Range',f'bytes {start}-{end}/{len(data)}')
         self.end_headers();self.wfile.write(data[start:end+1])
-        print(json.dumps({'path':self.path,'status':status,'jar_header':bool(self.headers.get('X-Jar-Fixture')),'media_header':bool(self.headers.get('X-Media-Fixture'))}),flush=True)
+        log_record({'path':self.path,'status':status,'jar_header':bool(self.headers.get('X-Jar-Fixture')),'media_header':bool(self.headers.get('X-Media-Fixture'))})
     def log_message(self,*args):pass
 server=http.server.ThreadingHTTPServer(('127.0.0.1',0),Fixture)
 Path(sys.argv[1]).write_text(str(server.server_port));server.serve_forever()

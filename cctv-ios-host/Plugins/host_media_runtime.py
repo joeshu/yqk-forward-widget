@@ -3,7 +3,7 @@
 Only explicitly enabled packages are loaded. This module never resolves a stream
 by executing a plugin during import/inspection of an archive.
 """
-from host_media_capabilities import NETWORK_TRANSPORTS, CICADA_FORMATS, UNSUPPORTED_CONTAINERS, AV_FORMATS
+from host_media_capabilities import NETWORK_TRANSPORTS, CICADA_FORMATS, UNSUPPORTED_CONTAINERS, UNSUPPORTED_VIDEO_CODECS, AV_FORMATS
 import builtins
 import collections
 import importlib
@@ -228,6 +228,7 @@ def cards(value):
         result.append({'id': str(identifier), 'name': str(name),
                        'poster': poster_url,
                        'remarks': _clean_meta_text(row.get('remarks', row.get('vod_remarks', ''))),
+                       **({'directory': True} if row.get('directory') is True else {}),
                        **({'posterHeaders': poster_headers} if poster_headers else {})})
     return result
 
@@ -236,6 +237,9 @@ def listing(value, page=1):
     value = unwrap_envelope(value, {'list', 'items'})
     data = value if isinstance(value, dict) else {}
     result = {'items': cards(value), 'page': int(data.get('page') or page)}
+    for key in ('categoryName', 'parentID', 'parentName'):
+        if isinstance(data.get(key), str):
+            result[key] = data[key]
     for name in ('pagecount', 'total', 'limit'):
         if data.get(name) is not None:
             try:
@@ -650,7 +654,7 @@ def playback(value, _depth=0):
                 merged = dict(value, url=nested)
                 return playback(merged)
     transport_keys = ('format', 'mediaType', 'playbackType', 'playerType', 'contentType', 'content_type',
-                      'mimeType', 'mime', 'parse', 'jx', 'proxy', 'requiresWebPlayback', 'webPlayback')
+                      'mimeType', 'mime', 'parse', 'jx', 'proxy', 'requiresWebPlayback', 'webPlayback', 'videoCodec', 'capabilityStatus', 'capabilityReason', 'capabilityReasonMessage')
     source_transport = {key: value[key] for key in transport_keys if key in value}
     headers = merge_media_headers(value.get('headers', {}), value.get('header', {}),
                                   value.get('customHeaders', {}))
@@ -668,7 +672,7 @@ def playback(value, _depth=0):
         # Some spiders put transport metadata beside the nested media URL.
         # Keep it before replacing the object with its URL string.
         for key in ('format', 'mediaType', 'playbackType', 'playerType', 'contentType', 'content_type',
-                    'mimeType', 'mime', 'parse', 'jx', 'proxy', 'requiresWebPlayback', 'webPlayback'):
+                    'mimeType', 'mime', 'parse', 'jx', 'proxy', 'requiresWebPlayback', 'webPlayback', 'videoCodec', 'capabilityStatus', 'capabilityReason', 'capabilityReasonMessage'):
             if key not in value and key in url:
                 value[key] = url[key]
         if 'proxy' in value:
@@ -682,7 +686,7 @@ def playback(value, _depth=0):
             first = choices[0] if choices else None
             if first:
                 for key in ('format', 'mediaType', 'playbackType', 'playerType', 'contentType', 'content_type',
-                            'mimeType', 'mime', 'parse', 'jx', 'requiresWebPlayback', 'webPlayback'):
+                            'mimeType', 'mime', 'parse', 'jx', 'requiresWebPlayback', 'webPlayback', 'videoCodec', 'capabilityStatus', 'capabilityReason', 'capabilityReasonMessage'):
                     if key not in value and key in first:
                         value[key] = first[key]
                 if 'proxy' not in value and 'proxy' in first:
@@ -708,7 +712,7 @@ def playback(value, _depth=0):
                 value['proxy'] = first['proxy']
                 proxy_requested = enabled(first['proxy'])
             for key in ('format', 'mediaType', 'playbackType', 'playerType', 'contentType', 'content_type',
-                        'mimeType', 'mime', 'parse', 'jx', 'requiresWebPlayback', 'webPlayback'):
+                        'mimeType', 'mime', 'parse', 'jx', 'requiresWebPlayback', 'webPlayback', 'videoCodec', 'capabilityStatus', 'capabilityReason', 'capabilityReasonMessage'):
                 if key not in value and key in first:
                     value[key] = first[key]
             first_headers = merge_media_headers(first.get('headers', {}), first.get('header', {}),
@@ -727,7 +731,7 @@ def playback(value, _depth=0):
                 if choice_headers:
                     choice['headers'] = choice_headers
                 for key in ('format', 'mediaType', 'playbackType', 'playerType', 'contentType', 'mimeType',
-                            'mime', 'parse', 'jx', 'requiresWebPlayback'):
+                            'mime', 'parse', 'jx', 'requiresWebPlayback', 'videoCodec', 'capabilityStatus', 'capabilityReason', 'capabilityReasonMessage'):
                     if item.get(key) is not None:
                         choice[key] = item[key]
                 alternates.append(choice)
@@ -826,7 +830,7 @@ def playback(value, _depth=0):
                 if choice_headers:
                     choice['headers'] = choice_headers
                 for key in ('format', 'mediaType', 'playbackType', 'playerType', 'contentType', 'mimeType',
-                            'mime', 'parse', 'jx', 'proxy', 'requiresWebPlayback'):
+                            'mime', 'parse', 'jx', 'proxy', 'requiresWebPlayback', 'videoCodec', 'capabilityStatus', 'capabilityReason', 'capabilityReasonMessage'):
                     if item.get(key) is not None:
                         choice[key] = item[key]
                 transport = dict(source_transport)
@@ -894,11 +898,27 @@ def playback(value, _depth=0):
         result['format'] = declared_format[:64]
     if declared_type:
         result['contentType'] = declared_type[:128]
+    codec = str(value.get('videoCodec') or value.get('video_codec') or '').strip().lower()[:64]
+    capability_status = str(value.get('capabilityStatus') or '').strip().lower()
+    capability_reason = str(value.get('capabilityReason') or '').strip()[:96]
+    capability_message = str(value.get('capabilityReasonMessage') or '').strip()[:200]
+    if codec:
+        result['videoCodec'] = codec
+    if capability_status in ('recognized', 'unknown', 'unsupported'):
+        result['capabilityStatus'] = capability_status
+    if capability_reason:
+        result['capabilityReason'] = capability_reason
+    if capability_message:
+        result['capabilityReasonMessage'] = capability_message
     if extension in UNSUPPORTED_CONTAINERS or declared_format in UNSUPPORTED_CONTAINERS:
         result['capabilityStatus'] = 'unsupported'
         result['capabilityReason'] = 'unsupported_container'
         result['nativePlayable'] = False
-    if cicada_media:
+    if codec in UNSUPPORTED_VIDEO_CODECS:
+        result['capabilityStatus'] = 'unsupported'
+        result['capabilityReason'] = 'unsupported_video_codec'
+        result['nativePlayable'] = False
+    if cicada_media and result.get('capabilityStatus') != 'unsupported':
         result['playbackEngine'] = 'cicada'
     for key in ('sessionID', 'expiresAt', 'refreshAfter', 'refreshInterval', 'isLive'):
         if key in value and isinstance(value[key], (str, int, float, bool)):
@@ -1415,7 +1435,7 @@ class PythonSpider:
             # Obscured HLS endpoints may end in .png or have no extension.
             # Honor explicit media metadata before page probes or extraction.
             if isinstance(result, dict) and not any(enabled(result.get(key)) for key in
-                    ('parse', 'jx', 'requiresWebPlayback', 'webPlayback')):
+                    ('parse', 'jx', 'requiresWebPlayback', 'webPlayback', 'videoCodec', 'capabilityStatus', 'capabilityReason', 'capabilityReasonMessage')):
                 declared_format = str(result.get('format') or result.get('mediaType') or
                                       result.get('playbackType') or '').strip().lower()
                 declared_type = str(result.get('contentType') or result.get('content_type') or

@@ -5,5 +5,6 @@ REGISTRY=json.loads(Path(__file__).with_name('media-capabilities.json').read_tex
 NETWORK_TRANSPORTS=frozenset(REGISTRY['networkTransports'])
 CICADA_FORMATS=frozenset(REGISTRY['cicadaFormats'])
 UNSUPPORTED_CONTAINERS=frozenset(REGISTRY['unsupportedContainers'])
+UNSUPPORTED_VIDEO_CODECS=frozenset(REGISTRY['unsupportedVideoCodecs'])
 
 AV_FORMATS=frozenset(REGISTRY['avFormats'])

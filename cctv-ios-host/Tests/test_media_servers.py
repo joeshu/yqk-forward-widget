@@ -10,7 +10,7 @@ from urllib.parse import parse_qs, urlsplit
 PLUGINS=Path(__file__).resolve().parents[1]/'Plugins'
 sys.path.insert(0,str(PLUGINS))
 from host_media_servers import ServerSpider
-from host_media_relay import ll_hls_upstream_url
+from host_media_relay import ll_hls_upstream_url, scoped_headers
 from host_media_runtime import playback
 
 class Handler(BaseHTTPRequestHandler):
@@ -38,7 +38,12 @@ class Handler(BaseHTTPRequestHandler):
         self.rfile.read(int(self.headers.get('Content-Length',0)));self.send({'AccessToken':'session-token','User':{'Id':'user'}})
     def do_PROPFIND(self):
         self.rfile.read(int(self.headers.get('Content-Length',0)))
-        self.send(b'<d:multistatus xmlns:d="DAV:"><d:response><d:href>/dav/a%20movie.mp4</d:href><d:propstat><d:prop><d:displayname>A Movie</d:displayname><d:resourcetype/></d:prop></d:propstat></d:response></d:multistatus>',207)
+        path=urlsplit(self.path).path
+        if path.rstrip('/')=='/dav/Shows':
+            body=b'<d:multistatus xmlns:d="DAV:"><d:response><d:href>/dav/Shows/</d:href><d:propstat><d:prop><d:displayname>Shows</d:displayname><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat></d:response><d:response><d:href>/dav/Shows/S01E01.mkv</d:href><d:propstat><d:prop><d:displayname>Episode One</d:displayname><d:resourcetype/></d:prop></d:propstat></d:response></d:multistatus>'
+        else:
+            body=b'<d:multistatus xmlns:d="DAV:"><d:response><d:href>/dav/</d:href><d:propstat><d:prop><d:displayname>Media</d:displayname><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat></d:response><d:response><d:href>/dav/a%20movie.mp4</d:href><d:propstat><d:prop><d:displayname>A Movie</d:displayname><d:resourcetype/></d:prop></d:propstat></d:response><d:response><d:href>/dav/Shows/</d:href><d:propstat><d:prop><d:displayname>Shows</d:displayname><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat></d:response></d:multistatus>'
+        self.send(body,207)
 
 class MediaServerTests(unittest.TestCase):
     @classmethod
@@ -59,10 +64,21 @@ class MediaServerTests(unittest.TestCase):
         spider=self.spider('xtream',username='a user',password='p/word');self.assertEqual(len(spider.homeContent()['class']),3)
         page=spider.categoryContent('vod:1','2');self.assertEqual(len(page['list']),5);self.assertIn('/movie/a%20user/p%2Fword/60.mp4',spider.playerContent('',page['list'][0]['vod_id'])['url'])
     def test_webdav_listing_play(self):
-        spider=self.spider('webdav',username='u',password='p');spider.base=self.base+'dav/';page=spider.categoryContent('','1');self.assertEqual(len(page['list']),1)
-        result=spider.playerContent('',page['list'][0]['vod_id']);self.assertTrue(result['url'].endswith('/dav/a%20movie.mp4'));self.assertEqual(result['header']['Authorization'],'Basic dTpw')
+        from host_media_servers import WEBDAV_ROOT_ID
+        spider=self.spider('webdav',username='u',password='p');spider.base=self.base+'dav/';home=spider.homeContent();self.assertEqual(home['class'],[{'type_id':WEBDAV_ROOT_ID,'type_name':'根目录'}])
+        page=spider.categoryContent(WEBDAV_ROOT_ID,'1');self.assertEqual(len(page['list']),2);folder=next(row for row in page['list'] if row['directory']);self.assertEqual(folder['name'],'Shows')
+        nested=spider.categoryContent(folder['id'],'1');self.assertEqual(nested['categoryName'],'Shows');self.assertEqual(nested['parentID'],WEBDAV_ROOT_ID);media_row=next(row for row in nested['list'] if not row.get('directory'))
+        result=spider.playerContent('',media_row['vod_id']);self.assertTrue(result['url'].endswith('/dav/Shows/S01E01.mkv'));self.assertEqual(result['header']['Authorization'],'Basic dTpw')
+        with self.assertRaises(ValueError):spider.categoryContent(self.base+'outside/','1')
     def test_rejects_cross_origin_redirect(self):
         with self.assertRaises(ValueError):self.spider()._request('redirect')
+    def test_cross_origin_scope_keeps_only_safe_transport_headers(self):
+        headers={'Authorization':'secret','X-Auth':'secret','X-Access-Key':'secret','User-Agent':'fixture','Accept':'video/*','Range':'bytes=0-'}
+        origin=('https','one.test:443')
+        same=scoped_headers(headers,origin,'https://one.test/segment.ts')
+        cross=scoped_headers(headers,origin,'https://two.test/segment.ts')
+        self.assertEqual(same,headers)
+        self.assertEqual(cross,{'User-Agent':'fixture','Accept':'video/*','Range':'bytes=0-'})
     def test_authentication_error(self):
         with self.assertRaisesRegex(ValueError,'authentication'):self.spider()._request('denied')
     def test_stopped_session(self):
@@ -77,13 +93,18 @@ class MediaServerTests(unittest.TestCase):
     def test_ll_hls_invalid_controls(self):
         for query in ('_HLS_msn=-1','_HLS_skip=no','_HLS_part=1&_HLS_part=2'):
             with self.subTest(query=query),self.assertRaises(ValueError):ll_hls_upstream_url('https://cdn.test/a.m3u8','/?'+query)
-    def test_ll_hls_replaces_stale_controls(self):self.assertEqual(ll_hls_upstream_url('https://cdn.test/a?_HLS_msn=1&sig=%2B','/?_HLS_msn=2'),'https://cdn.test/a?sig=%2B&_HLS_msn=2')
+    def test_ll_hls_replaces_stale_controls(self):self.assertEqual(ll_hls_upstream_url('https://cdn.test/a?_HLS_msn=1&_HLS_part=7&_HLS_skip=v2&sig=%2B','/?_HLS_msn=2'),'https://cdn.test/a?sig=%2B&_HLS_msn=2')
     def test_rtmp_normalization(self):
         for scheme in ('rtmp','rtmps'):
             result=playback({'url':scheme+'://stream.test/live/key'});self.assertEqual(result['playbackEngine'],'cicada');self.assertFalse(result['requiresWebPlayback'])
     def test_unsupported_containers(self):
         for extension in ('avi','wmv','asf','rmvb'):
             result=playback({'url':'https://stream.test/video.'+extension});self.assertEqual(result['capabilityStatus'],'unsupported');self.assertNotEqual(result.get('playbackEngine'),'cicada')
+    def test_codec_metadata_survives_python_playback_normalization(self):
+        result=playback({'url':'https://stream.test/video.webm','videoCodec':'VP9'})
+        self.assertEqual(result['videoCodec'],'vp9');self.assertEqual(result['capabilityStatus'],'unsupported');self.assertEqual(result['capabilityReason'],'unsupported_video_codec')
+        unknown=playback({'url':'https://stream.test/video.webm','videoCodec':'future-codec'})
+        self.assertEqual(unknown['videoCodec'],'future-codec');self.assertNotEqual(unknown.get('capabilityStatus'),'unsupported')
     def test_python_runtime_pipeline(self):
         from host_media_runtime import PythonSpider, MediaRuntime
         with tempfile.TemporaryDirectory() as directory:
@@ -98,6 +119,18 @@ class MediaServerTests(unittest.TestCase):
                 episode=detail['lines'][0]['episodes'][0]
                 result=runtime.call('play',{'id':episode['id'],'lineId':detail['lines'][0]['id']})
                 self.assertEqual(result['headers']['X-Emby-Token'],'key')
+            finally:runtime.close()
+    def test_webdav_runtime_preserves_folder_navigation_metadata(self):
+        from host_media_servers import WEBDAV_ROOT_ID
+        from host_media_runtime import PythonSpider, MediaRuntime
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory,'server.py').write_text('from host_media_servers import ServerSpider\nclass Spider(ServerSpider):\n    pass\n')
+            runtime=MediaRuntime(PythonSpider(directory,'server.py',{'type':'webdav','url':self.base+'dav/','username':'u','password':'p'}))
+            try:
+                root=runtime.call('category',{'categoryId':WEBDAV_ROOT_ID,'page':1});folder=next(row for row in root['items'] if row.get('directory'))
+                nested=runtime.call('category',{'categoryId':folder['id'],'page':1})
+                self.assertEqual((nested['categoryName'],nested['parentID'],nested['parentName']),('Shows',WEBDAV_ROOT_ID,'根目录'))
+                self.assertTrue(any(not row.get('directory') for row in nested['items']))
             finally:runtime.close()
     def test_webdav_cannot_escape_collection(self):
         spider=self.spider('webdav');spider.base=self.base+'dav/'
@@ -125,9 +158,9 @@ class MediaServerTests(unittest.TestCase):
     def test_redirect_strips_custom_credentials(self):
         from host_media_relay import ScopedRedirect
         from urllib.request import Request
-        request=Request('https://one.test/video',headers={'Authorization':'private','X-API-Key':'private','X-Session':'private','User-Agent':'agent'})
+        request=Request('https://one.test/video',headers={'Authorization':'private','X-API-Key':'private','X-Session':'private','X-Auth':'private','X-Access-Key':'private','User-Agent':'agent','Range':'bytes=0-'})
         redirected=ScopedRedirect().redirect_request(request,None,302,'redirect',{},'https://two.test/video')
         headers={key.lower():value for key,value in redirected.header_items()}
-        self.assertNotIn('authorization',headers);self.assertNotIn('x-api-key',headers);self.assertNotIn('x-session',headers);self.assertEqual(headers['user-agent'],'agent')
+        self.assertNotIn('authorization',headers);self.assertNotIn('x-api-key',headers);self.assertNotIn('x-session',headers);self.assertNotIn('x-auth',headers);self.assertNotIn('x-access-key',headers);self.assertEqual(headers['user-agent'],'agent');self.assertEqual(headers['range'],'bytes=0-')
     def test_generated_registry(self):
         spec=importlib.util.spec_from_file_location('generator',PLUGINS.parent/'Scripts/generate_media_capabilities.py');module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);self.assertEqual((PLUGINS.parent/'Sources/MediaCapabilityRegistry.h').read_text(),module.render())

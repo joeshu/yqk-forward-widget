@@ -25,7 +25,8 @@ class PlaybackHeaderScopeContracts(unittest.TestCase):
     def test_scope_preserves_same_origin_and_standard_https_upgrade(self):
         self.assertIn('([a isEqual:b]&&ap==bp)', self.headers)
         self.assertIn('([a isEqual:@"http"]&&[b isEqual:@"https"]&&ap==80&&bp==443)', self.headers)
-        self.assertIn('containsString:@"token"', self.headers)
+        self.assertIn('NSSet *allowed=[NSSet setWithArray:@[@"accept"', self.headers)
+        self.assertIn('if(![allowed containsObject:key.lowercaseString])', self.headers)
 
 
 if __name__ == '__main__':

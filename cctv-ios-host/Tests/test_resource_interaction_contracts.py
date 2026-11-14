@@ -26,6 +26,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         cls.js_runtime = (ROOT / 'Sources/JSPluginRuntime.m').read_text()
         cls.importer = (ROOT / 'Sources/MediaPackageImporter.m').read_text()
         cls.tvbox = (ROOT / 'Sources/TVBoxCatalogStore.m').read_text()
+        cls.tvbox_controller = (ROOT / 'Sources/TVBoxCatalogViewController.m').read_text()
         cls.services = (ROOT / 'Sources/ServicesViewController.m').read_text()
         cls.plugin_page = (ROOT / 'Sources/PluginViewController.m').read_text()
         cls.profile_store = (ROOT / 'Sources/ProfileStore.m').read_text()
@@ -86,6 +87,47 @@ class ResourceInteractionContracts(unittest.TestCase):
 
     def test_tvbox_type_zero_spider_gets_its_own_unsupported_reason(self):
         self.assertIn('TVBox type 0 为 JS 爬虫', self.tvbox)
+
+    def test_tvbox_alert_retry_is_bounded_cancelled_and_tracks_navigation_attachment(self):
+        self.assertIn('navigation.topViewController==self&&!self.isBeingDismissed&&!self.isMovingFromParentViewController', self.tvbox_controller)
+        self.assertNotIn('waitingForNavigationAttach=navigation&&navigation.topViewController==self&&!self.isBeingDismissed&&!self.isMovingFromParentViewController&&navigation.viewIfLoaded.window', self.tvbox_controller)
+        self.assertIn('retryCount<10', self.tvbox_controller)
+        self.assertIn('100*NSEC_PER_MSEC', self.tvbox_controller)
+        self.assertIn('dispatch_block_cancel(self.pendingAlertRetry)', self.tvbox_controller)
+        self.assertIn('generation!=self.alertPresentationGeneration', self.tvbox_controller)
+
+    def test_import_snapshot_restore_is_edit_guarded_and_write_is_transactional(self):
+        self.assertIn('NSUInteger restoreEditRevision=self.editRevision', self.import_workflow)
+        self.assertIn('owner.editRevision==restoreEditRevision', self.import_workflow)
+        self.assertIn('NSDataWritingAtomic', self.import_workflow)
+        self.assertIn('NSUInteger total=data.length', self.import_workflow)
+        self.assertIn('total<=maximumBytes', self.import_workflow)
+        self.assertIn('if(writeError)*writeError=error', self.import_workflow)
+        self.assertIn('if(success){for(NSURL *file', self.import_workflow)
+        self.assertIn('ResourceImportEnqueueSnapshot(immutable,task,^(BOOL success)', self.import_workflow)
+        self.assertIn('owner.persistentSnapshotAvailable=success&&!blank', self.import_workflow)
+
+    def test_import_recognizes_unsupported_only_playlists_without_offering_empty_saves(self):
+        self.assertIn('BOOL unsupportedOnly=!channels.count&&unsupported.count>0', self.import_workflow)
+        self.assertIn('@"unsupportedOnly":@(unsupportedOnly)', self.import_workflow)
+        self.assertIn('![row[@"unsupportedOnly"] boolValue]', self.import_workflow)
+        self.assertIn('已识别清单，但其中没有 iOS 支持的可导入频道', self.import_workflow)
+
+    def test_webdav_folder_feed_exposes_parent_navigation(self):
+        self.assertIn('WEBDAV_ROOT_ID', (ROOT / 'Plugins/host_media_servers.py').read_text())
+        self.assertIn('listingSection[@"action"]=@"folder-up"', self.detail)
+        self.assertIn('if([item[@"directory"] boolValue])', self.detail)
+        self.assertIn('if([action isEqual:@"folder-up"])', self.detail)
+        self.assertIn('directory?@"文件夹":badgeText', self.feed)
+
+    def test_release_waits_for_verified_build_and_optional_compatibility_job(self):
+        workflow = (ROOT.parent / '.github/workflows/cctv-ios-host.yml').read_text()
+        self.assertIn('needs: [build, media-compat]', workflow)
+        self.assertIn("needs.build.result == 'success'", workflow)
+        self.assertIn("needs['media-compat'].result == 'success'", workflow)
+        self.assertIn("github.ref == 'refs/heads/main'", workflow)
+        self.assertIn('inputs.publish_release == true', workflow)
+        self.assertIn('default: false', workflow)
 
     def test_resource_return_layout_reuses_filters_and_measures_variable_rows(self):
         self.assertIn('@interface CCTVResourceProfileCell : UITableViewCell', self.catalog)
@@ -290,7 +332,9 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('selectionRow.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor constant:14', self.browser)
         self.assertIn('self.selectionRow.spacing=8', self.browser)
         self.assertIn('button.titleLabel.lineBreakMode=NSLineBreakByTruncatingTail', self.browser)
-        self.assertIn('label:@"我的收藏与观看历史"', self.browser)
+        self.assertIn('label:@"我的收藏、历史与本地媒体"', self.browser)
+        self.assertIn('identifier:@"media.local"', self.browser)
+        self.assertIn('pushMediaPage:[LocalMediaViewController new]', self.browser)
         self.assertIn('homeMenuButton.widthAnchor constraintEqualToConstant:44', self.browser)
         self.assertIn('self.floatingSearchBottomConstraint.constant=-(MAX(self.bottomOverlayInset,self.view.safeAreaInsets.bottom)+12)', self.browser)
     def test_bottom_overlay_setters_do_not_reenter_themselves(self):

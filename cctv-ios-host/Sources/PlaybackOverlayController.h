@@ -8,6 +8,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)show;
 - (void)hide;
 - (void)toggle;
+- (void)rearmAutoHide;
 - (void)invalidate;
 @end
 NS_ASSUME_NONNULL_END
