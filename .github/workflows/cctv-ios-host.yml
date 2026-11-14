@@ -332,8 +332,8 @@ jobs:
         run: |
           cd cctv-ios-host/build
           tag="cctv-ios-host-${GITHUB_SHA:0:12}-${GITHUB_RUN_ID}"
-          version=$(unzip -p CCTVHost-unsigned.ipa Payload/CCTVHost.app/Info.plist | python3 -c 'import plistlib,sys; print(plistlib.load(sys.stdin.buffer)["CFBundleShortVersionString"])')
-          build=$(unzip -p CCTVHost-unsigned.ipa Payload/CCTVHost.app/Info.plist | python3 -c 'import plistlib,sys; print(plistlib.load(sys.stdin.buffer)["CFBundleVersion"])')
+          version=$(unzip -p CCTVHost-unsigned.ipa Payload/CCTVHost.app/Info.plist | python3 -c 'import plistlib,sys; print(plistlib.loads(sys.stdin.buffer.read())["CFBundleShortVersionString"])')
+          build=$(unzip -p CCTVHost-unsigned.ipa Payload/CCTVHost.app/Info.plist | python3 -c 'import plistlib,sys; print(plistlib.loads(sys.stdin.buffer.read())["CFBundleVersion"])')
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" CCTVHost-unsigned.ipa CCTVHost-unsigned.ipa.sha256 --clobber
           else

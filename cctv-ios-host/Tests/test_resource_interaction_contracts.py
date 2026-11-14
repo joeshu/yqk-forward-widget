@@ -128,6 +128,8 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn("github.ref == 'refs/heads/main'", workflow)
         self.assertIn('inputs.publish_release == true', workflow)
         self.assertIn('default: false', workflow)
+        self.assertEqual(workflow.count('plistlib.loads(sys.stdin.buffer.read())'), 2)
+        self.assertNotIn('plistlib.load(sys.stdin.buffer)', workflow)
 
     def test_resource_return_layout_reuses_filters_and_measures_variable_rows(self):
         self.assertIn('@interface CCTVResourceProfileCell : UITableViewCell', self.catalog)
