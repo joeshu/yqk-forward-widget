@@ -149,6 +149,12 @@ NSDictionary<NSString *,NSString *> *MediaPlaybackHeadersScopedToURL(NSDictionar
     NSInteger ap=originURL.port?originURL.port.integerValue:([a isEqual:@"https"]?443:80),bp=targetURL.port?targetURL.port.integerValue:([b isEqual:@"https"]?443:80);
     BOOL sameHost=originURL.host.length&&[originURL.host.lowercaseString isEqual:targetURL.host.lowercaseString];
     BOOL trusted=sameHost&&(([a isEqual:b]&&ap==bp)||([a isEqual:@"http"]&&[b isEqual:@"https"]&&ap==80&&bp==443));
-    if(!trusted)for(NSString *key in safe.allKeys){NSString *name=key.lowercaseString;if([@[@"authorization",@"cookie",@"proxy-authorization"] containsObject:name]||[name containsString:@"token"]||[name containsString:@"api-key"]||[name containsString:@"apikey"]||[name containsString:@"signature"]||[name containsString:@"secret"]||[name containsString:@"session"]||[name containsString:@"credential"])[safe removeObjectForKey:key];}
+    if(!trusted){
+        // Cross-origin playback targets may be CDN, parser or relay URLs. Use
+        // an explicit transport-header allowlist so custom credential names
+        // such as X-Auth and X-Access-Key cannot escape by naming convention.
+        NSSet *allowed=[NSSet setWithArray:@[@"accept",@"accept-encoding",@"accept-language",@"cache-control",@"if-range",@"range",@"user-agent"]];
+        for(NSString *key in safe.allKeys)if(![allowed containsObject:key.lowercaseString])[safe removeObjectForKey:key];
+    }
     return safe.copy;
 }

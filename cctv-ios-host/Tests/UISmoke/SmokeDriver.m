@@ -28,6 +28,7 @@
 #import <WebKit/WebKit.h>
 #import "MediaEpisodeSelectionViewController.h"
 #import "TVBoxCatalogStore.h"
+#import "M3UParser.h"
 #import "TVBoxCatalogViewController.h"
 #import "CNPlayerCrashGuard.h"
 #import "LogCenterViewController.h"
@@ -1145,7 +1146,7 @@ static void next(NSArray *steps, NSUInteger index) {
           @{ @"until":^BOOL{return mediaPage&&mediaPage.isHomeMode&&![[mediaPage valueForKey:@"loading"] boolValue]&&[[mediaPage valueForKey:@"items"] count]==4;},@"timeout":@100,@"run":^{
             MediaFeedView *feed=[mediaPage valueForKey:@"grid"];UIStackView *selectors=[mediaPage valueForKey:@"selectionRow"];UIButton *source=[mediaPage valueForKey:@"sourceSelectButton"],*provider=[mediaPage valueForKey:@"providerSelectButton"],*my=[mediaPage valueForKey:@"homeMenuButton"];[mediaPage.view layoutIfNeeded];
             check(feed==[mediaPage valueForKey:@"homeScroll"]&&feed.sections.count>0,@"media automatically loads only its selected site into one vertical feed");
-            check(!source.hidden&&!provider.hidden&&selectors.arrangedSubviews.count==3&&my.menu.children.count==2,@"unified media keeps independent resource and site selectors with one My entry");
+            check(!source.hidden&&!provider.hidden&&selectors.arrangedSubviews.count==3&&my.menu.children.count>=2&&[[(UIAction *)my.menu.children.lastObject identifier] isEqual:@"media.local"],@"unified media keeps independent resource/site selectors and exposes Local Media in its My menu");
             check(CGRectGetMinY(feed.frame)<1.5&&[mediaPage valueForKey:@"homeTopImmersiveGradient"]!=nil,@"media content extends under a readable immersive status region");
             check(CGRectGetHeight(source.frame)>=44&&CGRectGetHeight(provider.frame)>=44&&feed.contentInset.bottom>=[[mediaPage valueForKey:@"bottomOverlayInset"] doubleValue],@"media selectors have 44 pt hit targets and safe bottom scrolling space");
             capture(self.window,@"16-media-unified");[provider sendActionsForControlEvents:UIControlEventTouchUpInside];
@@ -1249,6 +1250,7 @@ static void next(NSArray *steps, NSUInteger index) {
             check([catalog[@"sites"][0][@"supported"] boolValue]&&[catalog[@"sites"][0][@"api"] isEqual:@"https://provider.test/index.js?token=kept"],@"TVBox direct script retains its complete source URL");
             check(![catalog[@"sites"][1][@"supported"] boolValue],@"unsupported TVBox JAR API is shown as unavailable");
             check([catalog[@"lives"] count]==1,@"TVBox live-list URL remains a separate subscription entry");
+            NSDictionary *inlineFixture=@{@"name":@"Inline Fixture",@"lives":@[@{@"name":@"Inline Live",@"ua":@"Global Fixture Agent",@"epg":@"https://guide.test/{name}.xml",@"logo":@"https://logo.test/{name}.png",@"channels":@[@{@"name":@"CCTV 1",@"epgID":@"cctv1",@"logo":@"https://logo.test/cctv1.png",@"urls":@[@"https://live.test/cctv1.m3u8"],@"headers":@{@"X-Channel-Key":@"fixture-secret"}}]}]}]};NSData *inlineData=[NSJSONSerialization dataWithJSONObject:inlineFixture options:0 error:NULL];NSDictionary *inlineCatalog=[TVBoxCatalogStore parseData:inlineData sourceURL:@"https://provider.test/inline.json" error:NULL];NSDictionary *inlineLive=[inlineCatalog[@"lives"] firstObject];NSArray<M3UChannel *> *parsedInline=[M3UParser parse:inlineLive[@"inlinePlaylist"] baseURL:nil];M3UChannel *inlineChannel=parsedInline.firstObject;check([inlineLive[@"ua"] isEqual:@"Global Fixture Agent"]&&[inlineLive[@"epg"] isEqual:@"https://guide.test/{name}.xml"]&&[inlineLive[@"logo"] isEqual:@"https://logo.test/{name}.png"]&&[inlineChannel.headers[@"User-Agent"] isEqual:@"Global Fixture Agent"]&&[inlineChannel.headers[@"X-Channel-Key"] isEqual:@"fixture-secret"]&&[inlineChannel.epgID isEqual:@"cctv1"]&&[inlineChannel.logo isEqual:@"https://logo.test/cctv1.png"],@"TVBox inline live keeps UA, per-channel headers, EPG and logo metadata through playlist parsing");
             if(catalog)[TVBoxCatalogStore saveCatalog:catalog];
             TVBoxCatalogViewController *catalogPage=[TVBoxCatalogViewController new];catalogSmokePage=catalogPage;catalogPage.catalog=[TVBoxCatalogStore catalogForID:catalog[@"id"]]?:catalog;[nav pushViewController:catalogPage animated:NO];
             check([catalogPage.tableView numberOfSections]==2&&[catalogPage.tableView numberOfRowsInSection:0]==2,@"resource collection separates script sites from live lists");

@@ -8,6 +8,7 @@
 #import "TVBoxCatalogStore.h"
 #import "ServiceStore.h"
 #import "M3UParser.h"
+#import "RuntimeDiagnostics.h"
 #import <CommonCrypto/CommonDigest.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
@@ -147,6 +148,7 @@ static id ResourceImportSnapshotBlobs(id value,BOOL storing,NSMutableSet *refere
         NSString *blob=value[@"__cctvhostBlob"];
         if(!storing&&[value count]==1&&[blob isKindOfClass:NSString.class]){
             if(blob.length!=69||[blob rangeOfString:@"^[a-f0-9]{64}\\.blob$" options:NSRegularExpressionSearch].location==NSNotFound){if(error)*error=[NSError errorWithDomain:@"ImportSnapshot" code:2 userInfo:nil];return nil;}
+            [referenced addObject:blob];
             NSData *data=[NSData dataWithContentsOfURL:[ResourceImportBlobDirectory() URLByAppendingPathComponent:blob] options:NSDataReadingMappedIfSafe error:error];if(!data)return nil;
             return ResourceImportSnapshotBlobs(data,NO,referenced,byteCount,error);
         }
@@ -156,30 +158,50 @@ static id ResourceImportSnapshotBlobs(id value,BOOL storing,NSMutableSet *refere
     return value;
 }
 static NSDictionary *ResourceImportReadSnapshot(void) {
-    NSData *data=[NSData dataWithContentsOfURL:ResourceImportSnapshotURL() options:NSDataReadingMappedIfSafe error:NULL];if(!data.length||data.length>80*1024*1024)return nil;
+    const NSUInteger maximumBytes=80*1024*1024;NSData *data=[NSData dataWithContentsOfURL:ResourceImportSnapshotURL() options:NSDataReadingMappedIfSafe error:NULL];if(!data.length||data.length>maximumBytes)return nil;
     id value=[NSPropertyListSerialization propertyListWithData:data options:NSPropertyListImmutable format:NULL error:NULL];
     if(![value isKindOfClass:NSDictionary.class]||![@[@1,@2] containsObject:value[@"version"]])return nil;
-    NSUInteger bytes=0;NSError *error=nil;id restored=ResourceImportSnapshotBlobs(value,NO,[NSMutableSet set],&bytes,&error);return error?nil:restored;
+    NSUInteger bytes=0,total=data.length;NSError *error=nil;NSMutableSet *references=[NSMutableSet set];id restored=ResourceImportSnapshotBlobs(value,NO,references,&bytes,&error);if(error||!restored)return nil;
+    for(NSString *name in references){NSNumber *size=nil;NSURL *blob=[[ResourceImportBlobDirectory() URLByAppendingPathComponent:name] standardizedFileURL];[blob getResourceValue:&size forKey:NSURLFileSizeKey error:&error];if(error||NSUIntegerMax-total<size.unsignedIntegerValue)return nil;total+=size.unsignedIntegerValue;if(total>maximumBytes)return nil;}
+    return total<=maximumBytes?restored:nil;
 }
-static void ResourceImportWriteSnapshot(NSDictionary *snapshot) {
-    NSURL *url=ResourceImportSnapshotURL();NSMutableSet *references=[NSMutableSet set];NSUInteger bytes=0;NSError *error=nil;
-    if(!snapshot.count){[NSFileManager.defaultManager removeItemAtURL:url error:NULL];}
-    else {id external=ResourceImportSnapshotBlobs(snapshot,YES,references,&bytes,&error);if(!external||error)return;
-        NSData *data=[NSPropertyListSerialization dataWithPropertyList:external format:NSPropertyListBinaryFormat_v1_0 options:0 error:&error];if(!data.length||data.length>80*1024*1024||![data writeToURL:url options:NSDataWritingAtomic error:&error])return;
+static BOOL ResourceImportWriteSnapshot(NSDictionary *snapshot,NSError **writeError) {
+    const NSUInteger maximumBytes=80*1024*1024;NSURL *url=ResourceImportSnapshotURL(),*blobDirectory=ResourceImportBlobDirectory();NSMutableSet *references=[NSMutableSet set];NSUInteger bytes=0;NSError *error=nil;
+    NSMutableSet *preexisting=[NSMutableSet set];for(NSURL *file in [NSFileManager.defaultManager contentsOfDirectoryAtURL:blobDirectory includingPropertiesForKeys:nil options:0 error:NULL])if([file.pathExtension isEqual:@"blob"])[preexisting addObject:file.lastPathComponent];
+    BOOL success=NO;
+    if(!snapshot.count)success=![NSFileManager.defaultManager fileExistsAtPath:url.path]||[NSFileManager.defaultManager removeItemAtURL:url error:&error];
+    else {
+        id external=ResourceImportSnapshotBlobs(snapshot,YES,references,&bytes,&error);
+        NSData *data=external&&!error?[NSPropertyListSerialization dataWithPropertyList:external format:NSPropertyListBinaryFormat_v1_0 options:0 error:&error]:nil;
+        NSUInteger total=data.length;
+        if(data.length){for(NSString *name in references){NSNumber *size=nil;NSURL *blob=[blobDirectory URLByAppendingPathComponent:name];[blob getResourceValue:&size forKey:NSURLFileSizeKey error:&error];if(error||NSUIntegerMax-total<size.unsignedIntegerValue){total=NSUIntegerMax;break;}total+=size.unsignedIntegerValue;}}
+        if(!error&&data.length&&total<=maximumBytes)success=[data writeToURL:url options:NSDataWritingAtomic error:&error];
+        else if(!error)error=[NSError errorWithDomain:@"ImportSnapshot" code:3 userInfo:@{NSLocalizedDescriptionKey:@"Import snapshot exceeds the combined 80 MiB limit"}];
     }
-    for(NSURL *file in [NSFileManager.defaultManager contentsOfDirectoryAtURL:ResourceImportBlobDirectory() includingPropertiesForKeys:nil options:0 error:NULL])if([file.pathExtension isEqual:@"blob"]&&![references containsObject:file.lastPathComponent])[NSFileManager.defaultManager removeItemAtURL:file error:NULL];
+    if(success){for(NSURL *file in [NSFileManager.defaultManager contentsOfDirectoryAtURL:blobDirectory includingPropertiesForKeys:nil options:0 error:NULL])if([file.pathExtension isEqual:@"blob"]&&![references containsObject:file.lastPathComponent])[NSFileManager.defaultManager removeItemAtURL:file error:NULL];}
+    else {for(NSURL *file in [NSFileManager.defaultManager contentsOfDirectoryAtURL:blobDirectory includingPropertiesForKeys:nil options:0 error:NULL])if([file.pathExtension isEqual:@"blob"]&&![preexisting containsObject:file.lastPathComponent])[NSFileManager.defaultManager removeItemAtURL:file error:NULL];if(writeError)*writeError=error?:[NSError errorWithDomain:@"ImportSnapshot" code:4 userInfo:nil];}
+    return success;
 }
+
+@interface ResourceImportBackgroundTaskToken : NSObject
+@property(nonatomic) UIBackgroundTaskIdentifier identifier;
+@property(nonatomic) BOOL ended;
+- (void)endIfNeeded;
+@end
+@implementation ResourceImportBackgroundTaskToken
+- (void)endIfNeeded {UIBackgroundTaskIdentifier identifier;@synchronized(self){if(self.ended||self.identifier==UIBackgroundTaskInvalid)return;self.ended=YES;identifier=self.identifier;}dispatch_block_t end=^{[UIApplication.sharedApplication endBackgroundTask:identifier];};if(NSThread.isMainThread)end();else dispatch_async(dispatch_get_main_queue(),end);}
+@end
 static NSObject *ResourceImportSnapshotLock(void) {static NSObject *lock;static dispatch_once_t once;dispatch_once(&once,^{lock=[NSObject new];});return lock;}
-static void ResourceImportEnqueueSnapshot(NSDictionary *snapshot,UIBackgroundTaskIdentifier task) {
-    static NSDictionary *pending;static NSMutableArray<NSNumber *> *tasks;static BOOL writing;
+static void ResourceImportEnqueueSnapshot(NSDictionary *snapshot,ResourceImportBackgroundTaskToken *task,void (^completion)(BOOL)) {
+    static NSDictionary *pending;static NSMutableArray<ResourceImportBackgroundTaskToken *> *tasks;static NSMutableArray *completions;static BOOL writing;
     @synchronized(ResourceImportSnapshotLock()){
-        pending=snapshot;if(!tasks)tasks=[NSMutableArray array];if(task!=UIBackgroundTaskInvalid)[tasks addObject:@(task)];if(writing)return;writing=YES;
+        pending=snapshot;if(!tasks)tasks=[NSMutableArray array];if(!completions)completions=[NSMutableArray array];if(task)[tasks addObject:task];if(completion)[completions addObject:[completion copy]];if(writing)return;writing=YES;
     }
     dispatch_async(ResourceImportSnapshotQueue(),^{
-        for(;;){NSDictionary *latest;NSArray *finishedTasks;
-            @synchronized(ResourceImportSnapshotLock()){latest=pending;pending=nil;if(!latest){writing=NO;finishedTasks=tasks.copy;[tasks removeAllObjects];}}
-            if(!latest){if(finishedTasks.count)dispatch_async(dispatch_get_main_queue(),^{for(NSNumber *identifier in finishedTasks)[UIApplication.sharedApplication endBackgroundTask:identifier.unsignedIntegerValue];});break;}
-            ResourceImportWriteSnapshot(latest);
+        for(;;){NSDictionary *latest;NSArray *finishedTasks,*finishedCompletions;
+            @synchronized(ResourceImportSnapshotLock()){latest=pending;pending=nil;finishedCompletions=completions.copy;[completions removeAllObjects];if(!latest){writing=NO;finishedTasks=tasks.copy;[tasks removeAllObjects];}}
+            if(!latest){if(finishedTasks.count)dispatch_async(dispatch_get_main_queue(),^{for(ResourceImportBackgroundTaskToken *token in finishedTasks)[token endIfNeeded];});break;}
+            NSError *error=nil;BOOL success=ResourceImportWriteSnapshot(latest,&error);dispatch_async(dispatch_get_main_queue(),^{for(void (^callback)(BOOL) in finishedCompletions)callback(success);});
         }
     });
 }
@@ -196,6 +218,7 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
 @interface ResourceImportWorkflowViewController () <UIDocumentPickerDelegate,UITextViewDelegate>
 @property(nonatomic) BOOL restoringSnapshot;
 @property(nonatomic) NSUInteger snapshotRevision;
+@property(nonatomic) NSUInteger editRevision;
 @property(nonatomic,strong) UITextView *address;
 @property(nonatomic,strong) UILabel *addressPlaceholder;
 @property(nonatomic,strong) UIButton *smartClipboardButton;
@@ -247,13 +270,13 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
 - (instancetype)init {
     if((self=[super initWithStyle:UITableViewStyleInsetGrouped])){
         self.candidates=[NSMutableArray array];self.batchRetryIndices=[NSMutableArray array];self.stage=@"粘贴地址，或选择本地文件";self.retryCandidateIndex=NSNotFound;self.selectedImportCategory=-1;self.restoringSnapshot=YES;
-        __weak typeof(self) weakSelf=self;BOOL smoke=[NSProcessInfo.processInfo.arguments containsObject:@"--smoke-port"];NSTimeInterval restoreStarted=NSProcessInfo.processInfo.systemUptime;
+        __weak typeof(self) weakSelf=self;NSUInteger restoreEditRevision=self.editRevision;BOOL smoke=[NSProcessInfo.processInfo.arguments containsObject:@"--smoke-port"];NSTimeInterval restoreStarted=NSProcessInfo.processInfo.systemUptime;
         if(smoke)NSLog(@"IMPORT_RESTORE_QUEUED controller=%p",self);
         dispatch_async(ResourceImportSnapshotQueue(),^{NSDictionary *snapshot=ResourceImportReadSnapshot();
             if(smoke)NSLog(@"IMPORT_RESTORE_READ controller=%p snapshot=%d elapsed=%.2f",weakSelf,snapshot!=nil,NSProcessInfo.processInfo.systemUptime-restoreStarted);
             dispatch_async(dispatch_get_main_queue(),^{
             ResourceImportWorkflowViewController *owner=weakSelf;if(!owner)return;
-            BOOL untouched=owner.generation==0&&!owner.busy&&!owner.address.text.length&&!owner.candidates.count;
+            BOOL untouched=owner.editRevision==restoreEditRevision&&owner.generation==0&&!owner.busy&&!owner.address.text.length&&!owner.candidates.count;
             owner.restoringSnapshot=NO;
             if(smoke)NSLog(@"IMPORT_RESTORE_FINISHED controller=%p snapshot=%d untouched=%d elapsed=%.2f",owner,snapshot!=nil,untouched,NSProcessInfo.processInfo.systemUptime-restoreStarted);
             if(snapshot&&untouched)[owner restoreSnapshot:snapshot];
@@ -261,8 +284,8 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
     }return self;
 }
 - (void)restoreSnapshot:(NSDictionary *)snapshot {
-NSArray *rows=[snapshot[@"candidates"] isKindOfClass:NSArray.class]?snapshot[@"candidates"]:@[];for(NSDictionary *row in rows)if([row isKindOfClass:NSDictionary.class])[self.candidates addObject:[row mutableCopy]];self.restoredAddress=[snapshot[@"address"] isKindOfClass:NSString.class]?snapshot[@"address"]:@"";self.taskKind=[snapshot[@"taskKind"] isKindOfClass:NSString.class]?snapshot[@"taskKind"]:@"";self.finished=[snapshot[@"finished"] boolValue];self.persistentSnapshotAvailable=YES;self.restoredDuplicatePolicy=[snapshot[@"duplicatePolicy"] respondsToSelector:@selector(integerValue)]?[snapshot[@"duplicatePolicy"] integerValue]:0;self.restoredRuntimeSelection=[snapshot[@"runtimeSelection"] respondsToSelector:@selector(integerValue)]?[snapshot[@"runtimeSelection"] integerValue]:0;self.selectedImportCategory=[snapshot[@"importCategory"] respondsToSelector:@selector(integerValue)]?[snapshot[@"importCategory"] integerValue]:-1;if([snapshot[@"busy"] boolValue])self.stage=[self.taskKind isEqual:@"save"]?@"上次保存中断 · 可重试未保存项目":([self.taskKind isEqual:@"url"]?@"上次链接识别中断 · 点按识别链接重试":@"上次本地识别中断 · 重新选择文件，或重试单项");else self.stage=[snapshot[@"stage"] isKindOfClass:NSString.class]?snapshot[@"stage"]:@"已恢复上次导入任务";
-    if(self.isViewLoaded){self.address.text=self.restoredAddress;self.runtime.selectedSegmentIndex=self.restoredRuntimeSelection;self.duplicatePolicy.selectedSegmentIndex=self.restoredDuplicatePolicy;[self updateView];}
+    self.restoringSnapshot=YES;NSArray *rows=[snapshot[@"candidates"] isKindOfClass:NSArray.class]?snapshot[@"candidates"]:@[];for(NSDictionary *row in rows)if([row isKindOfClass:NSDictionary.class])[self.candidates addObject:[row mutableCopy]];self.restoredAddress=[snapshot[@"address"] isKindOfClass:NSString.class]?snapshot[@"address"]:@"";self.taskKind=[snapshot[@"taskKind"] isKindOfClass:NSString.class]?snapshot[@"taskKind"]:@"";self.finished=[snapshot[@"finished"] boolValue];self.restoredDuplicatePolicy=[snapshot[@"duplicatePolicy"] respondsToSelector:@selector(integerValue)]?[snapshot[@"duplicatePolicy"] integerValue]:0;self.restoredRuntimeSelection=[snapshot[@"runtimeSelection"] respondsToSelector:@selector(integerValue)]?[snapshot[@"runtimeSelection"] integerValue]:0;self.selectedImportCategory=[snapshot[@"importCategory"] respondsToSelector:@selector(integerValue)]?[snapshot[@"importCategory"] integerValue]:-1;if([snapshot[@"busy"] boolValue])self.stage=[self.taskKind isEqual:@"save"]?@"上次保存中断 · 可重试未保存项目":([self.taskKind isEqual:@"url"]?@"上次链接识别中断 · 点按识别链接重试":@"上次本地识别中断 · 重新选择文件，或重试单项");else self.stage=[snapshot[@"stage"] isKindOfClass:NSString.class]?snapshot[@"stage"]:@"已恢复上次导入任务";
+    if(self.isViewLoaded){self.address.text=self.restoredAddress;self.runtime.selectedSegmentIndex=self.restoredRuntimeSelection;self.duplicatePolicy.selectedSegmentIndex=self.restoredDuplicatePolicy;[self updateView];}self.restoringSnapshot=NO;[self persistSnapshot];
 }
 
 - (NSString *)taskSummary {if(!self.candidates.count&&!self.restoredAddress.length&&([self.stage isEqual:@"粘贴地址，或选择本地文件"]||!self.stage.length))return nil;return self.stage?:@"添加资源";}
@@ -495,12 +518,13 @@ NSArray *rows=[snapshot[@"candidates"] isKindOfClass:NSArray.class]?snapshot[@"c
 }
 - (void)toggleSelectAllCandidates {
     if(self.busy||!self.candidates.count)return;
+    self.editRevision++;
     BOOL anyUnselected=NO;
     for(NSDictionary *row in self.candidates){
-        if(![row[@"kind"] isEqual:@"page"]&&!row[@"error"]&&!row[@"saveError"]&&![row[@"saved"] boolValue]&&![row[@"selected"] boolValue]){anyUnselected=YES;break;}
+        if(![row[@"kind"] isEqual:@"page"]&&![row[@"unsupportedOnly"] boolValue]&&!row[@"error"]&&!row[@"saveError"]&&![row[@"saved"] boolValue]&&![row[@"selected"] boolValue]){anyUnselected=YES;break;}
     }
     for(NSMutableDictionary *row in self.candidates){
-        if(![row[@"kind"] isEqual:@"page"]&&!row[@"error"]&&!row[@"saveError"]&&![row[@"saved"] boolValue])row[@"selected"]=@(anyUnselected);
+        if(![row[@"kind"] isEqual:@"page"]&&![row[@"unsupportedOnly"] boolValue]&&!row[@"error"]&&!row[@"saveError"]&&![row[@"saved"] boolValue])row[@"selected"]=@(anyUnselected);
     }
     self.finished=NO;
     [self updateView];
@@ -509,7 +533,7 @@ NSArray *rows=[snapshot[@"candidates"] isKindOfClass:NSArray.class]?snapshot[@"c
 - (NSUInteger)selectedUnsavedCandidateCount {
     NSUInteger count=0;
     for(NSDictionary *row in self.candidates){
-        if(![row[@"kind"] isEqual:@"page"]&&[row[@"selected"] boolValue]&&!row[@"error"]&&!row[@"saveError"]&&![row[@"saved"] boolValue])count++;
+        if(![row[@"kind"] isEqual:@"page"]&&![row[@"unsupportedOnly"] boolValue]&&[row[@"selected"] boolValue]&&!row[@"error"]&&!row[@"saveError"]&&![row[@"saved"] boolValue])count++;
     }
     return count;
 }
@@ -530,12 +554,12 @@ NSArray *rows=[snapshot[@"candidates"] isKindOfClass:NSArray.class]?snapshot[@"c
 - (void)writeCurrentSnapshot {
     NSString *address=self.address.text?:self.restoredAddress?:@"";BOOL blank=!self.busy&&!self.candidates.count&&!address.length&&[self.stage isEqual:@"粘贴地址，或选择本地文件"];
     NSMutableDictionary *snapshot=[NSMutableDictionary dictionary];if(!blank){snapshot[@"version"]=@2;snapshot[@"candidates"]=ResourceImportFrozenPropertyList(self.candidates)?:@[];snapshot[@"address"]=address;snapshot[@"taskKind"]=self.taskKind?:@"";snapshot[@"stage"]=self.stage?:@"添加资源";snapshot[@"busy"]=@(self.busy);snapshot[@"finished"]=@(self.finished);snapshot[@"duplicatePolicy"]=@(self.duplicatePolicy?self.duplicatePolicy.selectedSegmentIndex:self.restoredDuplicatePolicy);snapshot[@"runtimeSelection"]=@(self.runtime?self.runtime.selectedSegmentIndex:self.restoredRuntimeSelection);snapshot[@"importCategory"]=@(self.selectedImportCategory);}
-    self.persistentSnapshotAvailable=!blank;NSDictionary *immutable=snapshot.copy;UIBackgroundTaskIdentifier task=UIApplication.sharedApplication.applicationState==UIApplicationStateBackground?[UIApplication.sharedApplication beginBackgroundTaskWithExpirationHandler:nil]:UIBackgroundTaskInvalid;ResourceImportEnqueueSnapshot(immutable,task);
+    NSDictionary *immutable=snapshot.copy;NSUInteger revision=self.snapshotRevision;ResourceImportBackgroundTaskToken *task=nil;if(UIApplication.sharedApplication.applicationState==UIApplicationStateBackground){task=[ResourceImportBackgroundTaskToken new];__block ResourceImportBackgroundTaskToken *taskToken=task;task.identifier=[UIApplication.sharedApplication beginBackgroundTaskWithName:@"cctv.resourceImport.snapshot" expirationHandler:^{[taskToken endIfNeeded];}];}__weak typeof(self) weakSelf=self;ResourceImportEnqueueSnapshot(immutable,task,^(BOOL success){ResourceImportWorkflowViewController *owner=weakSelf;if(!owner||owner.snapshotRevision!=revision)return;owner.persistentSnapshotAvailable=success&&!blank;if(!success){[RuntimeDiagnostics.shared recordEvent:@"resource_import_snapshot_write_failed" category:@"resource_import" fields:@{@"revision":@(revision)}];}});
 }
 - (void)applicationDidEnterBackground:(NSNotification *)notification {[self persistSnapshot];}
-- (void)textViewDidChange:(UITextView *)textView {self.restoredAddress=textView.text?:@"";self.addressPlaceholder.hidden=textView.text.length>0;self.clearAddressButton.hidden=textView.text.length==0&&self.candidates.count==0;[self refreshSmartClipboardAndPresets];[self persistSnapshot];}
-- (void)runtimeChanged:(UISegmentedControl *)sender {self.restoredRuntimeSelection=sender.selectedSegmentIndex;[self persistSnapshot];}
-- (void)duplicatePolicyChanged:(UISegmentedControl *)sender {self.finished=NO;[self updateView];}
+- (void)textViewDidChange:(UITextView *)textView {if(!self.restoringSnapshot)self.editRevision++;self.restoredAddress=textView.text?:@"";self.addressPlaceholder.hidden=textView.text.length>0;self.clearAddressButton.hidden=textView.text.length==0&&self.candidates.count==0;[self refreshSmartClipboardAndPresets];[self persistSnapshot];}
+- (void)runtimeChanged:(UISegmentedControl *)sender {self.editRevision++;self.restoredRuntimeSelection=sender.selectedSegmentIndex;[self persistSnapshot];}
+- (void)duplicatePolicyChanged:(UISegmentedControl *)sender {self.editRevision++;self.finished=NO;[self updateView];}
 - (void)minimize {[self.view endEditing:YES];[self.navigationController dismissViewControllerAnimated:YES completion:nil];}
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {return 3;}
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
@@ -737,7 +761,7 @@ NSArray *rows=[snapshot[@"candidates"] isKindOfClass:NSArray.class]?snapshot[@"c
         NSString *newName=[alert.textFields.firstObject.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
         if(!newName.length)return;
         NSMutableDictionary *target=owner.candidates[index];
-        target[@"name"]=newName;
+        owner.editRevision++;target[@"name"]=newName;
         target[@"customNameAssigned"]=@YES;
         if([target[@"catalog"] isKindOfClass:NSDictionary.class]){
             NSMutableDictionary *cat=[target[@"catalog"] mutableCopy];
@@ -781,7 +805,7 @@ NSArray *rows=[snapshot[@"candidates"] isKindOfClass:NSArray.class]?snapshot[@"c
     if(ip.section==2&&ip.row==0){if(self.busy)[self cancelWork];else[self reset];return;}
     if(self.busy)return;
     if(ip.section==0){if(ip.row==1)[self recognizeURL];else if(ip.row==2||ip.row==3)[self pickFiles:ip.row==3];else if(ip.row==4){self.advancedOptionsExpanded=!self.advancedOptionsExpanded;[tableView reloadSections:[NSIndexSet indexSetWithIndex:0] withRowAnimation:UITableViewRowAnimationAutomatic];}else if(ip.row==6)[self showCategorizedImportOptions];}
-    else if(ip.section==1&&ip.row>0){NSMutableDictionary *row=self.candidates[ip.row-1];if([row[@"kind"] isEqual:@"page"]){[self expandSubScriptsForCandidateAtIndex:(NSUInteger)(ip.row-1)];return;}if(row[@"error"])[self retryCandidateAtIndex:(NSUInteger)(ip.row-1)];else if([row[@"matchTargets"] count]>1&&![row[@"saved"] boolValue])[self chooseExistingResourceForCandidate:row];else if(!row[@"saved"]){row[@"selected"]=@(![row[@"selected"] boolValue]);self.finished=NO;}[self updateView];}
+    else if(ip.section==1&&ip.row>0){NSMutableDictionary *row=self.candidates[ip.row-1];if([row[@"kind"] isEqual:@"page"]){[self expandSubScriptsForCandidateAtIndex:(NSUInteger)(ip.row-1)];return;}if([row[@"unsupportedOnly"] boolValue]){self.navigationItem.prompt=@"已识别清单，但其中没有 iOS 支持的可导入频道";return;}if(row[@"error"])[self retryCandidateAtIndex:(NSUInteger)(ip.row-1)];else if([row[@"matchTargets"] count]>1&&![row[@"saved"] boolValue])[self chooseExistingResourceForCandidate:row];else if(!row[@"saved"]){self.editRevision++;row[@"selected"]=@(![row[@"selected"] boolValue]);self.finished=NO;}[self updateView];}
     else if(ip.section==2){
         NSUInteger failed=[self failedCandidateCount];
         NSUInteger ready=[self selectedUnsavedCandidateCount];
@@ -818,7 +842,7 @@ NSArray *rows=[snapshot[@"candidates"] isKindOfClass:NSArray.class]?snapshot[@"c
     if(option==ResourceImportOptionMediaServer){[self chooseMediaServer];return;}
     if(option==ResourceImportOptionServices){dispatch_block_t open=self.onOpenServices;[self.navigationController dismissViewControllerAnimated:YES completion:^{if(open)open();}];return;}
     if(option==ResourceImportOptionHostCapabilities){UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"宿主运行能力" message:@"资源导入阶段只做静态识别，不会执行脚本。Python 资源使用内置 CPython；JavaScript 资源可自动识别，必要时在高级选项指定 Node.js。启动后的实际能力与健康状态可在服务页查看。" preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleDefault handler:nil]];[self presentViewController:alert animated:YES completion:nil];return;}
-    self.selectedImportCategory=option;NSInteger runtimeIndex=0;BOOL chooseFile=NO,chooseFolder=NO;NSString *category=nil;
+    self.editRevision++;self.selectedImportCategory=option;NSInteger runtimeIndex=0;BOOL chooseFile=NO,chooseFolder=NO;NSString *category=nil;
     switch(option){
         case ResourceImportOptionLiveURL:category=@"直播列表链接 · M3U / TXT";break;
         case ResourceImportOptionMediaURL:category=@"影视、合集或脚本链接";break;
@@ -903,7 +927,7 @@ NSArray *rows=[snapshot[@"candidates"] isKindOfClass:NSArray.class]?snapshot[@"c
 - (void)chooseExistingResourceForCandidate:(NSMutableDictionary *)row {
     NSArray *targets=[row[@"matchTargets"] isKindOfClass:NSArray.class]?row[@"matchTargets"]:@[];if(targets.count<2)return;
     UIAlertController *choices=[UIAlertController alertControllerWithTitle:@"选择要更新的旧资源" message:@"确认后会保留所选资源的 ID 和个人设置。" preferredStyle:UIAlertControllerStyleActionSheet];
-    for(NSDictionary *target in targets){NSString *title=[NSString stringWithFormat:@"%@ · %@",target[@"name"]?:@"未命名资源",target[@"kindLabel"]?:@"资源"];[choices addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){row[@"existingResourceID"]=target[@"id"]?:@"";row[@"existingResourceKind"]=target[@"kind"]?:@"";row[@"updatePreview"]=[NSString stringWithFormat:@"将更新「%@」并保留资源身份",target[@"name"]?:@"资源"];[self updateView];}]];}
+    for(NSDictionary *target in targets){NSString *title=[NSString stringWithFormat:@"%@ · %@",target[@"name"]?:@"未命名资源",target[@"kindLabel"]?:@"资源"];[choices addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){self.editRevision++;row[@"existingResourceID"]=target[@"id"]?:@"";row[@"existingResourceKind"]=target[@"kind"]?:@"";row[@"updatePreview"]=[NSString stringWithFormat:@"将更新「%@」并保留资源身份",target[@"name"]?:@"资源"];[self updateView];}]];}
     [choices addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];choices.popoverPresentationController.sourceView=self.view;choices.popoverPresentationController.sourceRect=CGRectMake(CGRectGetMidX(self.view.bounds),CGRectGetMidY(self.view.bounds),1,1);[self presentViewController:choices animated:YES completion:nil];
 }
 - (NSMutableDictionary *)candidateForData:(NSData *)data file:(NSURL *)file origin:(NSString *)origin companions:(NSDictionary *)companions hint:(NSString *)hint {
@@ -935,8 +959,8 @@ NSArray *rows=[snapshot[@"candidates"] isKindOfClass:NSArray.class]?snapshot[@"c
         }
         [self decorateCandidate:row file:file origin:origin];return annotate(row);
     }
-    NSString *text=[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];NSString *detectedExtension=ResourceContentExtension(data,file.lastPathComponent?:@"");BOOL scriptContent=[@[@"py",@"js",@"mjs",@"cjs",@"hjs"] containsObject:detectedExtension]||hint.length>0;NSArray *channels=text.length&&!scriptContent?[M3UParser parse:text baseURL:origin.length?[NSURL URLWithString:origin]:nil]:nil;
-    if(channels.count){NSDictionary *report=[M3UParser reportForText:text baseURL:origin.length?[NSURL URLWithString:origin]:nil];NSMutableDictionary *row=[@{@"kind":@"playlist",@"text":text,@"origin":origin?:@"",@"importFingerprint":fingerprint,@"name":file.lastPathComponent?:@"直播订阅",@"summary":[NSString stringWithFormat:@"直播列表 · %lu 个频道",(unsigned long)channels.count],@"selected":@YES} mutableCopy];row[@"unsupportedProtocols"]=report[@"unsupportedProtocols"]?:@{};if([report[@"unsupportedProtocols"] count])row[@"summary"]=[row[@"summary"] stringByAppendingFormat:@" · 跳过不支持的协议：%@",[[report[@"unsupportedProtocols"] allKeys] componentsJoinedByString:@"、"]];[self decorateCandidate:row file:file origin:origin];return annotate(row);}
+    NSString *text=[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];NSString *detectedExtension=ResourceContentExtension(data,file.lastPathComponent?:@"");BOOL scriptContent=[@[@"py",@"js",@"mjs",@"cjs",@"hjs"] containsObject:detectedExtension]||hint.length>0;NSDictionary *report=text.length&&!scriptContent?[M3UParser reportForText:text baseURL:origin.length?[NSURL URLWithString:origin]:nil]:nil;NSArray *channels=[report[@"channels"] isKindOfClass:NSArray.class]?report[@"channels"]:@[];NSDictionary *unsupported=[report[@"unsupportedProtocols"] isKindOfClass:NSDictionary.class]?report[@"unsupportedProtocols"]:@{};
+    if(channels.count||unsupported.count){BOOL unsupportedOnly=!channels.count&&unsupported.count>0;NSString *summary=unsupportedOnly?[NSString stringWithFormat:@"已识别直播清单 · 无可导入协议 · 不支持：%@",[[unsupported allKeys] componentsJoinedByString:@"、"]]:[NSString stringWithFormat:@"直播列表 · %lu 个可导入频道",(unsigned long)channels.count];if(!unsupportedOnly&&unsupported.count)summary=[summary stringByAppendingFormat:@" · 跳过不支持的协议：%@",[[unsupported allKeys] componentsJoinedByString:@"、"]];NSMutableDictionary *row=[@{@"kind":@"playlist",@"text":text,@"origin":origin?:@"",@"importFingerprint":fingerprint,@"name":file.lastPathComponent?:@"直播订阅",@"summary":summary,@"selected":@(!unsupportedOnly),@"unsupportedOnly":@(unsupportedOnly)} mutableCopy];row[@"unsupportedProtocols"]=unsupported;[self decorateCandidate:row file:file origin:origin];return annotate(row);}
     id json=[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];if(origin.length&&[json isKindOfClass:NSDictionary.class]&&[json[@"list"] isKindOfClass:NSArray.class]){NSDictionary *api=[TVBoxCatalogStore catalogWithMacCMSAPIURL:origin name:nil error:&error];if(api){NSMutableDictionary *catalog=[api mutableCopy];catalog[@"importFingerprint"]=fingerprint;NSMutableDictionary *row=[@{@"kind":@"catalog",@"catalog":catalog,@"name":catalog[@"name"]?:@"影视接口",@"summary":@"MacCMS 影视接口 · 按需连接",@"selected":@YES} mutableCopy];[self decorateCandidate:row file:file origin:origin];return annotate(row);}}
     NSDictionary *service=[MediaPackageImporter importFile:file companionFiles:companions runtimeHint:hint error:&error];
     if(service){NSMutableDictionary *imported=[service mutableCopy];if(origin.length)imported[@"url"]=origin;imported[@"importFingerprint"]=fingerprint;NSMutableDictionary *row=[@{@"kind":@"service",@"service":imported,@"name":service[@"name"]?:file.lastPathComponent,@"summary":[NSString stringWithFormat:@"脚本资源 · %@ · %@",service[@"engine"]?:@"自动识别",service[@"protocol"]?:@"启动后验证能力"],@"selected":@YES} mutableCopy];[self decorateCandidate:row file:file origin:origin];return annotate(row);}
@@ -1113,7 +1137,7 @@ NSArray *rows=[snapshot[@"candidates"] isKindOfClass:NSArray.class]?snapshot[@"c
         if(shouldDismiss){[self minimize];}
         return;
     }
-    NSMutableDictionary *row=self.candidates[index];if([row[@"kind"] isEqual:@"page"]||![row[@"selected"] boolValue]||row[@"error"]||[row[@"saved"] boolValue]){[self saveNext:index+1 generation:generation];return;}
+    NSMutableDictionary *row=self.candidates[index];if([row[@"kind"] isEqual:@"page"]||[row[@"unsupportedOnly"] boolValue]||![row[@"selected"] boolValue]||row[@"error"]||[row[@"saved"] boolValue]){[self saveNext:index+1 generation:generation];return;}
     if(self.activateAfterSaveRequested)row[@"activateAfterSave"]=@YES;
     else [row removeObjectForKey:@"activateAfterSave"];
     __weak typeof(self) weakSelf=self;self.onSaveCandidate(row,self.duplicatePolicy.selectedSegmentIndex==0,^(NSError *error){dispatch_async(dispatch_get_main_queue(),^{ResourceImportWorkflowViewController *owner=weakSelf;if(!owner||owner.generation!=generation)return;if(error)row[@"saveError"]=error.localizedDescription?:@"保存失败";else{row[@"saved"]=@YES;[row removeObjectForKey:@"saveError"];[row removeObjectForKey:@"retryData"];}[owner updateView];[owner saveNext:index+1 generation:generation];});});

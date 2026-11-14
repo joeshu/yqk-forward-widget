@@ -170,6 +170,51 @@ class PlaybackOwnershipAndMediaUIContracts(unittest.TestCase):
         self.assertIn("playback_gesture_swipe_seek", PLAYBACK_SOURCE)
         self.assertIn("touch.view", PLAYBACK_SOURCE)
 
+    def test_playback_intent_survives_resolution_and_never_overrides_a_user_pause(self):
+        session_play = method_body(PLAYBACK_SOURCE, "- (void)sessionPlay")
+        session_pause = method_body(PLAYBACK_SOURCE, "- (void)sessionPause")
+        play_result = method_body(PLAYBACK_SOURCE, "- (void)playResult:")
+        ready_buffer = method_body(PLAYBACK_SOURCE, "- (void)startAVPlayerFromReadyBufferIfNeeded:")
+        now_playing = method_body(PLAYBACK_SOURCE, "- (void)updateNowPlayingInfoCenter")
+        player_observer = method_body(PLAYBACK_SOURCE, "- (void)observeValueForKeyPath:")
+        self.assertIn("self.playbackWantsPlayback=YES", session_play)
+        self.assertIn("self.playbackWantsPlayback=NO", session_pause)
+        self.assertLess(play_result.index("NSString *previousURL="), play_result.index("self.result=[result copy]"))
+        reset_routes = play_result.index("if(![incomingURL isEqualToString:previousURL])self.attemptedRoutes=0")
+        paused_result = play_result.index("if(!self.playbackWantsPlayback||self.playbackSuspendedForVisibility)")
+        self.assertLess(reset_routes, paused_result)
+        self.assertIn("[self clearCurrentPlayerItem]", play_result[paused_result:])
+        self.assertIn("!self.playbackWantsPlayback", ready_buffer)
+        self.assertIn("self.hasReportedPlaying=YES;self.playbackWantsPlayback=YES", player_observer)
+        self.assertIn("self.player.timeControlStatus!=state", player_observer)
+        self.assertIn("!self.awaitingWebPlaybackReturn", player_observer)
+        self.assertIn("[self updateNowPlayingInfoCenter]", player_observer)
+        self.assertIn("currentSession]!=(id<PlaybackSession>)self", now_playing)
+        self.assertIn("self.playbackWantsPlayback?", now_playing)
+        self.assertIn('@"videoCodec",@"capabilityStatus",@"capabilityReason",@"capabilityReasonMessage"', PLAYBACK_SOURCE)
+        self.assertIn('videoCodec:[self.result[@"videoCodec"] isKindOfClass:NSString.class]?self.result[@"videoCodec"]:@""', PLAYBACK_SOURCE)
+
+    def test_automatic_next_episode_restores_play_intent_after_item_completion(self):
+        for signature in ("- (void)playerItemEnded:", "- (void)cicadaAdapterDidComplete:"):
+            body = method_body(PLAYBACK_SOURCE, signature)
+            self.assertIn("self.playbackWantsPlayback=YES", body)
+            self.assertLess(body.index("self.playbackWantsPlayback=YES"), body.index("[self resolveAndPlay]"))
+
+    def test_live_overlay_respects_voiceover_and_rearms_after_scrubbing(self):
+        overlay = (SOURCES / "PlaybackOverlayController.m").read_text(encoding="utf-8")
+        self.assertIn("UIAccessibilityVoiceOverStatusDidChangeNotification", overlay)
+        self.assertIn("if(self.visible)[self scheduleAutoHideAfter:3.0]", overlay)
+        self.assertIn("else[owner scheduleAutoHideAfter:0.5]", overlay)
+        self.assertIn("[self.controlsOverlay rearmAutoHide]", PLAYBACK_SOURCE)
+
+    def test_live_player_fullscreen_control_has_dynamic_accessibility_state(self):
+        self.assertIn('accessibilityIdentifier=@"player.control.fullscreen"', ROOT_SOURCE)
+        self.assertIn('self.fullscreen?@"退出全屏":@"全屏"', ROOT_SOURCE)
+        self.assertIn('self.fullscreen?@"返回频道播放页面":@"全屏显示当前频道"', ROOT_SOURCE)
+        self.assertIn("button.titleLabel.hidden=large", method_body(ROOT_SOURCE, "- (void)updatePlaybackControlAccessibility"))
+        cell = method_body(ROOT_SOURCE, "- (void)layoutSubviews")
+        self.assertIn("textWidth=MIN(textWidth,MAX(0,badgeX-textX-4))", cell)
+
     def test_scripts_and_services_is_a_primary_resource_page_button(self):
         self.assertIn('accessibilityIdentifier=@"resource-floating-actions"', ROOT_SOURCE)
         self.assertIn('self.resourceActionsButton.showsMenuAsPrimaryAction=NO', ROOT_SOURCE)

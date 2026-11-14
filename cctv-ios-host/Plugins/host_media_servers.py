@@ -7,6 +7,7 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 
 _MEDIA = ('.mp4', '.m4v', '.mov', '.mkv', '.webm', '.flv', '.m3u8', '.mp3', '.m4a', '.aac', '.ts')
+WEBDAV_ROOT_ID = '__webdav_root__'
 
 
 class ServerSpider:
@@ -167,8 +168,7 @@ class ServerSpider:
                 for row in self._xtream('get_%s_categories' % mode):
                     classes.append({'type_id': mode + ':' + str(row['category_id']), 'type_name': row.get('category_name', mode)})
         else:
-            classes = [{'type_id': '', 'type_name': '根目录'}] + [
-                {'type_id': x['url'], 'type_name': x['name']} for x in self._dav() if x['directory']]
+            classes = [{'type_id': WEBDAV_ROOT_ID, 'type_name': '根目录'}]
         return {'class': classes, 'list': []}
 
     def categoryContent(self, tid, pg, filter=True, extend=None):
@@ -193,8 +193,29 @@ class ServerSpider:
                 items.append({'vod_id': self._id({'id': str(ident), 'type': mode, 'ext': x.get('container_extension') or ('m3u8' if mode == 'live' else 'mp4')}),
                               'vod_name': x.get('name', str(ident)), 'vod_pic': x.get('cover') or x.get('stream_icon') or ''})
         else:
-            rows = [x for x in self._dav(tid) if not x['directory']];total = len(rows)
-            items = [{'vod_id': self._id(x), 'vod_name': x['name']} for x in rows[offset:offset + self.PAGE_SIZE]]
+            path = '' if tid == WEBDAV_ROOT_ID else tid
+            rows = self._dav(path);total = len(rows);items = []
+            for row in rows[offset:offset + self.PAGE_SIZE]:
+                if row['directory']:
+                    items.append({'id': row['url'], 'name': row['name'], 'directory': True,
+                                  'remarks': '文件夹'})
+                else:
+                    items.append({'vod_id': self._id(row), 'vod_name': row['name'],
+                                  'directory': False})
+            current = urllib.parse.urlsplit(self._url(path)).path
+            base_path = urllib.parse.urlsplit(self.base).path.rstrip('/') or '/'
+            parent_path = posixpath.dirname(current.rstrip('/')) or '/'
+            if tid == WEBDAV_ROOT_ID:
+                parent_id = '';parent_name = ''
+            elif parent_path == base_path or parent_path.rstrip('/') == base_path.rstrip('/'):
+                parent_id = WEBDAV_ROOT_ID;parent_name = '根目录'
+            else:
+                parent_id = urllib.parse.urlunsplit((self.origin[0], self.origin[1], parent_path.rstrip('/') + '/', '', ''))
+                parent_name = urllib.parse.unquote(parent_path.rstrip('/').rsplit('/', 1)[-1])
+            folder_name = '根目录' if tid == WEBDAV_ROOT_ID else urllib.parse.unquote(current.rstrip('/').rsplit('/', 1)[-1])
+            return {'list': items, 'page': page, 'pagecount': max(1, (total + self.PAGE_SIZE - 1) // self.PAGE_SIZE),
+                    'total': total, 'limit': self.PAGE_SIZE, 'categoryName': folder_name,
+                    'parentID': parent_id, 'parentName': parent_name}
         return {'list': items, 'page': page, 'pagecount': max(1, (total + self.PAGE_SIZE - 1) // self.PAGE_SIZE), 'total': total, 'limit': self.PAGE_SIZE}
 
     def searchContent(self, key, quick=False, pg='1'):

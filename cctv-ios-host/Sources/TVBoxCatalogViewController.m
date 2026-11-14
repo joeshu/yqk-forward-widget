@@ -10,14 +10,20 @@
 @property(nonatomic,copy) NSString *searchText;
 @property(nonatomic,strong) UISegmentedControl *contentFilter;
 @property(nonatomic,strong) UILabel *summaryLabel;
+@property(nonatomic) NSUInteger alertPresentationGeneration;
+@property(nonatomic,copy) dispatch_block_t pendingAlertRetry;
 - (void)updateEmptyState;
 - (void)updateCatalogSummary;
 - (void)presentCatalogAlert:(UIAlertController *)alert sourceView:(nullable UIView *)sourceView sourceRect:(CGRect)sourceRect;
-- (void)presentCatalogAlert:(UIAlertController *)alert sourceView:(nullable UIView *)sourceView sourceRect:(CGRect)sourceRect retryCount:(NSUInteger)retryCount;
+- (void)attemptPresentCatalogAlert:(UIAlertController *)alert sourceView:(nullable UIView *)sourceView sourceRect:(CGRect)sourceRect retryCount:(NSUInteger)retryCount generation:(NSUInteger)generation;
 @end
 
 @implementation TVBoxCatalogViewController
 - (instancetype)init { return [super initWithStyle:UITableViewStyleInsetGrouped]; }
+- (void)viewWillDisappear:(BOOL)animated {
+    [super viewWillDisappear:animated];self.alertPresentationGeneration++;
+    if(self.pendingAlertRetry){dispatch_block_cancel(self.pendingAlertRetry);self.pendingAlertRetry=nil;}
+}
 - (NSArray *)sites { return [self.catalog[@"sites"] isKindOfClass:NSArray.class]?self.catalog[@"sites"]:@[]; }
 - (NSArray *)lives { return [self.catalog[@"lives"] isKindOfClass:NSArray.class]?self.catalog[@"lives"]:@[]; }
 - (NSArray *)filteredRowsForSection:(NSInteger)section {
@@ -55,41 +61,32 @@
     empty.numberOfLines=0;empty.textAlignment=NSTextAlignmentCenter;empty.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];empty.adjustsFontForContentSizeCategory=YES;empty.textColor=HostSecondaryText();self.tableView.backgroundView=empty;
 }
 - (UIViewController *)visiblePresentationController {
-    UIWindow *window=self.viewIfLoaded.window?:self.navigationController.viewIfLoaded.window;
-    UIViewController *navigationTop=self.navigationController.topViewController;
-    if(window&&navigationTop.viewIfLoaded.window==window&&!navigationTop.isBeingDismissed)return navigationTop;
-    if(window&&self.viewIfLoaded.window==window&&!self.isBeingDismissed)return self;
-    if(!window){
-        for(UIScene *scene in UIApplication.sharedApplication.connectedScenes){
-            if(scene.activationState!=UISceneActivationStateForegroundActive&&scene.activationState!=UISceneActivationStateForegroundInactive)continue;
-            for(UIWindow *candidate in ((UIWindowScene *)scene).windows)if(candidate.isKeyWindow){window=candidate;break;}
-            if(window)break;
-        }
-    }
-    UIViewController *controller=window.rootViewController;
-    while(controller){
-        if(controller.presentedViewController&&!controller.presentedViewController.isBeingDismissed){controller=controller.presentedViewController;continue;}
-        if([controller isKindOfClass:UINavigationController.class]){UIViewController *top=((UINavigationController *)controller).topViewController;if(top&&top!=controller){controller=top;continue;}}
-        if([controller isKindOfClass:UITabBarController.class]){UIViewController *selected=((UITabBarController *)controller).selectedViewController;if(selected&&selected!=controller){controller=selected;continue;}}
-        break;
-    }
-    if(controller.viewIfLoaded.window==window&&!controller.isBeingDismissed)return controller;
-    if(navigationTop.viewIfLoaded.window==window&&!navigationTop.isBeingDismissed)return navigationTop;
-    if(self.viewIfLoaded.window==window&&!self.isBeingDismissed)return self;
-    return nil;
+    UIWindow *window=self.viewIfLoaded.window;
+    if(!window||self.isBeingDismissed||self.isMovingFromParentViewController)return nil;
+    UINavigationController *navigation=self.navigationController;
+    if(navigation&&(navigation.topViewController!=self||navigation.viewIfLoaded.window!=window))return nil;
+    return self;
 }
 - (void)presentCatalogAlert:(UIAlertController *)alert sourceView:(UIView *)sourceView sourceRect:(CGRect)sourceRect {
-    [self presentCatalogAlert:alert sourceView:sourceView sourceRect:sourceRect retryCount:0];
+    if(self.pendingAlertRetry){dispatch_block_cancel(self.pendingAlertRetry);self.pendingAlertRetry=nil;}
+    NSUInteger generation=++self.alertPresentationGeneration;
+    [self attemptPresentCatalogAlert:alert sourceView:sourceView sourceRect:sourceRect retryCount:0 generation:generation];
 }
-- (void)presentCatalogAlert:(UIAlertController *)alert sourceView:(UIView *)sourceView sourceRect:(CGRect)sourceRect retryCount:(NSUInteger)retryCount {
+- (void)attemptPresentCatalogAlert:(UIAlertController *)alert sourceView:(UIView *)sourceView sourceRect:(CGRect)sourceRect retryCount:(NSUInteger)retryCount generation:(NSUInteger)generation {
+    if(generation!=self.alertPresentationGeneration||alert.presentingViewController||alert.isBeingPresented)return;
     UIViewController *presenter=[self visiblePresentationController];
     if(!presenter){
         UINavigationController *navigation=self.navigationController;
-        BOOL waitingForNavigationAttach=navigation&&navigation.topViewController==self&&navigation.viewIfLoaded.window;
+        // The navigation stack can already point at this page while its
+        // controller view is still detached during the push transition. Keep
+        // retry eligibility tied to ownership of the visible stack entry;
+        // window attachment is the state we are waiting for.
+        BOOL waitingForNavigationAttach=navigation&&navigation.topViewController==self&&!self.isBeingDismissed&&!self.isMovingFromParentViewController;
         if(waitingForNavigationAttach&&retryCount<10){
             if([NSProcessInfo.processInfo.arguments containsObject:@"--smoke-port"])NSLog(@"TVBOX_ALERT_RETRY count=%lu originWindow=%d navWindow=%d",(unsigned long)retryCount,self.viewIfLoaded.window!=nil,navigation.viewIfLoaded.window!=nil);
             __weak typeof(self) weakSelf=self;
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,100*NSEC_PER_MSEC),dispatch_get_main_queue(),^{TVBoxCatalogViewController *owner=weakSelf;if(owner)[owner presentCatalogAlert:alert sourceView:sourceView sourceRect:sourceRect retryCount:retryCount+1];});
+            dispatch_block_t retry=dispatch_block_create(0,^{TVBoxCatalogViewController *owner=weakSelf;if(!owner||generation!=owner.alertPresentationGeneration)return;owner.pendingAlertRetry=nil;[owner attemptPresentCatalogAlert:alert sourceView:sourceView sourceRect:sourceRect retryCount:retryCount+1 generation:generation];});self.pendingAlertRetry=retry;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,100*NSEC_PER_MSEC),dispatch_get_main_queue(),retry);
             return;
         }
         if([NSProcessInfo.processInfo.arguments containsObject:@"--smoke-port"])NSLog(@"TVBOX_ALERT_NO_PRESENTER originWindow=%d navWindow=%d sceneCount=%lu",self.viewIfLoaded.window!=nil,self.navigationController.viewIfLoaded.window!=nil,(unsigned long)UIApplication.sharedApplication.connectedScenes.count);return;

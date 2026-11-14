@@ -105,10 +105,10 @@ class MediaLibraryRound2Tests(unittest.TestCase):
         self.assertIn("adjustsFontForContentSizeCategory=YES", FEED)
 
     def test_feed_poster_cell_placeholder_matches_film_fallback(self):
-        # 无海报时显示 film 占位（Center + 次级文本色）；有海报时经带重试
-        # 的加载器取图，成功后 HostImageLoader 把 contentMode 复位为
-        # AspectFill；复用时先清图片，避免旧图残留。
-        self.assertIn('self.poster.image=[UIImage systemImageNamed:@"film"];self.poster.contentMode=UIViewContentModeCenter;self.poster.tintColor=HostSecondaryText();', FEED)
+        # 普通媒体无海报时显示 film 占位；WebDAV 目录显示 folder 图标。
+        # 海报仍经带重试的加载器取图，成功后 HostImageLoader 将 contentMode
+        # 复位为 AspectFill；目录卡不请求图片。
+        self.assertIn('self.poster.image=[UIImage systemImageNamed:directory?@"folder.fill":@"film"];self.poster.contentMode=UIViewContentModeCenter;self.poster.tintColor=HostSecondaryText();', FEED)
         self.assertIn("self.poster.contentMode=UIViewContentModeScaleAspectFill", FEED)
         self.assertIn("MediaFeedLoadPosterWithRetry(poster,self.poster,1)", FEED)
         self.assertIn("self.poster.image=nil", FEED)

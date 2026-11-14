@@ -11,7 +11,7 @@ on:
       publish_release:
         description: "Publish the verified IPA as a GitHub Release"
         required: false
-        default: true
+        default: false
         type: boolean
       run_media_compat:
         description: "Run the longer live-catalogue AVFoundation compatibility matrix"
@@ -20,7 +20,7 @@ on:
         type: boolean
 
 permissions:
-  contents: write
+  contents: read
 
 
 jobs:
@@ -308,20 +308,41 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-      - name: Publish release asset
-        if: success() && (github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true)) && matrix.variant == 'full'
+
+  release:
+    needs: [build, media-compat]
+    if: >-
+      always() &&
+      needs.build.result == 'success' &&
+      (needs['media-compat'].result == 'success' || needs['media-compat'].result == 'skipped') &&
+      ((github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_release == true))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: CCTVHost-full-unsigned-ipa
+          path: cctv-ios-host/build
+      - name: Publish verified release assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           cd cctv-ios-host/build
           tag="cctv-ios-host-${GITHUB_SHA:0:12}-${GITHUB_RUN_ID}"
-          version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' CCTVHost.app/Info.plist)
-          build=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' CCTVHost.app/Info.plist)
-          gh release create "$tag" \
-            CCTVHost-unsigned.ipa CCTVHost-unsigned.ipa.sha256 \
-            --target "$GITHUB_SHA" \
-            --title "CCTVHost ${version} (${build})" \
-            --notes "Version ${version}, build ${build}. Built from $GITHUB_SHA on $(date -u +%Y-%m-%dT%H:%MZ). Device playback remains unverified."
+          version=$(unzip -p CCTVHost-unsigned.ipa Payload/CCTVHost.app/Info.plist | python3 -c 'import plistlib,sys; print(plistlib.load(sys.stdin.buffer)["CFBundleShortVersionString"])')
+          build=$(unzip -p CCTVHost-unsigned.ipa Payload/CCTVHost.app/Info.plist | python3 -c 'import plistlib,sys; print(plistlib.load(sys.stdin.buffer)["CFBundleVersion"])')
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" CCTVHost-unsigned.ipa CCTVHost-unsigned.ipa.sha256 --clobber
+          else
+            gh release create "$tag" \
+              CCTVHost-unsigned.ipa CCTVHost-unsigned.ipa.sha256 \
+              --target "$GITHUB_SHA" \
+              --title "CCTVHost ${version} (${build})" \
+              --notes "Version ${version}, build ${build}. Built from $GITHUB_SHA on $(date -u +%Y-%m-%dT%H:%MZ). Device playback remains unverified."
+          fi
           echo "https://github.com/${GITHUB_REPOSITORY}/releases/tag/$tag"
 
   jar-smoke:

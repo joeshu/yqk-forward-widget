@@ -1,6 +1,6 @@
 # CCTVHost 三阶段全面审查与实施记录
 
-基线：`3cb4eca93c9bbbcfb822690af7360a628d3b03da`。本轮目标为 iPhone 优先，保留 CCTVHost 的五个主入口及现有媒体/服务模型。兼容性边界沿用仓库现状：XcodeGen 开发目标和 UI-only simulator smoke 为 iOS 15；包含 JAR 运行时的完整 IPA 由 release 脚本设为 iOS 17。下面按实际改动记录，不把协议识别、SDK 可调用或源码 smoke 当作真机播放成功。
+基线：`061644dd3194e9d358e8fbb0cf0d90cd65370cbc`。本轮目标为 iPhone 优先，保留 CCTVHost 的五个主入口及现有媒体/服务模型。兼容性边界沿用仓库现状：XcodeGen 开发目标和 UI-only simulator smoke 为 iOS 15；包含 JAR 运行时的完整 IPA 由 release 脚本设为 iOS 17。下面按实际改动记录，不把协议识别、SDK 可调用或源码 smoke 当作真机播放成功。
 
 ## 阶段状态
 
@@ -25,7 +25,7 @@
 ### 播放地址与请求安全
 
 - 新增 `MediaDescriptor`，统一保存归一化 URL、请求头、容器、传输层及“已识别 / 未知 / 明确不支持”的区分。未知格式仍可尝试当前已有引擎；明确不支持的容器/编码不会被伪装为已支持。
-- `MediaPlaybackHeadersScopedToURL` 在交给 AVPlayer/Cicada 前、以及 catch-up 和自定义 HLS 密钥请求时，按目标地址筛选认证头；认证、Cookie、Token、签名、Session 等头只会交给同源地址或同主机标准端口 HTTP→HTTPS 升级地址。HLS relay 的重定向、分片和密钥请求另按资源源站过滤头。
+- `MediaPlaybackHeadersScopedToURL` 在交给 AVPlayer/Cicada 前、以及 catch-up 和自定义 HLS 密钥请求时，按目标地址筛选请求头；同源和同主机标准端口 HTTP→HTTPS 升级保留来源请求头，跨源仅保留明确的通用传输头。HLS relay 的资源重定向、清单、分片和密钥请求沿用同样的跨源白名单，避免自定义 `X-Auth` / `X-Access-Key` 等认证头绕过旧的名称黑名单。
 - AVPlayer 的直连 HLS 子分片和内部重定向由系统网络层加载，公开 API 不提供逐个子请求改写请求头的回调。需要认证且清单会跨域跳转/取分片的来源应经 `localProxy` 转发；本机不能仅凭初始 URL 的头作用域断言 AVPlayer 内部的所有子请求都已过滤。
 - 新增 `MediaKeyRequest`：一次性完成、可取消、请求 6 秒/资源 8 秒超时、最多 4 KiB、要求成功 HTTP 状态、最多 5 次重定向且拒绝 HTTPS 降级。只接受规范化后的 16 字节 HLS AES-128 密钥。
 - HLS AES-128 密钥请求不等于 DRM。FairPlay 证书/许可协商、Widevine、PlayReady 及 DRM 服务集成都未实现。
@@ -42,14 +42,14 @@
 ### 资源导入快照
 
 - 导入恢复改为串行后台读取，并只在用户尚未修改表单/选择时应用旧快照；不再在页面初始化时同步解析大 JSON。
-- 快照格式 v2 将较大的 NSData 作为 sidecar 存储，旧 v1 仍可读；总量上限 80 MiB，写盘原子替换，短时间多次变更合并写入，并在写入成功后清理孤立 sidecar。
+- 快照格式 v2 将较大的 NSData 作为 sidecar 存储，旧 v1 仍可读；清单和唯一 sidecar 合计上限 80 MiB，写盘原子替换，短时间多次变更合并写入，并在写入成功后清理孤立 sidecar。恢复期间有文本或选择编辑时，旧快照不会覆盖用户的新内容；只在真实写盘成功后报告持久化成功。
 - 冻结恢复快照前加入 300ms debounce，后台任务在系统切后台时及时结束。
 
 ## 阶段二：界面、交互、视觉和控制器边界
 
 ### 频道与影视播放控件
 
-- 新增 `PlaybackOverlayController` 统一控制浮层显示、自动隐藏、VoiceOver 常驻和定时器失效；暂停、拖动/手势和辅助功能状态会阻止不合时宜的隐藏。
+- 新增 `PlaybackOverlayController` 统一控制浮层显示、自动隐藏、VoiceOver 常驻和定时器失效；暂停、拖动/手势和辅助功能状态会阻止不合时宜的隐藏，拖动结束会重新计时。
 - CCTV 主播放操作保留播放、静音、全屏和更多菜单；线路与 EPG 从主操作区移入“更多”，AirPlay 入口仍可访问。
 - 影视独立播放器的长控件列进入可滚动视口，竖屏和大字体下不会挤压到不可触达；内嵌播放维持现有容器行为。
 - 播放器轨道菜单可显示 SDK 实际提供的音轨/字幕轨并请求切换。若 SDK 未提供轨道信息，界面说明“引擎尚未提供”，不误报为片源没有轨道。
@@ -60,7 +60,8 @@
 - 主题的强调色与小尺寸按钮填充色分开，保留主题识别的红色，同时提升选中项白色文字对比度。
 - 降低透明度时，玻璃材质改成实色卡片并加强边框；玻璃背景监听辅助功能设置变化。
 - 列表行按 Dynamic Type 字体计算高度，重新加载时更新；播放速度入口扩大到至少 44pt 高的可点击区域，并有明确无障碍动作。
-- 小尺寸辅助按钮隐藏容易截断的视觉标题，但保留完整 VoiceOver label。
+- 小尺寸辅助按钮隐藏容易截断的视觉标题，但保留完整 VoiceOver label；全屏控件在进入/退出全屏及 Dynamic Type 变化时更新名称和操作提示。
+- 频道列表在窄单元格中为健康状态徽标预留标题宽度，避免标题和状态文字互相覆盖。
 
 ### 控制器拆分
 
@@ -102,7 +103,7 @@
 
 - **Emby / Jellyfin**：用户名密码登录或 API Key，读取用户媒体库、分类、分页、搜索、详情/剧集和静态播放 URL；认证、响应 8 MiB、单请求 15 秒读取期限和 5 次重定向均有边界。
 - **Xtream**：认证检查、直播/VOD/剧集分类、分页、剧集详情与播放 URL。此协议没有统一的全库分页搜索接口，因此明确显示未提供搜索，不虚报支持。
-- **WebDAV**：Basic Auth、Depth 1 目录与常见影音文件枚举。XML 禁止 DOCTYPE/ENTITY；路径限制在配置根目录，禁止离开来源站点的重定向。它不提供通用服务端搜索。
+- **WebDAV**：Basic Auth、Depth 1 分页目录枚举和可逐层打开的文件夹浏览。XML 禁止 DOCTYPE/ENTITY；路径限制在配置根目录，禁止离开来源站点的重定向。它不提供通用服务端搜索。
 - 所有适配器只允许 HTTP(S) 基础地址，基础地址不能嵌入 URL 用户名密码、查询参数或片段；跨源跳转拒绝，停止会话会释放已保存 token。
 
 配置由固定类型和表单字段生成 CCTVHost server 资源，账号密码保存在本机资源设置中；不接受远程返回的 Python 代码作为适配器执行。真实 API 字段、认证插件、服务器版本差异仍需用用户自己的服务端验收。
@@ -111,19 +112,28 @@
 
 “影视库 → 我的菜单 → 本地媒体”支持多选视频/音频文件，将用户所选资源复制到 CCTVHost App Support，再由现有影视播放器按 file URL 播放。列表可删除本机副本；删除不会修改原始文件。应用卸载会删除沙盒内副本。
 
+## 本轮回归修复补充
+
+- 播放会话以用户播放意图作为状态来源：解析期间暂停不会被结果回调或缓冲启动逻辑重新播放；AVPlayer 原生暂停/恢复会同步会话意图，延迟状态回调会核对当前播放器状态；Now Playing 只由当前所有者更新，画质切换会替换对应的格式和编码能力信息，自动切集保持播放状态。
+- TVBox 告警在导航栈仍以该页为顶页但窗口尚未挂接时最多重试 10 次、每次 100ms；重试随页面离开或新告警取消。内嵌直播保留全局 UA、节目单、台标及逐频道请求头。
+- TXT/M3U 仅包含不支持协议时会保留识别结果并说明跳过原因，不创建可选择的空白导入项。Xtream 路径凭据在诊断文本中脱敏。
+- 发布动作移出构建 job，等待 IPA 构建成功并满足所选的媒体兼容矩阵；自动发布仅限 `main` 推送，手动发布需在 `main` 明确启用。
+
 ## 自动化验证记录
 
 在仓库根目录运行：
 
 ```sh
 cd cctv-ios-host
-PYTHONPATH=/tmp/yqk-review-python-deps python3 -m unittest discover -s Tests -p 'test_*.py' -v
+CCTVHOST_TEST_PYTHON_DEPS=/tmp/cctvhost-test-python-deps
+python3 -m pip install --disable-pip-version-check --target "$CCTVHOST_TEST_PYTHON_DEPS" -r Scripts/media-python-requirements.txt
+PYTHONPATH="$CCTVHOST_TEST_PYTHON_DEPS${PYTHONPATH:+:$PYTHONPATH}" python3 -m unittest discover -s Tests -p 'test_*.py' -v
 (cd JSPlugins && npm test)
 python3 Scripts/generate_media_capabilities.py --check
 git diff --check
 ```
 
-本轮最终复跑结果记录为：Python **912 项，845 通过、67 跳过、0 失败**；JavaScript 插件测试 3 个 suite 全通过；能力表生成检查与 `git diff --check` 通过。67 项跳过包括 macOS Foundation 原生密钥测试、原生/IPA 检查及原有附件样本。Python loopback 测试覆盖 Emby/Jellyfin、Xtream、WebDAV、HTTP 重定向、认证、分页和运行时归一化，不访问公共真实服务。
+本轮最终复跑结果记录为：Python **925 项，858 通过、67 跳过、0 失败**；JavaScript 插件测试 3 个 suite 全通过；能力表生成检查、Python 语法检查、工作流 YAML 解析与 `git diff --check` 通过。67 项跳过包括 macOS Foundation 原生密钥测试、原生/IPA 检查及原有附件样本。Python loopback 测试覆盖 Emby/Jellyfin、Xtream、WebDAV、HTTP 重定向、认证、分页和运行时归一化，不访问公共真实服务。
 
 Linux 环境没有 `xcodebuild`、`xcrun` 或 iOS SDK，未编译任何 Objective-C/UIKit/AVFoundation 源，也未运行 `Tests/UISmoke`。静态源契约通过不是 Objective-C 编译证明。
 

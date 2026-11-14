@@ -400,7 +400,7 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn("HostLogRedactor redactText:content", plugin)
         self.assertIn("HostLogRedactor redactText:stored", TEXT)
         self.assertIn("HostLogRedactor redactText:text?:@\"\"", TEXT)
-        for secret in ("authorization", "cookie", "access[_-]?token", "password", "Bearer"):
+        for secret in ("authorization", "cookie", "access[_-]?token", "password", "(?:live|movie|series)", "Bearer"):
             self.assertIn(secret, REDACTOR)
         smoke=(SOURCE.parents[1] / "Tests" / "UISmoke" / "SmokeDriver.m").read_text(encoding="utf-8")
         self.assertIn("diagnostic logs redact URL credentials", smoke)

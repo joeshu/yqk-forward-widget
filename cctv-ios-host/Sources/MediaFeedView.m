@@ -52,7 +52,7 @@ static void MediaFeedLoadPosterWithRetry(NSString *url, UIImageView *imageView, 
 - (void)configureItem:(NSDictionary *)item {
     self.poster.backgroundColor=HostNeutralSurface();HostSetLayerBorderColor(self.poster,HostBorder());
     self.nameLabel.textColor=HostText();self.detailLabel.textColor=HostSecondaryText();
-    self.poster.accessibilityIdentifier=nil;self.poster.image=[UIImage systemImageNamed:@"film"];self.poster.contentMode=UIViewContentModeCenter;self.poster.tintColor=HostSecondaryText();
+    BOOL directory=[item[@"directory"] boolValue];self.poster.accessibilityIdentifier=nil;self.poster.image=[UIImage systemImageNamed:directory?@"folder.fill":@"film"];self.poster.contentMode=UIViewContentModeCenter;self.poster.tintColor=HostSecondaryText();
     self.nameLabel.text=MediaFeedString(item[@"name"]).length?item[@"name"]:@"影片";
     NSString *remarks=MediaFeedString(item[@"remarks"]),*subtitle=MediaFeedString(item[@"feedSubtitle"]);
     NSString *badgeText=remarks;
@@ -60,9 +60,9 @@ static void MediaFeedLoadPosterWithRetry(NSString *url, UIImageView *imageView, 
     NSString *candidateDetail=subtitle.length?subtitle:(MediaFeedString(item[@"type"]).length?item[@"type"]:(MediaFeedString(item[@"year"]).length?item[@"year"]:MediaFeedString(item[@"area"])));
     if([candidateDetail isEqualToString:badgeText])candidateDetail=@"";
     self.detailLabel.text=candidateDetail;self.detailLabel.hidden=!candidateDetail.length;
-    self.badgeLabel.text=badgeText;self.badgeLabel.hidden=!badgeText.length;
-    NSString *poster=MediaFeedString(item[@"poster"]);if(poster.length)MediaFeedLoadPosterWithRetry(poster,self.poster,1);
-    self.accessibilityLabel=[@[self.nameLabel.text?:@"",remarks,self.detailLabel.text?:@""] componentsJoinedByString:@"，"];self.accessibilityHint=@"打开影片详情";[self setNeedsLayout];
+    self.badgeLabel.text=directory?@"文件夹":badgeText;self.badgeLabel.hidden=directory?NO:!badgeText.length;
+    NSString *poster=MediaFeedString(item[@"poster"]);if(!directory&&poster.length)MediaFeedLoadPosterWithRetry(poster,self.poster,1);
+    self.accessibilityLabel=[@[self.nameLabel.text?:@"",remarks,self.detailLabel.text?:@""] componentsJoinedByString:@"，"];self.accessibilityHint=directory?@"打开文件夹":@"打开影片详情";[self setNeedsLayout];
 }
 - (void)layoutSubviews {
     [super layoutSubviews];CGFloat width=CGRectGetWidth(self.contentView.bounds),height=CGRectGetHeight(self.contentView.bounds);CGFloat titleHeight=ceil(self.nameLabel.font.lineHeight)*2,detailHeight=ceil(self.detailLabel.font.lineHeight);CGFloat posterHeight=MIN(width*1.5,MAX(44,height-titleHeight-detailHeight-12));

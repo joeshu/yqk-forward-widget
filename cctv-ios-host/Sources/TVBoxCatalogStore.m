@@ -966,6 +966,10 @@ static void TVBoxNotifyAdaptationMonitorCatalog(NSString *name, NSString *source
         else if ([value isKindOfClass:NSDictionary.class]) {
             name=TVBoxString(value[@"name"],256);
             url=TVBoxString(value[@"url"],8192);
+            type=TVBoxString(value[@"type"],32)?:@"0";
+            userAgent=TVBoxString(value[@"ua"]?:value[@"userAgent"],1024);
+            epg=TVBoxString(value[@"epg"],2048);
+            logo=TVBoxString(value[@"logo"],2048);
             // Preserve all inline channels and all their alternative URLs.
             if(!url.length&&[value[@"channels"] isKindOfClass:NSArray.class]){
                 NSMutableString *playlist=[NSMutableString stringWithString:@"#EXTM3U\n"];NSUInteger count=0;
@@ -973,19 +977,21 @@ static void TVBoxNotifyAdaptationMonitorCatalog(NSString *name, NSString *source
                     if(![ch isKindOfClass:NSDictionary.class]||![ch[@"urls"] isKindOfClass:NSArray.class])continue;
                     NSString *channelName=TVBoxString(ch[@"name"],256)?:@"频道";channelName=[[channelName stringByReplacingOccurrencesOfString:@"\n" withString:@" "] stringByReplacingOccurrencesOfString:@"\r" withString:@" "];
                     NSString *groupName=TVBoxString(value[@"group"]?:value[@"name"],256)?:@"合集";groupName=[[[groupName stringByReplacingOccurrencesOfString:@"\n" withString:@" "] stringByReplacingOccurrencesOfString:@"\r" withString:@" "] stringByReplacingOccurrencesOfString:@"\"" withString:@"'"];
+                    NSString *channelLogo=TVBoxString(ch[@"logo"],2048)?:([logo containsString:@"{name}"]?[logo stringByReplacingOccurrencesOfString:@"{name}" withString:channelName]:logo);NSString *channelEPG=TVBoxString(ch[@"epgID"]?:ch[@"id"],512);
+                    NSMutableArray *attributes=[NSMutableArray array];if(channelEPG.length)[attributes addObject:[NSString stringWithFormat:@"tvg-id=\"%@\"",[[channelEPG stringByReplacingOccurrencesOfString:@"\"" withString:@"'"] stringByReplacingOccurrencesOfString:@"\n" withString:@" "]]];if(channelLogo.length&&TVBoxWebURL(channelLogo))[attributes addObject:[NSString stringWithFormat:@"tvg-logo=\"%@\"",[[channelLogo stringByReplacingOccurrencesOfString:@"\"" withString:@"'"] stringByReplacingOccurrencesOfString:@"\n" withString:@" "]]];[attributes addObject:[NSString stringWithFormat:@"group-title=\"%@\"",groupName]];
                     for(id raw in ch[@"urls"]){if(count>=5000)break;NSString *address=TVBoxString(raw,8192);NSURL *target=[NSURL URLWithString:address];if(!target.host.length||![@[@"http",@"https",@"rtmp",@"rtmps"] containsObject:target.scheme.lowercaseString]||[address rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location!=NSNotFound)continue;
-                        [playlist appendFormat:@"#EXTINF:-1 group-title=\"%@\",%@\n%@\n",groupName,channelName,address];count++;
+                        [playlist appendFormat:@"#EXTINF:-1 %@,%@\n",[attributes componentsJoinedByString:@" "],channelName];NSMutableDictionary *channelHeaders=[NSMutableDictionary dictionary];NSDictionary *provided=[ch[@"headers"] isKindOfClass:NSDictionary.class]?ch[@"headers"]:([ch[@"header"] isKindOfClass:NSDictionary.class]?ch[@"header"]:@{});NSUInteger headerCount=0;for(id headerName in provided){id headerValue=provided[headerName];if(headerCount++>=24)break;if([headerName isKindOfClass:NSString.class]&&[headerValue isKindOfClass:NSString.class]&&[headerName length]<=128&&[headerValue length]<=4096&&[headerName rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location==NSNotFound&&[headerValue rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location==NSNotFound)channelHeaders[headerName]=headerValue;}if(userAgent.length){BOOL hasUA=NO;for(NSString *key in channelHeaders)if([key caseInsensitiveCompare:@"User-Agent"]==NSOrderedSame){hasUA=YES;break;}if(!hasUA)channelHeaders[@"User-Agent"]=userAgent;}NSData *headerData=channelHeaders.count?[NSJSONSerialization dataWithJSONObject:channelHeaders options:0 error:NULL]:nil;if(headerData.length)[playlist appendFormat:@"#EXTHTTP:%@\n",[[NSString alloc] initWithData:headerData encoding:NSUTF8StringEncoding]];[playlist appendFormat:@"%@\n",address];count++;
                     }
                 }
                 if(count){NSString *identity=[NSString stringWithFormat:@"%@|%@|%lu",sourceURL?:@"local",name?:@"",(unsigned long)liveIndex];NSData *input=[identity dataUsingEncoding:NSUTF8StringEncoding];unsigned char digest[CC_SHA256_DIGEST_LENGTH];CC_SHA256(input.bytes,(CC_LONG)input.length,digest);NSMutableString *key=[NSMutableString string];for(NSUInteger i=0;i<sizeof(digest);i++)[key appendFormat:@"%02x",digest[i]];
                     url=[@"https://inline.cctvhost.invalid/" stringByAppendingString:key];
-                    [cleanLives addObject:@{@"name":name?:@"内嵌频道",@"url":url,@"type":@"0",@"supported":@YES,@"status":[NSString stringWithFormat:@"内嵌直播 · %lu 条线路",(unsigned long)count],@"inlinePlaylist":playlist.copy,@"sourceIndex":@(liveIndex-1)}];continue;
+                    NSMutableDictionary *inlineLive=[@{@"name":name?:@"内嵌频道",@"url":url,@"type":@"0",@"supported":@YES,@"status":[NSString stringWithFormat:@"内嵌直播 · %lu 条线路",(unsigned long)count],@"inlinePlaylist":playlist.copy,@"sourceIndex":@(liveIndex-1)} mutableCopy];
+                    if(userAgent.length&&[userAgent rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:@"\r\n"]].location==NSNotFound)inlineLive[@"ua"]=userAgent;
+                    if(epg.length&&TVBoxWebURL([epg stringByReplacingOccurrencesOfString:@"{name}" withString:@"cctv1"]))inlineLive[@"epg"]=epg;
+                    if(logo.length&&TVBoxWebURL([logo stringByReplacingOccurrencesOfString:@"{name}" withString:@"cctv1"]))inlineLive[@"logo"]=logo;
+                    [cleanLives addObject:inlineLive.copy];continue;
                 }
             }
-            type=TVBoxString(value[@"type"],32)?:@"0";
-            userAgent=TVBoxString(value[@"ua"]?:value[@"userAgent"],1024);
-            epg=TVBoxString(value[@"epg"],2048);
-            logo=TVBoxString(value[@"logo"],2048);
         }
         if(url.length&&!TVBoxWebURL(url)&&TVBoxWebURL(sourceURL)){NSURL *base=[NSURL URLWithString:sourceURL];NSURL *resolved=[NSURL URLWithString:url relativeToURL:base].absoluteURL;if(TVBoxWebURL(resolved.absoluteString))url=resolved.absoluteString;}
         if (!name.length) name=[NSString stringWithFormat:@"TVBox 直播源 %lu",(unsigned long)liveIndex];
