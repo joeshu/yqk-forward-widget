@@ -411,6 +411,8 @@ static void next(NSArray *steps, NSUInteger index) {
     if(appearanceIndex!=NSNotFound&&appearanceIndex+1<arguments.count&&[@[@"light",@"dark",@"system"] containsObject:arguments[appearanceIndex+1]])[NSUserDefaults.standardUserDefaults setObject:arguments[appearanceIndex+1] forKey:HostThemeModePreferenceKey];
     [NSUserDefaults.standardUserDefaults setBool:NO forKey:@"preloadNativeChannel"];
     [NSUserDefaults.standardUserDefaults setBool:NO forKey:@"resumeLastChannel"];
+    // 台标默认关闭（本轮改版）：冒烟先手动开启内置源台标，再验各台自己的台标
+    [ProfileStore setChannelLogoEnabled:YES forSource:nil];
     [NSUserDefaults.standardUserDefaults setInteger:4 forKey:@"cctv.channelGridColumns.v1"];
     [NSUserDefaults.standardUserDefaults setInteger:3 forKey:@"cctv.mediaGridColumns.v1"];
     [NSUserDefaults.standardUserDefaults removeObjectForKey:@"cctv.lastBottomTab.v1"];
