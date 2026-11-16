@@ -589,7 +589,6 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 @property(nonatomic,assign) NSUInteger playbackIntentVersion;
 @property(nonatomic,assign) NSUInteger subscriptionParseGeneration;
 @property(nonatomic,copy) NSDictionary *pendingNativeReplayProgram;
-@end
 - (BOOL)sessionHasContent;
 - (BOOL)sessionWantsPlayback;
 - (BOOL)sessionIsPlaying;
