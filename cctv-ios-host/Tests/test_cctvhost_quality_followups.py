@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class CCTVHostQualityFollowupContracts(unittest.TestCase):
     def test_channel_badges_only_report_bounded_measured_samples(self):
-        root = (ROOT / 'Sources/RootViewController.m').read_text()
+        root = "\n".join((p.read_text(encoding="utf-8").split("\n- (BOOL)sessionHasContent;", 1)[0] if p.name.endswith(".h") else p.read_text(encoding="utf-8")) for p in ([ROOT / "Sources" / "RootViewController_Internal.h", *sorted((ROOT / "Sources").glob("RootViewController*.m"))]))
         probe = (ROOT / 'Sources/MediaChannelProbe.m').read_text()
         self.assertNotIn('860.0', root)
         self.assertNotIn('FNV', root)
@@ -68,7 +68,7 @@ class CCTVHostQualityFollowupContracts(unittest.TestCase):
 
     def test_remote_toggle_and_large_type_tab_labels_stay_accessible(self):
         coordinator = (ROOT / 'Sources/PlaybackCoordinator.m').read_text()
-        root = (ROOT / 'Sources/RootViewController.m').read_text()
+        root = "\n".join((p.read_text(encoding="utf-8").split("\n- (BOOL)sessionHasContent;", 1)[0] if p.name.endswith(".h") else p.read_text(encoding="utf-8")) for p in ([ROOT / "Sources" / "RootViewController_Internal.h", *sorted((ROOT / "Sources").glob("RootViewController*.m"))]))
         self.assertIn('togglePlayPauseCommand addTarget:self', coordinator)
         self.assertIn('MPRemoteCommandHandlerStatus)togglePlayPause', coordinator)
         self.assertIn('configuration.title=accessibilitySize?@"":titles[button.tag]', root)

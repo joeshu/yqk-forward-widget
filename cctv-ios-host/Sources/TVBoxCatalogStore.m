@@ -1062,11 +1062,20 @@ static void TVBoxNotifyAdaptationMonitorCatalog(NSString *name, NSString *source
 
     }
 }
+static NSArray *gCachedRawCatalogs = nil;
+static NSArray<NSDictionary *> *gCachedCatalogs = nil;
++ (void)invalidateCatalogsCache {
+    @synchronized(self){ gCachedRawCatalogs=nil; gCachedCatalogs=nil; }
+}
 + (NSArray<NSDictionary *> *)catalogs {
     @synchronized(self){
+    NSArray *rawBefore=[NSUserDefaults.standardUserDefaults arrayForKey:@"tvboxCatalogs"];
+    if(gCachedCatalogs && gCachedRawCatalogs && (gCachedRawCatalogs==rawBefore || ([rawBefore isKindOfClass:NSArray.class] && [gCachedRawCatalogs isEqualToArray:rawBefore]))){
+        return gCachedCatalogs;
+    }
     [self ensureBuiltInMacCMSCatalogs];
     NSArray *rows=[NSUserDefaults.standardUserDefaults arrayForKey:@"tvboxCatalogs"];
-    if(![rows isKindOfClass:NSArray.class])return @[];
+    if(![rows isKindOfClass:NSArray.class]){gCachedRawCatalogs=nil;gCachedCatalogs=@[];return @[];}
     BOOL upgraded=NO;
     NSMutableArray *updatedCatalogs=[NSMutableArray arrayWithCapacity:rows.count];
     for(id rawCat in rows){
@@ -1124,7 +1133,9 @@ static void TVBoxNotifyAdaptationMonitorCatalog(NSString *name, NSString *source
         }
     }
     if(upgraded)[NSUserDefaults.standardUserDefaults setObject:updatedCatalogs forKey:@"tvboxCatalogs"];
-    return updatedCatalogs.copy;
+    gCachedCatalogs=updatedCatalogs.copy;
+    gCachedRawCatalogs=[[NSUserDefaults.standardUserDefaults arrayForKey:@"tvboxCatalogs"] copy];
+    return gCachedCatalogs;
 
     }
 }
@@ -1184,17 +1195,17 @@ static void TVBoxNotifyAdaptationMonitorCatalog(NSString *name, NSString *source
     if(sourceData.length){BOOL saved=NO;if(TVBoxSafeCatalogID(identifier)){NSString *path=[TVBoxCatalogStorageDirectory() stringByAppendingPathComponent:[identifier stringByAppendingPathExtension:@"json"]];saved=[sourceData writeToFile:path options:NSDataWritingAtomic error:NULL];}if(saved)[storedCatalog removeObjectForKey:@"_sourceConfigData"];else storedCatalog[@"_sourceConfigData"]=sourceData;}
     else [storedCatalog removeObjectForKey:@"_sourceConfigData"];
     NSMutableArray *rows=[[self catalogs] mutableCopy];
-    for(NSUInteger i=0;i<rows.count;i++) if([rows[i][@"id"] isEqual:identifier]) { NSMutableDictionary *merged=[rows[i] mutableCopy]; [merged addEntriesFromDictionary:storedCatalog]; rows[i]=merged; [NSUserDefaults.standardUserDefaults setObject:rows forKey:@"tvboxCatalogs"]; return; }
+    for(NSUInteger i=0;i<rows.count;i++) if([rows[i][@"id"] isEqual:identifier]) { NSMutableDictionary *merged=[rows[i] mutableCopy]; [merged addEntriesFromDictionary:storedCatalog]; rows[i]=merged; [NSUserDefaults.standardUserDefaults setObject:rows forKey:@"tvboxCatalogs"]; [self invalidateCatalogsCache]; return; }
     [rows addObject:storedCatalog];
     // 有界：最多保留 64 个目录，按 updatedAt 丢弃最旧（无时间戳的视为最旧）。
     while(rows.count>64){NSUInteger oldest=0;for(NSUInteger i=1;i<rows.count;i++)if([rows[i][@"updatedAt"] doubleValue]<[rows[oldest][@"updatedAt"] doubleValue])oldest=i;[rows removeObjectAtIndex:oldest];}
-    [NSUserDefaults.standardUserDefaults setObject:rows forKey:@"tvboxCatalogs"];
+    [NSUserDefaults.standardUserDefaults setObject:rows forKey:@"tvboxCatalogs"]; [self invalidateCatalogsCache];
 
     }
 }
 + (NSDictionary *)catalogForID:(NSString *)identifier { for(NSDictionary *row in [self catalogs])if([row[@"id"] isEqual:identifier])return row; return nil; }
 + (void)removeCatalog:(NSString *)identifier {
-    @synchronized(self){ NSMutableArray *rows=[[self catalogs] mutableCopy]; NSIndexSet *remove=[rows indexesOfObjectsPassingTest:^BOOL(NSDictionary *row,NSUInteger idx,BOOL *stop){return [row[@"id"] isEqual:identifier];}]; [rows removeObjectsAtIndexes:remove]; [NSUserDefaults.standardUserDefaults setObject:rows forKey:@"tvboxCatalogs"];if(TVBoxSafeCatalogID(identifier)){NSString *path=[TVBoxCatalogStorageDirectory() stringByAppendingPathComponent:[identifier stringByAppendingPathExtension:@"json"]];[NSFileManager.defaultManager removeItemAtPath:path error:NULL];NSString *bundleDir=[TVBoxCatalogBundlesDirectory() stringByAppendingPathComponent:identifier];[NSFileManager.defaultManager removeItemAtPath:bundleDir error:NULL];}
+    @synchronized(self){ NSMutableArray *rows=[[self catalogs] mutableCopy]; NSIndexSet *remove=[rows indexesOfObjectsPassingTest:^BOOL(NSDictionary *row,NSUInteger idx,BOOL *stop){return [row[@"id"] isEqual:identifier];}]; [rows removeObjectsAtIndexes:remove]; [NSUserDefaults.standardUserDefaults setObject:rows forKey:@"tvboxCatalogs"]; [self invalidateCatalogsCache];if(TVBoxSafeCatalogID(identifier)){NSString *path=[TVBoxCatalogStorageDirectory() stringByAppendingPathComponent:[identifier stringByAppendingPathExtension:@"json"]];[NSFileManager.defaultManager removeItemAtPath:path error:NULL];NSString *bundleDir=[TVBoxCatalogBundlesDirectory() stringByAppendingPathComponent:identifier];[NSFileManager.defaultManager removeItemAtPath:bundleDir error:NULL];}
     }
 }
 + (NSArray<NSDictionary *> *)liveSourcesInCatalog:(NSDictionary *)catalog { return [catalog[@"lives"] isKindOfClass:NSArray.class]?catalog[@"lives"]:@[]; }

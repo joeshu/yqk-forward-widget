@@ -7,6 +7,8 @@ CATPAW_PRESENTATION = ROOT.parent / "catpaw" / "presentation.js"
 
 
 def read_source(name: str) -> str:
+    if name == "RootViewController.m":
+        return "\n".join((p.read_text(encoding="utf-8").split("\n- (BOOL)sessionHasContent;", 1)[0] if p.name.endswith(".h") else p.read_text(encoding="utf-8")) for p in ([SOURCES / "RootViewController_Internal.h", *sorted(SOURCES.glob("RootViewController*.m"))]))
     return (SOURCES / name).read_text(encoding="utf-8")
 
 

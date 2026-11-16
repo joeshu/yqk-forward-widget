@@ -38,7 +38,7 @@ class UI2026PerformanceStabilityTests(unittest.TestCase):
         self.assertIn("if(specularRim)specularRim.frame=CGRectMake(0,0,CGRectGetWidth(view.bounds),MIN(1.2,CGRectGetHeight(view.bounds)));", theme)
 
     def test_06_sleep_timer_invalidation_in_dealloc_and_teardown(self):
-        root = (SOURCES / "RootViewController.m").read_text(encoding="utf-8")
+        root = "\n".join((p.read_text(encoding="utf-8").split("\n- (BOOL)sessionHasContent;", 1)[0] if p.name.endswith(".h") else p.read_text(encoding="utf-8")) for p in ([SOURCES / "RootViewController_Internal.h", *sorted(SOURCES.glob("RootViewController*.m"))]))
         playback = (SOURCES / "MediaPlaybackViewController.m").read_text(encoding="utf-8")
         self.assertIn("[self.liveSleepTimer invalidate];", root)
         self.assertGreaterEqual(playback.count("[self.mediaSleepTimer invalidate];"), 2)
@@ -71,7 +71,7 @@ class UI2026PerformanceStabilityTests(unittest.TestCase):
     def test_12_media_service_port_collision_deduplication_and_reassignment(self):
         service_store = (SOURCES / "ServiceStore.m").read_text(encoding="utf-8")
         import_workflow = (SOURCES / "ResourceImportWorkflowViewController.m").read_text(encoding="utf-8")
-        root = (SOURCES / "RootViewController.m").read_text(encoding="utf-8")
+        root = "\n".join((p.read_text(encoding="utf-8").split("\n- (BOOL)sessionHasContent;", 1)[0] if p.name.endswith(".h") else p.read_text(encoding="utf-8")) for p in ([SOURCES / "RootViewController_Internal.h", *sorted(SOURCES.glob("RootViewController*.m"))]))
         browser = (SOURCES / "MediaBrowserViewController.m").read_text(encoding="utf-8")
         self.assertIn("if([self isMediaService:resolved]&&(port<1024||port>65535||[usedPorts containsObject:@(port)]))", service_store)
         self.assertIn('if(![mutableService[@"builtin"] boolValue]&&[self isMediaService:mutableService])', service_store)

@@ -946,7 +946,14 @@ static void *pyThread(void *rawTask) {
     pthread_mutex_lock(&gLock); PyHostTask *task = gTasks[identifier];
     if (!task) { pthread_mutex_unlock(&gLock); if (![NodePluginRuntime.shared stopSessionsForServiceIdentifier:identifier error:error]) return NO;if(![JSPluginRuntime.shared stopSessionsForServiceIdentifier:identifier error:error])return NO;pthread_mutex_lock(&gLock);[gTaskFailures removeObjectForKey:identifier];pthread_mutex_unlock(&gLock);notifyRuntimeStateChanged();return YES; }
     task.stopping = YES;
-    for (NSUInteger wait = 0; !task.sessionReady && !task.threadExited && wait < 500; wait++) { struct timespec deadline; clock_gettime(CLOCK_REALTIME, &deadline); deadline.tv_nsec += 10000000; if (deadline.tv_nsec >= 1000000000) { deadline.tv_sec++; deadline.tv_nsec -= 1000000000; } pthread_cond_timedwait(&gCondition, &gLock, &deadline); }
+    for (NSUInteger wait = 0; !task.sessionReady && !task.threadExited && wait < 500; wait++) {
+#if defined(__APPLE__)
+        struct timespec relWait = { .tv_sec = 0, .tv_nsec = 10000000 };
+        pthread_cond_timedwait_relative_np(&gCondition, &gLock, &relWait);
+#else
+        struct timespec deadline; clock_gettime(CLOCK_REALTIME, &deadline); deadline.tv_nsec += 10000000; if (deadline.tv_nsec >= 1000000000) { deadline.tv_sec++; deadline.tv_nsec -= 1000000000; } pthread_cond_timedwait(&gCondition, &gLock, &deadline);
+#endif
+    }
     BOOL exited = task.threadExited, ready = task.sessionReady; pthread_mutex_unlock(&gLock);
     if (exited && !task.running) { clearPythonBreadcrumb(task); NSError *failure=nil;if(![JSPluginRuntime.shared stopSessionsForServiceIdentifier:identifier error:&failure]||![NodePluginRuntime.shared stopSessionsForServiceIdentifier:identifier error:&failure]){if(error)*error=failure;return NO;}pthread_mutex_lock(&gLock);[gTaskFailures removeObjectForKey:identifier];pthread_mutex_unlock(&gLock);notifyRuntimeStateChanged();return YES; }
     if (!ready) { if (error) *error = task.error ?: [NSError errorWithDomain:@"PyHost" code:7 userInfo:@{NSLocalizedDescriptionKey:@"Python 初始化尚未完成，请稍后停止。"}]; return NO; }
@@ -957,7 +964,22 @@ static void *pyThread(void *rawTask) {
     if (!stopped && gServiceRuntime) { PyObject *detail = PyObject_CallMethod(gServiceRuntime, "last_error", "s", identifier.UTF8String); const char *utf8 = detail && PyUnicode_Check(detail) ? PyUnicode_AsUTF8(detail) : NULL; if (utf8 && *utf8) message = [NSString stringWithUTF8String:utf8]; Py_XDECREF(detail); }
     PyErr_Clear(); PyGILState_Release(gil);
     if (!stopped) { if (error) *error = [NSError errorWithDomain:@"PyHost" code:6 userInfo:@{NSLocalizedDescriptionKey:message}]; pthread_mutex_lock(&gLock); task.stopping = NO; pthread_mutex_unlock(&gLock); return NO; }
-    for (NSUInteger attempt = 0; attempt < 500; attempt++) { pthread_mutex_lock(&gLock); exited = task.threadExited; if (exited) { task.running = NO; task.stopping = NO; [gTasks removeObjectForKey:identifier]; } pthread_mutex_unlock(&gLock); if (exited) { clearPythonBreadcrumb(task); NSError *failure=nil;if(![JSPluginRuntime.shared stopSessionsForServiceIdentifier:identifier error:&failure]||![NodePluginRuntime.shared stopSessionsForServiceIdentifier:identifier error:&failure]){if(error)*error=failure;return NO;}notifyRuntimeStateChanged(); return YES; } [NSThread sleepForTimeInterval:.01]; }
+    for (NSUInteger attempt = 0; attempt < 500; attempt++) {
+        pthread_mutex_lock(&gLock);
+        if (!task.threadExited) {
+#if defined(__APPLE__)
+            struct timespec relWait = { .tv_sec = 0, .tv_nsec = 10000000 };
+            pthread_cond_timedwait_relative_np(&gCondition, &gLock, &relWait);
+#endif
+        }
+        exited = task.threadExited;
+        if (exited) { task.running = NO; task.stopping = NO; [gTasks removeObjectForKey:identifier]; }
+        pthread_mutex_unlock(&gLock);
+        if (exited) { clearPythonBreadcrumb(task); NSError *failure=nil;if(![JSPluginRuntime.shared stopSessionsForServiceIdentifier:identifier error:&failure]||![NodePluginRuntime.shared stopSessionsForServiceIdentifier:identifier error:&failure]){if(error)*error=failure;return NO;}notifyRuntimeStateChanged(); return YES; }
+#if !defined(__APPLE__)
+        [NSThread sleepForTimeInterval:.01];
+#endif
+    }
     if (error) *error = [NSError errorWithDomain:@"PyHost" code:9 userInfo:@{NSLocalizedDescriptionKey:@"服务线程正在结束，请稍后重试。"}]; return NO;
 #endif
 }
@@ -972,17 +994,26 @@ static void *pyThread(void *rawTask) {
 + (void)stop { NSError *error = nil; if (![self stopWithError:&error] && error) emitLog(error.localizedDescription); }
 + (void)refreshListenersAfterForeground {
 #if PYHOST_AVAILABLE
-    pthread_mutex_lock(&gLock);
-    BOOL ready = gInterpreterReady && gServiceRuntime != NULL;
-    pthread_mutex_unlock(&gLock);
-    if (!ready) return;
-    PyGILState_STATE gil = PyGILState_Ensure();
-    if (gServiceRuntime) {
-        PyObject *rebind = PyObject_CallMethod(gServiceRuntime, "rebind_active_listeners", NULL);
-        Py_XDECREF(rebind);
-    }
-    PyErr_Clear();
-    PyGILState_Release(gil);
+    static dispatch_queue_t fgQueue;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        fgQueue = dispatch_queue_create("com.cctvhost.pyhost.foreground", DISPATCH_QUEUE_SERIAL);
+    });
+    dispatch_block_t work = ^{
+        pthread_mutex_lock(&gLock);
+        BOOL ready = gInterpreterReady && gServiceRuntime != NULL;
+        pthread_mutex_unlock(&gLock);
+        if (!ready) return;
+        PyGILState_STATE gil = PyGILState_Ensure();
+        if (gServiceRuntime) {
+            PyObject *rebind = PyObject_CallMethod(gServiceRuntime, "rebind_active_listeners", NULL);
+            Py_XDECREF(rebind);
+        }
+        PyErr_Clear();
+        PyGILState_Release(gil);
+    };
+    if (NSThread.isMainThread) dispatch_async(fgQueue, work);
+    else work();
 #endif
 }
 

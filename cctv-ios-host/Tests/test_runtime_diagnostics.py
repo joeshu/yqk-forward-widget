@@ -4,7 +4,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DIAGNOSTICS = (ROOT / "Sources/RuntimeDiagnostics.m").read_text()
 SETTINGS = (ROOT / "Sources/SettingsViewController.m").read_text()
-HOST = (ROOT / "Sources/RootViewController.m").read_text()
+HOST = "\n".join((p.read_text(encoding="utf-8").split("\n- (BOOL)sessionHasContent;", 1)[0] if p.name.endswith(".h") else p.read_text(encoding="utf-8")) for p in ([ROOT / "Sources" / "RootViewController_Internal.h", *sorted((ROOT / "Sources").glob("RootViewController*.m"))]))
 MEDIA = (ROOT / "Sources/MediaAPIClient.m").read_text()
 PLAYBACK = (ROOT / "Sources/MediaPlaybackViewController.m").read_text()
 READINESS = (ROOT / "Sources/LocalServiceReadiness.m").read_text()

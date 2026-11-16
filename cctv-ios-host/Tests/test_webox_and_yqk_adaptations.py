@@ -182,7 +182,7 @@ const fn = {fn_code};
     def test_unified_immersive_top_chrome_and_zero_jump_media_detail_transition(self):
         theme = (ROOT / "Sources/HostTheme.h").read_text(encoding="utf-8")
         browser = (ROOT / "Sources/MediaBrowserViewController.m").read_text(encoding="utf-8")
-        root = (ROOT / "Sources/RootViewController.m").read_text(encoding="utf-8")
+        root = "\n".join((p.read_text(encoding="utf-8").split("\n- (BOOL)sessionHasContent;", 1)[0] if p.name.endswith(".h") else p.read_text(encoding="utf-8")) for p in ([ROOT / "Sources" / "RootViewController_Internal.h", *sorted((ROOT / "Sources").glob("RootViewController*.m"))]))
         config = (ROOT / "Sources/ConfigCenterViewController.m").read_text(encoding="utf-8")
         settings = (ROOT / "Sources/SettingsViewController.m").read_text(encoding="utf-8")
 
@@ -201,7 +201,7 @@ const fn = {fn_code};
     def test_resource_import_workflow_advanced_features_and_closed_loop_activation(self):
         wf_h = (ROOT / "Sources/ResourceImportWorkflowViewController.h").read_text(encoding="utf-8")
         wf_m = (ROOT / "Sources/ResourceImportWorkflowViewController.m").read_text(encoding="utf-8")
-        root_m = (ROOT / "Sources/RootViewController.m").read_text(encoding="utf-8")
+        root_m = "\n".join((p.read_text(encoding="utf-8").split("\n- (BOOL)sessionHasContent;", 1)[0] if p.name.endswith(".h") else p.read_text(encoding="utf-8")) for p in ([ROOT / "Sources" / "RootViewController_Internal.h", *sorted((ROOT / "Sources").glob("RootViewController*.m"))]))
 
         self.assertIn("saveAndActivateSelected", wf_h)
         self.assertIn("promptRenameCandidateAtIndex:", wf_h)
@@ -270,7 +270,7 @@ const fn = {fn_code};
 
     def test_ci_syntax_service_editor_lag_and_playback_startup_optimizations(self):
         # 1. CI syntax & CCTVPlaybackListPanelController regression guards
-        root_src = (ROOT / "Sources/RootViewController.m").read_text(encoding="utf-8")
+        root_src = "\n".join((p.read_text(encoding="utf-8").split("\n- (BOOL)sessionHasContent;", 1)[0] if p.name.endswith(".h") else p.read_text(encoding="utf-8")) for p in ([ROOT / "Sources" / "RootViewController_Internal.h", *sorted((ROOT / "Sources").glob("RootViewController*.m"))]))
         panel_impl = root_src.split("@implementation CCTVPlaybackListPanelController", 1)[1].split("@end", 1)[0]
         self.assertNotIn("scrollViewDidScroll:", panel_impl)
         self.assertNotIn("catalogTopImmersiveScrim", panel_impl)

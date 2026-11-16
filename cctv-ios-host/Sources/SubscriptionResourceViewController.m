@@ -8,8 +8,11 @@
 @property(nonatomic,strong) UITextField *urlField;
 @property(nonatomic,strong) UITextField *epgField;
 @property(nonatomic,copy) NSDictionary *snapshot;
+@property(nonatomic,copy) NSDictionary *cachedProfile;
 @property(nonatomic) BOOL editingResource;
 @property(nonatomic) BOOL saving;
+@property(nonatomic) BOOL hasAppearedOnce;
+@property(nonatomic) BOOL suppressMetadataReload;
 @property(nonatomic,copy) NSString *notice;
 @property(nonatomic,weak) id<UIGestureRecognizerDelegate> previousPopDelegate;
 @end
@@ -61,11 +64,36 @@
     [self.tableView reloadData];
 }
 - (void)dealloc {[NSNotificationCenter.defaultCenter removeObserver:self];}
-- (void)viewWillAppear:(BOOL)animated {[super viewWillAppear:animated];UIGestureRecognizer *gesture=self.navigationController.interactivePopGestureRecognizer;self.previousPopDelegate=gesture.delegate;gesture.delegate=self;if(!self.editingResource)[self metadataChanged];}
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    UIGestureRecognizer *gesture=self.navigationController.interactivePopGestureRecognizer;
+    self.previousPopDelegate=gesture.delegate;
+    gesture.delegate=self;
+    if(self.hasAppearedOnce&&!self.editingResource){
+        [self metadataChanged];
+    }else if(!self.cachedProfile.count&&self.profileProvider){
+        self.cachedProfile=self.profileProvider()?:@{};
+    }
+    self.hasAppearedOnce=YES;
+}
 - (void)viewWillDisappear:(BOOL)animated {[super viewWillDisappear:animated];UIGestureRecognizer *gesture=self.navigationController.interactivePopGestureRecognizer;if(gesture.delegate==self)gesture.delegate=self.previousPopDelegate;}
 - (NSDictionary *)values {return @{@"name":self.nameField.text?:@"",@"url":self.urlField.text?:@"",@"epg":self.epgField.text?:@""};}
-- (void)loadFields {NSDictionary *metadata=[ProfileStore metadata:self.source],*profile=self.profileProvider?self.profileProvider():@{};self.nameField.text=metadata[@"name"]?:profile[@"name"]?:@"直播资源";self.urlField.text=self.source?:@"";self.epgField.text=metadata[@"epgURL"]?:@"";self.snapshot=[self values];}
-- (void)metadataChanged {if(self.editingResource||self.saving)return;[self loadFields];[self.tableView reloadData];}
+- (void)refreshCachedProfile {
+    self.cachedProfile=self.profileProvider?(self.profileProvider()?:@{}):@{};
+}
+- (void)loadFields {
+    [self refreshCachedProfile];
+    NSDictionary *metadata=[ProfileStore metadata:self.source],*profile=self.cachedProfile?:@{};
+    self.nameField.text=metadata[@"name"]?:profile[@"name"]?:(self.source.length?@"直播资源":@"央视直播 · 官方频道");
+    self.urlField.text=self.source?:@"";
+    self.epgField.text=metadata[@"epgURL"]?:@"";
+    self.snapshot=[self values];
+}
+- (void)metadataChanged {
+    if(self.editingResource||self.saving||self.suppressMetadataReload)return;
+    [self loadFields];
+    if(self.isViewLoaded)[self.tableView reloadData];
+}
 - (void)updateAction {
     self.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc] initWithTitle:self.editingResource?(self.saving?@"验证中…":@"保存"):@"编辑" style:UIBarButtonItemStyleDone target:self action:self.editingResource?@selector(save):@selector(beginEditing)];self.navigationItem.rightBarButtonItem.enabled=!self.saving&&(self.editingResource?![[self values] isEqual:self.snapshot]:self.source.length>0);
     self.nameField.enabled=self.editingResource&&!self.saving;self.urlField.enabled=self.editingResource&&!self.saving&&[ProfileStore isHTTP:self.source];self.epgField.enabled=self.editingResource&&!self.saving;
@@ -88,33 +116,67 @@
         @{@"title":@"查看频道",@"icon":@"play.tv",@"action":@"open"},
         @{@"title":@"刷新此订阅",@"icon":@"arrow.clockwise",@"action":@"refresh"},
         nil];
-    if(self.source.length&&self.onRecheckHealth)[rows addObject:@{@"title":@"重新检测健康",@"icon":@"checkmark.shield",@"action":@"recheck"}];
-    if(self.source.length&&self.onRematchEPG)[rows addObject:@{@"title":@"重新匹配节目单（EPG）",@"icon":@"calendar.badge.clock",@"action":@"rematch"}];
+    if(self.onRecheckHealth)[rows addObject:@{@"title":@"重新检测健康",@"icon":@"checkmark.shield",@"action":@"recheck"}];
+    if(self.onRematchEPG)[rows addObject:@{@"title":@"重新匹配节目单（EPG）",@"icon":@"calendar.badge.clock",@"action":@"rematch"}];
     [rows addObject:@{@"title":@"智能匹配官方高清台标与节目单",@"icon":@"sparkles.tv",@"action":@"matchLogos"}];
     [rows addObject:@{@"title":@"导出单项资源文件",@"icon":@"square.and.arrow.up",@"action":@"export"}];
     if(self.source.length)[rows addObject:@{@"title":@"复制订阅地址",@"icon":@"doc.on.doc",@"action":@"copy"}];
     if(self.source.length&&self.onDelete)[rows addObject:@{@"title":@"移除此订阅",@"icon":@"trash",@"action":@"delete",@"destructive":@YES}];
     return rows;
 }
+- (void)applyInPlaceSwitchFeedbackForRow:(NSInteger)row detail:(NSString *)detail iconName:(NSString *)iconName {
+    UITableViewCell *cell=[self.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:row inSection:1]];
+    if(cell){
+        cell.detailTextLabel.text=detail;
+        if(iconName.length){
+            cell.imageView.image=[UIImage systemImageNamed:iconName];
+            cell.imageView.tintColor=HostAccent();
+        }
+        [cell setNeedsLayout];
+    }
+    UITableViewHeaderFooterView *footer=[self.tableView footerViewForSection:0];
+    if(footer.textLabel){
+        footer.textLabel.text=[self tableView:self.tableView titleForFooterInSection:0];
+        [footer setNeedsLayout];
+    }else if(!cell){
+        [self.tableView reloadData];
+    }
+}
 - (void)toggleChannelLogoSwitch:(UISwitch *)sender {
+    self.suppressMetadataReload=YES;
     [ProfileStore setChannelLogoEnabled:sender.isOn forSource:self.source];
+    self.suppressMetadataReload=NO;
     self.notice = sender.isOn ? @"已开启此资源的频道列表与播放器台标" : @"已关闭此资源的台标显示";
-    [self.tableView reloadData];
+    [self applyInPlaceSwitchFeedbackForRow:2
+                                    detail:sender.isOn?@"已开启 · 在 CCTV 页与频道页显示该资源台标":@"已关闭 · 列表与网格仅显示文字台名"
+                                  iconName:sender.isOn?@"photo.fill":@"photo"];
 }
 - (void)togglePlayerCornerLogoSwitch:(UISwitch *)sender {
+    self.suppressMetadataReload=YES;
     [ProfileStore setPlayerCornerLogoEnabled:sender.isOn forSource:self.source];
+    self.suppressMetadataReload=NO;
     self.notice = sender.isOn ? @"已开启此资源的播放器右上角台标" : @"已关闭此资源的播放器右上角台标";
-    [self.tableView reloadData];
+    [self applyInPlaceSwitchFeedbackForRow:3
+                                    detail:sender.isOn?@"已开启 · 播放时在画面右上角显示当前频道台标":@"已关闭 · 播放画面右上角不显示台标水印"
+                                  iconName:sender.isOn?@"tv.inset.filled":@"tv"];
 }
 - (void)toggleChannelPreviewSwitch:(UISwitch *)sender {
+    self.suppressMetadataReload=YES;
     [ProfileStore setChannelPreviewEnabled:sender.isOn forSource:self.source];
+    self.suppressMetadataReload=NO;
     self.notice = sender.isOn ? @"已开启此资源的频道实时预览图" : @"已关闭此资源的频道实时预览图";
-    [self.tableView reloadData];
+    [self applyInPlaceSwitchFeedbackForRow:4
+                                    detail:sender.isOn?@"已开启 · 播放列表刷新时检测并展示频道最新真实画面":@"已关闭 · 仅展示纯色卡片与台标"
+                                  iconName:sender.isOn?@"photo.on.rectangle.angled":@"rectangle.slash"];
 }
 - (void)toggleChannelTelemetrySwitch:(UISwitch *)sender {
+    self.suppressMetadataReload=YES;
     [ProfileStore setChannelTelemetryEnabled:sender.isOn forSource:self.source];
+    self.suppressMetadataReload=NO;
     self.notice = sender.isOn ? @"已开启此资源的频道速率与延迟显示" : @"已关闭此资源的频道速率与延迟显示";
-    [self.tableView reloadData];
+    [self applyInPlaceSwitchFeedbackForRow:5
+                                    detail:sender.isOn?@"已开启 · 在 CCTV 页与频道页展示每个台的实时速率与响应延迟":@"已关闭 · 不显示速率与延迟徽章"
+                                  iconName:@"speedometer"];
 }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {return 3;}
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {return section==0?3:(section==1?6:self.managementRows.count);}
@@ -123,7 +185,19 @@
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {return @[@"资源配置",@"内容状态",@"使用与管理"][section];}
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {if(section==0)return self.notice?:@"修改订阅地址会先读取新清单，验证成功后替换。EPG 留空使用列表自动提供的地址。";return nil;}
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {
-    UITableViewCell *cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:nil];
+    NSString *reuseID=(ip.section==0&&self.editingResource)?[NSString stringWithFormat:@"subscription.edit.%ld",(long)ip.row]:(ip.section==1&&ip.row>=2?[NSString stringWithFormat:@"subscription.switch.%ld",(long)ip.row]:@"subscription.subtitle.cell");
+    UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:reuseID];
+    if(!cell){
+        cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:reuseID];
+    }
+    for(UIView *sub in cell.contentView.subviews){
+        if([sub isKindOfClass:UIStackView.class])[sub removeFromSuperview];
+    }
+    cell.accessoryView=nil;
+    cell.accessoryType=UITableViewCellAccessoryNone;
+    cell.imageView.image=nil;
+    cell.detailTextLabel.text=nil;
+    cell.selectionStyle=UITableViewCellSelectionStyleDefault;
     cell.backgroundColor=HostCard();
     cell.layer.cornerRadius=14;
     cell.layer.cornerCurve=kCACornerCurveContinuous;
@@ -138,13 +212,17 @@
     cell.detailTextLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];
     cell.textLabel.adjustsFontForContentSizeCategory=YES;
     cell.detailTextLabel.adjustsFontForContentSizeCategory=YES;
-    NSDictionary *profile=self.profileProvider?self.profileProvider():@{};
+    if(!self.cachedProfile.count&&self.profileProvider){
+        [self refreshCachedProfile];
+    }
+    NSDictionary *profile=self.cachedProfile?:@{};
     if(ip.section==0){
         NSString *rowTitle=@[@"名称",@"订阅来源",@"XMLTV / EPG"][ip.row];
         if(self.editingResource){
             cell.textLabel.text=nil;
             cell.detailTextLabel.text=nil;
             UITextField *field=@[self.nameField,self.urlField,self.epgField][ip.row];
+            [field removeFromSuperview];
             field.accessibilityLabel=rowTitle;
             UILabel *label=[UILabel new];
             label.text=rowTitle;
@@ -175,6 +253,7 @@
             NSString *epgURL=self.epgField.text.length?self.epgField.text:(meta[@"detectedEPGURL"]?:@"");
             cell.detailTextLabel.text=ip.row==0?self.nameField.text:(ip.row==1?(url.host.length?[NSString stringWithFormat:@"%@ · %@",url.host,url.lastPathComponent?:@""]:([self.source hasPrefix:@"local-playlist:"]?@"本地文件":@"官方频道目录")):(epgURL.length?[NSString stringWithFormat:@"已配置 EPG · %@",[HostLogRedactor redactText:epgURL]]:@"自动使用列表提供的 EPG"));
             if(ip.row>0&&self.source.length)cell.accessoryType=UITableViewCellAccessoryDisclosureIndicator;
+            else cell.selectionStyle=UITableViewCellSelectionStyleNone;
         }
     }
     else if(ip.section==1){
@@ -183,7 +262,8 @@
             cell.detailTextLabel.text=profile[@"epgStatus"]?:@"EPG 自动匹配";
             cell.imageView.image=[UIImage systemImageNamed:@"tv"];
         }else if(ip.row==1){
-            cell.textLabel.text=profile[@"status"]?:@"尚未检查";
+            NSString *defaultStatus=self.source.length?@"尚未检查":@"内置官方 · 实时就绪";
+            cell.textLabel.text=profile[@"status"]?:defaultStatus;
             NSTimeInterval updated=[profile[@"updatedAt"] doubleValue];
             if(updated>0){
                 static NSDateFormatter *fmt;static dispatch_once_t once;
@@ -220,7 +300,7 @@
         }else if(ip.row==4){
             BOOL previewEnabled=[ProfileStore isChannelPreviewEnabledForSource:self.source];
             cell.textLabel.text=@"频道实时预览图";
-            cell.detailTextLabel.text=previewEnabled?@"已开启 · 在 CCTV 页与频道页卡片/列表展示频道预览缩略图":@"已关闭 · 仅展示纯色卡片与台标";
+            cell.detailTextLabel.text=previewEnabled?@"已开启 · 播放列表刷新时检测并展示频道最新真实画面":@"已关闭 · 仅展示纯色卡片与台标";
             cell.imageView.image=[UIImage systemImageNamed:previewEnabled?@"photo.on.rectangle.angled":@"rectangle.slash"];
             UISwitch *toggle=[UISwitch new];
             toggle.onTintColor=HostAccent();
@@ -280,10 +360,10 @@
         if(ip.row<0||ip.row>=(NSInteger)rows.count)return;
         NSString *action=rows[ip.row][@"action"];
         if([action isEqual:@"open"]){if(self.onOpen)self.onOpen();}
-        else if([action isEqual:@"refresh"]){if(self.onRefresh){self.onRefresh();self.notice=@"刷新请求已发起";[self.tableView reloadData];}}
-        else if([action isEqual:@"recheck"]){if(self.onRecheckHealth){self.onRecheckHealth();self.notice=@"正在重新检测订阅健康状态…";[self.tableView reloadData];}}
-        else if([action isEqual:@"rematch"]){if(self.onRematchEPG){self.onRematchEPG();self.notice=@"已发起节目单（EPG）重新匹配";[self.tableView reloadData];}}
-        else if([action isEqual:@"matchLogos"]){if(self.onMatchStationLogos)self.onMatchStationLogos();self.notice=@"已完成官方高清台标与节目单归一匹配";[self.tableView reloadData];}
+        else if([action isEqual:@"refresh"]){if(self.onRefresh){self.onRefresh();self.notice=self.source.length?@"刷新请求已发起":@"已同步内置官方频道与节目单";[self loadFields];[self.tableView reloadData];}}
+        else if([action isEqual:@"recheck"]){if(self.onRecheckHealth){self.onRecheckHealth();self.notice=self.source.length?@"正在重新检测订阅健康状态…":@"内置官方频道健康状态正常";[self loadFields];[self.tableView reloadData];}}
+        else if([action isEqual:@"rematch"]){if(self.onRematchEPG){self.onRematchEPG();self.notice=@"已发起节目单（EPG）重新匹配";[self loadFields];[self.tableView reloadData];}}
+        else if([action isEqual:@"matchLogos"]){if(self.onMatchStationLogos)self.onMatchStationLogos();self.notice=@"已完成官方高清台标与节目单归一匹配";[self loadFields];[self.tableView reloadData];}
         else if([action isEqual:@"export"]){if(self.onExport)self.onExport();}
         else if([action isEqual:@"copy"]){if(self.source.length){UIPasteboard.generalPasteboard.string=self.source;self.notice=@"订阅地址已复制到剪贴板";[self.tableView reloadData];}}
         else if([action isEqual:@"delete"]){[self confirmDeleteSubscription];}

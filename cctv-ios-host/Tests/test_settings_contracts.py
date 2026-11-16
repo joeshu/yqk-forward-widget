@@ -23,7 +23,7 @@ class SettingsContracts(unittest.TestCase):
     def setUpClass(cls):
         cls.settings = (ROOT / 'Sources/SettingsViewController.m').read_text()
         cls.settings_h = (ROOT / 'Sources/SettingsViewController.h').read_text()
-        cls.root = (ROOT / 'Sources/RootViewController.m').read_text()
+        cls.root = "\n".join((p.read_text(encoding="utf-8").split("\n- (BOOL)sessionHasContent;", 1)[0] if p.name.endswith(".h") else p.read_text(encoding="utf-8")) for p in ([ROOT / "Sources" / "RootViewController_Internal.h", *sorted((ROOT / "Sources").glob("RootViewController*.m"))]))
         cls.playback = (ROOT / 'Sources/MediaPlaybackViewController.m').read_text()
         cls.backup = (ROOT / 'Sources/HostBackup.m').read_text()
         cls.media_api = (ROOT / 'Sources/MediaAPIClient.m').read_text()

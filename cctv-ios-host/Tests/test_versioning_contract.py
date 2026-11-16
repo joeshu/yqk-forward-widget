@@ -34,7 +34,7 @@ class VersioningContractTests(unittest.TestCase):
         self.assertEqual(bump("1.1.0"), "1.1.1")
 
     def test_ui_reads_version_from_app_bundle(self):
-        source = (ROOT / "Sources" / "RootViewController.m").read_text()
+        source = "\n".join((p.read_text(encoding="utf-8").split("\n- (BOOL)sessionHasContent;", 1)[0] if p.name.endswith(".h") else p.read_text(encoding="utf-8")) for p in ([ROOT / "Sources" / "RootViewController_Internal.h", *sorted((ROOT / "Sources").glob("RootViewController*.m"))]))
         self.assertIn('objectForInfoDictionaryKey:@"CFBundleShortVersionString"', source)
         self.assertNotRegex(source, r'kBuildTag\s*=\s*@"\d')
 

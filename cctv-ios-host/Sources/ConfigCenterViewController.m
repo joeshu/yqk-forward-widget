@@ -768,8 +768,7 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     NSArray<NSDictionary *> *profiles=[self.allProfiles isKindOfClass:NSArray.class]?self.allProfiles:@[];
     if(!profiles.count){self.probingResources=NO;return;}
     dispatch_group_t group=dispatch_group_create();
-    NSOperationQueue *queue=[NSOperationQueue new];queue.maxConcurrentOperationCount=8;queue.qualityOfService=NSQualityOfServiceUtility;
-    NSURLSessionConfiguration *configuration=[NSURLSessionConfiguration ephemeralSessionConfiguration];configuration.timeoutIntervalForRequest=4;configuration.timeoutIntervalForResource=5;configuration.requestCachePolicy=NSURLRequestReloadIgnoringLocalCacheData;
+    NSURLSessionConfiguration *configuration=[NSURLSessionConfiguration ephemeralSessionConfiguration];configuration.timeoutIntervalForRequest=4;configuration.timeoutIntervalForResource=5;configuration.HTTPMaximumConnectionsPerHost=4;configuration.requestCachePolicy=NSURLRequestReloadIgnoringLocalCacheData;
     NSURLSession *session=[NSURLSession sessionWithConfiguration:configuration];__weak typeof(self) weakSelf=self;
     NSMutableArray<NSDictionary *> *targets=[NSMutableArray array];
     for(NSDictionary *profile in profiles){
@@ -781,13 +780,13 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     [self.tableView reloadData];
     for(NSDictionary *target in targets){
         dispatch_group_enter(group);
-        [queue addOperationWithBlock:^{
-            NSURL *url=target[@"url"];NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:4];request.HTTPMethod=@"HEAD";
-            NSDate *start=[NSDate date];__block NSHTTPURLResponse *response=nil;__block NSError *probeError=nil;dispatch_semaphore_t semaphore=dispatch_semaphore_create(0);
-            NSURLSessionDataTask *task=[session dataTaskWithRequest:request completionHandler:^(NSData *data,NSURLResponse *rawResponse,NSError *error){response=[rawResponse isKindOfClass:NSHTTPURLResponse.class]?(id)rawResponse:nil;probeError=error;dispatch_semaphore_signal(semaphore);}];[task resume];
-            long waited=dispatch_semaphore_wait(semaphore,dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC));if(waited!=0){[task cancel];probeError=[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorTimedOut userInfo:nil];}
-            double elapsed=[[NSDate date] timeIntervalSinceDate:start]*1000.0;NSInteger status=response.statusCode;BOOL ok=!probeError&&status>=200&&status<300;
-            NSDictionary *result=@{@"ok":@(ok),@"milliseconds":@(MAX(0,elapsed)),@"status":@(status)};NSString *source=target[@"source"];
+        NSURL *url=target[@"url"];NSString *source=target[@"source"];
+        NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:4];request.HTTPMethod=@"HEAD";
+        NSDate *start=[NSDate date];
+        NSURLSessionDataTask *task=[session dataTaskWithRequest:request completionHandler:^(__unused NSData *data,NSURLResponse *rawResponse,NSError *error){
+            NSHTTPURLResponse *response=[rawResponse isKindOfClass:NSHTTPURLResponse.class]?(id)rawResponse:nil;
+            double elapsed=[[NSDate date] timeIntervalSinceDate:start]*1000.0;NSInteger status=response.statusCode;BOOL ok=!error&&status>=200&&status<300;
+            NSDictionary *result=@{@"ok":@(ok),@"milliseconds":@(MAX(0,elapsed)),@"status":@(status)};
             dispatch_async(dispatch_get_main_queue(),^{
                 ConfigCenterViewController *owner=weakSelf;if(!owner||!source.length)return;owner.latencyResults[source]=result;
                 NSUInteger row=[owner.profiles indexOfObjectPassingTest:^BOOL(NSDictionary *profile,NSUInteger index,BOOL *stop){return [profile[@"source"] isEqual:source];}];
@@ -795,9 +794,10 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
             });
             dispatch_group_leave(group);
         }];
+        [task resume];
     }
     dispatch_group_notify(group,dispatch_get_main_queue(),^{
-        NSOperationQueue *finishedQueue=queue;ConfigCenterViewController *owner=weakSelf;if(!owner)return;(void)finishedQueue;[session finishTasksAndInvalidate];owner.probingResources=NO;
+        ConfigCenterViewController *owner=weakSelf;if(!owner)return;[session finishTasksAndInvalidate];owner.probingResources=NO;
         [UIView transitionWithView:owner.tableView duration:.18 options:UIViewAnimationOptionTransitionCrossDissolve animations:^{[owner.tableView reloadData];} completion:nil];
     });
 }

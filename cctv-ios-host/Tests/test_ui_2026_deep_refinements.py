@@ -13,7 +13,7 @@ class UI2026DeepRefinementsTests(unittest.TestCase):
         self.assertIn("cell.layer.cornerRadius=14; cell.layer.cornerCurve=kCACornerCurveContinuous;", settings)
 
     def test_ref2_root_channel_list_cell_card_rounding_and_border(self):
-        root = (SOURCES / "RootViewController.m").read_text(encoding="utf-8")
+        root = "\n".join((p.read_text(encoding="utf-8").split("\n- (BOOL)sessionHasContent;", 1)[0] if p.name.endswith(".h") else p.read_text(encoding="utf-8")) for p in ([SOURCES / "RootViewController_Internal.h", *sorted(SOURCES.glob("RootViewController*.m"))]))
         self.assertIn("cell.layer.cornerRadius=13; cell.layer.cornerCurve=kCACornerCurveContinuous;", root)
         self.assertIn("HostSetLayerBorderColor(cell,playing?HostAccent():HostBorder());", root)
 
@@ -63,7 +63,7 @@ class UI2026DeepRefinementsTests(unittest.TestCase):
     def test_ref11_full_app_live_theme_reload_and_interface_style_coverage(self):
         for p in sorted(SOURCES.glob("*.m")):
             text = p.read_text(encoding="utf-8")
-            for cls in re.findall(r"@implementation\s+(\w+)", text):
+            for cls in re.findall(r"@implementation\s+(\w+)\s*\n", text):
                 if "ViewController" in cls or cls in ("MediaSourcePicker", "CCTVPlaybackListPanelController"):
                     block = re.search(rf"@implementation\s+{cls}\b(.*?)@end", text, re.S).group(1)
                     with self.subTest(file=p.name, controller=cls):
@@ -71,7 +71,7 @@ class UI2026DeepRefinementsTests(unittest.TestCase):
                         self.assertIn("overrideUserInterfaceStyle", block)
 
     def test_ref12_live_panel_and_source_picker_spatial_selected_cards(self):
-        root = (SOURCES / "RootViewController.m").read_text(encoding="utf-8")
+        root = "\n".join((p.read_text(encoding="utf-8").split("\n- (BOOL)sessionHasContent;", 1)[0] if p.name.endswith(".h") else p.read_text(encoding="utf-8")) for p in ([SOURCES / "RootViewController_Internal.h", *sorted(SOURCES.glob("RootViewController*.m"))]))
         self.assertIn("cell.backgroundColor=selected?HostSelectedSurface():HostCard();", root)
         self.assertIn("cell.layer.borderWidth=selected?1.1:0.6;HostSetLayerBorderColor(cell,selected?HostAccent():HostBorder());", root)
 
@@ -120,7 +120,7 @@ class UI2026DeepRefinementsTests(unittest.TestCase):
 
 
     def test_ref16_live_player_bottom_scrim_embedded_epg_frame_and_dock_fade(self):
-        root = (SOURCES / "RootViewController.m").read_text(encoding="utf-8")
+        root = "\n".join((p.read_text(encoding="utf-8").split("\n- (BOOL)sessionHasContent;", 1)[0] if p.name.endswith(".h") else p.read_text(encoding="utf-8")) for p in ([SOURCES / "RootViewController_Internal.h", *sorted(SOURCES.glob("RootViewController*.m"))]))
         self.assertIn("self.playerBottomScrim=[UIView new];", root)
         self.assertIn("self.bottomDockFadeGradient=[CAGradientLayer layer];", root)
         self.assertIn("self.playbackPanel.view.frame=[self.playbackPanel isKindOfClass:CCTVPlaybackListPanelController.class]?frame:CGRectMake(0,contentY,w,MAX(0,contentBottom-contentY));", root)

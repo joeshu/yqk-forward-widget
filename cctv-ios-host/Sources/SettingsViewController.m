@@ -125,9 +125,9 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
       ]},
       @{ @"category":@"live", @"title":@"直播与频道管理", @"footer":@"集中管理内置央视频道展示、频道网格/列表视图、排序方式及直播画中画。播放时屏幕常亮对央视与订阅直播同时生效。", @"rows":@[
         @{ @"title":@"显示内置央视频道", @"detail":@"在直播与频道列表中展示内置央视/卫视频道", @"key":@"nativeChannelsEnabled", @"icon":@"tv.badge.wifi", @"default":@YES },
-        @{ @"title":@"内置央视频道台标", @"detail":@"控制央视页列表与播放器右上角高清台标展示", @"key":@"nativeChannelLogoEnabled", @"icon":@"sparkles.tv", @"default":@YES },
-        @{ @"title":@"内置央视频道实时预览图", @"detail":@"在央视页与频道页展示频道实时画面缩略预览卡片", @"key":@"nativeChannelPreviewEnabled", @"icon":@"photo.tv", @"default":@YES },
-        @{ @"title":@"内置央视频道速率与延迟", @"detail":@"在央视页与频道页展示实时网速与毫秒级响应延迟角标", @"key":@"nativeChannelTelemetryEnabled", @"icon":@"speedometer", @"default":@YES },
+        @{ @"title":@"内置央视频道台标", @"detail":@"控制央视页列表与播放器右上角高清台标展示（默认关闭）", @"key":@"nativeChannelLogoEnabled", @"icon":@"sparkles.tv", @"default":@NO },
+        @{ @"title":@"内置央视频道实时预览图", @"detail":@"在频道列表刷新时检测并展示最新真实画面缩略图（默认关闭）", @"key":@"nativeChannelPreviewEnabled", @"icon":@"photo.tv", @"default":@NO },
+        @{ @"title":@"内置央视频道速率与延迟", @"detail":@"在央视页与频道页展示实时网速与毫秒级响应延迟角标（默认关闭）", @"key":@"nativeChannelTelemetryEnabled", @"icon":@"speedometer", @"default":@NO },
         @{ @"title":@"频道用网格显示", @"detail":@"切换频道列表为海报卡片网格或紧凑列表", @"key":@"channelGridMode", @"icon":@"square.grid.2x2", @"default":@YES },
         @{ @"title":@"频道网格列数", @"detail":@"网格模式下的单行频道卡片数量", @"key":@"cctv.channelGridColumns.v1", @"segmented":@YES, @"options":@[@"3 列",@"4 列"], @"values":@[@3,@4], @"default":@4, @"icon":@"rectangle.grid.3x2" },
         @{ @"title":@"频道排序方式", @"detail":@"按默认频道分组顺序或按频道名称排序", @"key":@"cctv.channelSortMode.v1", @"segmented":@YES, @"options":@[@"默认",@"名称"], @"values":@[@0,@1], @"default":@0, @"icon":@"arrow.up.arrow.down" },
@@ -847,7 +847,7 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
         NSArray<NSString *> *keysToReset=@[
             HostThemeModePreferenceKey, HostDarkThemePreferenceKey, HostThemePaletteIdentifierPreferenceKey,
             @"cctv.appFontSize.v1", @"cctv.restoreLastTab.v1",
-            @"nativeChannelsEnabled", @"nativeChannelLogoEnabled", @"nativeChannelPreviewEnabled", @"nativeChannelTelemetryEnabled", @"channelGridMode", @"cctv.channelGridColumns.v1", @"cctv.channelSortMode.v1",
+            @"nativeChannelsEnabled", @"nativeChannelLogoEnabled", @"nativePlayerCornerLogoEnabled", @"nativeChannelPreviewEnabled", @"nativeChannelTelemetryEnabled", @"enabledChannelLogoSources", @"enabledPlayerCornerLogoSources", @"enabledChannelPreviewSources", @"enabledChannelTelemetrySources", @"disabledChannelLogoSources", @"disabledPlayerCornerLogoSources", @"disabledChannelPreviewSources", @"disabledChannelTelemetrySources", @"channelGridMode", @"cctv.channelGridColumns.v1", @"cctv.channelSortMode.v1",
             @"cctv.mediaEpisodeLayoutStyle.v1", @"cctv.mediaEpisodeShowBadge.v1", @"cctv.mediaEpisodeAutoExpand.v1",
             @"cctv.mediaKeepScreenAwake", @"allowBackgroundAudio", @"autoPiP", @"autoLoadEPG",
             @"rememberLastChannel", @"resumeLastChannel", @"cctv.mediaPreferredQuality.v1",

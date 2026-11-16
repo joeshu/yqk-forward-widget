@@ -67,17 +67,23 @@ int main(int argc,const char **argv){@autoreleasepool{
     }
     if(argc>2){__block BOOL done=NO;__block NSDictionary *downloaded=nil;__block NSError *downloadError=nil;TVBoxCatalogDownloader *downloader=[TVBoxCatalogDownloader new];[downloader loadURL:[NSURL URLWithString:[NSString stringWithUTF8String:argv[2]]] completion:^(NSDictionary *value,NSError *error){downloaded=value;downloadError=error;done=YES;}];check(waitUntil(^BOOL{return done;},5),@"redirected TVBox config download completes");check(!downloadError&&[downloaded[@"sites"][0][@"api"] containsString:@"/configs/api.php/provide/vod"],@"relative MacCMS API URLs resolve against the final redirected config URL");}
     if(argc>3){NSString *base=[NSString stringWithUTF8String:argv[3]];NSDictionary *exportConfig=@{@"name":@"Exporter fixture",@"sites":@[@{@"key":@"py-fixture",@"name":@"Python fixture",@"api":[base stringByAppendingString:@"/site.py"],@"type":@3},@{@"key":@"js-fixture",@"name":@"JavaScript fixture",@"api":[base stringByAppendingString:@"/site.js.md5"],@"type":@3}]};NSDictionary *exportCatalog=[TVBoxCatalogStore parseData:encode(exportConfig) sourceURL:nil error:NULL];[TVBoxCatalogStore saveCatalog:exportCatalog];__block BOOL exportDone=NO;__block NSURL *archiveURL=nil;__block NSError *exportError=nil;TVBoxCatalogPackageExporter *exporter=[[TVBoxCatalogPackageExporter alloc] initWithCatalogID:exportCatalog[@"id"] token:nil];[exporter startWithCompletion:^(NSURL *url,NSUInteger failed,NSError *error){archiveURL=url;exportError=error;check(failed==0,@"all fixture scripts were collected");exportDone=YES;}];check(waitUntil(^BOOL{return exportDone;},10)&&archiveURL&&!exportError,@"full collection export downloads internal scripts and completes a ZIP");NSLog(@"TVBOX_EXPORTER_ZIP=%@",archiveURL.path);}
-    check([ProfileStore isChannelLogoEnabledForSource:source] && [ProfileStore isPlayerCornerLogoEnabledForSource:source], @"channel and corner logos enabled by default");
+    check(![ProfileStore isChannelLogoEnabledForSource:source] && ![ProfileStore isPlayerCornerLogoEnabledForSource:source], @"channel and corner logos disabled by default");
+    [ProfileStore setChannelLogoEnabled:YES forSource:source];
+    [ProfileStore setPlayerCornerLogoEnabled:YES forSource:source];
+    check([ProfileStore isChannelLogoEnabledForSource:source] && [ProfileStore isPlayerCornerLogoEnabledForSource:source], @"channel and corner logos can be manually enabled");
     [ProfileStore setPlayerCornerLogoEnabled:NO forSource:source];
     check([ProfileStore isChannelLogoEnabledForSource:source] && ![ProfileStore isPlayerCornerLogoEnabledForSource:source], @"corner logo can be disabled independently");
     [ProfileStore setChannelLogoEnabled:NO forSource:source];
-    check(![ProfileStore isChannelLogoEnabledForSource:source] && ![ProfileStore isPlayerCornerLogoEnabledForSource:source], @"disabling resource logo disables both list and corner logos");
+    check(![ProfileStore isChannelLogoEnabledForSource:source] && ![ProfileStore isPlayerCornerLogoEnabledForSource:source], @"both list and corner logos can be disabled");
     [ProfileStore setChannelLogoEnabled:YES forSource:source];
     [ProfileStore setPlayerCornerLogoEnabled:YES forSource:source];
     check([[ProfileStore canonicalStationIDForChannel:@{@"name":@"CCTV-1 综合 HD"}] isEqual:@"cctv1"], @"CCTV-1 HD alias resolves to cctv1");
     check([[ProfileStore canonicalStationIDForChannel:@{@"name":@"CCTV-5+ 体育赛事"}] isEqual:@"cctv5plus"], @"CCTV-5+ alias resolves to cctv5plus");
     check([[ProfileStore canonicalStationIDForChannel:@{@"name":@"广东卫视高清"}] isEqual:@"guangdong"], @"Guangdong TV alias resolves to guangdong");
-    check([ProfileStore isChannelPreviewEnabledForSource:source] && [ProfileStore isChannelTelemetryEnabledForSource:source], @"channel preview and telemetry enabled by default");
+    check(![ProfileStore isChannelPreviewEnabledForSource:source] && ![ProfileStore isChannelTelemetryEnabledForSource:source], @"channel preview and telemetry disabled by default");
+    [ProfileStore setChannelPreviewEnabled:YES forSource:source];
+    [ProfileStore setChannelTelemetryEnabled:YES forSource:source];
+    check([ProfileStore isChannelPreviewEnabledForSource:source] && [ProfileStore isChannelTelemetryEnabledForSource:source], @"channel preview and telemetry can be manually enabled");
     [ProfileStore setChannelPreviewEnabled:NO forSource:source];
     [ProfileStore setChannelTelemetryEnabled:NO forSource:source];
     check(![ProfileStore isChannelPreviewEnabledForSource:source] && ![ProfileStore isChannelTelemetryEnabledForSource:source], @"channel preview and telemetry can be disabled per source");

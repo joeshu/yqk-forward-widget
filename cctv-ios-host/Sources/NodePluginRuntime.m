@@ -84,8 +84,11 @@
         dispatch_semaphore_t done=dispatch_semaphore_create(0);
         NSURLSessionDataTask *task=[self.session dataTaskWithRequest:request completionHandler:^(NSData *data,NSURLResponse *response,NSError *networkError){body=data;failure=networkError;dispatch_semaphore_signal(done);}];[task resume];
         int64_t waitSec=([operation isEqual:@"play"]||[operation isEqual:@"proxy"])?95:36;if(dispatch_semaphore_wait(done,dispatch_time(DISPATCH_TIME_NOW,waitSec*NSEC_PER_SEC))!=0){[task cancel];if([operation isEqual:@"start"]||[operation isEqual:@"stop"])[self markStartUncertain:session];if(error)*error=[self error:@"Node 操作超时；会话结果未知，可尝试停止后重试"];return nil;}
-        if(!failure || body.length)break;
-        [NSThread sleepForTimeInterval:0.06];
+        if(!failure && body.length)break;
+        BOOL transient = failure && [failure.domain isEqualToString:NSURLErrorDomain] &&
+                         (failure.code == NSURLErrorCannotConnectToHost || failure.code == NSURLErrorNetworkConnectionLost || failure.code == NSURLErrorTimedOut);
+        if(!transient && failure)break;
+        [NSThread sleepForTimeInterval:(0.06 * (1 << retry))];
     }
     if(failure || body.length>2*1024*1024 || !body.length){if([operation isEqual:@"start"]||[operation isEqual:@"stop"])[self markStartUncertain:session];if(error)*error=failure?:[self error:@"Node 返回结果无效或过大"];return nil;}
     id reply=[NSJSONSerialization JSONObjectWithData:body options:0 error:error];if(![reply isKindOfClass:NSDictionary.class]){if([operation isEqual:@"start"]||[operation isEqual:@"stop"])[self markStartUncertain:session];return nil;}

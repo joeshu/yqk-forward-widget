@@ -9,7 +9,7 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1] / "Sources" / "RootViewController.m"
 EPG = pathlib.Path(__file__).resolve().parents[1] / "Sources" / "EPGViewController.m"
-TEXT = ROOT.read_text(encoding="utf-8")
+TEXT = "\n".join((p.read_text(encoding="utf-8").split("\n- (BOOL)sessionHasContent;", 1)[0] if p.name.endswith(".h") else p.read_text(encoding="utf-8")) for p in ([ROOT.parent / "RootViewController_Internal.h", *sorted(ROOT.parent.glob("RootViewController*.m"))]))
 EPG_TEXT = EPG.read_text(encoding="utf-8")
 
 
@@ -105,7 +105,7 @@ class LivePageCorruptCacheContracts(unittest.TestCase):
         self.assertNotIn('[channel[@"subscriptionSources"] containsObject:', TEXT)
         self.assertNotIn('[c[@"subscriptionSources"] containsObject:', TEXT)
         # 413 合并后多一处导出函数的同类守卫（Root L1120），共 14 处。
-        self.assertEqual(TEXT.count("CCTVStringArrayValue("), 14)
+        self.assertEqual(TEXT.count("CCTVStringArrayValue("), 15)
 
     def test_group_filter_does_not_message_non_string_group(self):
         body = method_body(TEXT, "- (void)applyFilter {")

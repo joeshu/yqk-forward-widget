@@ -1463,7 +1463,14 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 }
 - (void)teardownHiddenStreamSniffer {
     [self.streamSniffTask cancel];self.streamSniffTask=nil;
-    if(self.hiddenSnifferWebView){[self.hiddenSnifferWebView stopLoading];[self.hiddenSnifferWebView removeFromSuperview];self.hiddenSnifferWebView=nil;}
+    WKWebView *web=self.hiddenSnifferWebView;self.hiddenSnifferWebView=nil;
+    if(web){
+        [web stopLoading];
+        [web evaluateJavaScript:@"try{document.querySelectorAll('video,audio').forEach(function(e){e.muted=true;e.pause();e.removeAttribute('src');e.load();});}catch(e){}" completionHandler:nil];
+        [web.configuration.userContentController removeAllUserScripts];
+        [web loadHTMLString:@"" baseURL:nil];
+        [web removeFromSuperview];
+    }
 }
 - (void)sniffNativeStreamFromPageResult:(NSDictionary *)result playerGeneration:(NSUInteger)playerGeneration {
     [self teardownHiddenStreamSniffer];
@@ -1549,7 +1556,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
             cfg.websiteDataStore=WKWebsiteDataStore.nonPersistentDataStore;
             cfg.allowsInlineMediaPlayback=YES;
             cfg.mediaTypesRequiringUserActionForPlayback=WKAudiovisualMediaTypeNone;
-            NSString *hookSource=@"(function(){if(window.__cctvHooked)return;window.__cctvHooked=true;window.__cctvCapturedStreamURL='';function check(u){if(typeof u==='string'&&/https?:\\/\\/[^\\s'\"]+\\.(?:m3u8|mp4|flv|mpd)(?:\\?[^\\s'\"]*)?/i.test(u)){try{window.__cctvCapturedStreamURL=new URL(u,location.href).href;}catch(e){window.__cctvCapturedStreamURL=u;}}}const origOpen=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u){check(u);return origOpen.apply(this,arguments);};if(window.fetch){const origFetch=window.fetch;window.fetch=function(i){check(typeof i==='string'?i:(i&&i.url));return origFetch.apply(this,arguments);};}try{const d=Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype,'src');if(d&&d.set)Object.defineProperty(HTMLMediaElement.prototype,'src',{set:function(v){check(v);return d.set.call(this,v);}});const origSetAttr=Element.prototype.setAttribute;Element.prototype.setAttribute=function(k,v){if(typeof k==='string'&&/^(?:src|data-src)$/i.test(k))check(v);return origSetAttr.apply(this,arguments);};}catch(e){}})();";
+            NSString *hookSource=@"(function(){if(window.__cctvHooked)return;window.__cctvHooked=true;window.__cctvCapturedStreamURL='';function muteAll(){try{document.querySelectorAll('video,audio').forEach(function(v){v.muted=true;v.defaultMuted=true;v.volume=0;});}catch(e){}}function isAdURL(u){return /(?:doubleclick|googlesyndication|adsystem|adservice|cnzz|hm\\.baidu|miaozhen|tanx)\\./i.test(u);}function check(u){muteAll();if(typeof u==='string'&&/https?:\\/\\/[^\\s'\"]+\\.(?:m3u8|mp4|flv|mpd)(?:\\?[^\\s'\"]*)?/i.test(u)){try{var full=new URL(u,location.href).href;if(!isAdURL(full))window.__cctvCapturedStreamURL=full;}catch(e){if(!isAdURL(u))window.__cctvCapturedStreamURL=u;}}}document.addEventListener('play',muteAll,true);const origOpen=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u){check(u);return origOpen.apply(this,arguments);};if(window.fetch){const origFetch=window.fetch;window.fetch=function(i){check(typeof i==='string'?i:(i&&i.url));return origFetch.apply(this,arguments);};}try{const d=Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype,'src');if(d&&d.set)Object.defineProperty(HTMLMediaElement.prototype,'src',{set:function(v){check(v);return d.set.call(this,v);}});const origSetAttr=Element.prototype.setAttribute;Element.prototype.setAttribute=function(k,v){if(typeof k==='string'&&/^(?:src|data-src)$/i.test(k))check(v);return origSetAttr.apply(this,arguments);};}catch(e){}})();";
             WKUserScript *hookScript=[[WKUserScript alloc] initWithSource:hookSource injectionTime:WKUserScriptInjectionTimeAtDocumentStart forMainFrameOnly:NO];
             [cfg.userContentController addUserScript:hookScript];
             WKWebView *hiddenWeb=[[WKWebView alloc] initWithFrame:CGRectMake(0,0,1,1) configuration:cfg];

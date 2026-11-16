@@ -6,6 +6,10 @@ static NSString *const CCTVDisabledChannelLogoSourcesKey = @"disabledChannelLogo
 static NSString *const CCTVDisabledPlayerCornerLogoSourcesKey = @"disabledPlayerCornerLogoSources";
 static NSString *const CCTVDisabledChannelPreviewSourcesKey = @"disabledChannelPreviewSources";
 static NSString *const CCTVDisabledChannelTelemetrySourcesKey = @"disabledChannelTelemetrySources";
+static NSString *const CCTVEnabledChannelLogoSourcesKey = @"enabledChannelLogoSources";
+static NSString *const CCTVEnabledPlayerCornerLogoSourcesKey = @"enabledPlayerCornerLogoSources";
+static NSString *const CCTVEnabledChannelPreviewSourcesKey = @"enabledChannelPreviewSources";
+static NSString *const CCTVEnabledChannelTelemetrySourcesKey = @"enabledChannelTelemetrySources";
 
 @implementation ProfileStore
 + (BOOL)isHTTP:(id)source {
@@ -16,14 +20,48 @@ static NSString *const CCTVDisabledChannelTelemetrySourcesKey = @"disabledChanne
     if([self isHTTP:source])return YES;
     return [source isKindOfClass:NSString.class]&&[source hasPrefix:@"local-playlist:"]&&[[NSUUID alloc] initWithUUIDString:[source substringFromIndex:15]]!=nil;
 }
-+ (NSDictionary *)metadata:(NSString *)source {if(![source isKindOfClass:NSString.class]||!source.length)return @{};id value=[NSUserDefaults.standardUserDefaults dictionaryForKey:@"profileMetadata"][source];return [value isKindOfClass:NSDictionary.class]?value:@{};}
++ (NSString *)payloadFilePathForSource:(NSString *)source {
+    NSString *dir=[NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory,NSUserDomainMask,YES).firstObject stringByAppendingPathComponent:@"ProfilePayloads"];
+    [NSFileManager.defaultManager createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:NULL];
+    NSString *safe=[[[source stringByReplacingOccurrencesOfString:@"://" withString:@"_"] stringByReplacingOccurrencesOfString:@"/" withString:@"_"] stringByReplacingOccurrencesOfString:@":" withString:@"_"];
+    if(safe.length>120)safe=[NSString stringWithFormat:@"%@_%lu",[safe substringToIndex:96],(unsigned long)source.hash];
+    return [dir stringByAppendingPathComponent:[safe stringByAppendingPathExtension:@"plist"]];
+}
++ (NSDictionary *)metadata:(NSString *)source {
+    if(![source isKindOfClass:NSString.class]||!source.length)return @{};
+    @synchronized(self){
+        id value=[NSUserDefaults.standardUserDefaults dictionaryForKey:@"profileMetadata"][source];
+        if(![value isKindOfClass:NSDictionary.class])return @{};
+        NSDictionary *dict=(NSDictionary *)value;
+        if(![dict[@"_hasDiskPayload"] boolValue])return dict;
+        NSMutableDictionary *merged=[dict mutableCopy];
+        [merged removeObjectForKey:@"_hasDiskPayload"];
+        NSDictionary *disk=[NSDictionary dictionaryWithContentsOfFile:[self payloadFilePathForSource:source]];
+        if([disk isKindOfClass:NSDictionary.class])[merged addEntriesFromDictionary:disk];
+        return [merged copy];
+    }
+}
 + (void)update:(NSString *)source values:(NSDictionary *)values {
     @synchronized(self){
-    if(![self isSource:source]||![values isKindOfClass:NSDictionary.class])return;
+    if((source.length&&![self isSource:source])||![values isKindOfClass:NSDictionary.class])return;
+    NSString *storageKey=source.length?source:CCTVNativeLogoSourceKey;
     NSMutableDictionary *all=[[NSUserDefaults.standardUserDefaults dictionaryForKey:@"profileMetadata"]?:@{} mutableCopy];
-    NSMutableDictionary *p=[[self metadata:source] mutableCopy];[p addEntriesFromDictionary:values];all[source]=p;
+    NSMutableDictionary *p=[[all[storageKey] isKindOfClass:NSDictionary.class]?all[storageKey]:@{} mutableCopy];
+    BOOL offload=([values[@"text"] isKindOfClass:NSString.class]&&[(NSString *)values[@"text"] length]>65536)||([values[@"cachedChannels"] isKindOfClass:NSArray.class]&&[(NSArray *)values[@"cachedChannels"] count]>200);
+    if(offload){
+        NSString *payloadPath=[self payloadFilePathForSource:storageKey];
+        NSMutableDictionary *disk=[[NSDictionary dictionaryWithContentsOfFile:payloadPath] mutableCopy]?:[NSMutableDictionary dictionary];
+        for(NSString *k in values){
+            if([k isEqualToString:@"text"]||[k isEqualToString:@"cachedChannels"]){disk[k]=values[k];[p removeObjectForKey:k];}
+            else p[k]=values[k];
+        }
+        if([disk writeToFile:payloadPath atomically:YES])p[@"_hasDiskPayload"]=@YES;
+        else [p addEntriesFromDictionary:values];
+    }else{
+        [p addEntriesFromDictionary:values];
+    }
+    all[storageKey]=p;
     [NSUserDefaults.standardUserDefaults setObject:all forKey:@"profileMetadata"];
-
     }
 }
 + (void)removeValueForKey:(NSString *)key source:(NSString *)source {
@@ -41,14 +79,25 @@ static NSString *const CCTVDisabledChannelTelemetrySourcesKey = @"disabledChanne
 }
 + (void)remove:(NSString *)source {
     @synchronized(self){
+    if([source isKindOfClass:NSString.class]&&source.length)[NSFileManager.defaultManager removeItemAtPath:[self payloadFilePathForSource:source] error:NULL];
     NSMutableDictionary *all=[[NSUserDefaults.standardUserDefaults dictionaryForKey:@"profileMetadata"]?:@{} mutableCopy];[all removeObjectForKey:source];[NSUserDefaults.standardUserDefaults setObject:all forKey:@"profileMetadata"];
-    for(NSString *key in @[@"profileOrder",@"disabledSubscriptions",CCTVDisabledChannelLogoSourcesKey,CCTVDisabledPlayerCornerLogoSourcesKey,CCTVDisabledChannelPreviewSourcesKey,CCTVDisabledChannelTelemetrySourcesKey]){NSMutableArray *a=[[NSUserDefaults.standardUserDefaults arrayForKey:key]?:@[] mutableCopy];[a removeObject:source];[NSUserDefaults.standardUserDefaults setObject:a forKey:key];}
+    for(NSString *key in @[@"profileOrder",@"disabledSubscriptions",CCTVDisabledChannelLogoSourcesKey,CCTVDisabledPlayerCornerLogoSourcesKey,CCTVDisabledChannelPreviewSourcesKey,CCTVDisabledChannelTelemetrySourcesKey,CCTVEnabledChannelLogoSourcesKey,CCTVEnabledPlayerCornerLogoSourcesKey,CCTVEnabledChannelPreviewSourcesKey,CCTVEnabledChannelTelemetrySourcesKey]){NSMutableArray *a=[[NSUserDefaults.standardUserDefaults arrayForKey:key]?:@[] mutableCopy];[a removeObject:source];[NSUserDefaults.standardUserDefaults setObject:a forKey:key];}
 
     }
 }
 + (NSArray<NSString *> *)orderedSources:(NSArray<NSString *> *)sources {
+    if(sources.count<=1)return sources?:@[];
     NSArray *order=[NSUserDefaults.standardUserDefaults arrayForKey:@"profileOrder"]?:@[];
-    return [sources sortedArrayUsingComparator:^NSComparisonResult(NSString *a,NSString *b){NSUInteger x=[order indexOfObject:a],y=[order indexOfObject:b];if(x!=y)return x<y?NSOrderedAscending:NSOrderedDescending;return [a compare:b];}];
+    NSMutableDictionary<NSString *,NSNumber *> *rankMap=[NSMutableDictionary dictionaryWithCapacity:order.count];
+    [order enumerateObjectsUsingBlock:^(NSString *item,NSUInteger idx,__unused BOOL *stop){
+        if([item isKindOfClass:NSString.class]&&!rankMap[item])rankMap[item]=@(idx);
+    }];
+    return [sources sortedArrayUsingComparator:^NSComparisonResult(NSString *a,NSString *b){
+        NSNumber *rx=rankMap[a],*ry=rankMap[b];
+        NSUInteger x=rx?rx.unsignedIntegerValue:NSNotFound,y=ry?ry.unsignedIntegerValue:NSNotFound;
+        if(x!=y)return x<y?NSOrderedAscending:NSOrderedDescending;
+        return [a compare:b];
+    }];
 }
 + (void)move:(NSString *)source offset:(NSInteger)offset sources:(NSArray<NSString *> *)sources {
     @synchronized(self){
@@ -67,84 +116,80 @@ static NSString *const CCTVDisabledChannelTelemetrySourcesKey = @"disabledChanne
 + (NSString *)normalizedLogoSourceKey:(NSString *)source {
     if (![source isKindOfClass:NSString.class]) return CCTVNativeLogoSourceKey;
     NSString *trimmed = [source stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    return trimmed.length ? trimmed : CCTVNativeLogoSourceKey;
+    if (!trimmed.length || [trimmed isEqualToString:@"builtin:cctv"]) return CCTVNativeLogoSourceKey;
+    return trimmed;
+}
+
++ (BOOL)isSource:(NSString *)source enabledInKey:(NSString *)enabledKey disabledInKey:(NSString *)disabledKey nativePrefKey:(NSString *)nativePrefKey {
+    NSString *key = [self normalizedLogoSourceKey:source];
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    NSArray *disabled = [defaults arrayForKey:disabledKey];
+    if ([disabled isKindOfClass:NSArray.class] && [disabled containsObject:key]) return NO;
+    NSArray *enabled = [defaults arrayForKey:enabledKey];
+    if ([enabled isKindOfClass:NSArray.class] && [enabled containsObject:key]) return YES;
+    if (nativePrefKey.length && [key isEqualToString:CCTVNativeLogoSourceKey]) {
+        id nativePref = [defaults objectForKey:nativePrefKey];
+        if (nativePref != nil) return [nativePref boolValue];
+    }
+    NSDictionary *meta = [self metadata:key];
+    NSString *serviceID = [meta[@"managedServiceID"] isKindOfClass:NSString.class] ? meta[@"managedServiceID"] : @"";
+    if (serviceID.length) {
+        NSString *pluginKey = [@"plugin:" stringByAppendingString:serviceID];
+        if ([disabled isKindOfClass:NSArray.class] && [disabled containsObject:pluginKey]) return NO;
+        if ([enabled isKindOfClass:NSArray.class] && [enabled containsObject:pluginKey]) return YES;
+    }
+    NSString *catalogID = [meta[@"tvboxCatalogID"] isKindOfClass:NSString.class] ? meta[@"tvboxCatalogID"] : @"";
+    if (catalogID.length) {
+        NSString *tvboxKey = [@"tvbox:" stringByAppendingString:catalogID];
+        if ([disabled isKindOfClass:NSArray.class] && [disabled containsObject:tvboxKey]) return NO;
+        if ([enabled isKindOfClass:NSArray.class] && [enabled containsObject:tvboxKey]) return YES;
+    }
+    // 默认全部关闭，需由用户手动开启
+    return NO;
+}
+
++ (void)setSource:(NSString *)source enabled:(BOOL)enabled enabledKey:(NSString *)enabledKey disabledKey:(NSString *)disabledKey nativePrefKey:(NSString *)nativePrefKey {
+    NSString *key = [self normalizedLogoSourceKey:source];
+    @synchronized(self) {
+        NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+        NSMutableArray *enabledList = [[defaults arrayForKey:enabledKey] ?: @[] mutableCopy];
+        NSMutableArray *disabledList = [[defaults arrayForKey:disabledKey] ?: @[] mutableCopy];
+        [enabledList removeObject:key];
+        [disabledList removeObject:key];
+        if (enabled) {
+            [enabledList addObject:key];
+        } else {
+            [disabledList addObject:key];
+        }
+        [defaults setObject:enabledList.copy forKey:enabledKey];
+        [defaults setObject:disabledList.copy forKey:disabledKey];
+        if (nativePrefKey.length && [key isEqualToString:CCTVNativeLogoSourceKey]) {
+            [defaults setBool:enabled forKey:nativePrefKey];
+        }
+    }
+    if (NSThread.isMainThread) {
+        [NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:key];
+    } else {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:key];
+        });
+    }
 }
 
 + (BOOL)isChannelLogoEnabledForSource:(NSString *)source {
-    NSString *key = [self normalizedLogoSourceKey:source];
-    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
-    if ([key isEqualToString:CCTVNativeLogoSourceKey]) {
-        id nativePref = [defaults objectForKey:@"nativeChannelLogoEnabled"];
-        if (nativePref && ![nativePref boolValue]) return NO;
-    }
-    NSArray *disabled = [defaults arrayForKey:CCTVDisabledChannelLogoSourcesKey];
-    if ([disabled isKindOfClass:NSArray.class] && [disabled containsObject:key]) return NO;
-    NSDictionary *meta = [self metadata:key];
-    NSString *serviceID = [meta[@"managedServiceID"] isKindOfClass:NSString.class] ? meta[@"managedServiceID"] : @"";
-    if (serviceID.length && [disabled isKindOfClass:NSArray.class] && [disabled containsObject:[@"plugin:" stringByAppendingString:serviceID]]) return NO;
-    NSString *catalogID = [meta[@"tvboxCatalogID"] isKindOfClass:NSString.class] ? meta[@"tvboxCatalogID"] : @"";
-    if (catalogID.length && [disabled isKindOfClass:NSArray.class] && [disabled containsObject:[@"tvbox:" stringByAppendingString:catalogID]]) return NO;
-    return YES;
+    return [self isSource:source enabledInKey:CCTVEnabledChannelLogoSourcesKey disabledInKey:CCTVDisabledChannelLogoSourcesKey nativePrefKey:@"nativeChannelLogoEnabled"];
 }
 
 + (void)setChannelLogoEnabled:(BOOL)enabled forSource:(NSString *)source {
-    NSString *key = [self normalizedLogoSourceKey:source];
-    @synchronized(self) {
-        NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
-        NSMutableArray *disabled = [[defaults arrayForKey:CCTVDisabledChannelLogoSourcesKey] ?: @[] mutableCopy];
-        [disabled removeObject:key];
-        if (!enabled) [disabled addObject:key];
-        [defaults setObject:disabled.copy forKey:CCTVDisabledChannelLogoSourcesKey];
-        if ([key isEqualToString:CCTVNativeLogoSourceKey]) {
-            [defaults setBool:enabled forKey:@"nativeChannelLogoEnabled"];
-        }
-    }
-    if (NSThread.isMainThread) {
-        [NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:key];
-    } else {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:key];
-        });
-    }
+    [self setSource:source enabled:enabled enabledKey:CCTVEnabledChannelLogoSourcesKey disabledKey:CCTVDisabledChannelLogoSourcesKey nativePrefKey:@"nativeChannelLogoEnabled"];
 }
 
 + (BOOL)isPlayerCornerLogoEnabledForSource:(NSString *)source {
-    if (![self isChannelLogoEnabledForSource:source]) return NO;
-    NSString *key = [self normalizedLogoSourceKey:source];
-    NSArray *disabled = [NSUserDefaults.standardUserDefaults arrayForKey:CCTVDisabledPlayerCornerLogoSourcesKey];
-    if ([disabled isKindOfClass:NSArray.class] && [disabled containsObject:key]) return NO;
-    NSDictionary *meta = [self metadata:key];
-    NSString *serviceID = [meta[@"managedServiceID"] isKindOfClass:NSString.class] ? meta[@"managedServiceID"] : @"";
-    if (serviceID.length && [disabled isKindOfClass:NSArray.class] && [disabled containsObject:[@"plugin:" stringByAppendingString:serviceID]]) return NO;
-    NSString *catalogID = [meta[@"tvboxCatalogID"] isKindOfClass:NSString.class] ? meta[@"tvboxCatalogID"] : @"";
-    if (catalogID.length && [disabled isKindOfClass:NSArray.class] && [disabled containsObject:[@"tvbox:" stringByAppendingString:catalogID]]) return NO;
-    return YES;
+    return [self isSource:source enabledInKey:CCTVEnabledPlayerCornerLogoSourcesKey disabledInKey:CCTVDisabledPlayerCornerLogoSourcesKey nativePrefKey:@"nativePlayerCornerLogoEnabled"];
 }
 
 + (void)setPlayerCornerLogoEnabled:(BOOL)enabled forSource:(NSString *)source {
-    NSString *key = [self normalizedLogoSourceKey:source];
-    @synchronized(self) {
-        NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
-        NSMutableArray *disabled = [[defaults arrayForKey:CCTVDisabledPlayerCornerLogoSourcesKey] ?: @[] mutableCopy];
-        [disabled removeObject:key];
-        if (!enabled) [disabled addObject:key];
-        [defaults setObject:disabled.copy forKey:CCTVDisabledPlayerCornerLogoSourcesKey];
-        if (enabled && ![self isChannelLogoEnabledForSource:key]) {
-            NSMutableArray *channelDisabled = [[defaults arrayForKey:CCTVDisabledChannelLogoSourcesKey] ?: @[] mutableCopy];
-            [channelDisabled removeObject:key];
-            [defaults setObject:channelDisabled.copy forKey:CCTVDisabledChannelLogoSourcesKey];
-            if ([key isEqualToString:CCTVNativeLogoSourceKey]) {
-                [defaults setBool:YES forKey:@"nativeChannelLogoEnabled"];
-            }
-        }
-    }
-    if (NSThread.isMainThread) {
-        [NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:key];
-    } else {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:key];
-        });
-    }
+    [self setSource:source enabled:enabled enabledKey:CCTVEnabledPlayerCornerLogoSourcesKey disabledKey:CCTVDisabledPlayerCornerLogoSourcesKey nativePrefKey:@"nativePlayerCornerLogoEnabled"];
 }
 
 + (BOOL)isChannelLogoEnabledForChannel:(NSDictionary *)channel {
@@ -172,7 +217,7 @@ static NSString *const CCTVDisabledChannelTelemetrySourcesKey = @"disabledChanne
 }
 
 + (BOOL)isPlayerCornerLogoEnabledForChannel:(NSDictionary *)channel {
-    if (![self isChannelLogoEnabledForChannel:channel]) return NO;
+    if (![channel isKindOfClass:NSDictionary.class]) return NO;
     NSString *remoteURL = [channel[@"remoteURL"] isKindOfClass:NSString.class] ? channel[@"remoteURL"] : @"";
     if (!remoteURL.length || [channel[@"nativePlainRoute"] boolValue]) {
         return [self isPlayerCornerLogoEnabledForSource:CCTVNativeLogoSourceKey];
@@ -180,50 +225,27 @@ static NSString *const CCTVDisabledChannelTelemetrySourcesKey = @"disabledChanne
     NSArray *sources = [channel[@"subscriptionSources"] isKindOfClass:NSArray.class] ? channel[@"subscriptionSources"] : @[];
     if (!sources.count) return [self isPlayerCornerLogoEnabledForSource:remoteURL];
     NSSet *disabledSubs = [NSSet setWithArray:[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"] ?: @[]];
+    BOOL hasActiveOwner = NO;
     for (id raw in sources) {
         if (![raw isKindOfClass:NSString.class] || ![(NSString *)raw length]) continue;
         if ([disabledSubs containsObject:raw]) continue;
+        hasActiveOwner = YES;
         if ([self isPlayerCornerLogoEnabledForSource:raw]) return YES;
+    }
+    if (!hasActiveOwner) {
+        for (id raw in sources) {
+            if ([raw isKindOfClass:NSString.class] && [self isPlayerCornerLogoEnabledForSource:raw]) return YES;
+        }
     }
     return NO;
 }
 
 + (BOOL)isChannelPreviewEnabledForSource:(NSString *)source {
-    NSString *key = [self normalizedLogoSourceKey:source];
-    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
-    if ([key isEqualToString:CCTVNativeLogoSourceKey]) {
-        id nativePref = [defaults objectForKey:@"nativeChannelPreviewEnabled"];
-        if (nativePref && ![nativePref boolValue]) return NO;
-    }
-    NSArray *disabled = [defaults arrayForKey:CCTVDisabledChannelPreviewSourcesKey];
-    if ([disabled isKindOfClass:NSArray.class] && [disabled containsObject:key]) return NO;
-    NSDictionary *meta = [self metadata:key];
-    NSString *serviceID = [meta[@"managedServiceID"] isKindOfClass:NSString.class] ? meta[@"managedServiceID"] : @"";
-    if (serviceID.length && [disabled isKindOfClass:NSArray.class] && [disabled containsObject:[@"plugin:" stringByAppendingString:serviceID]]) return NO;
-    NSString *catalogID = [meta[@"tvboxCatalogID"] isKindOfClass:NSString.class] ? meta[@"tvboxCatalogID"] : @"";
-    if (catalogID.length && [disabled isKindOfClass:NSArray.class] && [disabled containsObject:[@"tvbox:" stringByAppendingString:catalogID]]) return NO;
-    return YES;
+    return [self isSource:source enabledInKey:CCTVEnabledChannelPreviewSourcesKey disabledInKey:CCTVDisabledChannelPreviewSourcesKey nativePrefKey:@"nativeChannelPreviewEnabled"];
 }
 
 + (void)setChannelPreviewEnabled:(BOOL)enabled forSource:(NSString *)source {
-    NSString *key = [self normalizedLogoSourceKey:source];
-    @synchronized(self) {
-        NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
-        NSMutableArray *disabled = [[defaults arrayForKey:CCTVDisabledChannelPreviewSourcesKey] ?: @[] mutableCopy];
-        [disabled removeObject:key];
-        if (!enabled) [disabled addObject:key];
-        [defaults setObject:disabled.copy forKey:CCTVDisabledChannelPreviewSourcesKey];
-        if ([key isEqualToString:CCTVNativeLogoSourceKey]) {
-            [defaults setBool:enabled forKey:@"nativeChannelPreviewEnabled"];
-        }
-    }
-    if (NSThread.isMainThread) {
-        [NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:key];
-    } else {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:key];
-        });
-    }
+    [self setSource:source enabled:enabled enabledKey:CCTVEnabledChannelPreviewSourcesKey disabledKey:CCTVDisabledChannelPreviewSourcesKey nativePrefKey:@"nativeChannelPreviewEnabled"];
 }
 
 + (BOOL)isChannelPreviewEnabledForChannel:(NSDictionary *)channel {
@@ -251,41 +273,11 @@ static NSString *const CCTVDisabledChannelTelemetrySourcesKey = @"disabledChanne
 }
 
 + (BOOL)isChannelTelemetryEnabledForSource:(NSString *)source {
-    NSString *key = [self normalizedLogoSourceKey:source];
-    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
-    if ([key isEqualToString:CCTVNativeLogoSourceKey]) {
-        id nativePref = [defaults objectForKey:@"nativeChannelTelemetryEnabled"];
-        if (nativePref && ![nativePref boolValue]) return NO;
-    }
-    NSArray *disabled = [defaults arrayForKey:CCTVDisabledChannelTelemetrySourcesKey];
-    if ([disabled isKindOfClass:NSArray.class] && [disabled containsObject:key]) return NO;
-    NSDictionary *meta = [self metadata:key];
-    NSString *serviceID = [meta[@"managedServiceID"] isKindOfClass:NSString.class] ? meta[@"managedServiceID"] : @"";
-    if (serviceID.length && [disabled isKindOfClass:NSArray.class] && [disabled containsObject:[@"plugin:" stringByAppendingString:serviceID]]) return NO;
-    NSString *catalogID = [meta[@"tvboxCatalogID"] isKindOfClass:NSString.class] ? meta[@"tvboxCatalogID"] : @"";
-    if (catalogID.length && [disabled isKindOfClass:NSArray.class] && [disabled containsObject:[@"tvbox:" stringByAppendingString:catalogID]]) return NO;
-    return YES;
+    return [self isSource:source enabledInKey:CCTVEnabledChannelTelemetrySourcesKey disabledInKey:CCTVDisabledChannelTelemetrySourcesKey nativePrefKey:@"nativeChannelTelemetryEnabled"];
 }
 
 + (void)setChannelTelemetryEnabled:(BOOL)enabled forSource:(NSString *)source {
-    NSString *key = [self normalizedLogoSourceKey:source];
-    @synchronized(self) {
-        NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
-        NSMutableArray *disabled = [[defaults arrayForKey:CCTVDisabledChannelTelemetrySourcesKey] ?: @[] mutableCopy];
-        [disabled removeObject:key];
-        if (!enabled) [disabled addObject:key];
-        [defaults setObject:disabled.copy forKey:CCTVDisabledChannelTelemetrySourcesKey];
-        if ([key isEqualToString:CCTVNativeLogoSourceKey]) {
-            [defaults setBool:enabled forKey:@"nativeChannelTelemetryEnabled"];
-        }
-    }
-    if (NSThread.isMainThread) {
-        [NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:key];
-    } else {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:key];
-        });
-    }
+    [self setSource:source enabled:enabled enabledKey:CCTVEnabledChannelTelemetrySourcesKey disabledKey:CCTVDisabledChannelTelemetrySourcesKey nativePrefKey:@"nativeChannelTelemetryEnabled"];
 }
 
 + (BOOL)isChannelTelemetryEnabledForChannel:(NSDictionary *)channel {
@@ -318,7 +310,7 @@ static NSString *const CCTVDisabledChannelTelemetrySourcesKey = @"disabledChanne
     if (!fromKey.length || !toKey.length || [fromKey isEqualToString:toKey]) return;
     @synchronized(self) {
         NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
-        for (NSString *prefKey in @[CCTVDisabledChannelLogoSourcesKey, CCTVDisabledPlayerCornerLogoSourcesKey, CCTVDisabledChannelPreviewSourcesKey, CCTVDisabledChannelTelemetrySourcesKey]) {
+        for (NSString *prefKey in @[CCTVDisabledChannelLogoSourcesKey, CCTVDisabledPlayerCornerLogoSourcesKey, CCTVDisabledChannelPreviewSourcesKey, CCTVDisabledChannelTelemetrySourcesKey, CCTVEnabledChannelLogoSourcesKey, CCTVEnabledPlayerCornerLogoSourcesKey, CCTVEnabledChannelPreviewSourcesKey, CCTVEnabledChannelTelemetrySourcesKey]) {
             NSMutableArray *arr = [[defaults arrayForKey:prefKey] ?: @[] mutableCopy];
             if ([arr containsObject:fromKey]) {
                 [arr removeObject:fromKey];
@@ -395,8 +387,8 @@ static NSString *const CCTVDisabledChannelTelemetrySourcesKey = @"disabledChanne
             @"香港卫视": @"xianggangweishi",
             @"熊猫直播": @"ipanda-live", @"熊猫频道": @"ipanda-live"
         };
-        cctvRegex = [NSRegularExpression regularExpressionWithPattern:@"cctv[-\s_]*(5\+|5plus|4k|8k|1[0-7]|[1-9])(?![0-9])" options:NSRegularExpressionCaseInsensitive error:NULL];
-        cetvRegex = [NSRegularExpression regularExpressionWithPattern:@"(?:cetv|中国教育|教育)[-\s_]*([1-4])(?![0-9])" options:NSRegularExpressionCaseInsensitive error:NULL];
+        cctvRegex = [NSRegularExpression regularExpressionWithPattern:@"cctv[-\\s_]*(5\\+|5plus|4k|8k|1[0-7]|[1-9])(?![0-9])" options:NSRegularExpressionCaseInsensitive error:NULL];
+        cetvRegex = [NSRegularExpression regularExpressionWithPattern:@"(?:cetv|中国教育|教育)[-\\s_]*([1-4])(?![0-9])" options:NSRegularExpressionCaseInsensitive error:NULL];
     });
     for (NSString *field in @[@"id", @"epgID", @"tvgName", @"name"]) {
         NSString *raw = [channel[field] isKindOfClass:NSString.class] ? channel[field] : @"";

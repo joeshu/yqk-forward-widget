@@ -6,7 +6,7 @@ import unittest
 
 
 SOURCE = pathlib.Path(__file__).resolve().parents[1] / "Sources" / "RootViewController.m"
-TEXT = SOURCE.read_text(encoding="utf-8")
+TEXT = "\n".join((p.read_text(encoding="utf-8").split("\n- (BOOL)sessionHasContent;", 1)[0] if p.name.endswith(".h") else p.read_text(encoding="utf-8")) for p in ([SOURCE.parent / "RootViewController_Internal.h", *sorted(SOURCE.parent.glob("RootViewController*.m"))]))
 PYHOST = (SOURCE.parent / "PyHost.m").read_text(encoding="utf-8")
 PLUGIN = (SOURCE.parent / "PluginViewController.m").read_text(encoding="utf-8")
 SETTINGS = (SOURCE.parent / "SettingsViewController.m").read_text(encoding="utf-8")
@@ -24,7 +24,7 @@ def method_body(signature):
     while True:
         start = TEXT.index(signature, start)
         after = TEXT[start + len(signature):].lstrip()
-        if not after.startswith(";"):
+        if ";" not in TEXT[start + len(signature):TEXT.index("{", start)]:
             break
         start += len(signature)
     opening = TEXT.index("{", start)

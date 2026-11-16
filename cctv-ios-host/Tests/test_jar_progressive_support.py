@@ -268,7 +268,7 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
 
     def test_jar_bridge_selection_and_playback_contracts(self):
         """Verifies jar-bridge sites are selectable in RootViewController & TVBoxCatalogViewController and playable via MediaAPIClient."""
-        root_code = (SOURCES / 'RootViewController.m').read_text(encoding='utf-8')
+        root_code = "\n".join((p.read_text(encoding="utf-8").split("\n- (BOOL)sessionHasContent;", 1)[0] if p.name.endswith(".h") else p.read_text(encoding="utf-8")) for p in ([SOURCES / "RootViewController_Internal.h", *sorted(SOURCES.glob("RootViewController*.m"))]))
         self.assertIn('[apiKind isEqual:@"jar-bridge"]', root_code)
         self.assertIn('[selectedMedia hasPrefix:[NSString stringWithFormat:@"jar-bridge:%@:",identifier]]', root_code)
 
@@ -344,7 +344,7 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
         html_enc2 = f'<script>var player_aaaa={{"url":"{b64_url}","encrypt":2}}</script>'
         self.assertEqual(_extract_stream_from_html(html_enc2), 'https://cdn.test/stream2.m3u8')
 
-        root_code = (SOURCES / 'RootViewController.m').read_text(encoding='utf-8')
+        root_code = "\n".join((p.read_text(encoding="utf-8").split("\n- (BOOL)sessionHasContent;", 1)[0] if p.name.endswith(".h") else p.read_text(encoding="utf-8")) for p in ([SOURCES / "RootViewController_Internal.h", *sorted(SOURCES.glob("RootViewController*.m"))]))
         self.assertIn('CCTVURLFromPossiblyUnescapedString', root_code)
         self.assertIn('activateNativeFallbackForTVBoxSite', root_code)
         self.assertIn('cctv.nativeFallbackSiteKeys.v1', root_code)
@@ -380,7 +380,7 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
         self.assertNotIn('type', cleaned)
         self.assertNotIn('remarks', cleaned)
 
-        root_code = (SOURCES / 'RootViewController.m').read_text(encoding='utf-8')
+        root_code = "\n".join((p.read_text(encoding="utf-8").split("\n- (BOOL)sessionHasContent;", 1)[0] if p.name.endswith(".h") else p.read_text(encoding="utf-8")) for p in ([SOURCES / "RootViewController_Internal.h", *sorted(SOURCES.glob("RootViewController*.m"))]))
         self.assertIn('pendingNativeReplayProgram', root_code)
         self.assertIn('refreshListenersAfterForeground', root_code)
 
@@ -497,7 +497,7 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
         dl_code = (SOURCES / 'MediaPackageDownloader.m').read_text(encoding='utf-8')
         self.assertIn('连接超时 · 正在自动重试下载', dl_code)
 
-        root_code = (SOURCES / 'RootViewController.m').read_text(encoding='utf-8')
+        root_code = "\n".join((p.read_text(encoding="utf-8").split("\n- (BOOL)sessionHasContent;", 1)[0] if p.name.endswith(".h") else p.read_text(encoding="utf-8")) for p in ([SOURCES / "RootViewController_Internal.h", *sorted(SOURCES.glob("RootViewController*.m"))]))
         self.assertIn('hibernateExcessBackgroundVODServicesKeepingID:', root_code)
         self.assertIn('if(owner.pendingTVBoxSiteName.length){', root_code)
 
@@ -561,7 +561,7 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
             for t in threads: t.join(2)
 
         # 2. Verify RootViewController duplicate activate guard & authentic site execution (no silent hijack)
-        root_code = (SOURCES / 'RootViewController.m').read_text(encoding='utf-8')
+        root_code = "\n".join((p.read_text(encoding="utf-8").split("\n- (BOOL)sessionHasContent;", 1)[0] if p.name.endswith(".h") else p.read_text(encoding="utf-8")) for p in ([SOURCES / "RootViewController_Internal.h", *sorted(SOURCES.glob("RootViewController*.m"))]))
         self.assertIn('reportAuthenticTVBoxSiteFailure:site rawAPI:originalAPI url:downloadURL error:error browseAfterImport:browseAfterImport', root_code)
         self.assertNotIn('([lowAPI hasPrefix:@"https://lytvs.top/py/"]&&([lowAPI hasSuffix:@".js"]||[lowAPI hasSuffix:@".hjs"]))', root_code)
 
@@ -610,7 +610,7 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
         self.assertEqual(extracted[2].lower(), 'https://sub.lytvs.top/hamo/duanju_tk_95f9cbf6.hawk')
 
         # Verify token extraction regex from /hamo/*tk_<token>.hawk paths
-        root_code = (SOURCES / 'RootViewController.m').read_text(encoding='utf-8')
+        root_code = "\n".join((p.read_text(encoding="utf-8").split("\n- (BOOL)sessionHasContent;", 1)[0] if p.name.endswith(".h") else p.read_text(encoding="utf-8")) for p in ([SOURCES / "RootViewController_Internal.h", *sorted(SOURCES.glob("RootViewController*.m"))]))
         self.assertIn('tk_([A-Za-z0-9]{6,64})', root_code)
         for hawk_url in extracted:
             m = re.search(r'(?:^|[_/-])tk_([A-Za-z0-9]{6,64})(?:\.[A-Za-z0-9]+|$)', hawk_url, flags=re.I)
@@ -658,7 +658,7 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
         3. MediaPackageImporter accepts any .hjs script as hamo-source-v3 even when obfuscated, and entry.mjs adapts CatVod exports.
         4. host_media_runtime.py does not substitute _get_cms_fallback() in PythonSpider or NativeJS when a site returns empty or errors.
         """
-        root_code = (SOURCES / 'RootViewController.m').read_text(encoding='utf-8')
+        root_code = "\n".join((p.read_text(encoding="utf-8").split("\n- (BOOL)sessionHasContent;", 1)[0] if p.name.endswith(".h") else p.read_text(encoding="utf-8")) for p in ([SOURCES / "RootViewController_Internal.h", *sorted(SOURCES.glob("RootViewController*.m"))]))
         self.assertIn('[[NSUserDefaults standardUserDefaults] removeObjectForKey:@"cctv.nativeFallbackSiteKeys.v1"];', root_code)
         self.assertIn('- (void)reportAuthenticTVBoxSiteFailure:(NSDictionary *)site rawAPI:(NSString *)rawAPI url:(NSURL *)downloadURL error:(NSError *)error browseAfterImport:(BOOL)browseAfterImport', root_code)
         self.assertNotIn('[self activateNativeFallbackForTVBoxSite:site reason:', root_code)
@@ -820,7 +820,7 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
         self.assertIn('MediaJARBridgeSaveWorkingBase', api_m)
         self.assertNotIn('if([from.scheme.lowercaseString isEqual:@"https"]&&[to.scheme.lowercaseString isEqual:@"http"])valid=NO;', api_m)
 
-        root_m = (SOURCES / 'RootViewController.m').read_text(encoding='utf-8')
+        root_m = "\n".join((p.read_text(encoding="utf-8").split("\n- (BOOL)sessionHasContent;", 1)[0] if p.name.endswith(".h") else p.read_text(encoding="utf-8")) for p in ([SOURCES / "RootViewController_Internal.h", *sorted(SOURCES.glob("RootViewController*.m"))]))
         self.assertNotIn('return @"95f9cbf6";', root_m)
         self.assertIn('MediaLytvsSubscriptionToken(stored)', root_m)
 

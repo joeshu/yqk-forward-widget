@@ -11,7 +11,7 @@ class ResourceInteractionContracts(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.catalog = (ROOT / 'Sources/ConfigCenterViewController.m').read_text()
-        cls.root = (ROOT / 'Sources/RootViewController.m').read_text()
+        cls.root = "\n".join((p.read_text(encoding="utf-8").split("\n- (BOOL)sessionHasContent;", 1)[0] if p.name.endswith(".h") else p.read_text(encoding="utf-8")) for p in ([ROOT / "Sources" / n for n in ("RootViewController_Internal.h", "RootViewController.m", "RootViewController+Catalog.m", "RootViewController+Playback.m", "RootViewController+StreamMetrics.m", "RootViewController+EPG.m", "RootViewController+Subscriptions.m", "RootViewController+Services.m")]))
         cls.editor = (ROOT / 'Sources/ServiceEditorViewController.m').read_text()
         cls.detail = (ROOT / 'Sources/MediaBrowserViewController.m').read_text()
         cls.feed = (ROOT / 'Sources/MediaFeedView.m').read_text()
@@ -1094,7 +1094,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         api_client = (ROOT / 'Sources/MediaAPIClient.m').read_text()
         browser = (ROOT / 'Sources/MediaBrowserViewController.m').read_text()
         global_search = (ROOT / 'Sources/MediaGlobalSearchViewController.m').read_text()
-        root = (ROOT / 'Sources/RootViewController.m').read_text()
+        root = "\n".join((p.read_text(encoding="utf-8").split("\n- (BOOL)sessionHasContent;", 1)[0] if p.name.endswith(".h") else p.read_text(encoding="utf-8")) for p in ([ROOT / "Sources" / n for n in ("RootViewController_Internal.h", "RootViewController.m", "RootViewController+Catalog.m", "RootViewController+Playback.m", "RootViewController+StreamMetrics.m", "RootViewController+EPG.m", "RootViewController+Subscriptions.m", "RootViewController+Services.m")]))
         self.assertIn('apiKindDouban=[siteType isEqual:@"3"]&&[api.lowercaseString isEqual:@"csp_doudou"]', store)
         self.assertIn('@"douban-index"', store)
         self.assertIn('MediaDoubanRequest(operation,arguments?:@{},error)', api_client)

@@ -10,7 +10,7 @@ class GlobalThemeContracts(unittest.TestCase):
         theme = (ROOT / "Sources/HostTheme.h").read_text(encoding="utf-8")
         settings = (ROOT / "Sources/SettingsViewController.m").read_text(encoding="utf-8")
         app = (ROOT / "Sources/AppDelegate.m").read_text(encoding="utf-8")
-        root = (ROOT / "Sources/RootViewController.m").read_text(encoding="utf-8")
+        root = "\n".join((p.read_text(encoding="utf-8").split("\n- (BOOL)sessionHasContent;", 1)[0] if p.name.endswith(".h") else p.read_text(encoding="utf-8")) for p in ([ROOT / "Sources" / "RootViewController_Internal.h", *sorted((ROOT / "Sources").glob("RootViewController*.m"))]))
 
         self.assertIn('HostDarkThemePreferenceKey = @"hostDarkTheme"', theme)
         self.assertIn('HostThemeModePreferenceKey = @"hostThemeMode"', theme)
@@ -29,7 +29,7 @@ class GlobalThemeContracts(unittest.TestCase):
         theme_impl = (ROOT / "Sources/HostTheme.m").read_text(encoding="utf-8")
         backdrop = (ROOT / "Sources/HostGlassBackdropView.m").read_text(encoding="utf-8")
         app = (ROOT / "Sources/AppDelegate.m").read_text(encoding="utf-8")
-        root = (ROOT / "Sources/RootViewController.m").read_text(encoding="utf-8")
+        root = "\n".join((p.read_text(encoding="utf-8").split("\n- (BOOL)sessionHasContent;", 1)[0] if p.name.endswith(".h") else p.read_text(encoding="utf-8")) for p in ([ROOT / "Sources" / "RootViewController_Internal.h", *sorted((ROOT / "Sources").glob("RootViewController*.m"))]))
         self.assertIn("HostInstallGlassBackdrop(self.window)", app)
         self.assertIn("HostStyleGlassCard(cell.contentView,11)", root)
         feed = (ROOT / "Sources/MediaFeedView.m").read_text(encoding="utf-8")

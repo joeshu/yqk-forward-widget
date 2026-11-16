@@ -61,7 +61,7 @@ invalid:
     if(error)*error=[NSError errorWithDomain:@"XMLTV" code:1 userInfo:@{NSLocalizedDescriptionKey:@"XMLTV 数据无效、过大或没有有效节目，请检查来源。"}];return nil;
 }
 - (NSString *)pathForSource:(NSString *)s {NSString *dir=[NSSearchPathForDirectoriesInDomains(NSCachesDirectory,NSUserDomainMask,YES).firstObject stringByAppendingPathComponent:@"XMLTV"];[NSFileManager.defaultManager createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:NULL];NSData *d=[s dataUsingEncoding:NSUTF8StringEncoding];unsigned char hash[CC_SHA256_DIGEST_LENGTH];CC_SHA256(d.bytes,(CC_LONG)d.length,hash);NSMutableString *key=[NSMutableString string];for(int i=0;i<CC_SHA256_DIGEST_LENGTH;i++)[key appendFormat:@"%02x",hash[i]];return [dir stringByAppendingPathComponent:[key stringByAppendingString:@".plist"]];}
-- (NSArray *)cachedRowsForSource:(NSString *)source channel:(NSString *)identifier {if(!source.length||!identifier.length)return @[];return self.cache[source][@"rows"][identifier.lowercaseString]?:@[];}
+- (NSArray *)cachedRowsForSource:(NSString *)source channel:(NSString *)identifier {if(!source.length||!identifier.length)return @[];@synchronized(self){return self.cache[source][@"rows"][identifier.lowercaseString]?:@[];}}
 - (void)setPaused:(BOOL)paused {
     _paused=paused;if(!paused)return;self.generation++;
     for(NSURLSessionDataTask *task in self.tasks.allValues)[task cancel];[self.tasks removeAllObjects];

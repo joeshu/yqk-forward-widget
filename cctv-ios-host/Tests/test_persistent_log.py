@@ -1,6 +1,6 @@
 import unittest
 from pathlib import Path
-S=Path(__file__).resolve().parents[1].joinpath('Sources/RootViewController.m').read_text()
+S="\n".join((p.read_text(encoding="utf-8").split("\n- (BOOL)sessionHasContent;", 1)[0] if p.name.endswith(".h") else p.read_text(encoding="utf-8")) for p in ([Path(__file__).resolve().parents[1].joinpath("Sources/RootViewController_Internal.h"), *sorted(Path(__file__).resolve().parents[1].joinpath("Sources").glob("RootViewController*.m"))]))
 L=Path(__file__).resolve().parents[1].joinpath('Sources/LogCenterViewController.m').read_text()
 class PersistentLogTests(unittest.TestCase):
  def test_log_persistence_is_event_driven_and_batches_writes(self):

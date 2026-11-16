@@ -54,6 +54,7 @@ static void JARThread(void (^work)(void)) {
 @implementation MediaJARRequest
 - (void)cancel {
     self.cancelled=YES;if(self.watchdog){dispatch_source_cancel(self.watchdog);self.watchdog=nil;}[self.download cancel];
+    dispatch_semaphore_t dlSema=self.downloaded;if(dlSema)dispatch_semaphore_signal(dlSema);
     if(self.executing){NSString *requestID=self.requestID;JARThread(^{JARInvoke(@{@"command":@"cancel",@"request":requestID});});}
 }
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task didReceiveResponse:(NSURLResponse *)response completionHandler:(void (^)(NSURLSessionResponseDisposition))completion {
@@ -105,10 +106,14 @@ static void JARThread(void (^work)(void)) {
             NSError *error=nil;id result=nil;
             @try {result=[self perform:source operation:operation arguments:arguments ticket:ticket error:&error];}
             @catch(NSException *exception){error=JARError(3,@"JAR 运行时请求失败，请查看诊断日志");}
-            dispatch_async(dispatch_get_main_queue(),^{if(ticket.watchdog){dispatch_source_cancel(ticket.watchdog);ticket.watchdog=nil;}if(!ticket.cancelled&&completion)completion(result,error);});
-            dispatch_semaphore_signal(finished);
+            @finally {
+                dispatch_async(dispatch_get_main_queue(),^{if(ticket.watchdog){dispatch_source_cancel(ticket.watchdog);ticket.watchdog=nil;}if(!ticket.cancelled&&completion)completion(result,error);});
+                dispatch_semaphore_signal(finished);
+            }
         }});
-        dispatch_semaphore_wait(finished,DISPATCH_TIME_FOREVER);
+        if(dispatch_semaphore_wait(finished,dispatch_time(DISPATCH_TIME_NOW,(int64_t)(180*NSEC_PER_SEC)))!=0){
+            [ticket cancel];
+        }
     }];
     return ticket;
 }
@@ -135,11 +140,19 @@ static void JARThread(void (^work)(void)) {
     if(!cached){
         NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:url] cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:45];
         for(id name in headers){id value=headers[name];if([name isKindOfClass:NSString.class]&&[value isKindOfClass:NSString.class]&&[name length]<=128&&[value length]<=4096&&[name rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location==NSNotFound&&[value rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location==NSNotFound&&![name isEqual:@"Host"])[request setValue:value forHTTPHeaderField:name];}
+        if(ticket.cancelled){if(error)*error=JARError(NSURLErrorCancelled,@"请求已取消");return nil;}
         ticket.bytes=[NSMutableData data];ticket.downloaded=dispatch_semaphore_create(0);
         NSURLSessionConfiguration *configuration=NSURLSessionConfiguration.ephemeralSessionConfiguration;configuration.URLCache=nil;configuration.timeoutIntervalForResource=60;
         NSURLSession *session=[NSURLSession sessionWithConfiguration:configuration delegate:ticket delegateQueue:nil];
-        ticket.download=[session dataTaskWithRequest:request];if(!ticket.cancelled)[ticket.download resume];else[ticket.download cancel];
-        dispatch_semaphore_wait(ticket.downloaded,DISPATCH_TIME_FOREVER);[session invalidateAndCancel];ticket.download=nil;
+        @try {
+            ticket.download=[session dataTaskWithRequest:request];
+            if(!ticket.cancelled)[ticket.download resume];else{dispatch_semaphore_signal(ticket.downloaded);[ticket.download cancel];}
+            if(dispatch_semaphore_wait(ticket.downloaded,dispatch_time(DISPATCH_TIME_NOW,(int64_t)(65*NSEC_PER_SEC)))!=0){
+                ticket.downloadError=JARError(NSURLErrorTimedOut,@"JAR 下载超时");[ticket.download cancel];
+            }
+        } @finally {
+            [session invalidateAndCancel];ticket.download=nil;
+        }
         if(ticket.downloadError||ticket.cancelled){if(error)*error=ticket.downloadError?:JARError(NSURLErrorCancelled,@"请求已取消");return nil;}
         data=ticket.bytes;ticket.bytes=nil;
         if(data.length<4||memcmp(data.bytes,"PK\003\004",4)!=0){if(error)*error=JARError(7,@"JAR 下载未返回 ZIP/JAR 文件，可能是登录页或访问限制");return nil;}

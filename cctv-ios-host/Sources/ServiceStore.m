@@ -23,7 +23,36 @@ static NSString *ServiceCodeWithoutComments(NSString *source){
     }
     return routeSource;
 }
+static NSCache<NSString *,NSDictionary *> *ServiceEntryAnalysisCache(void){
+    static NSCache<NSString *,NSDictionary *> *cache;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken,^{
+        cache=[NSCache new];
+        cache.countLimit=128;
+    });
+    return cache;
+}
 @implementation ServiceStore
++ (NSDictionary *)cachedCodeAnalysisForEntryPath:(NSString *)entry {
+    if(![entry isKindOfClass:NSString.class]||!entry.length)return nil;
+    NSDictionary *attributes=[NSFileManager.defaultManager attributesOfItemAtPath:entry error:NULL];
+    unsigned long long fileSize=[attributes[NSFileSize] unsignedLongLongValue];
+    if(!attributes||fileSize==0||fileSize>2*1024*1024)return nil;
+    NSTimeInterval modTime=[attributes[NSFileModificationDate] timeIntervalSince1970];
+    NSString *cacheKey=[NSString stringWithFormat:@"%@|%llu|%.3f",entry,fileSize,modTime];
+    NSCache<NSString *,NSDictionary *> *cache=ServiceEntryAnalysisCache();
+    NSDictionary *cached=[cache objectForKey:cacheKey];
+    if(cached)return cached;
+    NSData *data=[NSData dataWithContentsOfFile:entry options:NSDataReadingMappedIfSafe error:NULL];
+    NSString *source=data?[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]:nil;
+    if(!source.length)return nil;
+    NSInteger port=[self inferredPortInCode:source];
+    NSString *playlist=[self inferredPlaylistPathInCode:source]?:@"";
+    NSString *epg=[self inferredEPGPathInCode:source]?:@"";
+    NSDictionary *analysis=@{@"port":@(port),@"playlistPath":playlist,@"epgPath":epg};
+    [cache setObject:analysis forKey:cacheKey];
+    return analysis;
+}
 + (NSString *)directory {
     NSString *d =
         [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject
@@ -230,12 +259,9 @@ static NSString *ServiceCodeWithoutComments(NSString *source){
     if([self isMediaService:service])return [NSString stringWithFormat:@"宿主网关端口 %ld · 自动桥接",(long)port];
     NSInteger inferred=[service[@"inferredPort"] integerValue];
     if(inferred<1024){
-        NSString *entry=[self codePath:service];NSDictionary *attrs=entry.length?[NSFileManager.defaultManager attributesOfItemAtPath:entry error:NULL]:nil;
-        if(entry.length&&[attrs[NSFileSize] unsignedLongLongValue]<=2*1024*1024){
-            NSData *data=[NSData dataWithContentsOfFile:entry options:NSDataReadingMappedIfSafe error:NULL];
-            NSString *source=data?[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]:nil;
-            inferred=[self inferredPortInCode:source];
-        }
+        NSString *entry=[self codePath:service];
+        NSDictionary *analysis=[self cachedCodeAnalysisForEntryPath:entry];
+        if(analysis)inferred=[analysis[@"port"] integerValue];
     }
     NSString *args=[service[@"arguments"] isKindOfClass:NSString.class]?service[@"arguments"]:@"";
     if([args containsString:@"{port}"]){
@@ -321,10 +347,10 @@ static NSString *ServiceCodeWithoutComments(NSString *source){
     // Python HTTP services (and legacy unmanifested Python services) can have
     // their entry file interpreted as a local HTTP server declaration.
     if(![service[@"engine"] isEqual:@"python"])return nil;
-    NSString *entry=[self codePath:service];NSDictionary *attributes=entry.length?[NSFileManager.defaultManager attributesOfItemAtPath:entry error:NULL]:nil;
-    if(!entry.length||[attributes[NSFileSize] unsignedLongLongValue]>2*1024*1024)return nil;
-    NSData *data=[NSData dataWithContentsOfFile:entry options:NSDataReadingMappedIfSafe error:NULL];NSString *source=data?[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]:nil;
-    return [self inferredPlaylistPathInCode:source];
+    NSString *entry=[self codePath:service];
+    NSDictionary *analysis=[self cachedCodeAnalysisForEntryPath:entry];
+    NSString *path=analysis[@"playlistPath"];
+    return [path isKindOfClass:NSString.class]&&path.length?path:nil;
 }
 + (NSString *)epgPathForService:(NSDictionary *)service {
     if(![service isKindOfClass:NSDictionary.class])return nil;
@@ -336,10 +362,10 @@ static NSString *ServiceCodeWithoutComments(NSString *source){
     if(ServiceValidPlaylistPath(configured))return configured;
     if(mediaHost)return nil;
     if(![service[@"engine"] isEqual:@"python"])return nil;
-    NSString *entry=[self codePath:service];NSDictionary *attributes=entry.length?[NSFileManager.defaultManager attributesOfItemAtPath:entry error:NULL]:nil;
-    if(!entry.length||[attributes[NSFileSize] unsignedLongLongValue]>2*1024*1024)return nil;
-    NSData *data=[NSData dataWithContentsOfFile:entry options:NSDataReadingMappedIfSafe error:NULL];NSString *source=data?[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]:nil;
-    return [self inferredEPGPathInCode:source];
+    NSString *entry=[self codePath:service];
+    NSDictionary *analysis=[self cachedCodeAnalysisForEntryPath:entry];
+    NSString *path=analysis[@"epgPath"];
+    return [path isKindOfClass:NSString.class]&&path.length?path:nil;
 }
 + (NSArray<NSString *> *)epgPathCandidatesForService:(NSDictionary *)service {
     if(![service isKindOfClass:NSDictionary.class])return @[];

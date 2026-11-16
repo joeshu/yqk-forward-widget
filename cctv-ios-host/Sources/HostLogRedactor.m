@@ -9,8 +9,12 @@
     if(!parts.scheme.length||!parts.host.length){NSString *safe=[self redactText:trimmed];return safe.length>240?[[safe substringToIndex:240] stringByAppendingString:@"…"]:safe;}
     parts.user=nil;parts.password=nil;parts.fragment=nil;
     NSString *path=parts.path?:@"";
-    NSRegularExpression *xtream=[NSRegularExpression regularExpressionWithPattern:@"(?i)(/(?:live|movie|series)/)[^/?#]+/[^/?#]+(?:/|$)" options:0 error:NULL];
-    path=[xtream stringByReplacingMatchesInString:path options:0 range:NSMakeRange(0,path.length) withTemplate:@"$1[已脱敏]/[已脱敏]/"];
+    static NSRegularExpression *xtream=nil;
+    static dispatch_once_t xtreamOnce;
+    dispatch_once(&xtreamOnce,^{
+        xtream=[NSRegularExpression regularExpressionWithPattern:@"(?i)(/(?:live|movie|series)/)[^/?#]+/[^/?#]+(?:/|$)" options:0 error:NULL];
+    });
+    if(xtream&&path.length)path=[xtream stringByReplacingMatchesInString:path options:0 range:NSMakeRange(0,path.length) withTemplate:@"$1[已脱敏]/[已脱敏]/"];
     parts.path=path;
     if(parts.queryItems.count){NSMutableArray *items=[NSMutableArray arrayWithCapacity:parts.queryItems.count];for(NSURLQueryItem *item in parts.queryItems)[items addObject:[NSURLQueryItem queryItemWithName:item.name value:item.value?@"[已脱敏]":nil]];parts.queryItems=items;}
     NSString *result=parts.string?:@"";
