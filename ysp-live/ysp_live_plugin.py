@@ -51,6 +51,7 @@ import os
 import random
 import re
 import secrets
+import select
 import socket
 import ssl
 import struct
@@ -157,10 +158,60 @@ class _SocketTrackingMixin:
 
     @staticmethod
     def _create_connection(address, timeout=None, source_address=None):
-        sock = socket.create_connection(
-            address, timeout=timeout, source_address=source_address)
-        _register_socket(sock)
-        return sock
+        # socket.create_connection 的阻塞建连在 DNS 解析后、TCP 握手完成前
+        # 还没有 socket 可登记，stop 关不掉它；SYN 被黑洞时会等满整个
+        # timeout（CI 上 2.5s）。改用非阻塞 connect + select 轮询
+        # _STOP_EVENT，收到停止立刻放弃；超时语义与 create_connection 一致。
+        if _STOP_EVENT.is_set():
+            raise OSError('service is stopping')
+        if timeout is not None and timeout <= 0:
+            sock = socket.create_connection(
+                address, timeout=timeout, source_address=source_address)
+            _register_socket(sock)
+            return sock
+        deadline = None if timeout is None else time.monotonic() + timeout
+        last_err = None
+        for family, socktype, proto, _canon, sockaddr in socket.getaddrinfo(
+                address[0], address[1], 0, socket.SOCK_STREAM):
+            sock = socket.socket(family, socktype, proto)
+            _register_socket(sock)
+            try:
+                if source_address:
+                    sock.bind(source_address)
+                sock.settimeout(0)
+                try:
+                    sock.connect(sockaddr)
+                except BlockingIOError:
+                    pass
+                while True:
+                    if _STOP_EVENT.is_set():
+                        raise OSError('service is stopping')
+                    remaining = None if deadline is None else deadline - time.monotonic()
+                    if remaining is not None and remaining <= 0:
+                        raise socket.timeout('timed out')
+                    rlist, wlist, xlist = select.select(
+                        [sock], [sock], [sock],
+                        0.05 if remaining is None else min(0.05, remaining))
+                    if rlist or wlist or xlist:
+                        break
+                err = sock.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+                if err:
+                    raise OSError(err, os.strerror(err))
+                sock.settimeout(timeout)
+                return sock
+            except BaseException as exc:
+                last_err = exc
+                _unregister_socket(sock)
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+                if isinstance(exc, OSError) and str(exc) == 'service is stopping':
+                    raise
+                continue
+        if last_err is not None:
+            raise last_err
+        raise OSError('getaddrinfo returns an empty list')
 
     def connect(self):
         if isinstance(self, http.client.HTTPSConnection):
