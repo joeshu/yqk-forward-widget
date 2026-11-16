@@ -147,23 +147,39 @@ class _BytesStreamAdapter:
 
 
 class _SocketTrackingMixin:
-    """http.client 连接混入：在 connect() 内拦截 socket.create_connection，
-    使 socket 在进入（可能长时间阻塞的）代理 CONNECT / TLS 握手前就已登记，
-    stop 时可立即 shutdown 中断。不重写任何握手逻辑，行为与基类完全一致。"""
+    """http.client 连接混入：登记出站 socket，使 stop 能立即 shutdown 中断
+    卡在代理 CONNECT / TLS 握手 / 响应读取里的后台任务，而不是等网络超时。
+    注意两点：(1) http.client 经 self._create_connection 建连（类属性在
+    import 时就绑定了 socket.create_connection），直接改 socket.create_connection
+    全局是拦不到的，必须覆写 _create_connection；(2) wrap_socket 会 detach
+    明文 socket（fileno 变成 -1），登记它对握手无效，所以 HTTPS 手动 wrap
+    （do_handshake_on_connect=False），登记活的 SSLSocket 后再显式握手。"""
+
+    @staticmethod
+    def _create_connection(address, timeout=None, source_address=None):
+        sock = socket.create_connection(
+            address, timeout=timeout, source_address=source_address)
+        _register_socket(sock)
+        return sock
 
     def connect(self):
-        orig_create = socket.create_connection
-
-        def _creating(address, timeout=None, source_address=None):
-            sock = orig_create(address, timeout=timeout, source_address=source_address)
-            _register_socket(sock)
-            return sock
-
-        socket.create_connection = _creating
-        try:
+        if isinstance(self, http.client.HTTPSConnection):
+            # 明文 TCP 建连（+ 代理 CONNECT），再手动 TLS wrap。
+            http.client.HTTPConnection.connect(self)
+            plain = self.sock
+            server_hostname = self._tunnel_host if self._tunnel_host else self.host
+            self.sock = self._context.wrap_socket(
+                self.sock, server_hostname=server_hostname,
+                do_handshake_on_connect=False)
+            _unregister_socket(plain)
+            _register_socket(self.sock)
+            try:
+                self.sock.do_handshake()
+            except BaseException:
+                _unregister_socket(self.sock)
+                raise
+        else:
             super().connect()
-        finally:
-            socket.create_connection = orig_create
 
     def close(self):
         _unregister_socket(getattr(self, 'sock', None))
