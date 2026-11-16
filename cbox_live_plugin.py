@@ -154,16 +154,48 @@ def _read_body_chunked(resp, max_bytes=None):
         t._host_media_stream_read = prev
 
 
+def _getaddrinfo_stop_aware(host, port):
+    """阻塞的 getaddrinfo 用 _thread 裸线程跑（不经 threading.Thread.start，
+    否则宿主会把它登记为 session 线程，clean() 会等它——放弃它就没意义了），
+    主流程每 50ms 轮询 _STOP_EVENT；收到停止就丢弃它直接放弃
+    （解析线程随 DNS 返回后自行退出，不占 socket）。"""
+    import _thread
+    result = {}
+    done = threading.Event()
+
+    def _do():
+        try:
+            result['infos'] = socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM)
+        except BaseException as exc:  # noqa: BLE001
+            result['err'] = exc
+        finally:
+            done.set()
+
+    _thread.start_new_thread(_do, ())
+    while not done.is_set():
+        if _STOP_EVENT.is_set():
+            raise OSError('service is stopping')
+        done.wait(0.05)
+    if 'err' in result:
+        raise result['err']
+    return result['infos']
+
+
 class _SocketTrackingMixin:
     """http.client 连接混入：登记出站 socket，使 stop 能立即 shutdown 中断
     卡在代理 CONNECT / TLS 握手 / 响应读取里的后台任务，而不是等网络超时。
-    注意两点：(1) http.client 经 self._create_connection 建连（类属性在
-    import 时就绑定了 socket.create_connection），直接改 socket.create_connection
-    全局是拦不到的，必须覆写 _create_connection；(2) wrap_socket 会 detach
-    明文 socket（fileno 变成 -1），登记它对握手无效，所以 HTTPS 手动 wrap
-    （do_handshake_on_connect=False），登记活的 SSLSocket 后再显式握手。
-    （拦截窗口内的其它线程若恰好也在建连，其 socket 也会被登记；stop 时
-    一并关闭是期望行为，超时兜底仍在。）"""
+    注意两点：(1) http.client.HTTPConnection.__init__ 会把
+    self._create_connection 绑成 socket.create_connection 实例属性，遮住类
+    上的覆写，必须在 __init__ 里重新绑回本类的版本，否则覆写根本不生效；
+    (2) wrap_socket 会 detach 明文 socket（fileno 变成 -1），登记它对握手
+    无效，所以 HTTPS 手动 wrap（do_handshake_on_connect=False），登记活的
+    SSLSocket 后再显式握手。DNS 解析本身也是阻塞的，见
+    _getaddrinfo_stop_aware。"""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # 见类 docstring：把实例属性重新绑到本混入的可中断版本。
+        self._create_connection = type(self)._create_connection
 
     @staticmethod
     def _create_connection(address, timeout=None, source_address=None):
@@ -180,8 +212,8 @@ class _SocketTrackingMixin:
             return sock
         deadline = None if timeout is None else time.monotonic() + timeout
         last_err = None
-        for family, socktype, proto, _canon, sockaddr in socket.getaddrinfo(
-                address[0], address[1], 0, socket.SOCK_STREAM):
+        for family, socktype, proto, _canon, sockaddr in _getaddrinfo_stop_aware(
+                address[0], address[1]):
             sock = socket.socket(family, socktype, proto)
             _register_socket(sock)
             try:
