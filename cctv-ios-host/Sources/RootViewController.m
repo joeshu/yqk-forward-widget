@@ -10,14 +10,6 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
     return cache;
 }
 
-@interface CCTVPlaybackListPanelController : UIViewController <UITableViewDataSource, UITableViewDelegate>
-@property(nonatomic,copy) NSArray<NSDictionary *> *items;
-@property(nonatomic,copy) NSString *emptyMessage;
-@property(nonatomic,copy) void (^selectionHandler)(NSDictionary *item);
-@property(nonatomic,strong) UITableView *tableView;
-@property(nonatomic,strong) UILabel *emptyLabel;
-@end
-
 @implementation CCTVPlaybackListPanelController
 - (void)viewDidLoad {
     [super viewDidLoad];
@@ -76,10 +68,6 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
 }
 @end
 
-@interface CCTVChannelListCell : UITableViewCell
-@property(nonatomic,strong) UIImageView *previewThumbView;
-@property(nonatomic,strong) UILabel *telemetryBadgeLabel;
-@end
 @implementation CCTVChannelListCell
 - (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)reuseIdentifier {
     if ((self = [super initWithStyle:style reuseIdentifier:reuseIdentifier])) {
