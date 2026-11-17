@@ -126,6 +126,7 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
       @{ @"category":@"live", @"title":@"直播与频道管理", @"footer":@"集中管理内置央视频道展示、频道网格/列表视图、排序方式及直播画中画。播放时屏幕常亮对央视与订阅直播同时生效。", @"rows":@[
         @{ @"title":@"显示内置央视频道", @"detail":@"在直播与频道列表中展示内置央视/卫视频道", @"key":@"nativeChannelsEnabled", @"icon":@"tv.badge.wifi", @"default":@YES },
         @{ @"title":@"内置央视频道台标", @"detail":@"控制央视页列表与播放器右上角高清台标展示（默认关闭）", @"key":@"nativeChannelLogoEnabled", @"icon":@"sparkles.tv", @"default":@NO },
+        @{ @"title":@"内置央视播放器右上角台标", @"detail":@"独立控制内置央视播放画面右上角台标展示（默认关闭）", @"key":@"nativePlayerCornerLogoEnabled", @"icon":@"tv.inset.filled", @"default":@NO },
         @{ @"title":@"内置央视频道实时预览图", @"detail":@"在频道列表刷新时检测并展示最新真实画面缩略图（默认关闭）", @"key":@"nativeChannelPreviewEnabled", @"icon":@"photo.tv", @"default":@NO },
         @{ @"title":@"内置央视频道速率与延迟", @"detail":@"在央视页与频道页展示实时网速与毫秒级响应延迟角标（默认关闭）", @"key":@"nativeChannelTelemetryEnabled", @"icon":@"speedometer", @"default":@NO },
         @{ @"title":@"频道用网格显示", @"detail":@"切换频道列表为海报卡片网格或紧凑列表", @"key":@"channelGridMode", @"icon":@"square.grid.2x2", @"default":@YES },

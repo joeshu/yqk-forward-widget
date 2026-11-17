@@ -392,48 +392,109 @@ def _extract_stream_from_html(html, base_url='', allow_unscoped=False):
     return ''
 
 
-def extract_title_from_vip_url(url):
-    """Best-effort title and episode extraction from a commercial video webpage (Youku/QQ/iQiyi/MGTV/Bili)."""
+VIP_VIDEO_DOMAINS = (
+    'youku.com', 'qq.com', 'iqiyi.com', 'qiyi.com',
+    'mgtv.com', 'imgo.tv', 'bilibili.com', 'b23.tv',
+    'sohu.com', 'le.com', 'letv.com', '1905.com', 'pptv.com',
+)
+
+
+def unwrap_vip_watch_url(url):
+    """Unwraps parser/wrapper query parameters (?url=https://...) if present."""
     u = str(url or '').strip()
-    if not u.startswith(('http://', 'https://')) or any(tok in u.lower() for tok in ('.test', '.example')):
-        return '', ''
+    if not u.startswith(('http://', 'https://')):
+        return u
     try:
         qs = urllib.parse.parse_qs(urllib.parse.urlsplit(u).query)
-        for qk in ('url', 'v', 'vid', 'src'):
+        for qk in ('url', 'v', 'vid', 'src', 'target', 'link'):
             cand_u = (qs.get(qk) or [''])[0].strip()
             if cand_u.startswith(('http://', 'https://')):
-                u = cand_u
-                break
+                return cand_u
     except Exception:
         pass
+    return u
+
+
+def is_vip_watch_url(url):
+    """Returns True if url (or its unwrapped target) points to a commercial video platform page."""
+    u = unwrap_vip_watch_url(url).lower()
+    if not u.startswith(('http://', 'https://')):
+        return False
+    path = urllib.parse.urlsplit(u).path.lower()
+    if any(path.endswith(ext) for ext in ('.m3u8', '.mp4', '.flv', '.mpd', '.ts')):
+        return False
+    return any(dom in u for dom in VIP_VIDEO_DOMAINS)
+
+
+def vip_platform_referer(url, flag=''):
+    """Returns the canonical platform Referer header for Youku/QQ/iQIYI/MGTV/Bili URLs."""
+    low = (unwrap_vip_watch_url(url) + ' ' + str(flag or '')).lower()
+    if 'youku' in low or '优酷' in low:
+        return 'https://v.youku.com/'
+    if 'qq.com' in low or 'qqlive' in low or 'tencent' in low or '腾讯' in low or low.strip() == 'qq':
+        return 'https://v.qq.com/'
+    if 'iqiyi' in low or 'qiyi' in low or '爱奇艺' in low or '奇艺' in low:
+        return 'https://www.iqiyi.com/'
+    if 'mgtv' in low or 'imgo' in low or 'hunantv' in low or '芒果' in low:
+        return 'https://www.mgtv.com/'
+    if 'bilibili' in low or 'b23.tv' in low or '哔哩' in low or 'bili' in low:
+        return 'https://www.bilibili.com/'
+    if 'sohu' in low or '搜狐' in low:
+        return 'https://tv.sohu.com/'
+    if 'le.com' in low or 'letv' in low or '乐视' in low:
+        return 'https://www.le.com/'
+    if '1905.com' in low:
+        return 'https://www.1905.com/'
+    if 'pptv' in low:
+        return 'https://v.pptv.com/'
+    return ''
+
+
+def extract_title_from_vip_url(url):
+    """Best-effort title and episode extraction from a commercial video webpage (Youku/QQ/iQiyi/MGTV/Bili)."""
+    u = unwrap_vip_watch_url(url)
+    low_u = u.lower()
+    if not u.startswith(('http://', 'https://')) or any(tok in low_u for tok in ('.test', '.example', '.invalid', 'fixture')):
+        return '', ''
     try:
         headers = {
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         }
+        ref = vip_platform_referer(u)
+        if ref:
+            headers['Referer'] = ref
         resp = requests.get(u, headers=headers, timeout=4)
         html = resp.text or ''
         raw_title = ''
-        m_og = re.search(r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']', html, re.I)
-        if not m_og:
-            m_og = re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:title["\']', html, re.I)
-        if m_og:
-            raw_title = m_og.group(1).strip()
-        if not raw_title:
-            m_t = re.search(r'<title[^>]*>([^<]+)</title>', html, re.I)
-            if m_t:
-                raw_title = m_t.group(1).strip()
+        for pat in (
+            r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']',
+            r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:title["\']',
+            r'<meta[^>]+name=["\']irTitle["\'][^>]+content=["\']([^"\']+)["\']',
+            r'<title[^>]*>([^<]+)</title>',
+        ):
+            m = re.search(pat, html, re.I)
+            if m and m.group(1).strip():
+                raw_title = m.group(1).strip()
+                break
         if not raw_title:
             return '', ''
-        raw_title = re.split(r'[-_—|｜]|在线观看|高清完整版|全集|优酷|腾讯视频|爱奇艺|芒果TV|哔哩哔哩', raw_title)[0].strip()
-        raw_title = re.sub(r'^[《【\[]|[》】\]]$', '', raw_title).strip()
-        ep_match = re.search(r'第\s*(\d+)\s*[集期话]|\s+(\d{1,3})$', raw_title)
-        ep_name = ''
-        if ep_match:
-            num = ep_match.group(1) or ep_match.group(2)
-            ep_name = f'第{int(num)}集'
-            raw_title = raw_title[:ep_match.start()].strip()
-        return raw_title, ep_name
+        ep_match = re.search(r'第\s*(\d+)\s*[集期话]', raw_title)
+        ep_name = f'第{int(ep_match.group(1))}集' if ep_match else ''
+        book_m = re.search(r'《([^《》]{1,60})》', raw_title)
+        if book_m:
+            clean_t = book_m.group(1).strip()
+        else:
+            clean_t = re.split(r'[-_—|｜]|在线观看|高清完整版|全集|正片|优酷|腾讯视频|爱奇艺|芒果TV|哔哩哔哩', raw_title)[0].strip()
+            clean_t = re.sub(r'^[《【\[]+|[》】\]]+$', '', clean_t).strip()
+        ep_tail = re.search(r'(?:第\s*(\d+)\s*[集期话]|\s+(\d{1,3}))$', clean_t)
+        if ep_tail:
+            num = ep_tail.group(1) or ep_tail.group(2)
+            if not ep_name:
+                ep_name = f'第{int(num)}集'
+            clean_t = clean_t[:ep_tail.start()].strip()
+        clean_t = re.sub(r'^[《【\[]+|[》】\]]+$', '', clean_t).strip()
+        return clean_t, ep_name
     except Exception:
         return '', ''
 
@@ -582,6 +643,86 @@ def resolve_maccms_stream_by_title(title, episode_index=0, episode_name=''):
     if fallback_rows:
         return pick_from_rows(fallback_rows, allow_dead_cdn=True)
     return ''
+
+
+BUILTIN_VIP_JSON_PARSERS = (
+    ('https://zy.qiaoji8.com/neibu.php?url=', {'User-Agent': 'okhttp/4.9.1'}),
+    ('https://zy.qiaoji8.com/gouzi.php?url=', {'User-Agent': 'okhttp/4.9.1'}),
+    ('https://zy.qiaoji8.com/xiafan.php?url=', {'User-Agent': 'okhttp/4.9.1'}),
+)
+
+
+def resolve_vip_url_via_parsers(url, flag='', headers=None):
+    """Attempts to resolve a Youku/QQ/iQIYI/MGTV watch URL via built-in JSON/HTML parser endpoints."""
+    target = unwrap_vip_watch_url(url)
+    low = target.lower()
+    if not target.startswith(('http://', 'https://')) or any(tok in low for tok in ('.test', '.example', '.invalid', 'fixture', '127.0.0.1', 'localhost')):
+        return '', {}
+    encoded = urllib.parse.quote(target, safe='')
+    base_hdrs = dict(headers or {}) if isinstance(headers, dict) else {}
+    ref = vip_platform_referer(target, flag)
+    if ref and 'Referer' not in base_hdrs:
+        base_hdrs['Referer'] = ref
+    for prefix, req_hdrs in BUILTIN_VIP_JSON_PARSERS:
+        probe_url = prefix + encoded
+        try:
+            resp = requests.get(probe_url, headers=req_hdrs, timeout=3.2)
+            if not (200 <= resp.status_code < 300):
+                continue
+            text = (resp.text or '').strip()
+            if not text:
+                continue
+            try:
+                data = json.loads(text)
+            except Exception:
+                data = None
+            cand = ''
+            out_hdrs = dict(base_hdrs)
+            if isinstance(data, dict):
+                raw_u = data.get('url') or data.get('playUrl') or data.get('vurl') or (data.get('data') or {}).get('url') if isinstance(data.get('data'), dict) else (data.get('url') or data.get('playUrl'))
+                if isinstance(raw_u, str) and raw_u.strip():
+                    cand = raw_u.strip().replace('\\/', '/')
+                h_obj = data.get('header') or data.get('headers')
+                if isinstance(h_obj, dict):
+                    for hk, hv in h_obj.items():
+                        if isinstance(hk, str) and isinstance(hv, str) and hk.strip() and hv.strip():
+                            out_hdrs[hk.strip()] = hv.strip()
+            if not cand:
+                cand = _extract_stream_from_html(text, base_url=probe_url)
+            if cand and cand.startswith(('http://', 'https://')):
+                cand_low = cand.lower()
+                if any(tok in cand_low for tok in ('.m3u8', '.mp4', '.flv', '.mpd')) and not any(dead in cand_low for dead in ('lzcdn', 'lzfile', 'lfthirtytwo')):
+                    return cand, out_hdrs
+        except Exception:
+            continue
+    return '', {}
+
+
+def resolve_vip_watch_url(url, title='', episode_index=0, episode_name='', flag='', headers=None):
+    """Resolves commercial video watch pages (Youku, Tencent, iQIYI, MangoTV) to direct in-app streams."""
+    target = unwrap_vip_watch_url(url)
+    low = target.lower()
+    if not target.startswith(('http://', 'https://')) or any(tok in low for tok in ('.test', '.example', '.invalid', 'fixture')):
+        return '', {}
+    out_hdrs = dict(headers or {}) if isinstance(headers, dict) else {}
+    ref = vip_platform_referer(target, flag)
+    if ref and 'Referer' not in out_hdrs:
+        out_hdrs['Referer'] = ref
+    eff_title = str(title or '').strip()
+    eff_ep_name = str(episode_name or '').strip()
+    if not eff_title and is_vip_watch_url(target):
+        eff_title, page_ep = extract_title_from_vip_url(target)
+        if not eff_ep_name and page_ep:
+            eff_ep_name = page_ep
+    if eff_title:
+        rescued = resolve_maccms_stream_by_title(eff_title, episode_index=episode_index, episode_name=eff_ep_name)
+        if rescued and rescued.startswith(('http://', 'https://')):
+            return rescued, out_hdrs
+    if is_vip_watch_url(target) or target != str(url or '').strip():
+        parsed_stream, parsed_hdrs = resolve_vip_url_via_parsers(target, flag=flag, headers=out_hdrs)
+        if parsed_stream:
+            return parsed_stream, parsed_hdrs
+    return '', {}
 
 
 def _first_valid_http_url(candidate, allow_txt=True):
@@ -855,6 +996,10 @@ class XBPQEngine:
         raw_id = str(id or '').strip()
         is_direct = any(tok in raw_id.lower() for tok in ('.m3u8', '.mp4', '.flv', '.mpd'))
         if not is_direct and raw_id.startswith(('http://', 'https://')):
+            if is_vip_watch_url(raw_id):
+                vip_stream, vip_hdrs = resolve_vip_watch_url(raw_id, flag=flag, headers=self.headers)
+                if vip_stream:
+                    return {'parse': 0, 'jx': 0, 'url': vip_stream, 'header': vip_hdrs or self.headers}
             # Try sniffing player_aaaa (encrypt=0/1/2) or direct stream from the episode page
             html = self._get(raw_id)
             if html:
@@ -1266,6 +1411,10 @@ class AppVideoEngine:
         is_direct = any(tok in final_url.lower() for tok in ('.m3u8', '.mp4', '.flv', '.mpd'))
         if not is_direct and not self._is_test_host():
             if final_url.startswith(('http://', 'https://')):
+                if is_vip_watch_url(final_url):
+                    vip_stream, vip_hdrs = resolve_vip_watch_url(final_url, flag=flag, headers=self.headers)
+                    if vip_stream:
+                        return {'parse': 0, 'jx': 0, 'url': vip_stream, 'header': vip_hdrs or self.headers}
                 try:
                     resp = self.session.get(final_url, headers=self.headers, timeout=6)
                     sniffed = _extract_stream_from_html(resp.text, base_url=final_url)
@@ -1273,8 +1422,6 @@ class AppVideoEngine:
                         return {'parse': 0, 'url': sniffed, 'header': self.headers}
                 except Exception:
                     pass
-            # Leave unresolved pages with the selected provider. A catalog
-            # title match can refer to another edition, episode or work.
         return {'parse': 0 if is_direct else 1, 'url': final_url, 'header': self.headers}
 
 

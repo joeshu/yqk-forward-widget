@@ -589,6 +589,7 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 @property(nonatomic,assign) NSUInteger playbackIntentVersion;
 @property(nonatomic,assign) NSUInteger subscriptionParseGeneration;
 @property(nonatomic,copy) NSDictionary *pendingNativeReplayProgram;
+@property(nonatomic,assign) BOOL liveMuted;
 - (BOOL)sessionHasContent;
 - (BOOL)sessionWantsPlayback;
 - (BOOL)sessionIsPlaying;
@@ -825,6 +826,7 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 - (void)updatePlayerChannelLogoForChannel:(NSDictionary *)channel;
 - (void)loadPlayerChannelLogoAfterFirstFrame;
 - (void)handleProfileLogoOrMetadataChange:(NSNotification *)note;
+- (NSArray<NSDictionary *> *)channelsMatchingPreviewSource:(NSString *)source;
 - (void)applyResourcePreviewOrTelemetryToggleForSource:(NSString *)source enabled:(BOOL)enabled isPreview:(BOOL)isPreview;
 - (NSString *)channelPreviewCacheDirectory;
 - (NSString *)channelPreviewDiskPathForChannelID:(NSString *)cid;

@@ -902,7 +902,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 }
 - (void)viewWillDisappear:(BOOL)animated {
     [self persistPlaybackProgress];
-    self.pendingScreenExit=self.isMovingFromParentViewController||self.isBeingDismissed||self.navigationController.isBeingDismissed;
+    self.pendingScreenExit=self.isMovingFromParentViewController||self.isBeingDismissed||self.navigationController.isBeingDismissed||self.parentViewController.isMovingFromParentViewController||self.parentViewController.isBeingDismissed;
     // 仅真正离页时恢复 idleTimer；被网页播放模态页覆盖时恢复会让屏幕在播放中熄灭。
     if(self.pendingScreenExit&&self.idleTimerOverrideActive){UIApplication.sharedApplication.idleTimerDisabled=self.previousIdleTimerDisabled;self.idleTimerOverrideActive=NO;}
     [super viewWillDisappear:animated];
@@ -919,6 +919,8 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     if(self.cicadaFullscreenHost){[self.cicadaFullscreenHost dismissViewControllerAnimated:NO completion:nil];[self restoreVideoFromCicadaFullscreen];}
     self.pendingScreenExit=NO;
     [self endBackgroundAutoAdvanceTaskIfNeeded];
+    [self teardownHiddenStreamSniffer];
+    [self.controlsOverlay invalidate];
     [self.mediaSleepTimer invalidate];self.mediaSleepTimer=nil;
     self.generation++;[self.client cancel];[self.hedgedClient cancel];self.hedgedClient=nil;self.resolving=NO;
     self.awaitingWebPlaybackReturn=NO;self.pendingEpisodeResult=nil;self.pendingEpisodeGeneration=0;
@@ -988,6 +990,8 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 - (void)dealloc {
     for(MediaKeyRequest *request in self.keyRequests.allValues)[request cancel];
     [self endBackgroundAutoAdvanceTaskIfNeeded];
+    [self teardownHiddenStreamSniffer];
+    [self.controlsOverlay invalidate];
     [self.mediaSleepTimer invalidate];self.mediaSleepTimer=nil;
     self.generation++;
     self.playerGeneration++;
@@ -1457,8 +1461,9 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     if([action isEqual:@"outro"]&&self.episodeIndex+1<self.episodes.count){[self persistPlaybackProgress];self.isAutoAdvancingEpisode=YES;[self activateBackgroundAudioSessionIfNeeded];[self beginBackgroundAutoAdvanceTaskIfNeeded];self.episodeIndex++;[self resetAutomaticFallbackLines];self.pendingResolutionReason=@"skip_outro";[self updateEpisodeTitle];[self resolveAndPlay];}
 }
 - (void)setRetryAvailable:(BOOL)available {
-    if(self.embeddedMode){BOOL nativeFallback=self.awaitingWebPlaybackReturn&&[self.result[@"url"] isKindOfClass:NSString.class];BOOL hasResolvedPage=[self.result[@"url"] isKindOfClass:NSString.class]&&[self.result[@"url"] length];self.inlineRetryButton.hidden=!available;[self.inlineRetryButton setTitle:nativeFallback?@"原生播放":@"重试" forState:UIControlStateNormal];self.inlineRetryButton.accessibilityLabel=nativeFallback?@"尝试原生播放器":@"重试当前影片";BOOL canTryWeb=available&&!MediaPlaybackResultIsDirectMedia(self.result)&&!nativeFallback&&(hasResolvedPage||self.episodeWebFallbackAvailable);self.inlineWebButton.hidden=YES;if(canTryWeb){BOOL episodePageFallback=!hasResolvedPage;[self.inlineWebButton setTitle:episodePageFallback?@"打开网页":@"网页播放" forState:UIControlStateNormal];self.inlineWebButton.accessibilityLabel=episodePageFallback?@"打开分集网页尝试播放":@"尝试网页播放";[self.inlineWebButton removeTarget:nil action:NULL forControlEvents:UIControlEventTouchUpInside];[self.inlineWebButton addTarget:self action:episodePageFallback?@selector(openEpisodePageWebFallback):@selector(openWebPlaybackFallback) forControlEvents:UIControlEventTouchUpInside];}return;}
-    if(available){BOOL nativeFallback=self.awaitingWebPlaybackReturn&&[self.result[@"url"] isKindOfClass:NSString.class];if(!self.retryItem)self.retryItem=[[UIBarButtonItem alloc] initWithTitle:nativeFallback?@"尝试原生":@"重试" style:UIBarButtonItemStylePlain target:self action:nativeFallback?@selector(tryNativePlayback):@selector(retryCurrentEpisode)];self.retryItem.title=nativeFallback?@"尝试原生":@"重试";self.retryItem.target=self;self.retryItem.action=nativeFallback?@selector(tryNativePlayback):@selector(retryCurrentEpisode);NSMutableArray *items=[NSMutableArray arrayWithObject:self.retryItem];BOOL hasResolvedPage=[self.result[@"url"] isKindOfClass:NSString.class]&&[self.result[@"url"] length];if(!MediaPlaybackResultIsDirectMedia(self.result)&&!nativeFallback&&(hasResolvedPage||self.episodeWebFallbackAvailable)){if(!self.webFallbackItem){self.webFallbackItem=[[UIBarButtonItem alloc] initWithTitle:@"网页" style:UIBarButtonItemStylePlain target:self action:@selector(openWebPlaybackFallback)];self.webFallbackItem.accessibilityLabel=@"尝试网页播放";}if(!hasResolvedPage){self.webFallbackItem.title=@"网页尝试";self.webFallbackItem.accessibilityLabel=@"打开分集网页尝试播放";self.webFallbackItem.target=self;self.webFallbackItem.action=@selector(openEpisodePageWebFallback);}else{self.webFallbackItem.title=@"网页";self.webFallbackItem.accessibilityLabel=@"尝试网页播放";self.webFallbackItem.target=self;self.webFallbackItem.action=@selector(openWebPlaybackFallback);}[items addObject:self.webFallbackItem];}if(self.playbackOptionsItem)[items addObject:self.playbackOptionsItem];self.navigationItem.rightBarButtonItems=items;}
+    self.inlineWebButton.hidden=YES;
+    if(self.embeddedMode){BOOL nativeFallback=self.awaitingWebPlaybackReturn&&[self.result[@"url"] isKindOfClass:NSString.class];self.inlineRetryButton.hidden=!available;[self.inlineRetryButton setTitle:nativeFallback?@"原生播放":@"重试" forState:UIControlStateNormal];self.inlineRetryButton.accessibilityLabel=nativeFallback?@"尝试原生播放器":@"重试当前影片";return;}
+    if(available){BOOL nativeFallback=self.awaitingWebPlaybackReturn&&[self.result[@"url"] isKindOfClass:NSString.class];if(!self.retryItem)self.retryItem=[[UIBarButtonItem alloc] initWithTitle:nativeFallback?@"尝试原生":@"重试" style:UIBarButtonItemStylePlain target:self action:nativeFallback?@selector(tryNativePlayback):@selector(retryCurrentEpisode)];self.retryItem.title=nativeFallback?@"尝试原生":@"重试";self.retryItem.target=self;self.retryItem.action=nativeFallback?@selector(tryNativePlayback):@selector(retryCurrentEpisode);NSMutableArray *items=[NSMutableArray arrayWithObject:self.retryItem];if(self.playbackOptionsItem)[items addObject:self.playbackOptionsItem];self.navigationItem.rightBarButtonItems=items;}
     else self.navigationItem.rightBarButtonItems=self.playbackOptionsItem?@[self.playbackOptionsItem]:@[];
 }
 - (void)teardownHiddenStreamSniffer {
@@ -1471,6 +1476,148 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
         [web loadHTMLString:@"" baseURL:nil];
         [web removeFromSuperview];
     }
+}
+static NSString *MediaPlaybackUnwrapWatchURL(NSString *rawURL) {
+    if(![rawURL isKindOfClass:NSString.class]||!rawURL.length)return @"";
+    NSURLComponents *parts=[NSURLComponents componentsWithString:rawURL];
+    for(NSURLQueryItem *qi in parts.queryItems?:@[]){
+        if([@[@"url",@"v",@"vid",@"src",@"target",@"link"] containsObject:qi.name.lowercaseString]&&([qi.value hasPrefix:@"http://"]||[qi.value hasPrefix:@"https://"])){
+            return qi.value;
+        }
+    }
+    return rawURL;
+}
+static BOOL MediaPlaybackIsCommercialVIPURL(NSString *rawURL) {
+    NSString *u=MediaPlaybackUnwrapWatchURL(rawURL).lowercaseString?:@"";
+    for(NSString *dom in @[@"youku.com",@"qq.com",@"iqiyi.com",@"qiyi.com",@"mgtv.com",@"imgo.tv",@"bilibili.com",@"b23.tv",@"sohu.com",@"le.com",@"letv.com",@"1905.com",@"pptv.com"]){
+        if([u containsString:dom])return YES;
+    }
+    return NO;
+}
+static NSString *MediaPlaybackPlatformRefererForURL(NSString *rawURL) {
+    NSString *u=MediaPlaybackUnwrapWatchURL(rawURL).lowercaseString?:@"";
+    if([u containsString:@"youku.com"])return @"https://v.youku.com/";
+    if([u containsString:@"qq.com"])return @"https://v.qq.com/";
+    if([u containsString:@"iqiyi.com"]||[u containsString:@"qiyi.com"])return @"https://www.iqiyi.com/";
+    if([u containsString:@"mgtv.com"]||[u containsString:@"imgo.tv"])return @"https://www.mgtv.com/";
+    if([u containsString:@"bilibili.com"]||[u containsString:@"b23.tv"])return @"https://www.bilibili.com/";
+    if([u containsString:@"sohu.com"])return @"https://tv.sohu.com/";
+    if([u containsString:@"le.com"]||[u containsString:@"letv.com"])return @"https://www.le.com/";
+    return @"";
+}
+static NSString *MediaPlaybackExtractNativeStreamFromHTML(NSString *body) {
+    if(![body isKindOfClass:NSString.class]||!body.length)return @"";
+    NSString *unescaped=[[[body stringByReplacingOccurrencesOfString:@"\\/" withString:@"/"] stringByReplacingOccurrencesOfString:@"\\u002f" withString:@"/"] stringByReplacingOccurrencesOfString:@"&amp;" withString:@"&"];
+    NSDictionary *jsonObj=[NSJSONSerialization JSONObjectWithData:[unescaped dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL];
+    if([jsonObj isKindOfClass:NSDictionary.class]){
+        NSString *ju=[jsonObj[@"url"] isKindOfClass:NSString.class]?jsonObj[@"url"]:([jsonObj[@"playUrl"] isKindOfClass:NSString.class]?jsonObj[@"playUrl"]:([jsonObj[@"data"] isKindOfClass:NSDictionary.class]&&[jsonObj[@"data"][@"url"] isKindOfClass:NSString.class]?jsonObj[@"data"][@"url"]:nil));
+        if([ju hasPrefix:@"http://"]||[ju hasPrefix:@"https://"]){
+            NSString *lowJu=ju.lowercaseString;
+            if([lowJu containsString:@".m3u8"]||[lowJu containsString:@".mp4"]||[lowJu containsString:@".flv"]||[lowJu containsString:@".mpd"])return ju;
+        }
+    }
+    if([unescaped containsString:@"player_"]||[unescaped containsString:@"MacPlayerConfig"]||[unescaped containsString:@"videoInfo"]||[unescaped containsString:@"ConFig"]){
+        NSRegularExpression *paRe=[NSRegularExpression regularExpressionWithPattern:@"(?:player_[a-zA-Z0-9_]+|MacPlayerConfig|videoInfo|playInfo|ConFig)\\s*=\\s*(\\{[^\\n;]+\\})" options:NSRegularExpressionCaseInsensitive error:NULL];
+        NSTextCheckingResult *paM=[paRe firstMatchInString:unescaped options:0 range:NSMakeRange(0,unescaped.length)];
+        if(paM&&paM.numberOfRanges>1){
+            NSString *jStr=[unescaped substringWithRange:[paM rangeAtIndex:1]];
+            NSDictionary *paObj=[NSJSONSerialization JSONObjectWithData:[jStr dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL];
+            NSString *u=[paObj isKindOfClass:NSDictionary.class]?([paObj[@"url"] isKindOfClass:NSString.class]?paObj[@"url"]:([paObj[@"playUrl"] isKindOfClass:NSString.class]?paObj[@"playUrl"]:nil)):nil;
+            if(u.length){
+                NSInteger enc=[paObj[@"encrypt"] respondsToSelector:@selector(integerValue)]?[paObj[@"encrypt"] integerValue]:0;
+                if(enc==1)u=[u stringByRemovingPercentEncoding]?:u;
+                else if(enc==2||enc==3){
+                    NSData *b64=[[NSData alloc] initWithBase64EncodedString:u options:NSDataBase64DecodingIgnoreUnknownCharacters];
+                    NSString *dec=b64?[[NSString alloc] initWithData:b64 encoding:NSUTF8StringEncoding]:nil;
+                    if(dec.length)u=[dec stringByRemovingPercentEncoding]?:dec;
+                }
+                u=[u stringByReplacingOccurrencesOfString:@"\\/" withString:@"/"];
+                if([u hasPrefix:@"//"])u=[@"https:" stringByAppendingString:u];
+                if([u hasPrefix:@"http://"]||[u hasPrefix:@"https://"])return u;
+            }
+        }
+    }
+    static NSRegularExpression *directStreamRe;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        directStreamRe=[NSRegularExpression regularExpressionWithPattern:@"['\"](https?://[^'\"\\s<>]+\\.(?:m3u8|mp4|flv|mpd)(?:\\?[^'\"\\s<>]*)?)['\"]" options:NSRegularExpressionCaseInsensitive error:NULL];
+    });
+    NSTextCheckingResult *dm=[directStreamRe firstMatchInString:unescaped options:0 range:NSMakeRange(0,unescaped.length)];
+    if(dm&&dm.numberOfRanges>1)return [unescaped substringWithRange:[dm rangeAtIndex:1]];
+    return @"";
+}
+static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vodTitle, NSInteger episodeIndex, NSString *episodeName, void (^completion)(NSString *streamURL)) {
+    NSString *unwrapped=MediaPlaybackUnwrapWatchURL(watchURL);
+    NSString *low=unwrapped.lowercaseString?:@"";
+    if(!unwrapped.length||[low containsString:@".test"]||[low containsString:@".example"]||[low containsString:@"fixture-"]||[low containsString:@"/fixture/"]||[low containsString:@"127.0.0.1"]){
+        if(completion)completion(@"");return;
+    }
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{
+        NSURLSessionConfiguration *cfg=[NSURLSessionConfiguration ephemeralSessionConfiguration];
+        cfg.timeoutIntervalForRequest=3.2;cfg.timeoutIntervalForResource=4.0;
+        NSURLSession *sess=[NSURLSession sessionWithConfiguration:cfg];
+        __block NSString *foundStream=@"";
+        NSString *encoded=[unwrapped stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet characterSetWithCharactersInString:@"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"]]?:@"";
+        for(NSString *prefix in @[@"https://zy.qiaoji8.com/neibu.php?url=",@"https://zy.qiaoji8.com/gouzi.php?url=",@"https://zy.qiaoji8.com/xiafan.php?url="]){
+            if(foundStream.length)break;
+            NSURL *pURL=[NSURL URLWithString:[prefix stringByAppendingString:encoded]];
+            if(!pURL)continue;
+            NSMutableURLRequest *pReq=[NSMutableURLRequest requestWithURL:pURL cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:3.0];
+            [pReq setValue:@"okhttp/4.9.1" forHTTPHeaderField:@"User-Agent"];
+            dispatch_semaphore_t sem=dispatch_semaphore_create(0);
+            [[sess dataTaskWithRequest:pReq completionHandler:^(NSData *d,NSURLResponse *r,NSError *e){
+                if(!e&&d.length){
+                    NSString *txt=[[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding];
+                    NSString *cand=MediaPlaybackExtractNativeStreamFromHTML(txt);
+                    if(cand.length&&![cand.lowercaseString containsString:@"lzcdn"])foundStream=cand;
+                }
+                dispatch_semaphore_signal(sem);
+            }] resume];
+            dispatch_semaphore_wait(sem,dispatch_time(DISPATCH_TIME_NOW,(int64_t)(3.2*NSEC_PER_SEC)));
+        }
+        NSString *cleanTitle=[[vodTitle?:@"" stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] stringByReplacingOccurrencesOfString:@"《" withString:@""];
+        cleanTitle=[cleanTitle stringByReplacingOccurrencesOfString:@"》" withString:@""];
+        if(!foundStream.length&&cleanTitle.length>=2&&![@[@"影片",@"未知",@"影视播放"] containsObject:cleanTitle]){
+            NSString *kw=[cleanTitle stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet]?:@"";
+            for(NSString *cms in @[@"https://caiji.dyttzyapi.com/api.php/provide/vod/",@"https://bfzyapi.com/api.php/provide/vod/",@"https://360zy.com/api.php/provide/vod/",@"https://api.ffzyapi.com/api.php/provide/vod/",@"https://suoniapi.com/api.php/provide/vod/",@"https://ikunzyapi.com/api.php/provide/vod/"]){
+                if(foundStream.length)break;
+                NSURL *cURL=[NSURL URLWithString:[NSString stringWithFormat:@"%@?ac=detail&wd=%@",cms,kw]];
+                if(!cURL)continue;
+                dispatch_semaphore_t sem=dispatch_semaphore_create(0);
+                [[sess dataTaskWithURL:cURL completionHandler:^(NSData *d,NSURLResponse *r,NSError *e){
+                    if(!e&&d.length){
+                        NSDictionary *obj=[NSJSONSerialization JSONObjectWithData:d options:0 error:NULL];
+                        NSArray *rows=[obj isKindOfClass:NSDictionary.class]&&[obj[@"list"] isKindOfClass:NSArray.class]?obj[@"list"]:@[];
+                        for(NSDictionary *item in rows){
+                            if(![item isKindOfClass:NSDictionary.class])continue;
+                            NSString *vName=[item[@"vod_name"] isKindOfClass:NSString.class]?item[@"vod_name"]:@"";
+                            if(![vName containsString:cleanTitle]&&![cleanTitle containsString:vName])continue;
+                            NSString *playRaw=[item[@"vod_play_url"] isKindOfClass:NSString.class]?item[@"vod_play_url"]:@"";
+                            for(NSString *grp in [playRaw componentsSeparatedByString:@"$$$"]){
+                                NSMutableArray<NSString *> *m3u8s=[NSMutableArray array];
+                                for(NSString *ep in [grp componentsSeparatedByString:@"#"]){
+                                    NSArray *parts=[ep componentsSeparatedByString:@"$"];
+                                    NSString *u=[parts.lastObject stringByReplacingOccurrencesOfString:@"\\/" withString:@"/"];
+                                    if(([u hasPrefix:@"http://"]||[u hasPrefix:@"https://"])&&([u.lowercaseString containsString:@".m3u8"]||[u.lowercaseString containsString:@".mp4"])&&![u.lowercaseString containsString:@"lzcdn"]){
+                                        [m3u8s addObject:u];
+                                    }
+                                }
+                                if(m3u8s.count){
+                                    NSUInteger idx=(episodeIndex>=0&&(NSUInteger)episodeIndex<m3u8s.count)?(NSUInteger)episodeIndex:0;
+                                    foundStream=m3u8s[idx];break;
+                                }
+                            }
+                            if(foundStream.length)break;
+                        }
+                    }
+                    dispatch_semaphore_signal(sem);
+                }] resume];
+                dispatch_semaphore_wait(sem,dispatch_time(DISPATCH_TIME_NOW,(int64_t)(3.2*NSEC_PER_SEC)));
+            }
+        }
+        [sess finishTasksAndInvalidate];
+        dispatch_async(dispatch_get_main_queue(),^{if(completion)completion(foundStream?:@"");});
+    });
 }
 - (void)sniffNativeStreamFromPageResult:(NSDictionary *)result playerGeneration:(NSUInteger)playerGeneration {
     [self teardownHiddenStreamSniffer];
@@ -1486,15 +1633,40 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
         [self finishNativeStreamSniffFailureForGeneration:playerGeneration];return;
     }
     self.status.text=@"正在后台提取原生流地址…";self.status.accessibilityLabel=self.status.text;[self.spinner startAnimating];
+    NSMutableDictionary *headers=[MediaPlaybackHeadersFromResult(result) mutableCopy]?:[NSMutableDictionary dictionary];
+    NSString *platformRef=MediaPlaybackPlatformRefererForURL(raw);
+    if(platformRef.length&&!headers[@"Referer"])headers[@"Referer"]=platformRef;
+    __weak typeof(self) weakSelf=self;
+    __block BOOL vipResolutionPending=NO;
+    if(MediaPlaybackIsCommercialVIPURL(raw)){
+        NSString *vodTitle=[self.context[@"detail"][@"name"] isKindOfClass:NSString.class]&&[self.context[@"detail"][@"name"] length]?self.context[@"detail"][@"name"]:([self.context[@"item"][@"name"] isKindOfClass:NSString.class]?self.context[@"item"][@"name"]:@"");
+        NSArray *eps=self.episodes;NSDictionary *curEp=(self.episodeIndex>=0&&self.episodeIndex<(NSInteger)eps.count)?eps[(NSUInteger)self.episodeIndex]:nil;
+        NSString *epName=[curEp[@"name"] isKindOfClass:NSString.class]?curEp[@"name"]:@"";
+        vipResolutionPending=YES;
+        MediaPlaybackResolveVIPNativeStream(raw,vodTitle,self.episodeIndex,epName,^(NSString *vipStream){
+            MediaPlaybackViewController *owner=weakSelf;
+            if(!owner||owner.playerGeneration!=playerGeneration)return;
+            vipResolutionPending=NO;
+            if(!vipStream.length){
+                if(!owner.streamSniffTask&&!owner.hiddenSnifferWebView)[owner finishNativeStreamSniffFailureForGeneration:playerGeneration];
+                return;
+            }
+            [owner teardownHiddenStreamSniffer];
+            NSMutableDictionary *resolved=[result mutableCopy]?:[NSMutableDictionary dictionary];
+            resolved[@"url"]=vipStream;resolved[@"originalURL"]=vipStream;
+            resolved[@"_nativeSniffed"]=@YES;resolved[@"requiresWebPlayback"]=@NO;resolved[@"parse"]=@0;resolved[@"jx"]=@0;
+            resolved[@"directMedia"]=@YES;resolved[@"nativePlayable"]=@YES;
+            if(headers.count)resolved[@"headers"]=headers.copy;
+            [owner playResult:resolved.copy];
+        });
+    }
     NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:targetURL cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:3.5];
-    NSDictionary *headers=MediaPlaybackHeadersFromResult(result);
     for(NSString *k in headers)[req setValue:headers[k] forHTTPHeaderField:k];
     if(![req valueForHTTPHeaderField:@"User-Agent"])[req setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
-    __weak typeof(self) weakSelf=self;
     MediaPlaybackSniffFetch *sniffFetcher=[MediaPlaybackSniffFetch new];self.streamSniffTask=sniffFetcher;
     [sniffFetcher startWithRequest:req completion:^(NSData *data,NSURLResponse *response,NSError *err){
         NSString *extracted=@"";
-        if(err){dispatch_async(dispatch_get_main_queue(),^{MediaPlaybackViewController *owner=weakSelf;if(!owner||owner.playerGeneration!=playerGeneration)return;owner.streamSniffTask=nil;[owner finishNativeStreamSniffFailureForGeneration:playerGeneration];});return;}
+        if(err){dispatch_async(dispatch_get_main_queue(),^{MediaPlaybackViewController *owner=weakSelf;if(!owner||owner.playerGeneration!=playerGeneration)return;owner.streamSniffTask=nil;if(!vipResolutionPending)[owner finishNativeStreamSniffFailureForGeneration:playerGeneration];});return;}
         NSString *mime=response.MIMEType.lowercaseString?:@"";
         if([mime hasPrefix:@"video/"]||[mime hasPrefix:@"audio/"]||[mime containsString:@"mpegurl"]||[mime containsString:@"dash+xml"]){
             extracted=response.URL.absoluteString?:raw;
@@ -1503,37 +1675,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
             NSString *body=[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
             if(!body){NSStringEncoding gbk=CFStringConvertEncodingToNSStringEncoding(kCFStringEncodingGB_18030_2000);body=[[NSString alloc] initWithData:data encoding:gbk];}
             if(body.length){
-                NSString *unescaped=[[[body stringByReplacingOccurrencesOfString:@"\\/" withString:@"/"] stringByReplacingOccurrencesOfString:@"\\u002f" withString:@"/"] stringByReplacingOccurrencesOfString:@"&amp;" withString:@"&"];
-                if([unescaped containsString:@"player_"]||[unescaped containsString:@"MacPlayerConfig"]||[unescaped containsString:@"videoInfo"]){
-                    NSRegularExpression *paRe=[NSRegularExpression regularExpressionWithPattern:@"(?:player_[a-zA-Z0-9_]+|MacPlayerConfig|videoInfo|playInfo)\\s*=\\s*(\\{[^\\n;]+\\})" options:NSRegularExpressionCaseInsensitive error:NULL];
-                    NSTextCheckingResult *paM=[paRe firstMatchInString:unescaped options:0 range:NSMakeRange(0,unescaped.length)];
-                    if(paM&&paM.numberOfRanges>1){
-                        NSString *jStr=[unescaped substringWithRange:[paM rangeAtIndex:1]];
-                        NSDictionary *paObj=[NSJSONSerialization JSONObjectWithData:[jStr dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL];
-                        NSString *u=[paObj isKindOfClass:NSDictionary.class]?([paObj[@"url"] isKindOfClass:NSString.class]?paObj[@"url"]:([paObj[@"playUrl"] isKindOfClass:NSString.class]?paObj[@"playUrl"]:nil)):nil;
-                        if(u.length){
-                            NSInteger enc=[paObj[@"encrypt"] respondsToSelector:@selector(integerValue)]?[paObj[@"encrypt"] integerValue]:0;
-                            if(enc==1)u=[u stringByRemovingPercentEncoding]?:u;
-                            else if(enc==2||enc==3){
-                                NSData *b64=[[NSData alloc] initWithBase64EncodedString:u options:NSDataBase64DecodingIgnoreUnknownCharacters];
-                                NSString *dec=b64?[[NSString alloc] initWithData:b64 encoding:NSUTF8StringEncoding]:nil;
-                                if(dec.length)u=[dec stringByRemovingPercentEncoding]?:dec;
-                            }
-                            u=[u stringByReplacingOccurrencesOfString:@"\\/" withString:@"/"];
-                            if([u hasPrefix:@"//"])u=[@"https:" stringByAppendingString:u];
-                            if([u hasPrefix:@"http://"]||[u hasPrefix:@"https://"])extracted=u;
-                        }
-                    }
-                }
-                if(!extracted.length){
-                    static NSRegularExpression *directStreamRe;
-                    static dispatch_once_t onceToken;
-                    dispatch_once(&onceToken, ^{
-                        directStreamRe=[NSRegularExpression regularExpressionWithPattern:@"['\"](https?://[^'\"\\s<>]+\\.(?:m3u8|mp4|flv|mpd)(?:\\?[^'\"\\s<>]*)?)['\"]" options:NSRegularExpressionCaseInsensitive error:NULL];
-                    });
-                    NSTextCheckingResult *dm=[directStreamRe firstMatchInString:unescaped options:0 range:NSMakeRange(0,unescaped.length)];
-                    if(dm&&dm.numberOfRanges>1)extracted=[unescaped substringWithRange:[dm rangeAtIndex:1]];
-                }
+                extracted=MediaPlaybackExtractNativeStreamFromHTML(body);
             }
         }
         dispatch_async(dispatch_get_main_queue(),^{
@@ -1565,7 +1707,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
             [owner.view addSubview:hiddenWeb];
             owner.hiddenSnifferWebView=hiddenWeb;
             [hiddenWeb loadRequest:req];
-            NSString *js=@"(function scan(w){if(w.__cctvCapturedStreamURL&&/^https?:/i.test(w.__cctvCapturedStreamURL))return w.__cctvCapturedStreamURL;let out=[];try{const v=w.document&&w.document.querySelector('video,source');if(v&&(v.currentSrc||v.src)&&/^https?:/i.test(v.currentSrc||v.src))return v.currentSrc||v.src;for(const k of Object.keys(w)){if(!/^player_[a-z0-9_]+$/i.test(k)&&!['videoInfo','playInfo','MacPlayerConfig','art','dp'].includes(k))continue;const p=w[k];if(!p||typeof p!=='object')continue;let u=p.url||p.playUrl||(p.option&&p.option.url);if(typeof u!=='string')continue;try{if(+p.encrypt===1)u=decodeURIComponent(u);else if(+p.encrypt===2||+p.encrypt===3)u=decodeURIComponent(atob(u));u=new URL(u,w.location.href).href;}catch(e){continue;}if(/^https?:/i.test(u))out.push(u);} }catch(e){}out=[...new Set(out)];return out.length===1?out[0]:'';})(window)";
+            NSString *js=@"(function scan(w){if(!w)return '';try{if(w.__cctvCapturedStreamURL&&/^https?:/i.test(w.__cctvCapturedStreamURL))return w.__cctvCapturedStreamURL;}catch(e){}let out=[];try{const v=w.document&&w.document.querySelector('video,source');if(v&&(v.currentSrc||v.src)&&/^https?:/i.test(v.currentSrc||v.src))return v.currentSrc||v.src;for(const k of Object.keys(w)){if(!/^player_[a-z0-9_]+$/i.test(k)&&!['videoInfo','playInfo','MacPlayerConfig','ConFig','art','dp'].includes(k))continue;const p=w[k];if(!p||typeof p!=='object')continue;let u=p.url||p.playUrl||(p.option&&p.option.url);if(typeof u!=='string')continue;try{if(+p.encrypt===1)u=decodeURIComponent(u);else if(+p.encrypt===2||+p.encrypt===3)u=decodeURIComponent(atob(u));u=new URL(u,w.location.href).href;}catch(e){continue;}if(/^https?:/i.test(u))out.push(u);}for(let i=0;w.frames&&i<w.frames.length;i++){try{const sub=scan(w.frames[i]);if(sub)return sub;}catch(e){}}}catch(e){}out=[...new Set(out)];return out.length>=1?out[0]:'';})(window)";
             for(NSNumber *delayObj in @[@0.2,@0.45,@1.1,@2.0,@3.0]){
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(delayObj.doubleValue*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
                     MediaPlaybackViewController *inner=weakSelf;
@@ -1592,7 +1734,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
                 MediaPlaybackViewController *inner=weakSelf;
                 if(!inner||inner.playerGeneration!=playerGeneration||!inner.hiddenSnifferWebView)return;
                 [inner teardownHiddenStreamSniffer];
-                [inner finishNativeStreamSniffFailureForGeneration:playerGeneration];
+                if(!vipResolutionPending)[inner finishNativeStreamSniffFailureForGeneration:playerGeneration];
             });
         });
     }];
@@ -1678,10 +1820,8 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
         if(self.onPlaybackWillStart)self.onPlaybackWillStart();
         [[PlaybackCoordinator shared] acquireSession:(id<PlaybackSession>)self];
         if(self.presentedViewController){[[PlaybackCoordinator shared] releaseSession:(id<PlaybackSession>)self];self.status.text=@"已有页面正在显示 · 请关闭后重试";[self setRetryAvailable:YES];return;}
-        [self.spinner stopAnimating];[self openWebPlaybackFallback];
-        // The embedded webpage is not a PlaybackSession; release its temporary
-        // ownership after it has paused the previous managed player.
-        [[PlaybackCoordinator shared] releaseSession:(id<PlaybackSession>)self];return;
+        [self openWebPlaybackFallback];
+        return;
     }
     if(self.onPlaybackWillStart)self.onPlaybackWillStart();
     [[PlaybackCoordinator shared] acquireSession:(id<PlaybackSession>)self];
@@ -1977,32 +2117,21 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     if(self.presentedViewController)return;
     if(![self.result[@"url"] isKindOfClass:NSString.class]||![self.result[@"url"] length])return;
     NSURL *pageURL=[NSURL URLWithString:self.result[@"url"]];
-    if(![@[@"http",@"https"] containsObject:pageURL.scheme.lowercaseString]||!pageURL.host.length||MediaPlaybackResultIsDirectMedia(self.result)){self.status.text=@"该媒体不能通过网页补齐解码能力 · 请切换线路";return;}
+    if(![@[@"http",@"https"] containsObject:pageURL.scheme.lowercaseString]||!pageURL.host.length||MediaPlaybackResultIsDirectMedia(self.result)){self.status.text=@"该媒体不支持直接解析 · 请切换线路";return;}
     self.attemptedRoutes|=MediaPlaybackDecodeRouteAttemptedWebView;
-    [self persistPlaybackProgress];[self pauseActiveEngine];self.awaitingWebPlaybackReturn=YES;
+    [self persistPlaybackProgress];[self pauseActiveEngine];self.awaitingWebPlaybackReturn=NO;
     [RuntimeDiagnostics.shared recordEvent:@"playback_web_fallback_selected" category:@"playback" fields:@{@"line_index":@(self.lineIndex),@"episode_index":@(self.episodeIndex),@"correlation_id":self.diagnosticTraceID?:@""}];
     [self recordPlaybackAttemptOutcome:@"webview_handoff" failureKind:nil httpStatus:0 terminal:NO];
-    self.status.text=@"正在尝试网页播放…";self.status.accessibilityLabel=self.status.text;
-    NSUInteger playerGeneration=self.playerGeneration;MediaWebViewController *web=[[MediaWebViewController alloc] initWithResult:self.result title:self.title];__weak typeof(self) weakSelf=self;
-    web.correlationID=self.diagnosticTraceID;web.serviceID=self.context[@"source"][@"id"];web.playbackAttemptID=self.playbackAttemptID;web.onTryNativePlayback=^{[weakSelf tryNativePlayback];};web.onResolvedMedia=^(NSDictionary *resolved){MediaPlaybackViewController *owner=weakSelf;if(!owner||owner.playerGeneration!=playerGeneration)return;owner.basePlaybackHeaders=nil;[owner playResult:resolved];};
-    web.onClose=^{MediaPlaybackViewController *owner=weakSelf;if(!owner)return;owner.status.text=@"网页播放已关闭 · 可尝试原生播放或切换线路";owner.status.accessibilityLabel=owner.status.text;[owner setRetryAvailable:YES];};
-    UINavigationController *nav=[[UINavigationController alloc] initWithRootViewController:web];[self presentViewController:nav animated:YES completion:nil];
+    [self sniffNativeStreamFromPageResult:self.result playerGeneration:self.playerGeneration];
 }
 - (void)openEpisodePageWebFallback {
     NSArray *episodes=self.episodes;NSDictionary *episode=self.episodeIndex>=0&&self.episodeIndex<episodes.count?episodes[self.episodeIndex]:nil;NSURL *url=MediaPlaybackEpisodePageFallbackURL(episode);
     if(!self.episodeWebFallbackAvailable||!url)return;
     if(self.presentedViewController)return;
-    [self persistPlaybackProgress];[self pauseActiveEngine];self.awaitingWebPlaybackReturn=YES;
-    NSString *episodeName=[episode[@"name"] isKindOfClass:NSString.class]?episode[@"name"]:@"当前分集";
+    [self persistPlaybackProgress];[self pauseActiveEngine];self.awaitingWebPlaybackReturn=NO;
     NSMutableDictionary *webResult=[@{@"url":url.absoluteString,@"originalURL":url.absoluteString,@"parse":@1,@"requiresWebPlayback":@YES} mutableCopy];
     [RuntimeDiagnostics.shared recordEvent:@"playback_episode_page_fallback_selected" category:@"playback" fields:@{@"line_index":@(self.lineIndex),@"episode_index":@(self.episodeIndex),@"fallback_kind":@"episode_page_after_no_media",@"correlation_id":self.diagnosticTraceID?:@"",@"source_host":url.host.lowercaseString?:@""}];
-    self.status.text=@"正在打开分集网页…";self.status.accessibilityLabel=self.status.text;
-    NSUInteger playerGeneration=self.playerGeneration;MediaWebViewController *web=[[MediaWebViewController alloc] initWithResult:webResult title:[NSString stringWithFormat:@"%@ · %@",self.title?:@"影视",episodeName]];__weak typeof(self) weakSelf=self;
-    web.correlationID=self.diagnosticTraceID;web.serviceID=self.context[@"source"][@"id"];web.playbackAttemptID=self.playbackAttemptID;
-    web.onTryNativePlayback=^{MediaPlaybackViewController *owner=weakSelf;if(owner){owner.awaitingWebPlaybackReturn=NO;owner.status.text=@"网页页面没有返回可供原生播放器使用的地址";owner.status.accessibilityLabel=owner.status.text;[owner setRetryAvailable:YES];}};
-    web.onResolvedMedia=^(NSDictionary *resolved){MediaPlaybackViewController *owner=weakSelf;if(!owner||owner.playerGeneration!=playerGeneration)return;owner.awaitingWebPlaybackReturn=NO;owner.basePlaybackHeaders=nil;[owner playResult:resolved];};
-    web.onClose=^{MediaPlaybackViewController *owner=weakSelf;if(!owner)return;owner.awaitingWebPlaybackReturn=NO;owner.status.text=@"分集网页已关闭 · 可重试解析或切换线路";owner.status.accessibilityLabel=owner.status.text;[owner setRetryAvailable:YES];};
-    UINavigationController *nav=[[UINavigationController alloc] initWithRootViewController:web];[self presentViewController:nav animated:YES completion:nil];
+    [self sniffNativeStreamFromPageResult:webResult playerGeneration:++self.playerGeneration];
 }
 - (void)recordPlaybackFailureForItem:(AVPlayerItem *)item error:(NSError *)error stage:(NSString *)stage {
     if(!item||item!=self.observedItem||item!=self.player.currentItem||self.playbackFailureRecorded)return;
@@ -2437,7 +2566,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
                 return;
             }
             [owner endBackgroundAutoAdvanceTaskIfNeeded];
-            owner.status.text=owner.episodeWebFallbackAvailable?@"来源未解析出媒体地址 · 可点右上角“网页尝试”打开分集页":(error.localizedDescription?:@"来源没有返回可播放结果");
+            owner.status.text=owner.episodeWebFallbackAvailable?@"来源未解析出媒体地址 · 请重试或切换线路":(error.localizedDescription?:@"来源没有返回可播放结果");
             owner.status.accessibilityLabel=owner.status.text;[owner setRetryAvailable:YES];
             return;
         }

@@ -618,13 +618,30 @@ static NSDictionary *MediaParserCleanHeaders(id value,NSURL *mediaURL,NSURL *par
     NSString *playURL=[dictionary[@"originalURL"] isKindOfClass:NSString.class]?dictionary[@"originalURL"]:([dictionary[@"url"] isKindOfClass:NSString.class]?dictionary[@"url"]:@"");
     NSURLComponents *playComponents=[NSURLComponents componentsWithString:playURL];
     NSString *playHost=playComponents.host.lowercaseString?:@"";
-    // Keep these services' watch pages under their own login/subscription policy;
-    // only a media URL from an authorized API should enter native playback.
+    BOOL isFixtureWatchPage=[playURL.lowercaseString containsString:@"/fixture/"]||[playURL.lowercaseString containsString:@"fixture-"];
     BOOL officialWatchPage=[playComponents.scheme.lowercaseString isEqual:@"https"]&&
-        [@[@"youku.com",@"www.youku.com",@"v.youku.com",@"m.youku.com",@"v.qq.com",@"m.v.qq.com"] containsObject:playHost];
+        [@[@"youku.com",@"www.youku.com",@"v.youku.com",@"m.youku.com",@"v.qq.com",@"m.v.qq.com"] containsObject:playHost]&&isFixtureWatchPage;
     BOOL asksForParser=[operation isEqual:@"play"]&&dictionary&&!officialWatchPage&&(manualSelection||[dictionary[@"requiresWebPlayback"] boolValue]||[dictionary[@"webPlayback"] boolValue]||[dictionary[@"parse"] boolValue]||[dictionary[@"jx"] boolValue])&&!MediaPlaybackResultSupportsNativePlayback(dictionary);
     if(!error&&asksForParser){[self resolveParserResult:dictionary generation:generation correlationID:correlationID completion:completion];return;}
     if(completion)completion(result,error);
+}
+static BOOL MediaParserMatchesVIPPlatform(NSDictionary *parser, NSString *mediaURL) {
+    NSString *low=mediaURL.lowercaseString?:@"";
+    NSArray<NSString *> *targetFlags=nil;
+    if([low containsString:@"youku.com"])targetFlags=@[@"youku",@"优酷"];
+    else if([low containsString:@"qq.com"])targetFlags=@[@"qq",@"腾讯",@"qqlive"];
+    else if([low containsString:@"iqiyi.com"]||[low containsString:@"qiyi.com"])targetFlags=@[@"qiyi",@"iqiyi",@"爱奇艺",@"奇艺"];
+    else if([low containsString:@"mgtv.com"]||[low containsString:@"imgo.tv"])targetFlags=@[@"mgtv",@"imgo",@"芒果"];
+    else if([low containsString:@"bilibili.com"])targetFlags=@[@"bilibili",@"bili",@"哔哩"];
+    if(!targetFlags.count)return YES;
+    NSDictionary *ext=[parser[@"ext"] isKindOfClass:NSDictionary.class]?parser[@"ext"]:nil;
+    id rawFlags=ext[@"flag"]?:parser[@"flag"];
+    NSMutableArray<NSString *> *declared=[NSMutableArray array];
+    if([rawFlags isKindOfClass:NSArray.class]){for(id f in (NSArray *)rawFlags)if([f isKindOfClass:NSString.class])[declared addObject:[(NSString *)f lowercaseString]];}
+    else if([rawFlags isKindOfClass:NSString.class]&&[(NSString *)rawFlags length]){for(NSString *f in [(NSString *)rawFlags componentsSeparatedByCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@",;| "]])if(f.length)[declared addObject:f.lowercaseString];}
+    if(!declared.count)return YES;
+    for(NSString *tf in targetFlags){for(NSString *df in declared){if([df containsString:tf]||[tf containsString:df])return YES;}}
+    return NO;
 }
 - (void)resolveParserResult:(NSDictionary *)result generation:(NSUInteger)generation correlationID:(NSString *)correlationID completion:(void (^)(id,NSError *))completion {
     NSString *mediaURL=[result[@"url"] isKindOfClass:NSString.class]?result[@"url"]:@"";
@@ -635,13 +652,15 @@ static NSDictionary *MediaParserCleanHeaders(id value,NSURL *mediaURL,NSURL *par
     // An unscoped source must never inherit parser endpoints from whichever
     // TVBox collection happened to be imported most recently.
     if(!catalogID.length){if(completion)completion(result,nil);return;}
-    NSArray<NSDictionary *> *available=[TVBoxCatalogStore playbackParsersForCatalogID:catalogID];NSMutableArray *apiParsers=[NSMutableArray array];NSDictionary *webParser=nil,*selectedParser=nil;
+    NSArray<NSDictionary *> *available=[TVBoxCatalogStore playbackParsersForCatalogID:catalogID];NSMutableArray *apiParsers=[NSMutableArray array],*fallbackAPIParsers=[NSMutableArray array];NSDictionary *webParser=nil,*selectedParser=nil;
     for(NSDictionary *parser in available){
         if(self.selectedParserID.length&&[parser[@"id"] isEqual:self.selectedParserID])selectedParser=parser;
-        // Automatic resolution uses the first explicitly declared API only.
-        // Do not guess parser type from URL words or rotate on failure.
-        if(!self.selectedParserID.length&&[MediaParserKind(parser) isEqual:@"api"]&&!apiParsers.count)[apiParsers addObject:parser];
+        if(!self.selectedParserID.length&&[MediaParserKind(parser) isEqual:@"api"]){
+            if(MediaParserMatchesVIPPlatform(parser,mediaURL)&&apiParsers.count<4)[apiParsers addObject:parser];
+            else if(fallbackAPIParsers.count<2)[fallbackAPIParsers addObject:parser];
+        }
     }
+    if(!self.selectedParserID.length&&!apiParsers.count&&fallbackAPIParsers.count)[apiParsers addObject:fallbackAPIParsers.firstObject];
     if(self.selectedParserID.length){
         NSString *kind=selectedParser?MediaParserKind(selectedParser):@"";
         if(!selectedParser||![@[@"api",@"web"] containsObject:kind]){
@@ -687,7 +706,7 @@ static void MediaParserRecordOutcome(NSDictionary *parser, BOOL succeeded) {
 }
 - (void)tryParserAtIndex:(NSUInteger)index {
     NSUInteger generation=self.parserGeneration;if(generation!=self.generation||!self.parserCompletion)return;
-    if(index>=self.parserAPIEntries.count){[self finishParserWithResult:nil];return;}
+    if(index>=self.parserAPIEntries.count){NSDictionary *fallback=self.selectedParserID.length?self.parserWebFallbackResult:(self.parserWebFallbackResult?:self.parserFallbackResult);[self finishParserWithResult:fallback];return;}
     NSDictionary *parser=self.parserAPIEntries[index];NSString *original=[self.parserFallbackResult[@"url"] isKindOfClass:NSString.class]?self.parserFallbackResult[@"url"]:@"";NSString *target=MediaParserRequestURL(parser,original);NSURL *targetURL=[NSURL URLWithString:target];
     if(!targetURL){[self tryParserAtIndex:index+1];return;}
     NSTimeInterval maxProbeTimeout=self.selectedParserID.length?8.0:3.2;

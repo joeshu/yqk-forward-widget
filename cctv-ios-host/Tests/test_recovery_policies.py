@@ -45,7 +45,8 @@ int main(int argc,char **argv) {
  if(p.initialized)return 7;
  return 0;
 }'''
-        with tempfile.TemporaryDirectory() as directory:
+        exec_tmp = root / 'build'; exec_tmp.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=str(exec_tmp)) as directory:
             path = Path(directory)
             (path / 'policy.c').write_text(source)
             command = ['cc', '-std=c11', '-I', str(root / 'Sources'), str(path / 'policy.c'), '-lm', '-o', str(path / 'policy')]

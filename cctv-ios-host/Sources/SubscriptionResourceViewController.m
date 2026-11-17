@@ -27,7 +27,7 @@
         [pasteBtn setTitle:@"粘贴" forState:UIControlStateNormal];
         pasteBtn.titleLabel.font=[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
         pasteBtn.tintColor=HostAccent();
-        pasteBtn.frame=CGRectMake(0,0,44,32);
+        pasteBtn.frame=CGRectMake(0,0,48,36);
         pasteBtn.backgroundColor=HostSelectedSurface();
         pasteBtn.layer.cornerRadius=10;
         pasteBtn.layer.cornerCurve=kCACornerCurveContinuous;

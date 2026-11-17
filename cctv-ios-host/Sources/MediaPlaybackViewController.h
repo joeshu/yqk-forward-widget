@@ -15,6 +15,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)installFloatingInlineSurfaceInHost:(UIView *)videoHost controlsStack:(UIStackView *)controlsStack;
 - (CGFloat)preferredInlineVideoHeightForWidth:(CGFloat)width maximumHeight:(CGFloat)maximumHeight;
 - (void)reloadThemeAppearance;
-- (void)reloadThemeAppearance;
+- (void)teardownAfterScreenExit;
+- (void)teardownCicadaAdapter;
 @end
 NS_ASSUME_NONNULL_END

@@ -48,7 +48,7 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.overrideUserInterfaceStyle = HostSelectedInterfaceStyle();
-    self.title = self.channelName.length ? self.channelName : self.channelID;
+    self.title = self.channelName.length ? self.channelName : [self effectiveChannelIdentifier];
     self.view.backgroundColor = HostBackground();
     self.view.tintColor = HostAccent();
     self.navigationItem.largeTitleDisplayMode=UINavigationItemLargeTitleDisplayModeNever;
@@ -213,12 +213,20 @@
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];CGFloat top=self.view.safeAreaInsets.top;CGFloat bottom=self.view.safeAreaInsets.bottom;CGFloat width=self.view.bounds.size.width;
     CGFloat hintHeight=ceil(self.hint.font.lineHeight*2);
-    self.dates.frame=CGRectMake(16,top+8,width-32,40);self.dateMenuButton.frame=self.dates.frame;self.hint.frame=CGRectMake(16,top+56,width-32,hintHeight);self.table.frame=CGRectMake(0,top+56+hintHeight+8,width,MAX(0,self.view.bounds.size.height-top-56-hintHeight-8-bottom));self.spinner.center=CGPointMake(width/2,top+150);
+    self.dates.frame=CGRectMake(16,top+8,width-32,44);self.dateMenuButton.frame=self.dates.frame;self.hint.frame=CGRectMake(16,top+60,width-32,hintHeight);self.table.frame=CGRectMake(0,top+60+hintHeight+8,width,MAX(0,self.view.bounds.size.height-top-60-hintHeight-8-bottom));self.spinner.center=CGPointMake(width/2,top+150);
 }
 - (void)updateEmptyState {
     self.emptyLabel.hidden = self.rows.count > 0 || self.spinner.isAnimating;
 }
-- (NSDateFormatter *)dayFormatter {NSDateFormatter *f=[NSDateFormatter new];f.timeZone=[NSTimeZone timeZoneWithName:@"Asia/Shanghai"];f.dateFormat=@"yyyy-MM-dd";return f;}
+- (NSDateFormatter *)dayFormatter {static NSDateFormatter *f=nil;static dispatch_once_t onceToken;dispatch_once(&onceToken,^{f=[NSDateFormatter new];f.timeZone=[NSTimeZone timeZoneWithName:@"Asia/Shanghai"];f.dateFormat=@"yyyy-MM-dd";});return f;}
+- (NSString *)effectiveChannelIdentifier {
+    if(self.channelID.length)return self.channelID;
+    NSString *cid=[self.channel[@"id"] isKindOfClass:NSString.class]?self.channel[@"id"]:@"";
+    if(cid.length)return cid;
+    NSString *epgID=[ProfileStore epgIDForChannel:self.channel];
+    if(epgID.length)return epgID;
+    return self.channelName.length?self.channelName:@"channel";
+}
 - (void)rebuildDates {
     NSDateFormatter *f=[self dayFormatter];NSString *previous=(self.dates.selectedSegmentIndex>=0&&self.dates.selectedSegmentIndex<self.dateKeys.count)?self.dateKeys[self.dates.selectedSegmentIndex]:nil;NSMutableOrderedSet *days=[NSMutableOrderedSet orderedSet];for(NSDictionary *row in self.allRows)[days addObject:[f stringFromDate:[NSDate dateWithTimeIntervalSince1970:[row[@"start"] doubleValue]]]];self.dateKeys=days.array;
     [self.dates removeAllSegments];NSString *today=[f stringFromDate:NSDate.date];NSInteger selected=NSNotFound;for(NSUInteger i=0;i<self.dateKeys.count;i++){NSString *key=self.dateKeys[i];NSString *title=[key isEqualToString:today]?@"今天":[key substringFromIndex:5];[self.dates insertSegmentWithTitle:title atIndex:i animated:NO];if(previous.length&&[key isEqualToString:previous])selected=i;}
@@ -248,7 +256,7 @@
 }
 
 - (void)clearChannelReminders {
-    NSString *prefix=[NSString stringWithFormat:@"%@|",self.channelID?:@""];
+    NSString *prefix=[NSString stringWithFormat:@"%@|",[self effectiveChannelIdentifier]];
     NSMutableArray<NSString *> *toRemove=[NSMutableArray array];
     for(NSString *key in self.reminders.allKeys)if([key hasPrefix:prefix])[toRemove addObject:key];
     if(!toRemove.count){self.hint.text=@"当前频道没有已预约的节目提醒";return;}
@@ -274,7 +282,7 @@
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController {self.searchQuery=searchController.searchBar.text;[self filterDate];}
 - (NSString *)reminderKeyForProgram:(NSDictionary *)program {
     // 提醒以“频道 | 开播时间戳”为键，同一节目只会有一条提醒。
-    return [NSString stringWithFormat:@"%@|%lld",self.channelID?:@"",(long long)[program[@"start"] doubleValue]];
+    return [NSString stringWithFormat:@"%@|%lld",[self effectiveChannelIdentifier],(long long)[program[@"start"] doubleValue]];
 }
 - (BOOL)isProgramReminded:(NSDictionary *)program {return self.reminders[[self reminderKeyForProgram:program]]!=nil;}
 - (void)saveReminders {[NSUserDefaults.standardUserDefaults setObject:self.reminders forKey:@"cctv.epgReminders.v1"];}

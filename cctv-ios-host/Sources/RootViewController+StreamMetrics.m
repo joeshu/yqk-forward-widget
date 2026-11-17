@@ -285,11 +285,43 @@
     if(activeChannel&&![ProfileStore isPlayerCornerLogoEnabledForChannel:activeChannel]){self.playerChannelLogo.hidden=YES;self.playerChannelLogo.image=nil;return;}
     NSString *url=self.playerChannelLogo.accessibilityIdentifier;if([NSURL URLWithString:url].host.length&&self.firstRender)[[HostImageLoader shared] loadURL:url intoImageView:self.playerChannelLogo];
 }
+- (NSArray<NSDictionary *> *)channelsMatchingPreviewSource:(NSString *)source {
+    NSString *key=[source isKindOfClass:NSString.class]?[source stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]:@"";
+    if(!key.length||[key isEqualToString:@"builtin:cctv"]){
+        NSMutableArray<NSDictionary *> *native=[NSMutableArray array];
+        for(NSDictionary *ch in self.allChannels){
+            if(![ch isKindOfClass:NSDictionary.class])continue;
+            NSString *remote=[ch[@"remoteURL"] isKindOfClass:NSString.class]?ch[@"remoteURL"]:@"";
+            if(!remote.length||[ch[@"nativePlainRoute"] boolValue])[native addObject:ch];
+        }
+        return native.count?native:self.shownChannels;
+    }
+    NSDictionary *service=[self resourceServiceForSource:key];
+    NSString *subURL=service?[ServiceStore subscriptionURLForService:service]?:@"":@"";
+    NSMutableArray<NSDictionary *> *matched=[NSMutableArray array];
+    for(NSDictionary *ch in self.allChannels){
+        if(![ch isKindOfClass:NSDictionary.class])continue;
+        id rawOwners=[ch objectForKey:@"subscriptionSources"];NSArray *owners=[rawOwners isKindOfClass:NSArray.class]?rawOwners:nil;
+        BOOL belongs=NO;
+        for(NSString *owner in owners){
+            if([owner isEqualToString:key]||(subURL.length&&[owner isEqualToString:subURL])||[self subscriptionOwner:owner matchesLiveResourceSource:key]){
+                belongs=YES;break;
+            }
+        }
+        if(belongs)[matched addObject:ch];
+    }
+    return matched.count?matched:self.shownChannels;
+}
 - (void)handleProfileLogoOrMetadataChange:(NSNotification *)note {
     if(!NSThread.isMainThread){dispatch_async(dispatch_get_main_queue(),^{[self handleProfileLogoOrMetadataChange:note];});return;}
     NSDictionary *active=[self channelWithID:self.channelID];
     if(active)[self updatePlayerChannelLogoForChannel:active];
-    [self refreshChannelPreviewSnapshotsForChannels:self.shownChannels force:NO];
+    NSString *changedSource=[note.object isKindOfClass:NSString.class]?note.object:nil;
+    if(changedSource.length&&[ProfileStore isChannelPreviewEnabledForSource:changedSource]){
+        [self refreshChannelPreviewSnapshotsForChannels:[self channelsMatchingPreviewSource:changedSource] force:YES];
+    }else{
+        [self refreshChannelPreviewSnapshotsForChannels:self.shownChannels force:NO];
+    }
     if(self.isViewLoaded){[self.table reloadData];[self.channelGrid reloadData];[self refreshConfigurationPage];}
 }
 - (void)applyResourcePreviewOrTelemetryToggleForSource:(NSString *)source enabled:(BOOL)enabled isPreview:(BOOL)isPreview {
@@ -298,7 +330,7 @@
     if(isPreview){
         [ProfileStore setChannelPreviewEnabled:enabled forSource:source];
         if(subURL.length)[ProfileStore setChannelPreviewEnabled:enabled forSource:subURL];
-        if(enabled)[self refreshChannelPreviewSnapshotsForChannels:self.shownChannels force:YES];
+        if(enabled)[self refreshChannelPreviewSnapshotsForChannels:[self channelsMatchingPreviewSource:source] force:YES];
     }else{
         [ProfileStore setChannelTelemetryEnabled:enabled forSource:source];
         if(subURL.length)[ProfileStore setChannelTelemetryEnabled:enabled forSource:subURL];
@@ -436,8 +468,8 @@
     if(!cid.length)return nil;
     UIImage *realSnapshot=[self cachedRealPreviewImageForChannelID:cid];
     BOOL needsRefresh=[self.channelPreviewRefreshPending containsObject:cid];
-    if(needsRefresh||(!realSnapshot&&!self.channelPreviewCapturedAt[cid])){
-        [self detectRealPreviewFrameForChannel:channel force:needsRefresh];
+    if(needsRefresh){
+        [self detectRealPreviewFrameForChannel:channel force:YES];
     }
     return realSnapshot;
 }

@@ -22,7 +22,8 @@ int main(void) {
   if(HostImageDimensionsAllowed(100, INFINITY)) return 9;
   return 0;
 }'''
-        with tempfile.TemporaryDirectory() as directory:
+        exec_tmp = root / 'build'; exec_tmp.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=str(exec_tmp)) as directory:
             path = Path(directory)
             (path / 'policy.c').write_text(source)
             built = subprocess.run(['cc', '-std=c11', '-I', str(root / 'Sources'),

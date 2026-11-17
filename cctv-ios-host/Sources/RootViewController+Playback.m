@@ -340,6 +340,9 @@
     self.avLayer = nil;
     self.currentPlayer = nil;
     self.cicadaPlayer = nil;
+    [self.liveControlsOverlay invalidate];
+    self.liveMuted = NO;
+    [self.muteBtn setTitle:@"静音" forState:UIControlStateNormal];
     [self.watchdog invalidate];
     self.watchdog = nil;
     [self.liveQualityBadgeTimer invalidate];
@@ -401,17 +404,16 @@
 }
 
 - (void)toggleMute {
-    static BOOL muted = NO;
-    if(self.remoteAdapter){muted=!muted;[self.remoteAdapter setMuted:muted];[self.muteBtn setTitle:muted?@"发声":@"静音" forState:UIControlStateNormal];return;}
+    if(self.remoteAdapter){self.liveMuted=!self.liveMuted;[self.remoteAdapter setMuted:self.liveMuted];[self.muteBtn setTitle:self.liveMuted?@"发声":@"静音" forState:UIControlStateNormal];return;}
     if (self.avPlayer) {
-        muted = !muted;
-        self.avPlayer.muted = muted;
-        [self.muteBtn setTitle:(muted ? @"发声" : @"静音") forState:UIControlStateNormal];
+        self.liveMuted = !self.liveMuted;
+        self.avPlayer.muted = self.liveMuted;
+        [self.muteBtn setTitle:(self.liveMuted ? @"发声" : @"静音") forState:UIControlStateNormal];
         return;
     }
-    muted = !muted;
-    @try { [self.currentPlayer setValue:@(muted) forKey:@"muted"]; } @catch (NSException *e) {}
-    [self.muteBtn setTitle:(muted ? @"发声" : @"静音") forState:UIControlStateNormal];
+    self.liveMuted = !self.liveMuted;
+    @try { [self.currentPlayer setValue:@(self.liveMuted) forKey:@"muted"]; } @catch (NSException *e) {}
+    [self.muteBtn setTitle:(self.liveMuted ? @"发声" : @"静音") forState:UIControlStateNormal];
 }
 
 #pragma mark - 手势 / 锁屏

@@ -97,7 +97,11 @@ static BOOL MediaWebIsOfficialWatchPageURL(NSURL *url) {
     dispatch_group_notify(group,dispatch_get_main_queue(),^{if(completion)completion();});
 }
 - (void)invalidateMediaResolution {self.mediaGeneration++;self.resolvingMedia=NO;self.nativeButton.enabled=YES;}
-- (void)viewDidDisappear:(BOOL)animated {[super viewDidDisappear:animated];if(self.isMovingFromParentViewController||self.isBeingDismissed||self.navigationController.isBeingDismissed){self.didClose=YES;[self invalidateMediaResolution];[self.web stopLoading];self.onResolvedMedia=nil;self.onTryNativePlayback=nil;}}
+- (void)stopWebMediaPlayback {
+    [self.web stopLoading];
+    [self.web evaluateJavaScript:@"try{document.querySelectorAll('video,audio').forEach(function(e){e.muted=true;e.pause();e.removeAttribute('src');e.load();});}catch(e){}" completionHandler:nil];
+}
+- (void)viewDidDisappear:(BOOL)animated {[super viewDidDisappear:animated];if(self.isMovingFromParentViewController||self.isBeingDismissed||self.navigationController.isBeingDismissed){self.didClose=YES;[self invalidateMediaResolution];[self stopWebMediaPlayback];self.onResolvedMedia=nil;self.onTryNativePlayback=nil;}}
 - (void)refresh {
     if(self.didClose)return;[self invalidateMediaResolution];
     NSString *urlString=[self.result[@"url"] isKindOfClass:NSString.class]?self.result[@"url"]:nil;
@@ -115,7 +119,7 @@ static BOOL MediaWebIsOfficialWatchPageURL(NSURL *url) {
 - (void)tryNativePlayback {
     if(self.didClose||self.resolvingMedia)return;
     if(MediaWebIsOfficialWatchPageURL([NSURL URLWithString:self.result[@"url"]])){self.navigationItem.prompt=@"请在官方网页播放器中观看";return;}
-    if(!self.onResolvedMedia){if(self.onTryNativePlayback){self.didClose=YES;[self.web stopLoading];dispatch_block_t callback=self.onTryNativePlayback;self.onTryNativePlayback=nil;self.onClose=nil;[self dismissViewControllerAnimated:YES completion:callback];}return;}
+    if(!self.onResolvedMedia){if(self.onTryNativePlayback){self.didClose=YES;[self stopWebMediaPlayback];dispatch_block_t callback=self.onTryNativePlayback;self.onTryNativePlayback=nil;self.onClose=nil;[self dismissViewControllerAnimated:YES completion:callback];}return;}
     self.resolvingMedia=YES;self.nativeButton.enabled=NO;NSUInteger generation=++self.mediaGeneration;self.navigationItem.prompt=@"正在读取网页媒体地址…";
     [self recordMediaEvent:@"web_media_extraction_started" fields:nil];
     NSString *script=@"(function scan(w){try{for(const v of w.document.querySelectorAll('video,audio')){const s=v.currentSrc||v.src;if(/^https?:/i.test(s))return s;}for(const f of w.frames){const s=scan(f);if(s)return s;}}catch(e){}return ''; })(window)";
@@ -136,7 +140,7 @@ static BOOL MediaWebIsOfficialWatchPageURL(NSURL *url) {
             NSMutableArray *matching=[NSMutableArray array];for(NSHTTPCookie *cookie in cookies){NSString *domain=cookie.domain.lowercaseString;BOOL subdomains=[domain hasPrefix:@"."];if(subdomains)domain=[domain substringFromIndex:1];BOOL host=[url.host.lowercaseString isEqual:domain]||(subdomains&&[url.host.lowercaseString hasSuffix:[@"." stringByAppendingString:domain]]);NSString *path=url.path.length?url.path:@"/";NSString *cp=cookie.path.length?cookie.path:@"/";BOOL pathMatch=[path isEqual:cp]||([path hasPrefix:cp]&&([cp hasSuffix:@"/"]||[path hasPrefix:[cp stringByAppendingString:@"/"]]));if(host&&pathMatch&&(!cookie.secure||[url.scheme.lowercaseString isEqual:@"https"])&&(!cookie.expiresDate||[cookie.expiresDate timeIntervalSinceNow]>0))[matching addObject:cookie];}
             [headers addEntriesFromDictionary:[NSHTTPCookie requestHeaderFieldsWithCookies:matching]];
             NSDictionary *resolved=@{@"url":raw,@"headers":headers,@"parse":@0,@"jx":@0,@"requiresWebPlayback":@NO};
-            [page recordMediaEvent:@"web_media_native_handoff" fields:@{@"result_has_media_url":@YES,@"transport_host":url.host.lowercaseString?:@"",@"request_header_count":@(headers.count),@"matched_cookie_count":@(matching.count)}];page.didClose=YES;[page.web stopLoading];void (^callback)(NSDictionary *)=page.onResolvedMedia;page.onResolvedMedia=nil;page.onClose=nil;[page dismissViewControllerAnimated:YES completion:^{if(callback)callback(resolved);}];
+            [page recordMediaEvent:@"web_media_native_handoff" fields:@{@"result_has_media_url":@YES,@"transport_host":url.host.lowercaseString?:@"",@"request_header_count":@(headers.count),@"matched_cookie_count":@(matching.count)}];page.didClose=YES;[page stopWebMediaPlayback];void (^callback)(NSDictionary *)=page.onResolvedMedia;page.onResolvedMedia=nil;page.onClose=nil;[page dismissViewControllerAnimated:YES completion:^{if(callback)callback(resolved);}];
         });}];
     }];
     // evaluateJavaScript 与 getAllCookies 均无超时：挂起时 resolvingMedia 恒为
@@ -145,7 +149,7 @@ static BOOL MediaWebIsOfficialWatchPageURL(NSURL *url) {
     __weak typeof(self) weakTimeoutSelf=self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,15*NSEC_PER_SEC),dispatch_get_main_queue(),^{MediaWebViewController *owner=weakTimeoutSelf;if(!owner||owner.didClose||owner.mediaGeneration!=generation||!owner.resolvingMedia)return;[owner recordMediaEvent:@"web_media_extraction_timeout" fields:nil];[owner invalidateMediaResolution];owner.navigationItem.prompt=@"网页媒体读取超时，请重试";});
 }
-- (void)close {if(self.didClose)return;self.didClose=YES;[self.web stopLoading];dispatch_block_t callback=self.onClose;self.onClose=nil;[self dismissViewControllerAnimated:YES completion:callback];}
+- (void)close {if(self.didClose)return;self.didClose=YES;[self stopWebMediaPlayback];dispatch_block_t callback=self.onClose;self.onClose=nil;[self dismissViewControllerAnimated:YES completion:callback];}
 - (void)dealloc {self.web.navigationDelegate=nil;[self.web stopLoading];}
 - (void)webView:(WKWebView *)webView decidePolicyForNavigationAction:(WKNavigationAction *)action decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
     NSURL *url=action.request.URL;NSString *scheme=url.scheme.lowercaseString?:@"";BOOL allowed=[@[@"http",@"https",@"about"] containsObject:scheme];if(self.configurationPage&&(action.targetFrame.isMainFrame||!action.targetFrame)){NSURL *base=[NSURL URLWithString:self.result[@"url"]];allowed=allowed&&[url.scheme.lowercaseString isEqual:base.scheme.lowercaseString]&&[url.host.lowercaseString isEqual:base.host.lowercaseString]&&[(url.port?:@0) isEqual:(base.port?:@0)];if(!allowed)self.navigationItem.prompt=@"此操作需要离开源配置页，当前未打开";}

@@ -52,6 +52,7 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
 @property(nonatomic,assign) NSUInteger probeChannelCount;
 @property(nonatomic, copy, nullable) NSNumber *stopPortState; // 0 端口已释放，1 仍可访问，-1 未知
 @property(nonatomic, assign) NSUInteger stopVerifyGeneration;
+@property(nonatomic, assign) NSUInteger restartGeneration;
 @property(nonatomic, copy, nullable) NSString *currentRunStartedAt;
 - (void)reloadThemeAppearance;
 @end
@@ -97,6 +98,8 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
     // 打开详情即自动检测一次接口健康：运行中才探测，60 秒内已有成功
     // 响应时不再重复探测，避免来回进出页面反复打接口。
     if([self running])[self probeIfStale];
+    [NSNotificationCenter.defaultCenter removeObserver:self name:PyHostRuntimeStateDidChangeNotification object:nil];
+    [NSNotificationCenter.defaultCenter removeObserver:self name:ProfileStoreMetadataDidChangeNotification object:nil];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(runtimeStateDidChange) name:PyHostRuntimeStateDidChangeNotification object:nil];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(subscriptionMetadataDidChange) name:ProfileStoreMetadataDidChangeNotification object:nil];
 }
@@ -350,13 +353,23 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
 - (void)restart {
     // 重启只对运行中的服务有意义：已停止的服务用第 0 区的开关启动，
     // 避免“重启”被误读成启动。进行中用 prompt 反馈，失败弹明确原因。
+    if(self.changingService)return;
     if(![self running]){self.navigationItem.prompt=@"服务未运行 · 请先启动";__weak typeof(self) weakSelf=self;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,2*NSEC_PER_SEC),dispatch_get_main_queue(),^{ServiceDetailViewController *owner=weakSelf;if(owner&&[owner.navigationItem.prompt isEqual:@"服务未运行 · 请先启动"])owner.navigationItem.prompt=nil;});return;}
     if(!self.onRestart){self.navigationItem.prompt=@"当前版本不支持重启此服务";__weak typeof(self) weakSelf=self;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,2*NSEC_PER_SEC),dispatch_get_main_queue(),^{ServiceDetailViewController *owner=weakSelf;if(owner&&[owner.navigationItem.prompt isEqual:@"当前版本不支持重启此服务"])owner.navigationItem.prompt=nil;});return;}
+    self.changingService=YES;self.changingServiceTarget=YES;[self.tableView reloadData];
     self.navigationItem.prompt=@"正在重启服务…";__weak typeof(self) w=self;
+    NSUInteger restartGen=++self.restartGeneration;
     self.onRestart(self.service,^(NSError *error){
-        ServiceDetailViewController *owner=w;if(!owner)return;owner.navigationItem.prompt=nil;
-        if(error){UIAlertController *a=[UIAlertController alertControllerWithTitle:@"重启失败" message:error.localizedDescription preferredStyle:UIAlertControllerStyleAlert];[a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];[owner presentViewController:a animated:YES completion:nil];return;}
-        [owner.tableView reloadData];
+        dispatch_async(dispatch_get_main_queue(),^{
+            ServiceDetailViewController *owner=w;if(!owner||restartGen!=owner.restartGeneration)return;
+            owner.changingService=NO;owner.navigationItem.prompt=nil;[owner.tableView reloadData];
+            if(error){UIAlertController *a=[UIAlertController alertControllerWithTitle:@"重启失败" message:error.localizedDescription preferredStyle:UIAlertControllerStyleAlert];[a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];[owner presentViewController:a animated:YES completion:nil];}
+        });
+    });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,30*NSEC_PER_SEC),dispatch_get_main_queue(),^{
+        ServiceDetailViewController *owner=w;if(!owner||restartGen!=owner.restartGeneration||!owner.changingService)return;
+        owner.changingService=NO;owner.navigationItem.prompt=nil;[owner.tableView reloadData];
+        UIAlertController *a=[UIAlertController alertControllerWithTitle:@"重启超时" message:@"服务重启超时，请查看此服务日志确认状态。" preferredStyle:UIAlertControllerStyleAlert];[a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];[owner presentViewController:a animated:YES completion:nil];
     });
 }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)ip {
@@ -516,6 +529,7 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
 - (void)statusFilterChanged {self.displayedRunningID=nil;[self refresh];}
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
+    [NSNotificationCenter.defaultCenter removeObserver:self name:PyHostRuntimeStateDidChangeNotification object:nil];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(runtimeStateDidChange) name:PyHostRuntimeStateDidChangeNotification object:nil];
     [self refresh];
 }

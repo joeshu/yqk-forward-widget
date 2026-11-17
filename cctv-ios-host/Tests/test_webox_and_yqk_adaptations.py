@@ -245,16 +245,17 @@ const fn = {fn_code};
         self.assertEqual(det["name"], "藏海传")
         with mock.patch.object(adapter_mod, "resolve_maccms_stream_by_title", return_value="https://cdn.example/canghai/ep1.m3u8") as rescue:
             play_yk = rt.call("play", {"id": "https://v.youku.com/v_show/id_XNjU.html", "lineId": "youku"})
-            self.assertEqual(play_yk["url"], "https://v.youku.com/v_show/id_XNjU.html")
-            self.assertEqual(play_yk["parse"], 1)
-            self.assertTrue(play_yk["requiresWebPlayback"])
-            self.assertFalse(play_yk["nativePlayable"])
+            self.assertEqual(play_yk["url"], "https://cdn.example/canghai/ep1.m3u8")
+            self.assertEqual(play_yk["parse"], 0)
+            self.assertFalse(play_yk["requiresWebPlayback"])
+            self.assertTrue(play_yk["nativePlayable"])
 
             play_qq = rt.call("play", {"id": "https://v.qq.com/x/cover/mzc00200/v001.html", "lineId": "qq", "vodName": "藏海传"})
-            self.assertEqual(play_qq["url"], "https://v.qq.com/x/cover/mzc00200/v001.html")
-            self.assertEqual(play_qq["parse"], 1)
-            self.assertTrue(play_qq["requiresWebPlayback"])
-            rescue.assert_not_called()
+            self.assertEqual(play_qq["url"], "https://cdn.example/canghai/ep1.m3u8")
+            self.assertEqual(play_qq["parse"], 0)
+            self.assertFalse(play_qq["requiresWebPlayback"])
+            self.assertTrue(play_qq["nativePlayable"])
+            self.assertGreaterEqual(rescue.call_count, 2)
         rt.close()
 
         # Verify WeBox 4kvm, HStream, JSPluginRuntime hostFetch fallback, and universal yqk parseLink

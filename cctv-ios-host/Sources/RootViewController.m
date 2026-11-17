@@ -191,6 +191,7 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
     [self buildPlayer];
     [self buildList];
     [self configureCatalogNavigation];
+    [self applyFilter];
     [self activateAudioSession];
     [self setupRemoteCommands];
     [self registerCallbackProtocol];
@@ -437,6 +438,7 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
     [self.playbackReadiness cancel];
     for(LocalServiceReadiness *probe in self.subscriptionReadiness.allValues)[probe cancel];
+    [self.liveControlsOverlay invalidate];
     [self.watchdog invalidate];
     [self.epgTimer invalidate];
     [self.liveSleepTimer invalidate];
@@ -1407,6 +1409,7 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
         if ([key isEqualToString:@"autoLoadEPG"]) { [weakSelf.epgTimer invalidate]; weakSelf.epgTimer=nil; weakSelf.epgRefreshDesired=value;if(value) [weakSelf restartEPGTimer]; else weakSelf.infoLabel.text=@"节目单自动获取已关闭"; }
         if ([key isEqualToString:@"nativeChannelsEnabled"]) { [weakSelf configureCatalogNavigation]; [weakSelf applyFilter]; [weakSelf updateLiveResourceCapsule]; }
         if ([key isEqualToString:@"nativeChannelLogoEnabled"]) { [weakSelf applyResourceChannelLogoToggleForSource:@"builtin:cctv" enabled:value cornerOnly:NO]; }
+        if ([key isEqualToString:@"nativePlayerCornerLogoEnabled"]) { [weakSelf applyResourceChannelLogoToggleForSource:@"builtin:cctv" enabled:value cornerOnly:YES]; }
         if ([key isEqualToString:@"nativeChannelPreviewEnabled"]) { [weakSelf applyResourcePreviewOrTelemetryToggleForSource:@"builtin:cctv" enabled:value isPreview:YES]; }
         if ([key isEqualToString:@"nativeChannelTelemetryEnabled"]) { [weakSelf applyResourcePreviewOrTelemetryToggleForSource:@"builtin:cctv" enabled:value isPreview:NO]; }
         if ([key isEqualToString:@"cctv.mediaEpisodeShowBadge.v1"] || [key isEqualToString:@"cctv.mediaEpisodeAutoExpand.v1"]) { [NSNotificationCenter.defaultCenter postNotificationName:@"MediaDisplayConfigurationDidChangeNotification" object:nil]; }

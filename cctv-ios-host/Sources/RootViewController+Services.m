@@ -441,13 +441,23 @@
     if([self.serviceOperations containsObject:serviceID]){if(completion)completion([NSError errorWithDomain:@"CCTVHostService" code:4 userInfo:@{NSLocalizedDescriptionKey:@"该服务正在启停，请稍候。"}]);return;}
     if(enabled && [PyHost isRunningServiceIdentifier:serviceID]){
         int port=[service[@"port"] intValue];
-        if(port>0 && HostLocalPortState(port)==0){
-            [PyHost refreshListenersAfterForeground];
-            [NSThread sleepForTimeInterval:0.12];
-            if(HostLocalPortState(port)==0){
-                [self restartMediaService:service completion:completion];
-                return;
-            }
+        if(port>0){
+            __weak typeof(self) weakSelf=self;
+            dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
+                BOOL needsRestart=NO;
+                if(HostLocalPortState(port)==0){
+                    [PyHost refreshListenersAfterForeground];
+                    [NSThread sleepForTimeInterval:0.12];
+                    needsRestart=(HostLocalPortState(port)==0);
+                }
+                dispatch_async(dispatch_get_main_queue(),^{
+                    RootViewController *owner=weakSelf;
+                    if(!owner){if(completion)completion(nil);return;}
+                    if(needsRestart){[owner restartMediaService:service completion:completion];return;}
+                    [owner refreshConfigurationPage];if(completion)completion(nil);
+                });
+            });
+            return;
         }
         [self refreshConfigurationPage];if(completion)completion(nil);return;
     }

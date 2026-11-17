@@ -33,10 +33,27 @@ static NSURLRequest *MediaSP360Request(NSString *operation, NSDictionary *args, 
     [request setValue:@"application/json" forHTTPHeaderField:@"Accept"];return request;
 }
 
+static NSString *MediaSP360PlatformName(NSString *site) {
+    NSString *low=site.lowercaseString?:@"";
+    NSDictionary *names=@{@"youku":@"优酷",@"qq":@"腾讯视频",@"qiyi":@"爱奇艺",@"iqiyi":@"爱奇艺",@"imgo":@"芒果TV",@"mgtv":@"芒果TV",@"bilibili":@"哔哩哔哩",@"bili":@"哔哩哔哩",@"sohu":@"搜狐视频",@"leshi":@"乐视视频",@"letv":@"乐视视频",@"pptv":@"PPTV",@"1905":@"1905电影网",@"xigua":@"西瓜视频",@"douyin":@"抖音"};
+    return names[low]?:site;
+}
+static NSString *MediaSP360PlatformReferer(NSString *url) {
+    NSString *low=url.lowercaseString?:@"";
+    if([low containsString:@"youku.com"])return @"https://v.youku.com/";
+    if([low containsString:@"qq.com"])return @"https://v.qq.com/";
+    if([low containsString:@"iqiyi.com"]||[low containsString:@"qiyi.com"])return @"https://www.iqiyi.com/";
+    if([low containsString:@"mgtv.com"]||[low containsString:@"imgo.tv"])return @"https://www.mgtv.com/";
+    if([low containsString:@"bilibili.com"])return @"https://www.bilibili.com/";
+    if([low containsString:@"sohu.com"])return @"https://tv.sohu.com/";
+    if([low containsString:@"le.com"]||[low containsString:@"letv.com"])return @"https://www.le.com/";
+    return @"https://www.360kan.com/";
+}
 static NSDictionary *MediaSP360Normalize(NSString *operation, NSDictionary *args, id raw) {
     if([operation isEqual:@"play"]){
         NSString *url=SP360Text(args[@"id"]);
-        return @{@"url":url,@"originalURL":url,@"parse":@1,@"jx":@1,@"requiresWebPlayback":@YES};
+        NSString *ref=MediaSP360PlatformReferer(url);
+        return @{@"url":url,@"originalURL":url,@"parse":@1,@"jx":@1,@"requiresWebPlayback":@YES,@"headers":@{@"Referer":ref}};
     }
     NSDictionary *root=SP360Object(raw),*data=SP360Object(root[@"data"]);
     if([operation isEqual:@"detail"]){
@@ -50,7 +67,7 @@ static NSDictionary *MediaSP360Normalize(NSString *operation, NSDictionary *args
                 if(rows.count>=2000)break;
             }
             if(!rows.count){NSDictionary *link=SP360Object(links[site]);NSString *url=SP360Text(link[@"default_url"]);if(url.length)[rows addObject:@{@"id":url,@"name":SP360Text(link[@"quality"]).length?SP360Text(link[@"quality"]):@"正片"}];}
-            if(rows.count)[lines addObject:@{@"id":site,@"name":site,@"episodes":rows}];
+            if(rows.count)[lines addObject:@{@"id":site,@"name":MediaSP360PlatformName(site),@"episodes":rows}];
         }
         return @{@"id":SP360Text(args[@"id"]),@"name":SP360Text(data[@"title"]),@"poster":SP360Text(data[@"cdncover"]),@"description":SP360Text(data[@"description"]),@"actor":SP360Joined(data[@"actor"]),@"director":SP360Joined(data[@"director"]),@"year":SP360Text(data[@"pubdate"]),@"lines":lines};
     }

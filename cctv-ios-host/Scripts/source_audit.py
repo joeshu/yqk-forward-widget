@@ -62,7 +62,11 @@ def inspect(path):
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--output',default='build/source-audit.json');args=parser.parse_args()
-    listed=subprocess.check_output(['git','ls-files','--cached','--others','--exclude-standard','--','cctv-ios-host'],cwd=REPO,text=True).splitlines()
+    try:
+        listed=subprocess.check_output(['git','ls-files','--cached','--others','--exclude-standard','--','cctv-ios-host'],cwd=REPO,text=True,stderr=subprocess.DEVNULL).splitlines()
+    except Exception:
+        skip_dirs={'build','__pycache__','.git','node_modules','.tmp_exec'}
+        listed=[str(f.relative_to(REPO)) for f in ROOT.rglob('*') if f.is_file() and not (set(f.relative_to(ROOT).parts)&skip_dirs)]
     paths=sorted(set(path for path in listed if (REPO/path).is_file()))
     with ThreadPoolExecutor(max_workers=4) as workers:records=list(workers.map(inspect,paths))
     errors=[{'path':r['path'],'error':r['error']} for r in records if 'error' in r]

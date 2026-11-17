@@ -29,7 +29,16 @@
         [self.deferredLocalSubscriptions addObject:key];
     }
     NSMutableDictionary *unique=[NSMutableDictionary dictionary];NSMutableArray *dedup=[NSMutableArray array];for(id rawChannel in self.allChannels){if(![rawChannel isKindOfClass:NSDictionary.class])continue;NSDictionary *c=rawChannel;NSString *cid=[c[@"id"] isKindOfClass:NSString.class]?c[@"id"]:nil;if(!cid.length){[dedup addObject:c];continue;}NSNumber *index=unique[cid];if(index){NSMutableDictionary *existing=[dedup[index.unsignedIntegerValue] mutableCopy];NSMutableSet *owners=[NSMutableSet setWithArray:CCTVStringArrayValue(existing[@"subscriptionSources"])];[owners addObjectsFromArray:CCTVStringArrayValue(c[@"subscriptionSources"])];if(owners.count)existing[@"subscriptionSources"]=owners.allObjects;dedup[index.unsignedIntegerValue]=existing;}else{unique[cid]=@(dedup.count);[dedup addObject:c];}}self.allChannels=dedup;
+    [self.altSources removeAllObjects];
+    for(NSDictionary *c in self.allChannels){
+        NSString *url=[c[@"remoteURL"] isKindOfClass:NSString.class]?c[@"remoteURL"]:@"";
+        NSString *groupKey=CCTVRouteGroupKey(c);
+        if(!url.length||!groupKey.length)continue;
+        if(!self.altSources[groupKey])self.altSources[groupKey]=[NSMutableArray array];
+        if(![self.altSources[groupKey] containsObject:url])[self.altSources[groupKey] addObject:url];
+    }
     self.shownChannels=self.allChannels;
+    [self applyFilter];
     [self log:@"频道 %lu 个 / 线路 %lu 条",
          (unsigned long)self.allChannels.count,
          (unsigned long)[[self.allChannels valueForKeyPath:@"@sum.routes.@count"] integerValue]];

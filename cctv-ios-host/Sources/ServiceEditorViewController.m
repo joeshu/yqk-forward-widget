@@ -256,7 +256,7 @@
     autoPortBtn.layer.cornerRadius=10;
     autoPortBtn.layer.cornerCurve=kCACornerCurveContinuous;
     HostInstallPressFeedback(autoPortBtn);
-    autoPortBtn.frame=CGRectMake(0,0,64,32);
+    autoPortBtn.frame=CGRectMake(0,0,68,36);
     [autoPortBtn addTarget:self action:@selector(assignAvailablePort) forControlEvents:UIControlEventTouchUpInside];
     self.portField.rightView=autoPortBtn;
     self.portField.rightViewMode=UITextFieldViewModeAlways;
@@ -277,7 +277,7 @@
     pasteURLBtn.layer.cornerRadius=10;
     pasteURLBtn.layer.cornerCurve=kCACornerCurveContinuous;
     HostInstallPressFeedback(pasteURLBtn);
-    pasteURLBtn.frame=CGRectMake(0,0,44,32);
+    pasteURLBtn.frame=CGRectMake(0,0,48,36);
     [pasteURLBtn addTarget:self action:@selector(pasteURLIntoField) forControlEvents:UIControlEventTouchUpInside];
     self.urlField.rightView=pasteURLBtn;
     self.urlField.rightViewMode=UITextFieldViewModeUnlessEditing;
@@ -333,7 +333,7 @@
     if(previousTraitCollection&&![previousTraitCollection.preferredContentSizeCategory isEqualToString:self.traitCollection.preferredContentSizeCategory])[self updateSourceControlFont];
 }
 - (void)urlChanged {
-    self.downloadGeneration++;[self.downloadTask cancel];self.downloadTask=nil;self.downloading=NO;
+    self.downloadGeneration++;[self.downloadTask cancel];self.downloadTask=nil;[self.downloadSession invalidateAndCancel];self.downloadSession=nil;self.downloading=NO;
     if (![self managedCode]) {
         self.code = nil;
         [self refreshSection0FooterCache];
@@ -588,13 +588,13 @@
     if(self.downloadData.length>2*1024*1024)[task cancel];
 }
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
-    if(task!=self.downloadTask)return;
+    if(task!=self.downloadTask){[session finishTasksAndInvalidate];return;}
     NSUInteger generation=self.downloadGeneration;
     NSData *data=[self.downloadData copy];NSString *failure=self.downloadFailureMessage;BOOL tooLarge=self.downloadData.length>2*1024*1024;
     __weak typeof(self) weakSelf=self;
     dispatch_async(dispatch_get_main_queue(),^{
-        ServiceEditorViewController *owner=weakSelf;if(!owner||generation!=owner.downloadGeneration||![owner.urlField.text isEqualToString:owner.downloadRequestedURL])return;
-        owner.downloading=NO;owner.downloadTask=nil;
+        ServiceEditorViewController *owner=weakSelf;if(!owner||generation!=owner.downloadGeneration||![owner.urlField.text isEqualToString:owner.downloadRequestedURL]){[session finishTasksAndInvalidate];return;}
+        owner.downloading=NO;owner.downloadTask=nil;[owner.downloadSession finishTasksAndInvalidate];owner.downloadSession=nil;
         if(tooLarge||failure.length)[owner message:tooLarge?@"文件超过 2 MB，请选择较小的 Python 脚本。":failure];
         else if(error)[owner message:error.localizedDescription?:@"下载失败，请检查代码链接。"];
         else [owner acceptCode:data];
@@ -682,7 +682,7 @@
     UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"有尚未保存的更改" message:@"可以继续编辑、保存，或放弃本次更改。" preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"继续编辑" style:UIAlertActionStyleCancel handler:nil]];
     if(self.navigationItem.rightBarButtonItem.enabled)[alert addAction:[UIAlertAction actionWithTitle:@"保存" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[self save];}]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"放弃更改" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action){[self.downloadTask cancel];self.downloadGeneration++;[NSFileManager.defaultManager removeItemAtPath:[self draftPath] error:NULL];[NSFileManager.defaultManager removeItemAtPath:[self optionsDraftPath] error:NULL];[self.navigationController popViewControllerAnimated:YES];}]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"放弃更改" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action){[self.downloadTask cancel];self.downloadTask=nil;[self.downloadSession invalidateAndCancel];self.downloadSession=nil;self.downloadGeneration++;[NSFileManager.defaultManager removeItemAtPath:[self draftPath] error:NULL];[NSFileManager.defaultManager removeItemAtPath:[self optionsDraftPath] error:NULL];[self.navigationController popViewControllerAnimated:YES];}]];
     [self presentViewController:alert animated:YES completion:nil];
 }
 - (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gestureRecognizer {

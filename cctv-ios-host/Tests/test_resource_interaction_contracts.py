@@ -1330,10 +1330,8 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('网页播放已关闭 · 可尝试原生播放', appeared)
         self.assertIn('[self setRetryAvailable:YES]', appeared)
         self.assertNotIn('self.awaitingWebPlaybackReturn=NO', appeared)
-        # playbackMethodOverride 是死数据（全仓库无读取处），tryNativePlayback
-        # 已删掉它，路由改按格式决定，不再把 FLV 推回注定失败的 AVPlayer。
         self.assertNotIn('playbackMethodOverride', fallback)
-        self.assertIn('web.onTryNativePlayback=^{[weakSelf tryNativePlayback];}', self.playback)
+        self.assertIn('[self sniffNativeStreamFromPageResult:self.result playerGeneration:self.playerGeneration]', self.playback)
         self.assertIn('@"原生播放"', webview)
         self.assertIn('loadInitialPageAtURL:configurationURL cookie:cookie', webview)
         self.assertIn('httpCookieStore setCookie:item', webview)
@@ -1358,18 +1356,16 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('if(initialRoute==MediaPlaybackDecodeRouteWebView)', route)
         self.assertIn('[self openWebPlaybackFallback]', route)
         fallback = self.playback[self.playback.index('- (void)openWebPlaybackFallback {'):self.playback.index('- (void)openEpisodePageWebFallback {')]
-        self.assertIn('initWithResult:self.result', fallback)
-        self.assertIn('[[UINavigationController alloc] initWithRootViewController:web]', fallback)
-        self.assertIn('[self presentViewController:nav animated:YES completion:nil]', fallback)
+        self.assertIn('[self sniffNativeStreamFromPageResult:self.result playerGeneration:self.playerGeneration]', fallback)
+        self.assertNotIn('MediaWebViewController', fallback)
         self.assertNotIn('openURL:', route)
 
     def test_no_media_error_offers_the_original_episode_page_without_exposing_its_url(self):
         self.assertIn('MediaPlaybackEpisodePageFallbackURL', self.playback)
         self.assertIn('pluginCode isEqualToString:@"NO_MEDIA"', self.playback)
         self.assertIn('owner.episodeWebFallbackAvailable=pageURL!=nil', self.playback)
-        self.assertIn('@selector(openEpisodePageWebFallback)', self.playback)
+        self.assertIn('[owner sniffNativeStreamFromPageResult:sniffCandidate playerGeneration:++owner.playerGeneration]', self.playback)
         self.assertIn('episode_web_fallback_available', self.playback)
-        self.assertIn('打开分集网页尝试播放', self.playback)
         self.assertNotIn('fields[@"episode_url"]', self.playback)
 
     def test_extensionless_signed_media_endpoints_use_native_playback_classification(self):

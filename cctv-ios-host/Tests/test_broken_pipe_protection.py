@@ -33,7 +33,8 @@ int main(int argc,char **argv) {
   close(pair[1]);int result=(int)send(pair[0],"x",1,0);int code=errno;close(pair[0]);
   return result==-1 && code==EPIPE?0:16;
 }'''
-        with tempfile.TemporaryDirectory() as directory:
+        exec_tmp = root / 'build'; exec_tmp.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=str(exec_tmp)) as directory:
             path = Path(directory)
             (path / 'protection.c').write_text(source)
             built = subprocess.run(['cc', '-std=c11', '-D_POSIX_C_SOURCE=200809L',

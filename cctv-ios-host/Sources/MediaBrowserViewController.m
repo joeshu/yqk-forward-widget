@@ -417,8 +417,8 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
     self.spinner=[[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];self.spinner.hidesWhenStopped=YES;self.spinner.translatesAutoresizingMaskIntoConstraints=NO;[self.view addSubview:self.spinner];
     [NSLayoutConstraint activateConstraints:@[[self.spinner.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],[self.spinner.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor]]];
 }
-- (void)dealloc {[NSNotificationCenter.defaultCenter removeObserver:self];[self.client cancel];self.inlinePlaybackController=nil;}
-- (void)teardownInlinePlayback {MediaPlaybackViewController *player=self.inlinePlaybackController;if(!player)return;self.inlinePlaybackController=nil;self.playButton.hidden=NO;self.contentStack.layoutMargins=UIEdgeInsetsMake(0,14,20,14);[player willMoveToParentViewController:nil];[player.view removeFromSuperview];[player removeFromParentViewController];}
+- (void)dealloc {[NSNotificationCenter.defaultCenter removeObserver:self];[self.client cancel];[self teardownInlinePlayback];}
+- (void)teardownInlinePlayback {MediaPlaybackViewController *player=self.inlinePlaybackController;if(!player)return;self.inlinePlaybackController=nil;self.playButton.hidden=NO;self.contentStack.layoutMargins=UIEdgeInsetsMake(0,14,20,14);[player teardownAfterScreenExit];[player teardownCicadaAdapter];[player willMoveToParentViewController:nil];[player.view removeFromSuperview];[self.inlinePlaybackDock removeFromSuperview];self.inlinePlaybackDock=nil;[player removeFromParentViewController];}
 - (void)goBack {[self.navigationController popViewControllerAnimated:YES];}
 - (void)viewDidAppear:(BOOL)animated {[super viewDidAppear:animated];[self.inlinePlaybackController resumeAfterVisibilityChange];}
 - (void)viewDidDisappear:(BOOL)animated {[super viewDidDisappear:animated];[self.inlinePlaybackController pauseForBackground];if(self.isMovingFromParentViewController){self.generation++;[self.client cancel];[self teardownInlinePlayback];}}

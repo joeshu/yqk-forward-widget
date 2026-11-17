@@ -660,6 +660,7 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
             toggleAll.titleLabel.font=[UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
             toggleAll.tintColor=HostAccent();
             [toggleAll addTarget:self action:@selector(toggleSelectAllCandidates) forControlEvents:UIControlEventTouchUpInside];
+            [toggleAll.heightAnchor constraintGreaterThanOrEqualToConstant:44].active=YES;
             UIStackView *policyRow=[[UIStackView alloc] initWithArrangedSubviews:@[self.duplicatePolicy,toggleAll]];
             policyRow.axis=UILayoutConstraintAxisHorizontal;
             policyRow.spacing=10;
@@ -693,7 +694,7 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
             editBtn.titleLabel.font=[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
             editBtn.tintColor=[row[@"selected"] boolValue]?HostAccent():HostSecondaryText();
             [editBtn sizeToFit];
-            editBtn.frame=CGRectMake(0,0,MAX(62,CGRectGetWidth(editBtn.bounds)+10),36);
+            editBtn.frame=CGRectMake(0,0,MAX(62,CGRectGetWidth(editBtn.bounds)+10),44);
             [editBtn addTarget:self action:@selector(candidateActionButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
             cell.accessoryView=editBtn;
         }
