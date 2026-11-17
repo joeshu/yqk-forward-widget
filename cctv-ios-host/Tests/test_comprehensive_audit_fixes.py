@@ -128,7 +128,7 @@ class ComprehensiveAuditRegressionTests(unittest.TestCase):
         preview_ch = self.subscriptions.split("- (void)previewChannel:(NSDictionary *)ch {", 1)[1].split(
             "\n- (void)stopPreview", 1
         )[0]
-        self.assertIn("MediaPlaybackScopedHeadersForRequest", preview_ch)
+        self.assertIn("MediaPlaybackHeadersScopedToURL(rawHeaders,previewURL,previewURL)", preview_ch)
         self.assertIn('@"AVURLAssetHTTPHeaderFieldsKey"', preview_ch)
 
     def test_07_web_playback_disabled_and_routed_to_native_stream_sniffer(self):
