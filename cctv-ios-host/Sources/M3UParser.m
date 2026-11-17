@@ -71,16 +71,66 @@ static NSURL *M3UNormalizedLoopbackURL(NSURL *url, NSURL *baseURL) {
 
 @implementation M3UChannel
 - (NSURL *)catchupURLForStart:(NSDate *)start end:(NSDate *)end {
-    if(!self.catchupSource.length||!start||!end||[end timeIntervalSinceDate:start]<=0)return nil;
+    NSDate *now=[NSDate date];
+    if(!self.catchupSource.length||!start||!end||[start timeIntervalSinceDate:now]>60)return nil;
+    NSDate *effectiveEnd=([end timeIntervalSinceDate:now]>0 && [start timeIntervalSinceDate:now]<-1)?now:end;
+    if([effectiveEnd timeIntervalSinceDate:start]<=0)return nil;
     if(self.catchupDays>0&&[start timeIntervalSinceNow]<-self.catchupDays*86400)return nil;
     NSTimeInterval shift=self.tvgShift*3600;
     NSString *address=self.catchupSource;
-    NSDictionary *values=@{@"{utc}":[NSString stringWithFormat:@"%.0f",start.timeIntervalSince1970+shift],@"{utcend}":[NSString stringWithFormat:@"%.0f",end.timeIntervalSince1970+shift],@"{duration}":[NSString stringWithFormat:@"%.0f",[end timeIntervalSinceDate:start]],@"${start}":[NSString stringWithFormat:@"%.0f",start.timeIntervalSince1970+shift],@"${end}":[NSString stringWithFormat:@"%.0f",end.timeIntervalSince1970+shift]};
+    NSString *startSec=[NSString stringWithFormat:@"%.0f",start.timeIntervalSince1970+shift];
+    NSString *endSec=[NSString stringWithFormat:@"%.0f",effectiveEnd.timeIntervalSince1970+shift];
+    NSString *durationSec=[NSString stringWithFormat:@"%.0f",[effectiveEnd timeIntervalSinceDate:start]];
+    NSString *nowSec=[NSString stringWithFormat:@"%.0f",now.timeIntervalSince1970+shift];
+    NSString *offsetSec=[NSString stringWithFormat:@"%.0f",MAX(0,[now timeIntervalSinceDate:start])];
+    NSDictionary *values=@{
+        @"{utc}":startSec,@"${utc}":startSec,@"{start}":startSec,@"${start}":startSec,@"{timestamp}":startSec,@"${timestamp}":startSec,
+        @"{utcend}":endSec,@"${utcend}":endSec,@"{end}":endSec,@"${end}":endSec,
+        @"{duration}":durationSec,@"${duration}":durationSec,
+        @"{lutc}":nowSec,@"${lutc}":nowSec,@"{now}":nowSec,@"${now}":nowSec,
+        @"{offset}":offsetSec,@"${offset}":offsetSec
+    };
     for(NSString *token in values)address=[address stringByReplacingOccurrencesOfString:token withString:values[token]];
-    NSDateFormatter *formatter=[NSDateFormatter new];formatter.locale=[NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];formatter.timeZone=[NSTimeZone timeZoneForSecondsFromGMT:0];NSDictionary *dateTokens=@{@"{Y}":@"yyyy",@"{m}":@"MM",@"{d}":@"dd",@"{H}":@"HH",@"{M}":@"mm",@"{S}":@"ss"};
-    for(NSString *token in dateTokens){formatter.dateFormat=dateTokens[token];address=[address stringByReplacingOccurrencesOfString:token withString:[formatter stringFromDate:[start dateByAddingTimeInterval:shift]]];}
+    static NSCalendar *utcCalendar=nil;
+    static dispatch_once_t calOnce;
+    dispatch_once(&calOnce,^{
+        utcCalendar=[[NSCalendar alloc] initWithCalendarIdentifier:NSCalendarIdentifierGregorian];
+        utcCalendar.timeZone=[NSTimeZone timeZoneForSecondsFromGMT:0];
+    });
+    NSDate *shiftedStart=[start dateByAddingTimeInterval:shift];
+    NSDate *shiftedEnd=[effectiveEnd dateByAddingTimeInterval:shift];
+    NSDateComponents *comps=nil,*endComps=nil;
+    @synchronized(utcCalendar){
+        NSCalendarUnit units=(NSCalendarUnitYear|NSCalendarUnitMonth|NSCalendarUnitDay|NSCalendarUnitHour|NSCalendarUnitMinute|NSCalendarUnitSecond);
+        comps=[utcCalendar components:units fromDate:shiftedStart];
+        endComps=[utcCalendar components:units fromDate:shiftedEnd];
+    }
+    NSString *compactStart=[NSString stringWithFormat:@"%04ld%02ld%02ld%02ld%02ld%02ld",(long)comps.year,(long)comps.month,(long)comps.day,(long)comps.hour,(long)comps.minute,(long)comps.second];
+    NSString *compactEnd=[NSString stringWithFormat:@"%04ld%02ld%02ld%02ld%02ld%02ld",(long)endComps.year,(long)endComps.month,(long)endComps.day,(long)endComps.hour,(long)endComps.minute,(long)endComps.second];
+    NSDictionary *dateTokens=@{
+        @"{YmdHMS}":compactStart,@"${YmdHMS}":compactStart,@"{utc:YmdHMS}":compactStart,
+        @"{(b)yyyyMMddHHmmss}":compactStart,@"${(b)yyyyMMddHHmmss}":compactStart,@"{utc:yyyyMMddHHmmss}":compactStart,
+        @"{utcend:YmdHMS}":compactEnd,@"{(e)yyyyMMddHHmmss}":compactEnd,@"${(e)yyyyMMddHHmmss}":compactEnd,@"{utcend:yyyyMMddHHmmss}":compactEnd,
+        @"{Yend}":[NSString stringWithFormat:@"%04ld",(long)endComps.year],
+        @"{mend}":[NSString stringWithFormat:@"%02ld",(long)endComps.month],
+        @"{dend}":[NSString stringWithFormat:@"%02ld",(long)endComps.day],
+        @"{Hend}":[NSString stringWithFormat:@"%02ld",(long)endComps.hour],
+        @"{Mend}":[NSString stringWithFormat:@"%02ld",(long)endComps.minute],
+        @"{Send}":[NSString stringWithFormat:@"%02ld",(long)endComps.second],
+        @"{Y}":[NSString stringWithFormat:@"%04ld",(long)comps.year],@"${Y}":[NSString stringWithFormat:@"%04ld",(long)comps.year],
+        @"{m}":[NSString stringWithFormat:@"%02ld",(long)comps.month],@"${m}":[NSString stringWithFormat:@"%02ld",(long)comps.month],
+        @"{d}":[NSString stringWithFormat:@"%02ld",(long)comps.day],@"${d}":[NSString stringWithFormat:@"%02ld",(long)comps.day],
+        @"{H}":[NSString stringWithFormat:@"%02ld",(long)comps.hour],@"${H}":[NSString stringWithFormat:@"%02ld",(long)comps.hour],
+        @"{M}":[NSString stringWithFormat:@"%02ld",(long)comps.minute],@"${M}":[NSString stringWithFormat:@"%02ld",(long)comps.minute],
+        @"{S}":[NSString stringWithFormat:@"%02ld",(long)comps.second],@"${S}":[NSString stringWithFormat:@"%02ld",(long)comps.second]
+    };
+    for(NSString *token in dateTokens){address=[address stringByReplacingOccurrencesOfString:token withString:dateTokens[token]];}
     if([address containsString:@"{"]||[address containsString:@"}"])return nil;
-    if([self.catchupMode isEqual:@"append"])address=[self.url stringByAppendingString:address];
+    NSString *mode=self.catchupMode.lowercaseString?:@"default";
+    if([mode isEqual:@"append"]||[mode isEqual:@"shift"]||[mode isEqual:@"timeshift"]||[mode isEqual:@"flussonic"]){
+        if([self.url containsString:@"?"]&&[address hasPrefix:@"?"])address=[self.url stringByAppendingString:[@"&" stringByAppendingString:[address substringFromIndex:1]]];
+        else address=[self.url stringByAppendingString:address];
+    }
     NSURL *url=[NSURL URLWithString:address relativeToURL:[NSURL URLWithString:self.url]].absoluteURL;
     return [@[@"http",@"https"] containsObject:url.scheme.lowercaseString]?url:nil;
 }
@@ -165,7 +215,7 @@ static NSURL *M3UNormalizedLoopbackURL(NSURL *url, NSURL *baseURL) {
         NSString *line = [raw stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
         if (!line.length) return;
 
-        if([line hasPrefix:@"#EXTM3U"]){defaultMode=[self attribute:@"catchup" in:line];defaultSource=[self attribute:@"catchup-source" in:line];defaultDays=[[self attribute:@"catchup-days" in:line] doubleValue];defaultShift=[[self attribute:@"tvg-shift" in:line] doubleValue];return;}
+        if([line hasPrefix:@"#EXTM3U"]){defaultMode=[self attribute:@"catchup" in:line]?:[self attribute:@"catchup-type" in:line];defaultSource=[self attribute:@"catchup-source" in:line];NSString *hdrDays=[self attribute:@"catchup-days" in:line]?:([self attribute:@"timeshift" in:line]?:[self attribute:@"tvg-rec" in:line]);defaultDays=[hdrDays doubleValue];defaultShift=[[self attribute:@"tvg-shift" in:line] doubleValue];if(!defaultSource.length&&[@[@"shift",@"timeshift",@"flussonic"] containsObject:defaultMode.lowercaseString?:@""])defaultSource=@"?utc={utc}&lutc={lutc}";return;}
         if ([line hasPrefix:@"#EXTVLCOPT:"]) {
             M3UAddVLCOption(pendingHeaders, [line substringFromIndex:[@"#EXTVLCOPT:" length]]);
             return;
@@ -183,7 +233,7 @@ static NSURL *M3UNormalizedLoopbackURL(NSURL *url, NSURL *baseURL) {
             if([tail containsString:@"://"]){pendingName=label;line=tail;}
         }
         if ([line hasPrefix:@"#EXTINF"]) {
-            catchupMode=[self attribute:@"catchup" in:line]?:defaultMode;catchupSource=[self attribute:@"catchup-source" in:line]?:defaultSource;NSString *days=[self attribute:@"catchup-days" in:line],*shift=[self attribute:@"tvg-shift" in:line];catchupDays=days.length?days.doubleValue:defaultDays;tvgShift=shift.length?shift.doubleValue:defaultShift;
+            catchupMode=([self attribute:@"catchup" in:line]?:[self attribute:@"catchup-type" in:line])?:defaultMode;catchupSource=[self attribute:@"catchup-source" in:line]?:defaultSource;NSString *days=[self attribute:@"catchup-days" in:line]?:([self attribute:@"timeshift" in:line]?:[self attribute:@"tvg-rec" in:line]),*shift=[self attribute:@"tvg-shift" in:line];catchupDays=days.length?days.doubleValue:defaultDays;tvgShift=shift.length?shift.doubleValue:defaultShift;if(!catchupSource.length&&[@[@"shift",@"timeshift",@"flussonic"] containsObject:catchupMode.lowercaseString?:@""])catchupSource=@"?utc={utc}&lutc={lutc}";
             // Header directives belong to the next URL. Drop any directives
             // left behind by a malformed entry so they cannot leak to another
             // channel after a missing URL line.

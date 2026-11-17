@@ -267,12 +267,19 @@
     [self stopAutoRefreshTimer];
 }
 
+- (void)dealloc {
+    [self.autoRefreshTimer invalidate];
+    self.autoRefreshTimer = nil;
+}
+
 - (void)startAutoRefreshTimer {
     [self stopAutoRefreshTimer];
     if (self.autoRefreshInterval <= 0.1) return;
     __weak typeof(self) weakSelf = self;
-    self.autoRefreshTimer = [NSTimer scheduledTimerWithTimeInterval:self.autoRefreshInterval repeats:YES block:^(__unused NSTimer *timer) {
-        [weakSelf refreshSnapshot];
+    self.autoRefreshTimer = [NSTimer scheduledTimerWithTimeInterval:self.autoRefreshInterval repeats:YES block:^(NSTimer *timer) {
+        PlaybackInfoViewController *owner = weakSelf;
+        if (!owner) { [timer invalidate]; return; }
+        [owner refreshSnapshot];
     }];
 }
 

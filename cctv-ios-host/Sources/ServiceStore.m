@@ -234,16 +234,25 @@ static NSCache<NSString *,NSDictionary *> *ServiceEntryAnalysisCache(void){
 + (NSInteger)inferredPortInCode:(NSString *)source {
     NSString *code=ServiceCodeWithoutComments(source);
     if(!code.length)return 0;
-    NSArray<NSString *> *patterns=@[
-        @"(?is)add_argument\\s*\\(\\s*['\\\"](?:--port|-p|port)['\\\"][^\\n)]*?default\\s*=\\s*['\\\"]?(\\d{4,5})['\\\"]?",
-        @"(?is)(?:os\\.environ\\.get|os\\.getenv)\\s*\\(\\s*['\\\"](?:CCTVHOST_PORT|PORT)['\\\"]\\s*,\\s*['\\\"]?(\\d{4,5})['\\\"]?\\s*\\)",
-        @"(?is)process\\.env\\.(?:CCTVHOST_PORT|PORT)\\s*(?:\\|\\||\\?\\?)\\s*['\\\"]?(\\d{4,5})['\\\"]?",
-        @"(?is)(?:ThreadingHTTPServer|HTTPServer|TCPServer|ThreadingTCPServer)\\s*\\(\\s*\\([^,)]+,\\s*(\\d{4,5})\\s*\\)",
-        @"(?is)(?:app|server|uvicorn|bottle|web)\\.(?:run|run_app|listen)\\s*\\([^\\n)]*?(?:port\\s*=\\s*|:\\s*|(?:^|[,\\(\\s]))(\\d{4,5})\\b",
-        @"(?m)^\\s*(?:DEFAULT_PORT|SERVER_PORT|LISTEN_PORT|PORT|port)\\s*=\\s*(\\d{4,5})\\b"
-    ];
-    for(NSString *pattern in patterns){
-        NSRegularExpression *re=[NSRegularExpression regularExpressionWithPattern:pattern options:0 error:NULL];
+    static NSArray<NSRegularExpression *> *compiledPatterns=nil;
+    static dispatch_once_t portRegexOnce;
+    dispatch_once(&portRegexOnce,^{
+        NSArray<NSString *> *patterns=@[
+            @"(?is)add_argument\\s*\\(\\s*['\\\"](?:--port|-p|port)['\\\"][^\\n)]*?default\\s*=\\s*['\\\"]?(\\d{4,5})['\\\"]?",
+            @"(?is)(?:os\\.environ\\.get|os\\.getenv)\\s*\\(\\s*['\\\"](?:CCTVHOST_PORT|PORT)['\\\"]\\s*,\\s*['\\\"]?(\\d{4,5})['\\\"]?\\s*\\)",
+            @"(?is)process\\.env\\.(?:CCTVHOST_PORT|PORT)\\s*(?:\\|\\||\\?\\?)\\s*['\\\"]?(\\d{4,5})['\\\"]?",
+            @"(?is)(?:ThreadingHTTPServer|HTTPServer|TCPServer|ThreadingTCPServer)\\s*\\(\\s*\\([^,)]+,\\s*(\\d{4,5})\\s*\\)",
+            @"(?is)(?:app|server|uvicorn|bottle|web)\\.(?:run|run_app|listen)\\s*\\([^\\n)]*?(?:port\\s*=\\s*|:\\s*|(?:^|[,\\(\\s]))(\\d{4,5})\\b",
+            @"(?m)^\\s*(?:DEFAULT_PORT|SERVER_PORT|LISTEN_PORT|PORT|port)\\s*=\\s*(\\d{4,5})\\b"
+        ];
+        NSMutableArray<NSRegularExpression *> *built=[NSMutableArray arrayWithCapacity:patterns.count];
+        for(NSString *pattern in patterns){
+            NSRegularExpression *re=[NSRegularExpression regularExpressionWithPattern:pattern options:0 error:NULL];
+            if(re)[built addObject:re];
+        }
+        compiledPatterns=[built copy];
+    });
+    for(NSRegularExpression *re in compiledPatterns){
         NSTextCheckingResult *match=[re firstMatchInString:code options:0 range:NSMakeRange(0,code.length)];
         if(match&&match.numberOfRanges>1){
             NSInteger port=[[code substringWithRange:[match rangeAtIndex:1]] integerValue];
@@ -292,8 +301,13 @@ static NSCache<NSString *,NSDictionary *> *ServiceEntryAnalysisCache(void){
     NSString *lower=routeSource.lowercaseString;
     BOOL m3uEvidence=[lower containsString:@"#extm3u"]||[lower containsString:@"#extinf"]||[lower containsString:@"m3u"]||[lower containsString:@"playlist"];
     if(!m3uEvidence)return nil;
-    NSString *routePattern=@"(?is)(?:@[a-z_][a-z0-9_.]*\\.(?:route|get|post|put)\\s*\\(|(?:[a-z_$][a-z0-9_$]*(?:\\.[a-z_$][a-z0-9_$]*)*)\\.(?:route|get|post|put|addroute|add_route|addget|add_get)\\s*\\(|(?:add_url_rule|add_get|add_route)\\s*\\(|(?:(?:self|request)\\.)?path\\s*(?:==|in)\\s*|(?:route|playlist(?:_path)?|m3u_path)\\s*=\\s*)['\\\"](/[^'\\\"?#\\\\\\s]{1,126})['\\\"]";
-    NSError *error=nil;NSRegularExpression *routes=[NSRegularExpression regularExpressionWithPattern:routePattern options:0 error:&error];if(!routes||error)return nil;
+    static NSRegularExpression *routes=nil;
+    static dispatch_once_t m3uRouteOnce;
+    dispatch_once(&m3uRouteOnce,^{
+        NSString *routePattern=@"(?is)(?:@[a-z_][a-z0-9_.]*\\.(?:route|get|post|put)\\s*\\(|(?:[a-z_$][a-z0-9_$]*(?:\\.[a-z_$][a-z0-9_$]*)*)\\.(?:route|get|post|put|addroute|add_route|addget|add_get)\\s*\\(|(?:add_url_rule|add_get|add_route)\\s*\\(|(?:(?:self|request)\\.)?path\\s*(?:==|in)\\s*|(?:route|playlist(?:_path)?|m3u_path)\\s*=\\s*)['\\\"](/[^'\\\"?#\\\\\\s]{1,126})['\\\"]";
+        routes=[NSRegularExpression regularExpressionWithPattern:routePattern options:0 error:NULL];
+    });
+    if(!routes)return nil;
     NSArray<NSTextCheckingResult *> *matches=[routes matchesInString:routeSource options:0 range:NSMakeRange(0,routeSource.length)];
     NSSet *tokens=[NSSet setWithArray:@[@"m3u",@"playlist",@"live",@"channel",@"iptv",@"tv"]];
     NSArray *preferred=@[@"/all.m3u",@"/all.m3u8",@"/m3u",@"/playlist.m3u",@"/playlist.m3u8",@"/live.m3u",@"/live.m3u8",@"/channels.m3u",@"/tv.m3u",@"/iptv.m3u",@"/index.m3u"];
@@ -309,8 +323,13 @@ static NSCache<NSString *,NSDictionary *> *ServiceEntryAnalysisCache(void){
     NSString *lower=routeSource.lowercaseString;
     BOOL epgEvidence=[lower containsString:@"epg"]||[lower containsString:@"xmltv"]||[lower containsString:@"x-tvg-url"]||[lower containsString:@"url-tvg"]||[lower containsString:@"tvg-url"]||[lower containsString:@"<programme"];
     if(!epgEvidence)return nil;
-    NSString *routePattern=@"(?is)(?:@[a-z_][a-z0-9_.]*\\.(?:route|get|post|put)\\s*\\(|(?:[a-z_$][a-z0-9_$]*(?:\\.[a-z_$][a-z0-9_$]*)*)\\.(?:route|get|post|put|addroute|add_route|addget|add_get)\\s*\\(|(?:add_url_rule|add_get|add_route)\\s*\\(|(?:(?:self|request)\\.)?path\\s*(?:==|in)\\s*|(?:epg(?:_path|_route)?|xmltv(?:_path|_route)?|guide_path)\\s*=\\s*|(?:x-tvg-url|url-tvg|tvg-url|epg-url)\\s*=\\s*['\\\"]?(?:https?://[^'\\\"\\s/]+)?)['\\\"]?(/[^'\\\"?#\\\\\\s,;]{1,126})";
-    NSError *error=nil;NSRegularExpression *routes=[NSRegularExpression regularExpressionWithPattern:routePattern options:0 error:&error];if(!routes||error)return nil;
+    static NSRegularExpression *routes=nil;
+    static dispatch_once_t epgRouteOnce;
+    dispatch_once(&epgRouteOnce,^{
+        NSString *routePattern=@"(?is)(?:@[a-z_][a-z0-9_.]*\\.(?:route|get|post|put)\\s*\\(|(?:[a-z_$][a-z0-9_$]*(?:\\.[a-z_$][a-z0-9_$]*)*)\\.(?:route|get|post|put|addroute|add_route|addget|add_get)\\s*\\(|(?:add_url_rule|add_get|add_route)\\s*\\(|(?:(?:self|request)\\.)?path\\s*(?:==|in)\\s*|(?:epg(?:_path|_route)?|xmltv(?:_path|_route)?|guide_path)\\s*=\\s*|(?:x-tvg-url|url-tvg|tvg-url|epg-url)\\s*=\\s*['\\\"]?(?:https?://[^'\\\"\\s/]+)?)['\\\"]?(/[^'\\\"?#\\\\\\s,;]{1,126})";
+        routes=[NSRegularExpression regularExpressionWithPattern:routePattern options:0 error:NULL];
+    });
+    if(!routes)return nil;
     NSArray<NSTextCheckingResult *> *matches=[routes matchesInString:routeSource options:0 range:NSMakeRange(0,routeSource.length)];
     NSSet *tokens=[NSSet setWithArray:@[@"epg",@"xmltv",@"guide",@"tv.xml",@".xml"]];
     NSArray *preferred=@[@"/epg.xml",@"/epg.xml.gz",@"/xmltv.xml",@"/epg",@"/tv.xml",@"/guide.xml"];

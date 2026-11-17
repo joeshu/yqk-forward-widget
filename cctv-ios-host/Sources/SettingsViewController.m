@@ -768,15 +768,20 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
             SettingsViewController *owner=weakSelf;
             if(!owner)return;
             owner.checkingUpdate=NO;
-            NSDictionary *json=[NSJSONSerialization JSONObjectWithData:data?:[NSData data] options:0 error:NULL];
+            NSDictionary *json=(data.length&&data.length<=1024*1024)?[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL]:nil;
             NSString *name=[json isKindOfClass:NSDictionary.class]&&[json[@"name"] isKindOfClass:NSString.class]?json[@"name"]:@"";
             NSString *htmlURL=[json isKindOfClass:NSDictionary.class]&&[json[@"html_url"] isKindOfClass:NSString.class]?json[@"html_url"]:@"";
             NSString *published=[json isKindOfClass:NSDictionary.class]&&[json[@"published_at"] isKindOfClass:NSString.class]?json[@"published_at"]:@"";
             NSString *latestVersion=nil,*latestBuild=nil;
-            NSRegularExpression *versionPattern=[NSRegularExpression regularExpressionWithPattern:@"\\d+(\\.\\d+){1,2}" options:0 error:NULL];
+            static NSRegularExpression *versionPattern=nil;
+            static NSRegularExpression *buildPattern=nil;
+            static dispatch_once_t updateRegexOnce;
+            dispatch_once(&updateRegexOnce,^{
+                versionPattern=[NSRegularExpression regularExpressionWithPattern:@"\\d+(\\.\\d+){1,2}" options:0 error:NULL];
+                buildPattern=[NSRegularExpression regularExpressionWithPattern:@"\\((\\d+)\\)" options:0 error:NULL];
+            });
             NSTextCheckingResult *versionMatch=[versionPattern firstMatchInString:name options:0 range:NSMakeRange(0,name.length)];
             if(versionMatch)latestVersion=[name substringWithRange:versionMatch.range];
-            NSRegularExpression *buildPattern=[NSRegularExpression regularExpressionWithPattern:@"\\((\\d+)\\)" options:0 error:NULL];
             NSTextCheckingResult *buildMatch=[buildPattern firstMatchInString:name options:0 range:NSMakeRange(0,name.length)];
             if(buildMatch&&buildMatch.numberOfRanges>1)latestBuild=[name substringWithRange:[buildMatch rangeAtIndex:1]];
             NSString *installed=[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"]?:@"开发版";

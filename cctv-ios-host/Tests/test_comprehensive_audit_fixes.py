@@ -1,12 +1,16 @@
 """Regression tests for the 2026-11 comprehensive full-project audit and fixes (Round 1 & Round 2)."""
 import importlib.util
 from pathlib import Path
+import sys
 import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
 REPO = ROOT.parent
 SOURCES = ROOT / "Sources"
+for _p in (ROOT / "Plugins", ROOT / "Scripts"):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
 
 def read_root_source() -> str:

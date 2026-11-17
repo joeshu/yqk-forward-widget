@@ -90,6 +90,7 @@
     self.snapshot=[self values];
 }
 - (void)metadataChanged {
+    if(!NSThread.isMainThread){__weak typeof(self) weakSelf=self;dispatch_async(dispatch_get_main_queue(),^{[weakSelf metadataChanged];});return;}
     if(self.editingResource||self.saving||self.suppressMetadataReload)return;
     [self loadFields];
     if(self.isViewLoaded)[self.tableView reloadData];

@@ -652,7 +652,11 @@ static void TVBoxNotifyAdaptationMonitorCatalog(NSString *name, NSString *source
             NSData *hData=normalizedEntries[helperName];
             NSString *hText=hData.length?[[NSString alloc] initWithData:hData encoding:NSUTF8StringEncoding]:nil;
             if(!hText.length)continue;
-            NSRegularExpression *re=[NSRegularExpression regularExpressionWithPattern:@"https?://[^\\s\"'<>\\)]+\\.json" options:NSRegularExpressionCaseInsensitive error:NULL];
+            static NSRegularExpression *re=nil;
+            static dispatch_once_t originJsonRegexOnce;
+            dispatch_once(&originJsonRegexOnce,^{
+                re=[NSRegularExpression regularExpressionWithPattern:@"https?://[^\\s\"'<>\\)]+\\.json" options:NSRegularExpressionCaseInsensitive error:NULL];
+            });
             NSTextCheckingResult *m=[re firstMatchInString:hText options:0 range:NSMakeRange(0,hText.length)];
             if(m){
                 NSString *found=[hText substringWithRange:m.range];

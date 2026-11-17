@@ -1000,6 +1000,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     if(self.progressTimeObserver&&self.player){@try{[self.player removeTimeObserver:self.progressTimeObserver];}@catch(NSException *exception){}self.progressTimeObserver=nil;}
     if(self.idleTimerOverrideActive){BOOL previousIdleTimerDisabled=self.previousIdleTimerDisabled;if(NSThread.isMainThread)UIApplication.sharedApplication.idleTimerDisabled=previousIdleTimerDisabled;else dispatch_async(dispatch_get_main_queue(),^{UIApplication.sharedApplication.idleTimerDisabled=previousIdleTimerDisabled;});}
     if(self.observingPlayer){@try{[self.player removeObserver:self forKeyPath:@"timeControlStatus" context:CCTVPlayerTimeControlContext];}@catch(NSException *exception){}}
+    [self.streamSniffTask cancel];self.streamSniffTask=nil;
     [self stopObservingCurrentPlayback];
     [NSNotificationCenter.defaultCenter removeObserver:self];[self.client cancel];[self.hedgedClient cancel];self.hedgedClient=nil;self.prefetchGeneration++;[self.prefetchClient cancel];[self.prefetchedAsset cancelLoading];[self.player pause];[self teardownCicadaAdapterUpdatingUI:NO];
 }
@@ -1022,7 +1023,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
         [RuntimeDiagnostics.shared recordEvent:@"playback_progress_summary" category:@"playback" fields:@{@"playback_attempt_id":self.playbackAttemptID,@"correlation_id":self.diagnosticTraceID?:@"",@"first_frame_observed":@(self.videoFrameReady),@"observed_playing_seconds":@(_progressEvidence.observed),@"progress_samples":@(_progressEvidence.samples),@"stall_notifications":@(self.diagnosticStallCount)}];
     }
     AVPlayerItem *item=self.observedItem;
-    if(self.observingPlayerControllerReady){[self.playerController removeObserver:self forKeyPath:@"readyForDisplay" context:CCTVPlayerControllerReadyContext];self.observingPlayerControllerReady=NO;}
+    if(self.observingPlayerControllerReady){@try{[self.playerController removeObserver:self forKeyPath:@"readyForDisplay" context:CCTVPlayerControllerReadyContext];}@catch(NSException *exception){}self.observingPlayerControllerReady=NO;}
     if(self.observingVideoLayer&&self.videoLayer){@try{[self.videoLayer removeObserver:self forKeyPath:@"readyForDisplay" context:CCTVPlayerLayerReadyContext];}@catch(NSException *exception){}self.observingVideoLayer=NO;}
     self.videoLayer=nil;
     if(item){@try{[item removeObserver:self forKeyPath:@"status" context:CCTVPlayerItemStatusContext];}@catch(NSException *exception){}[NSNotificationCenter.defaultCenter removeObserver:self name:AVPlayerItemFailedToPlayToEndTimeNotification object:item];[NSNotificationCenter.defaultCenter removeObserver:self name:AVPlayerItemPlaybackStalledNotification object:item];[NSNotificationCenter.defaultCenter removeObserver:self name:AVPlayerItemDidPlayToEndTimeNotification object:item];self.observedItem=nil;}
@@ -1517,7 +1518,11 @@ static NSString *MediaPlaybackExtractNativeStreamFromHTML(NSString *body) {
         }
     }
     if([unescaped containsString:@"player_"]||[unescaped containsString:@"MacPlayerConfig"]||[unescaped containsString:@"videoInfo"]||[unescaped containsString:@"ConFig"]){
-        NSRegularExpression *paRe=[NSRegularExpression regularExpressionWithPattern:@"(?:player_[a-zA-Z0-9_]+|MacPlayerConfig|videoInfo|playInfo|ConFig)\\s*=\\s*(\\{[^\\n;]+\\})" options:NSRegularExpressionCaseInsensitive error:NULL];
+        static NSRegularExpression *paRe = nil;
+        static dispatch_once_t paOnce;
+        dispatch_once(&paOnce, ^{
+            paRe = [NSRegularExpression regularExpressionWithPattern:@"(?:player_[a-zA-Z0-9_]+|MacPlayerConfig|videoInfo|playInfo|ConFig)\\s*=\\s*(\\{[^\\n;]+\\})" options:NSRegularExpressionCaseInsensitive error:NULL];
+        });
         NSTextCheckingResult *paM=[paRe firstMatchInString:unescaped options:0 range:NSMakeRange(0,unescaped.length)];
         if(paM&&paM.numberOfRanges>1){
             NSString *jStr=[unescaped substringWithRange:[paM rangeAtIndex:1]];
@@ -1565,27 +1570,32 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
             NSMutableURLRequest *pReq=[NSMutableURLRequest requestWithURL:pURL cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:3.0];
             [pReq setValue:@"okhttp/4.9.1" forHTTPHeaderField:@"User-Agent"];
             dispatch_semaphore_t sem=dispatch_semaphore_create(0);
-            [[sess dataTaskWithRequest:pReq completionHandler:^(NSData *d,NSURLResponse *r,NSError *e){
-                if(!e&&d.length){
+            NSURLSessionDataTask *pTask=[sess dataTaskWithRequest:pReq completionHandler:^(NSData *d,NSURLResponse *r,NSError *e){
+                if(!e&&d.length&&d.length<=2*1024*1024){
                     NSString *txt=[[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding];
                     NSString *cand=MediaPlaybackExtractNativeStreamFromHTML(txt);
-                    if(cand.length&&![cand.lowercaseString containsString:@"lzcdn"])foundStream=cand;
+                    if(cand.length&&![cand.lowercaseString containsString:@"lzcdn"]){
+                        @synchronized(sess){if(!foundStream.length)foundStream=cand;}
+                    }
                 }
                 dispatch_semaphore_signal(sem);
-            }] resume];
-            dispatch_semaphore_wait(sem,dispatch_time(DISPATCH_TIME_NOW,(int64_t)(3.2*NSEC_PER_SEC)));
+            }];
+            [pTask resume];
+            if(dispatch_semaphore_wait(sem,dispatch_time(DISPATCH_TIME_NOW,(int64_t)(2.5*NSEC_PER_SEC)))!=0)[pTask cancel];
         }
         NSString *cleanTitle=[[vodTitle?:@"" stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] stringByReplacingOccurrencesOfString:@"《" withString:@""];
         cleanTitle=[cleanTitle stringByReplacingOccurrencesOfString:@"》" withString:@""];
-        if(!foundStream.length&&cleanTitle.length>=2&&![@[@"影片",@"未知",@"影视播放"] containsObject:cleanTitle]){
+        BOOL hasFound=NO;@synchronized(sess){hasFound=foundStream.length>0;}
+        if(!hasFound&&cleanTitle.length>=2&&![@[@"影片",@"未知",@"影视播放"] containsObject:cleanTitle]){
             NSString *kw=[cleanTitle stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet]?:@"";
             for(NSString *cms in @[@"https://caiji.dyttzyapi.com/api.php/provide/vod/",@"https://bfzyapi.com/api.php/provide/vod/",@"https://360zy.com/api.php/provide/vod/",@"https://api.ffzyapi.com/api.php/provide/vod/",@"https://suoniapi.com/api.php/provide/vod/",@"https://ikunzyapi.com/api.php/provide/vod/"]){
-                if(foundStream.length)break;
+                @synchronized(sess){hasFound=foundStream.length>0;}
+                if(hasFound)break;
                 NSURL *cURL=[NSURL URLWithString:[NSString stringWithFormat:@"%@?ac=detail&wd=%@",cms,kw]];
                 if(!cURL)continue;
                 dispatch_semaphore_t sem=dispatch_semaphore_create(0);
-                [[sess dataTaskWithURL:cURL completionHandler:^(NSData *d,NSURLResponse *r,NSError *e){
-                    if(!e&&d.length){
+                NSURLSessionDataTask *cTask=[sess dataTaskWithURL:cURL completionHandler:^(NSData *d,NSURLResponse *r,NSError *e){
+                    if(!e&&d.length&&d.length<=2*1024*1024){
                         NSDictionary *obj=[NSJSONSerialization JSONObjectWithData:d options:0 error:NULL];
                         NSArray *rows=[obj isKindOfClass:NSDictionary.class]&&[obj[@"list"] isKindOfClass:NSArray.class]?obj[@"list"]:@[];
                         for(NSDictionary *item in rows){
@@ -1593,6 +1603,7 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
                             NSString *vName=[item[@"vod_name"] isKindOfClass:NSString.class]?item[@"vod_name"]:@"";
                             if(![vName containsString:cleanTitle]&&![cleanTitle containsString:vName])continue;
                             NSString *playRaw=[item[@"vod_play_url"] isKindOfClass:NSString.class]?item[@"vod_play_url"]:@"";
+                            NSString *matchedURL=nil;
                             for(NSString *grp in [playRaw componentsSeparatedByString:@"$$$"]){
                                 NSMutableArray<NSString *> *m3u8s=[NSMutableArray array];
                                 for(NSString *ep in [grp componentsSeparatedByString:@"#"]){
@@ -1604,15 +1615,19 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
                                 }
                                 if(m3u8s.count){
                                     NSUInteger idx=(episodeIndex>=0&&(NSUInteger)episodeIndex<m3u8s.count)?(NSUInteger)episodeIndex:0;
-                                    foundStream=m3u8s[idx];break;
+                                    matchedURL=m3u8s[idx];break;
                                 }
                             }
-                            if(foundStream.length)break;
+                            if(matchedURL.length){
+                                @synchronized(sess){if(!foundStream.length)foundStream=matchedURL;}
+                                break;
+                            }
                         }
                     }
                     dispatch_semaphore_signal(sem);
-                }] resume];
-                dispatch_semaphore_wait(sem,dispatch_time(DISPATCH_TIME_NOW,(int64_t)(3.2*NSEC_PER_SEC)));
+                }];
+                [cTask resume];
+                if(dispatch_semaphore_wait(sem,dispatch_time(DISPATCH_TIME_NOW,(int64_t)(2.5*NSEC_PER_SEC)))!=0)[cTask cancel];
             }
         }
         [sess finishTasksAndInvalidate];

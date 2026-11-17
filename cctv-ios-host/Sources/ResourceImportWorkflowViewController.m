@@ -38,16 +38,25 @@ static NSURL *ResourceImportNormalizedURL(NSString *raw) {
 // 自动切分粘连在一起的多条 HTTP/HTTPS 链接（例如 a.hawkhttps://b.hawk 或 a.jsonhttps://b.js）并提取全部有效地址
 static NSString *ResourceImportSplitConcatenatedURLs(NSString *text) {
     if(![text isKindOfClass:NSString.class]||!text.length)return @"";
-    NSRegularExpression *concatRe=[NSRegularExpression regularExpressionWithPattern:@"(\\.(?:json|hawk|js|hjs|mjs|cjs|py|m3u8|m3u|txt|zip|php|xml|webox|jar|md5))(https?://)" options:NSRegularExpressionCaseInsensitive error:NULL];
+    static NSRegularExpression *concatRe=nil;
+    static NSRegularExpression *boundaryRe=nil;
+    static dispatch_once_t splitOnce;
+    dispatch_once(&splitOnce,^{
+        concatRe=[NSRegularExpression regularExpressionWithPattern:@"(\\.(?:json|hawk|js|hjs|mjs|cjs|py|m3u8|m3u|txt|zip|php|xml|webox|jar|md5))(https?://)" options:NSRegularExpressionCaseInsensitive error:NULL];
+        boundaryRe=[NSRegularExpression regularExpressionWithPattern:@"(?<![=?&/])([^\\s=\"'<>?&])(https?://sub\\.lytvs\\.top/)" options:NSRegularExpressionCaseInsensitive error:NULL];
+    });
     NSString *step=[concatRe stringByReplacingMatchesInString:text options:0 range:NSMakeRange(0,text.length) withTemplate:@"$1\n$2"];
-    NSRegularExpression *boundaryRe=[NSRegularExpression regularExpressionWithPattern:@"(?<![=?&/])([^\\s=\"'<>?&])(https?://sub\\.lytvs\\.top/)" options:NSRegularExpressionCaseInsensitive error:NULL];
     return [boundaryRe stringByReplacingMatchesInString:step options:0 range:NSMakeRange(0,step.length) withTemplate:@"$1\n$2"];
 }
 
 static NSArray<NSString *> *ResourceImportExtractURLStrings(NSString *text) {
     if(![text isKindOfClass:NSString.class]||!text.length)return @[];
     NSString *prepared=ResourceImportSplitConcatenatedURLs(text);
-    NSRegularExpression *re=[NSRegularExpression regularExpressionWithPattern:@"https?://[^\\s\"'<>\\u3000]+" options:NSRegularExpressionCaseInsensitive error:NULL];
+    static NSRegularExpression *re=nil;
+    static dispatch_once_t extractOnce;
+    dispatch_once(&extractOnce,^{
+        re=[NSRegularExpression regularExpressionWithPattern:@"https?://[^\\s\"'<>\\u3000]+" options:NSRegularExpressionCaseInsensitive error:NULL];
+    });
     NSArray<NSTextCheckingResult *> *matches=[re matchesInString:prepared options:0 range:NSMakeRange(0,prepared.length)];
     NSMutableOrderedSet<NSString *> *results=[NSMutableOrderedSet orderedSet];
     for(NSTextCheckingResult *match in matches){

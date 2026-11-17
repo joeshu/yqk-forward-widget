@@ -1460,12 +1460,12 @@ class PythonSpider:
                 not is_dead_cdn and not is_wrapper and
                 any(tok in path_low for tok in ('.m3u8', '.mp4', '.flv', '.mpd'))
             )
-            if ('127.0.0.1' in low or 'localhost' in low) and not is_direct:
+            host_low = (parsed.hostname or '').lower() if parsed else ''
+            if host_low in ('127.0.0.1', 'localhost', '::1') and not is_direct:
                 try:
                     import requests
-                    probe = requests.get(url, timeout=2.5, stream=True)
-                    probe_ok = 200 <= probe.status_code < 400
-                    probe.close()
+                    with requests.get(url, timeout=2.5, stream=True) as probe:
+                        probe_ok = 200 <= probe.status_code < 400
                     if probe_ok:
                         return result
                 except Exception:

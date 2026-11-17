@@ -252,9 +252,40 @@
     }
     return [channel[@"routes"] isKindOfClass:NSArray.class] ? [channel[@"routes"] count] : 0;
 }
+- (NSDictionary *)catchupChannelForChannel:(NSDictionary *)channel {
+    if (![channel isKindOfClass:NSDictionary.class]) return nil;
+    if ([channel[@"catchupSource"] isKindOfClass:NSString.class] && [channel[@"catchupSource"] length] > 0) return channel;
+    if (![channel[@"remoteURL"] length]) return nil;
+    NSString *groupKey = CCTVRouteGroupKey(channel);
+    NSString *canonical = [ProfileStore canonicalStationIDForChannel:channel];
+    for (NSDictionary *cand in self.allChannels) {
+        if (![cand isKindOfClass:NSDictionary.class] || ![cand[@"remoteURL"] length]) continue;
+        if (![cand[@"catchupSource"] isKindOfClass:NSString.class] || ![cand[@"catchupSource"] length]) continue;
+        if ((groupKey.length && [CCTVRouteGroupKey(cand) isEqualToString:groupKey]) ||
+            (canonical.length && [[ProfileStore canonicalStationIDForChannel:cand] isEqualToString:canonical])) {
+            return cand;
+        }
+    }
+    return nil;
+}
+- (NSDictionary *)nativeFallbackChannelForChannel:(NSDictionary *)channel {
+    if (![channel isKindOfClass:NSDictionary.class] || !CCTVBoolPreference(@"nativeChannelsEnabled", YES)) return nil;
+    if (![channel[@"remoteURL"] length] && ![ProfileStore isHTTP:channel[@"id"]]) return channel;
+    NSString *officialID = [self epgIDForChannel:channel];
+    if (officialID.length) {
+        NSDictionary *matched = [self channelWithID:officialID];
+        if (matched && ![matched[@"remoteURL"] length] && ![ProfileStore isHTTP:matched[@"id"]]) return matched;
+    }
+    NSString *canonical = [ProfileStore canonicalStationIDForChannel:channel];
+    if (canonical.length) {
+        NSDictionary *matched = [self channelWithID:canonical];
+        if (matched && ![matched[@"remoteURL"] length] && ![ProfileStore isHTTP:matched[@"id"]]) return matched;
+    }
+    return nil;
+}
 - (BOOL)channelSupportsCatchup:(NSDictionary *)channel {
     if (![channel isKindOfClass:NSDictionary.class]) return NO;
-    if ([channel[@"catchupSource"] isKindOfClass:NSString.class] && [channel[@"catchupSource"] length] > 0) return YES;
+    if ([self catchupChannelForChannel:channel] != nil) return YES;
     return ![channel[@"remoteURL"] length];
 }
 - (NSString *)catalogSubtitleForChannel:(NSDictionary *)channel {
@@ -265,6 +296,7 @@
     NSUInteger sourceCount=[self sourceCountForChannel:channel];
     if(sourceCount>1)[tags addObject:[NSString stringWithFormat:@"%lu源",(unsigned long)sourceCount]];
     if([channel[@"remoteURL"] length] && [self channelSupportsCatchup:channel])[tags addObject:@"回看"];
+    else if(![channel[@"remoteURL"] length] && [self channelSupportsCatchup:channel])[tags addObject:@"时移回看"];
     return [tags componentsJoinedByString:@" · "];
 }
 - (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout sizeForItemAtIndexPath:(NSIndexPath *)ip {
@@ -465,7 +497,7 @@
     } else {
         NSUInteger routes = [ch[@"routes"] isKindOfClass:NSArray.class] ? [ch[@"routes"] count] : 0;
         NSString *groupName=[ch[@"group"] isKindOfClass:NSString.class]?ch[@"group"]:@"直播";
-        cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ · %lu 线路", groupName, (unsigned long)routes];
+        cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ · %lu 线路 · 时移回看", groupName, (unsigned long)routes];
     }
     if (self.recentsOnly) {
         for (NSDictionary *rec in self.recents) {
@@ -624,9 +656,19 @@
             [self playChannel:ch route:r];
         }]];
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"节目单" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+    [sheet addAction:[UIAlertAction actionWithTitle:@"节目单与回看" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         [self openEPGforChannel:ch[@"id"] name:ch[@"name"]];
     }]];
+    if ([ch[@"id"] isEqual:self.channelID] && self.currentPlayer && !self.avPlayer) {
+        [sheet addAction:[UIAlertAction actionWithTitle:@"时移 / 回看" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+            [self showNativeTimeshiftActions];
+        }]];
+        if (self.nativeTimeShiftActive) {
+            [sheet addAction:[UIAlertAction actionWithTitle:@"返回直播" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+                [self returnToLivePlayback];
+            }]];
+        }
+    }
     [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     if (ip && self.table && !self.table.hidden) {
         sheet.popoverPresentationController.sourceView = self.table;
@@ -693,6 +735,7 @@
 
 - (void)presentSubscriptionActions:(NSDictionary *)channel sourceView:(UIView *)source {
     UIAlertController *a=[UIAlertController alertControllerWithTitle:channel[@"name"]?:@"订阅频道" message:channel[@"remoteURL"] preferredStyle:UIAlertControllerStyleActionSheet];
+    [a addAction:[UIAlertAction actionWithTitle:@"节目单与回看" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){ [self openEPGforChannel:channel[@"id"] name:channel[@"name"]]; }]];
     [a addAction:[UIAlertAction actionWithTitle:@"从列表移除" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *x){ NSMutableArray *m=[self.allChannels mutableCopy]; [m removeObject:channel]; self.allChannels=m; [self applyFilter]; }]];
     [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     a.popoverPresentationController.sourceView=source; a.popoverPresentationController.sourceRect=source.bounds; [self presentViewController:a animated:YES completion:nil];

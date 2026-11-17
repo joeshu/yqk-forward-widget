@@ -1099,7 +1099,11 @@ static NSURLRequest *MediaJARBridgeRequest(NSDictionary *source,NSString *operat
             NSString *tid=MediaTVBoxString(arguments[@"categoryId"]);if(!tid.length)tid=@"1";
             NSString *pg=[NSString stringWithFormat:@"%ld",(long)MAX(1,[arguments[@"page"] integerValue])];
             urlStr=[[[tpl stringByReplacingOccurrencesOfString:@"{cateId}" withString:tid] stringByReplacingOccurrencesOfString:@"{catePg}" withString:pg] stringByReplacingOccurrencesOfString:@"{pg}" withString:pg];
-            NSRegularExpression *re=[NSRegularExpression regularExpressionWithPattern:@"\\{[a-zA-Z0-9_]+\\}" options:0 error:NULL];
+            static NSRegularExpression *re=nil;
+            static dispatch_once_t tplOnce;
+            dispatch_once(&tplOnce,^{
+                re=[NSRegularExpression regularExpressionWithPattern:@"\\{[a-zA-Z0-9_]+\\}" options:0 error:NULL];
+            });
             if(re&&urlStr.length)urlStr=[re stringByReplacingMatchesInString:urlStr options:0 range:NSMakeRange(0,urlStr.length) withTemplate:@""];
         } else if([operation isEqual:@"search"]){
             NSString *tpl=MediaTVBoxString(cfg[@"搜索url"]?:cfg[@"search_url"]);

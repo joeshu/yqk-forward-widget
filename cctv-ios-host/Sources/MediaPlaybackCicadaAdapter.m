@@ -545,7 +545,7 @@ static dispatch_queue_t MediaPlaybackCicadaQuarantineQueue(void) {
     NSUInteger generation = self.generation;
     self.pollTimer = [NSTimer scheduledTimerWithTimeInterval:MediaPlaybackCicadaPositionPollInterval repeats:YES block:^(NSTimer *timer) {
         MediaPlaybackCicadaAdapter *owner = weakSelf;
-        if (!owner || generation != owner.generation || owner.destroyed || !owner.player) return;
+        if (!owner || generation != owner.generation || owner.destroyed || !owner.player) { [timer invalidate]; return; }
         NSTimeInterval position = owner.currentPosition;
         NSTimeInterval duration = owner.duration;
         owner.lastPolledPosition = position;

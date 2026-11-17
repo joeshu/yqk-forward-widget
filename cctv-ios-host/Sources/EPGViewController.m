@@ -136,7 +136,7 @@
 - (void)scheduleRefreshTimer {
     [self.refreshTimer invalidate];self.refreshTimer=nil;
     if(!self.pageVisible||UIApplication.sharedApplication.applicationState!=UIApplicationStateActive)return;
-    __weak typeof(self) w=self;self.refreshTimer=[NSTimer scheduledTimerWithTimeInterval:60 repeats:YES block:^(NSTimer *t){[w fetch];}];
+    __weak typeof(self) w=self;self.refreshTimer=[NSTimer scheduledTimerWithTimeInterval:60 repeats:YES block:^(NSTimer *t){EPGViewController *owner=w;if(!owner){[t invalidate];return;}[owner fetch];}];
 }
 - (void)cancelPageRequest {
     self.requestGeneration++;[self.task cancel];self.task=nil;
@@ -184,7 +184,7 @@
             if ([json isKindOfClass:NSDictionary.class]) {
                 NSDictionary *dict = json;
                 NSArray *epg = dict[@"EPG"] ?: dict[@"data"];
-                if ([epg isKindOfClass:NSArray.class]) rows = [self normalize:epg];
+                if ([epg isKindOfClass:NSArray.class]) rows = [weakSelf normalize:epg];
             }
         }
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -219,6 +219,10 @@
     self.emptyLabel.hidden = self.rows.count > 0 || self.spinner.isAnimating;
 }
 - (NSDateFormatter *)dayFormatter {static NSDateFormatter *f=nil;static dispatch_once_t onceToken;dispatch_once(&onceToken,^{f=[NSDateFormatter new];f.timeZone=[NSTimeZone timeZoneWithName:@"Asia/Shanghai"];f.dateFormat=@"yyyy-MM-dd";});return f;}
+- (NSString *)dayKeyForTimestamp:(NSTimeInterval)ts {
+    NSDateFormatter *f=[self dayFormatter];
+    @synchronized(f){return [f stringFromDate:[NSDate dateWithTimeIntervalSince1970:ts]]?:@"";}
+}
 - (NSString *)effectiveChannelIdentifier {
     if(self.channelID.length)return self.channelID;
     NSString *cid=[self.channel[@"id"] isKindOfClass:NSString.class]?self.channel[@"id"]:@"";
@@ -228,8 +232,8 @@
     return self.channelName.length?self.channelName:@"channel";
 }
 - (void)rebuildDates {
-    NSDateFormatter *f=[self dayFormatter];NSString *previous=(self.dates.selectedSegmentIndex>=0&&self.dates.selectedSegmentIndex<self.dateKeys.count)?self.dateKeys[self.dates.selectedSegmentIndex]:nil;NSMutableOrderedSet *days=[NSMutableOrderedSet orderedSet];for(NSDictionary *row in self.allRows)[days addObject:[f stringFromDate:[NSDate dateWithTimeIntervalSince1970:[row[@"start"] doubleValue]]]];self.dateKeys=days.array;
-    [self.dates removeAllSegments];NSString *today=[f stringFromDate:NSDate.date];NSInteger selected=NSNotFound;for(NSUInteger i=0;i<self.dateKeys.count;i++){NSString *key=self.dateKeys[i];NSString *title=[key isEqualToString:today]?@"今天":[key substringFromIndex:5];[self.dates insertSegmentWithTitle:title atIndex:i animated:NO];if(previous.length&&[key isEqualToString:previous])selected=i;}
+    NSString *previous=(self.dates.selectedSegmentIndex>=0&&self.dates.selectedSegmentIndex<self.dateKeys.count)?self.dateKeys[self.dates.selectedSegmentIndex]:nil;NSMutableOrderedSet *days=[NSMutableOrderedSet orderedSet];for(NSDictionary *row in self.allRows)[days addObject:[self dayKeyForTimestamp:[row[@"start"] doubleValue]]];self.dateKeys=days.array;
+    [self.dates removeAllSegments];NSString *today=[self dayKeyForTimestamp:NSDate.date.timeIntervalSince1970];NSInteger selected=NSNotFound;for(NSUInteger i=0;i<self.dateKeys.count;i++){NSString *key=self.dateKeys[i];NSString *title=[key isEqualToString:today]?@"今天":[key substringFromIndex:5];[self.dates insertSegmentWithTitle:title atIndex:i animated:NO];if(previous.length&&[key isEqualToString:previous])selected=i;}
     if(selected==NSNotFound)for(NSUInteger i=0;i<self.dateKeys.count;i++)if([self.dateKeys[i] isEqualToString:today]){selected=i;break;}
     self.dates.selectedSegmentIndex=self.dateKeys.count?(selected==NSNotFound?(NSInteger)self.dateKeys.count-1:selected):UISegmentedControlNoSegment;[self updateDateMenuButton];[self filterDate];
 }
@@ -238,7 +242,7 @@
     BOOL overflow=self.dateKeys.count>5;
     self.dates.hidden=overflow;self.dateMenuButton.hidden=!overflow;
     if(!overflow)return;
-    NSDateFormatter *f=[self dayFormatter];NSString *today=[f stringFromDate:NSDate.date];
+    NSString *today=[self dayKeyForTimestamp:NSDate.date.timeIntervalSince1970];
     NSString *selected=(self.dates.selectedSegmentIndex>=0&&self.dates.selectedSegmentIndex<self.dateKeys.count)?self.dateKeys[self.dates.selectedSegmentIndex]:nil;
     [self.dateMenuButton setTitle:selected?([selected isEqualToString:today]?@"今天":selected):@"选择日期" forState:UIControlStateNormal];
     NSMutableArray<UIAction *> *actions=[NSMutableArray array];
@@ -252,7 +256,13 @@
     UIAction *remindedOnly=[UIAction actionWithTitle:@"仅看已预约提醒" image:self.programFilterMode==2?[UIImage systemImageNamed:@"checkmark"]:nil identifier:nil handler:^(__unused UIAction *a){weakSelf.programFilterMode=2;weakSelf.filterMenuItem.menu=[weakSelf buildProgramFilterMenu];[weakSelf filterDate];}];
     UIAction *clearReminders=[UIAction actionWithTitle:@"清空本频道预约提醒" image:[UIImage systemImageNamed:@"bell.slash"] identifier:nil handler:^(__unused UIAction *a){[weakSelf clearChannelReminders];}];
     clearReminders.attributes=UIMenuElementAttributesDestructive;
-    return [UIMenu menuWithTitle:@"节目筛选与预约" children:@[all,replayOnly,remindedOnly,clearReminders]];
+    NSMutableArray<UIMenuElement *> *items=[NSMutableArray arrayWithObjects:all,replayOnly,remindedOnly,nil];
+    if(self.onReturnToLive){
+        UIAction *backLive=[UIAction actionWithTitle:@"返回实时直播" image:[UIImage systemImageNamed:@"dot.radiowaves.left.and.right"] identifier:@"epg.return.live" handler:^(__unused UIAction *a){if(weakSelf.onReturnToLive)weakSelf.onReturnToLive();}];
+        [items addObject:backLive];
+    }
+    [items addObject:clearReminders];
+    return [UIMenu menuWithTitle:@"节目筛选与预约" children:items];
 }
 
 - (void)clearChannelReminders {
@@ -267,9 +277,9 @@
 }
 
 - (void)filterDate {
-    NSInteger idx=self.dates.selectedSegmentIndex;if(idx<0||idx>=self.dateKeys.count){[self updateEmptyState];return;}NSString *key=self.dateKeys[idx];NSDateFormatter *f=[self dayFormatter];self.rows=[self.allRows filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *row,NSDictionary *bindings){return [[f stringFromDate:[NSDate dateWithTimeIntervalSince1970:[row[@"start"] doubleValue]]] isEqualToString:key];}]];
+    NSInteger idx=self.dates.selectedSegmentIndex;if(idx<0||idx>=self.dateKeys.count){[self updateEmptyState];return;}NSString *key=self.dateKeys[idx];self.rows=[self.allRows filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *row,NSDictionary *bindings){return [[self dayKeyForTimestamp:[row[@"start"] doubleValue]] isEqualToString:key];}]];
     NSTimeInterval now=NSDate.date.timeIntervalSince1970;
-    if(self.programFilterMode==1)self.rows=[self.rows filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *row,NSDictionary *bindings){return [row[@"end"] doubleValue]<=now;}]];
+    if(self.programFilterMode==1)self.rows=[self.rows filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *row,NSDictionary *bindings){return [row[@"start"] doubleValue]<=now;}]];
     else if(self.programFilterMode==2)self.rows=[self.rows filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *row,NSDictionary *bindings){return [self isProgramReminded:row];}]];
     if(self.searchQuery.length){NSString *q=self.searchQuery.lowercaseString;self.rows=[self.rows filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *row,NSDictionary *bindings){return [[(row[@"title"]?:@"") description].lowercaseString containsString:q];}]];}
     [self.table reloadData];if(!self.searchQuery.length&&self.programFilterMode==0)[self scrollToCurrentProgramAnimated:NO];
@@ -370,20 +380,25 @@
     static NSDateFormatter *fmt = nil;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{ fmt = [[NSDateFormatter alloc] init]; fmt.dateFormat = @"HH:mm"; fmt.timeZone = [NSTimeZone timeZoneWithName:@"Asia/Shanghai"]; });
-    NSString *range = [NSString stringWithFormat:@"%@ - %@",
-                       [fmt stringFromDate:[NSDate dateWithTimeIntervalSince1970:start]],
-                       [fmt stringFromDate:[NSDate dateWithTimeIntervalSince1970:end]]];
+    NSString *range = nil;
+    @synchronized(fmt) {
+        range = [NSString stringWithFormat:@"%@ - %@",
+                 [fmt stringFromDate:[NSDate dateWithTimeIntervalSince1970:start]],
+                 [fmt stringFromDate:[NSDate dateWithTimeIntervalSince1970:end]]];
+    }
     cell.textLabel.text = row[@"title"];
     cell.detailTextLabel.text = range;
     cell.detailTextLabel.textColor = HostSecondaryText();
 
-    BOOL replayable=self.onReplay && end<=now && (!self.canReplay||self.canReplay(row));
+    BOOL live = (now >= start && now < end);
+    NSDictionary *liveCandidate = live ? @{@"start":@(start), @"end":@(MAX(start + 1, now)), @"title":row[@"title"] ?: @"", @"liveRestart":@YES} : row;
+    BOOL replayable = self.onReplay && (end <= now || (live && (now - start >= 15))) && (!self.canReplay || self.canReplay(live ? liveCandidate : row));
+    BOOL activeReplayRow = (self.activeReplayStart > 0 && fabs(start - self.activeReplayStart) < 2.0);
     cell.accessoryType=replayable?UITableViewCellAccessoryDisclosureIndicator:UITableViewCellAccessoryNone;
     cell.selectionStyle=(replayable||start>now)?UITableViewCellSelectionStyleDefault:UITableViewCellSelectionStyleNone;
-    BOOL live = (now >= start && now < end);
-    cell.backgroundColor = live ? HostSelectedSurface() : HostCard();
+    cell.backgroundColor = (live || activeReplayRow) ? HostSelectedSurface() : HostCard();
     cell.layer.cornerRadius=13; cell.layer.cornerCurve=kCACornerCurveContinuous; cell.clipsToBounds=YES;
-    cell.layer.borderWidth=live?1.1:0.6; HostSetLayerBorderColor(cell,live?HostAccent():HostBorder());
+    cell.layer.borderWidth=(live || activeReplayRow)?1.1:0.6; HostSetLayerBorderColor(cell,live?HostAccent():HostBorder()); if(activeReplayRow)HostSetLayerBorderColor(cell,HostAccent());
     UIProgressView *liveProgress = (UIProgressView *)[cell.contentView viewWithTag:9102];
     if (!liveProgress) {
         liveProgress = [[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleBar];
@@ -402,15 +417,17 @@
         liveProgress.progress = progress;
         liveProgress.frame = CGRectMake(16, MAX(0, CGRectGetHeight(cell.contentView.bounds) - 4), MAX(0, CGRectGetWidth(cell.contentView.bounds) - 32), 3);
         cell.textLabel.textColor = HostAccent();
-        cell.detailTextLabel.text = [range stringByAppendingFormat:@"  ● 正在播出 · %.0f%%", progress * 100.0];
+        NSString *liveSuffix = activeReplayRow ? @"  ● 正在回看本节目" : (replayable ? @"  点按从头回看" : @"");
+        cell.detailTextLabel.text = [range stringByAppendingFormat:@"  ● 正在播出 · %.0f%%%@", progress * 100.0, liveSuffix];
     } else if (end <= now) {
-        cell.textLabel.textColor = replayable?HostText():HostSecondaryText();
-        if(replayable)cell.detailTextLabel.text=[range stringByAppendingString:@"  点按回看"];
+        cell.textLabel.textColor = activeReplayRow ? HostAccent() : (replayable ? HostText() : HostSecondaryText());
+        if (activeReplayRow) cell.detailTextLabel.text = [range stringByAppendingString:@"  ● 正在回看"];
+        else if (replayable) cell.detailTextLabel.text = [range stringByAppendingString:@"  点按回看"];
     } else {
         cell.textLabel.textColor = HostText();
         if([self isProgramReminded:row])cell.detailTextLabel.text=[range stringByAppendingString:@"  ⏰ 已预约"];
     }
-    cell.accessibilityLabel = [NSString stringWithFormat:@"%@，%@%@", row[@"title"] ?: @"", range, live ? @"，正在播出" : (end <= now ? (replayable ? @"，已播出，点按回看" : @"，已播出") : ([self isProgramReminded:row] ? @"，尚未播出，已预约" : @"，尚未播出"))];
+    cell.accessibilityLabel = [NSString stringWithFormat:@"%@，%@%@", row[@"title"] ?: @"", range, activeReplayRow ? @"，正在回看" : (live ? (replayable ? @"，正在播出，点按从头回看" : @"，正在播出") : (end <= now ? (replayable ? @"，已播出，点按回看" : @"，已播出") : ([self isProgramReminded:row] ? @"，尚未播出，已预约" : @"，尚未播出")))];
     return cell;
 }
 
@@ -418,8 +435,18 @@
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     if(indexPath.row>=self.rows.count)return;
     NSDictionary *program=self.rows[indexPath.row];NSTimeInterval now=NSDate.date.timeIntervalSince1970;
-    if([program[@"start"] doubleValue]>now){[self toggleReminderForProgram:program];return;}
-    if(!self.onReplay || [program[@"end"] doubleValue]>now || (self.canReplay&&!self.canReplay(program)))return;
+    NSTimeInterval start=[program[@"start"] doubleValue],end=[program[@"end"] doubleValue];
+    if(start>now){[self toggleReminderForProgram:program];return;}
+    if(!self.onReplay)return;
+    if(now>=start && now<end){
+        NSMutableDictionary *liveProgram=[program mutableCopy];
+        liveProgram[@"end"]=@(MAX(start+1,now));
+        liveProgram[@"liveRestart"]=@YES;
+        if(self.canReplay && !self.canReplay(liveProgram))return;
+        self.onReplay(liveProgram.copy);
+        return;
+    }
+    if(end>now || (self.canReplay&&!self.canReplay(program)))return;
     self.onReplay(program);
 }
 

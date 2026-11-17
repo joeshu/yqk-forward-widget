@@ -31,8 +31,15 @@ def inspect(path):
     if extension in CODE:record['review_markers']=[i for i,line in enumerate(text.splitlines(),1) if RISK.search(line)]
     try:
         if extension=='.py':
-            with tokenize.open(file) as stream:ast.parse(stream.read(),filename=path)
+            with tokenize.open(file) as stream:tree=ast.parse(stream.read(),filename=path)
             record['checks'].append('python_ast')
+            for node in tree.body:
+                if isinstance(node,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='PYTHON_SOURCES' for t in node.targets):
+                    sources=ast.literal_eval(node.value)
+                    if isinstance(sources,dict):
+                        for mod_name,mod_src in sources.items():
+                            if isinstance(mod_src,str):ast.parse(mod_src,filename=f'{path}::{mod_name}')
+                        record['checks'].append('embedded_python_ast')
         elif extension=='.json':
             try:json.loads(text)
             except json.JSONDecodeError:

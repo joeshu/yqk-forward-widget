@@ -183,6 +183,7 @@
     return 8767;
 }
 - (void)refreshStatus {
+    if(!NSThread.isMainThread){__weak typeof(self) weakSelf=self;dispatch_async(dispatch_get_main_queue(),^{[weakSelf refreshStatus];});return;}
     self.startStopPending=NO;
     // 订阅数不在本页维护：每次出现时向调用方现取，否则在资源页增删订阅
     // 后返回本页仍显示旧数。未提供 provider 时沿用上次传入的值。

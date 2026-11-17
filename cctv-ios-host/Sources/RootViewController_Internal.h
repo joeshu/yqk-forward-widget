@@ -137,7 +137,11 @@ static NSString *CCTVTVBoxTokenFromInput(NSString *input) {
         for(NSURLQueryItem *item in parts.queryItems)if([@[@"token",@"tk"] containsObject:item.name.lowercaseString]&&item.value.length&&![item.value isEqualToString:CCTVTVBoxTokenPlaceholder])return MediaLytvsSubscriptionToken(item.value);
         NSString *path=parts.path?:@"";
         if(path.length){
-            NSRegularExpression *pathRe=[NSRegularExpression regularExpressionWithPattern:@"(?:^|[_/-])tk_([A-Za-z0-9]{6,64})(?:\\.[A-Za-z0-9]+|$)" options:NSRegularExpressionCaseInsensitive error:NULL];
+            static NSRegularExpression *pathRe=nil;
+            static dispatch_once_t pathReOnce;
+            dispatch_once(&pathReOnce,^{
+                pathRe=[NSRegularExpression regularExpressionWithPattern:@"(?:^|[_/-])tk_([A-Za-z0-9]{6,64})(?:\\.[A-Za-z0-9]+|$)" options:NSRegularExpressionCaseInsensitive error:NULL];
+            });
             NSTextCheckingResult *match=[pathRe firstMatchInString:path options:0 range:NSMakeRange(0,path.length)];
             if(match&&match.numberOfRanges>1){
                 NSString *tk=[path substringWithRange:[match rangeAtIndex:1]];
@@ -589,6 +593,11 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 @property(nonatomic,assign) NSUInteger playbackIntentVersion;
 @property(nonatomic,assign) NSUInteger subscriptionParseGeneration;
 @property(nonatomic,copy) NSDictionary *pendingNativeReplayProgram;
+@property(nonatomic,assign) BOOL remoteCatchupActive;
+@property(nonatomic,copy) NSString *activeCatchupProgramTitle;
+@property(nonatomic,assign) NSTimeInterval activeCatchupStart;
+@property(nonatomic,assign) NSTimeInterval activeCatchupEnd;
+@property(nonatomic,copy) NSDictionary *activeCatchupLiveChannel;
 @property(nonatomic,assign) BOOL liveMuted;
 - (BOOL)sessionHasContent;
 - (BOOL)sessionWantsPlayback;
@@ -693,6 +702,8 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 - (NSInteger)collectionView:(UICollectionView *)collectionView numberOfItemsInSection:(NSInteger)section;
 - (CGFloat)catalogTextHeight:(NSString *)text font:(UIFont *)font width:(CGFloat)width maximumLines:(NSUInteger)maximumLines;
 - (NSUInteger)sourceCountForChannel:(NSDictionary *)channel;
+- (NSDictionary *)catchupChannelForChannel:(NSDictionary *)channel;
+- (NSDictionary *)nativeFallbackChannelForChannel:(NSDictionary *)channel;
 - (BOOL)channelSupportsCatchup:(NSDictionary *)channel;
 - (NSString *)catalogSubtitleForChannel:(NSDictionary *)channel;
 - (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout sizeForItemAtIndexPath:(NSIndexPath *)ip;
@@ -798,6 +809,9 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 - (void)authFailed:(NSError *)error;
 - (void)showPlaybackInfo;
 - (void)showNativeTimeshiftActions;
+- (void)seekCurrentChannelByOffsetMinutes:(double)minutes;
+- (BOOL)isCatchupOrTimeshiftActive;
+- (void)returnToLivePlayback;
 - (void)beginNativeTransition:(NSString *)kind;
 - (void)seekNativeStart:(NSTimeInterval)start end:(NSTimeInterval)end;
 - (void)failNativeTransition:(NSString *)message;
@@ -858,6 +872,7 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 - (void)restartEPGTimer;
 - (void)refreshNowNext;
 - (void)refreshOfficialNowNext;
+- (BOOL)startRemoteCatchupForChannel:(NSDictionary *)channel program:(NSDictionary *)program start:(NSTimeInterval)start end:(NSTimeInterval)end;
 - (EPGViewController *)epgPageForChannel:(NSString *)cid name:(NSString *)name;
 - (void)cacheXMLRows:(NSArray *)rows channel:(NSString *)cid;
 - (void)trimEPGCache;

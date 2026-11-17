@@ -39,9 +39,21 @@ try:
     import requests
 except ImportError:
     import urllib.request as _ureq
+    _MAX_HTTP_BODY_BYTES = 1024 * 1024
+    _HTTP_READ_CHUNK_BYTES = 512 * 1024
+    def _read_bounded_stream(r, max_bytes=_MAX_HTTP_BODY_BYTES, chunk_size=_HTTP_READ_CHUNK_BYTES):
+        chunks = []
+        total = 0
+        while total < max_bytes:
+            piece = r.read(min(chunk_size, max_bytes - total))
+            if not piece:
+                break
+            chunks.append(piece)
+            total += len(piece)
+        return b''.join(chunks)
     class _FallbackResp:
         def __init__(self, r):
-            self.content = r.read(4 * 1024 * 1024)
+            self.content = _read_bounded_stream(r)
             self.status_code = getattr(r, 'status', 200)
             self.headers = dict(r.headers)
             self.url = r.geturl()
@@ -87,7 +99,9 @@ except ImportError:
 
 _EXT_CACHE = {}
 _JAR_CACHE = {}
+import threading as _threading
 _MACCMS_ROWS_CACHE = {}
+_MACCMS_CACHE_LOCK = _threading.Lock()
 
 _QIAOJI_7LJ763GG_KEY = bytes([
     0x17, 0xa3, 0x17, 0xda, 0x33, 0x16, 0x56, 0x6d, 0x31, 0x4a, 0xea, 0xb3, 0xd0, 0x3c, 0xec, 0xf2,
@@ -591,7 +605,8 @@ def resolve_maccms_stream_by_title(title, episode_index=0, episode_name=''):
     import concurrent.futures
     now_ts = time.time()
     for kw in search_keywords[:3]:
-        cached_entry = _MACCMS_ROWS_CACHE.get(kw)
+        with _MACCMS_CACHE_LOCK:
+            cached_entry = _MACCMS_ROWS_CACHE.get(kw)
         if cached_entry and now_ts - cached_entry[0] < 600:
             chosen = pick_from_rows(cached_entry[1], allow_dead_cdn=False)
             if chosen:
@@ -610,7 +625,7 @@ def resolve_maccms_stream_by_title(title, episode_index=0, episode_name=''):
                 pass
             return []
 
-        pool = concurrent.futures.ThreadPoolExecutor(max_workers=6)
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
         try:
             futures = [pool.submit(fetch_host, h) for h in cms_hosts]
             collected_for_kw = []
@@ -624,17 +639,19 @@ def resolve_maccms_stream_by_title(title, episode_index=0, episode_name=''):
                         collected_for_kw.extend(rows)
                         chosen = pick_from_rows(rows, allow_dead_cdn=False)
                         if chosen:
-                            if len(_MACCMS_ROWS_CACHE) >= 64:
-                                _MACCMS_ROWS_CACHE.pop(next(iter(_MACCMS_ROWS_CACHE)), None)
-                            _MACCMS_ROWS_CACHE[kw] = (time.time(), collected_for_kw)
+                            with _MACCMS_CACHE_LOCK:
+                                if len(_MACCMS_ROWS_CACHE) >= 64:
+                                    _MACCMS_ROWS_CACHE.pop(next(iter(_MACCMS_ROWS_CACHE)), None)
+                                _MACCMS_ROWS_CACHE[kw] = (time.time(), list(collected_for_kw))
                             return chosen
                         fallback_rows.extend(rows)
             except Exception:
                 pass
             if collected_for_kw:
-                if len(_MACCMS_ROWS_CACHE) >= 64:
-                    _MACCMS_ROWS_CACHE.pop(next(iter(_MACCMS_ROWS_CACHE)), None)
-                _MACCMS_ROWS_CACHE[kw] = (time.time(), collected_for_kw)
+                with _MACCMS_CACHE_LOCK:
+                    if len(_MACCMS_ROWS_CACHE) >= 64:
+                        _MACCMS_ROWS_CACHE.pop(next(iter(_MACCMS_ROWS_CACHE)), None)
+                    _MACCMS_ROWS_CACHE[kw] = (time.time(), list(collected_for_kw))
         finally:
             try:
                 pool.shutdown(wait=False, cancel_futures=True)

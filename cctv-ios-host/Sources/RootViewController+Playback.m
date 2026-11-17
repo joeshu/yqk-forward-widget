@@ -91,6 +91,7 @@
         [self showNativeRouteError:routeError channel:ch];return;
     }
     self.nativePlainRouteActive=NO;
+    self.remoteCatchupActive=NO;self.activeCatchupProgramTitle=nil;self.activeCatchupStart=0;self.activeCatchupEnd=0;self.activeCatchupLiveChannel=nil;
     if(!self.currentPlaybackTraceID.length||self.selectionRequestedAt<=0)self.currentPlaybackTraceID=NSUUID.UUID.UUIDString.lowercaseString;
     self.requestedNativeRoute=route;
     self.directNativeRouteActive=(route!=nil);
@@ -188,7 +189,7 @@
     __weak typeof(self) weakSelf=self;
     self.timeshiftController.onFailure=^(NSError *error){[weakSelf displayNativePlaybackFailure:@"时移 / 回看失败" error:error];};
     self.timeshiftController.onReturnToLiveFallback=^{[weakSelf playSelectedNativeRouteOrChannel];};
-    self.timeshiftController.onProgress=^(NSTimeInterval behindLive,NSTimeInterval position){weakSelf.infoLabel.hidden=NO;weakSelf.infoLabel.text=[NSString stringWithFormat:@"回看中 · 距直播 %.0f 分钟",behindLive/60.0];};
+    self.timeshiftController.onProgress=^(NSTimeInterval behindLive,NSTimeInterval position){weakSelf.infoLabel.hidden=NO;NSString *prog=weakSelf.activeCatchupProgramTitle.length?[NSString stringWithFormat:@" · %@",weakSelf.activeCatchupProgramTitle]:@"";weakSelf.infoLabel.text=[NSString stringWithFormat:@"回看中%@ · 距直播 %.0f 分钟",prog,behindLive/60.0];};
 }
 - (void)playViaSDKURL:(NSString *)url channelID:(NSString *)cid title:(NSString *)title {
     [CNPlayerCrashGuard install];
@@ -305,9 +306,9 @@
     self.nativeStartupTuner=nil; // Restore before the retained SDK wrapper is stopped or reused.
     self.remotePlaybackWanted=NO;
     self.remoteFailureRecoveryPending=NO;
-    if(self.avKeepUpObserved){[self.avPlayer.currentItem removeObserver:self forKeyPath:@"playbackLikelyToKeepUp" context:kAVItemStatusContext];self.avKeepUpObserved=NO;}
+    if(self.avKeepUpObserved){@try { [self.avPlayer.currentItem removeObserver:self forKeyPath:@"playbackLikelyToKeepUp" context:kAVItemStatusContext]; } @catch (NSException *e) {} self.avKeepUpObserved=NO;}
     [self.playbackReadiness cancel];self.playbackReadiness=nil;
-    if(self.avLayerObserved){[self.avLayer removeObserver:self forKeyPath:@"readyForDisplay" context:kAVLayerFrameContext];self.avLayerObserved=NO;}
+    if(self.avLayerObserved){@try { [self.avLayer removeObserver:self forKeyPath:@"readyForDisplay" context:kAVLayerFrameContext]; } @catch (NSException *e) {} self.avLayerObserved=NO;}
 
     self.epgListGeneration++;
     for(NSURLSessionDataTask *task in self.epgListTasks.allValues)[task cancel];[self.epgListTasks removeAllObjects];[self.epgInflight removeAllObjects];
@@ -478,6 +479,9 @@
 }
 - (void)playRemote:(NSDictionary *)ch {
     self.livePlaybackSuspendedForNavigation=NO;
+    if(![ch[@"catchupReplay"] boolValue]){
+        self.remoteCatchupActive=NO;self.activeCatchupProgramTitle=nil;self.activeCatchupStart=0;self.activeCatchupEnd=0;self.activeCatchupLiveChannel=nil;
+    }
     if(!self.currentPlaybackTraceID.length||self.selectionRequestedAt<=0)self.currentPlaybackTraceID=NSUUID.UUID.UUIDString.lowercaseString;
     self.requestedNativeRoute=nil;self.directNativeRouteActive=NO;
     [self.remoteAttemptedURLs removeAllObjects];self.remoteRetryCount=0;self.remoteFailureRecoveryPending=NO;self.remotePlaybackFailed=NO;
@@ -702,7 +706,7 @@
         if(service && [PyHost isRunningServiceIdentifier:service[@"id"]])self.readyLocalOrigins[[self originForURL:playingURL]]=@(CACurrentMediaTime());
         self.firstRender=YES;self.remotePlaybackFailed=NO;if(self.remotePlaybackWanted&&self.avPlayer.rate==0)[self.avPlayer playImmediatelyAtRate:1.0];[self.playPauseBtn setTitle:@"暂停" forState:UIControlStateNormal];self.playPauseBtn.enabled=YES;[self endPlaybackPriority];self.firstFrameSeconds=CACurrentMediaTime()-self.playStartedAt;[self recordStartupStage:@"frame"];
         NSMutableDictionary *frameFields=[@{@"player":@"AVPlayer", @"elapsed_ms":@((NSInteger)(self.firstFrameSeconds*1000)), @"playback_generation":@(self.playbackGeneration), @"playback_attempt_id":self.currentRemotePlaybackAttemptID?:@"", @"correlation_id":self.currentPlaybackTraceID?:@""} mutableCopy];[frameFields addEntriesFromDictionary:MediaPlaybackDiagnosticHeaderFields(self.currentRemoteHeaders)];[frameFields addEntriesFromDictionary:CCTVDiagnosticURLFields([NSURL URLWithString:self.currentRemoteURL])];CCTVAddAVPlayerFailureFields(frameFields,self.avPlayer.currentItem,self.avPlayer,nil);[RuntimeDiagnostics.shared recordEvent:@"playback_first_frame" category:@"playback" fields:frameFields];if(service)[self logPluginLine:[NSString stringWithFormat:@"视频首帧已渲染 · %.2f 秒 · %@",self.firstFrameSeconds,self.startupTrace.summary] identifier:service[@"id"] name:service[@"name"]];
-        [self.spinner stopAnimating];self.titleLabel.hidden=YES;self.infoLabel.hidden=YES;self.playerTopScrim.hidden=YES;[self loadPlayerChannelLogoAfterFirstFrame];[self captureLivePreviewSnapshotForChannelID:self.channelID];[self startLiveQualityBadgeTimer];[self updateNowPlaying];[self refreshNowNext];[self restartEPGTimer];
+        [self.spinner stopAnimating];if(self.remoteCatchupActive){self.titleLabel.text=[NSString stringWithFormat:@"%@ · 回看",self.channelName?:@"频道"];self.titleLabel.hidden=NO;self.infoLabel.text=self.activeCatchupProgramTitle.length?[NSString stringWithFormat:@"回看中 · %@（点更多可返回直播）",self.activeCatchupProgramTitle]:@"回看中 · 点更多可返回直播";self.infoLabel.hidden=NO;self.playerTopScrim.hidden=NO;}else{self.titleLabel.hidden=YES;self.infoLabel.hidden=YES;self.playerTopScrim.hidden=YES;}[self loadPlayerChannelLogoAfterFirstFrame];[self captureLivePreviewSnapshotForChannelID:self.channelID];[self startLiveQualityBadgeTimer];[self updateNowPlaying];[self refreshNowNext];[self restartEPGTimer];
         [self log:@"订阅视频首帧 %.2fs · %@",self.firstFrameSeconds,self.startupTrace.summary];return;
     }
     if(context==kAVItemStatusContext){
@@ -732,7 +736,12 @@
     [self.watchdog invalidate];
     self.watchdogTicks = 0;
     self.nativeAttemptStartedAt=CACurrentMediaTime();
-    self.watchdog = [NSTimer scheduledTimerWithTimeInterval:0.5 target:self selector:@selector(tick:) userInfo:nil repeats:YES];
+    __weak typeof(self) weakSelf = self;
+    self.watchdog = [NSTimer scheduledTimerWithTimeInterval:0.5 repeats:YES block:^(NSTimer *timer) {
+        RootViewController *strongSelf = weakSelf;
+        if (!strongSelf) { [timer invalidate]; return; }
+        [strongSelf tick:timer];
+    }];
 }
 
 - (BOOL)recoverNativeStartupForReason:(NSString *)reason {
@@ -903,6 +912,9 @@
         if([self.pendingNativeReplayProgram[@"channelID"] isEqualToString:self.channelID]){
             NSDictionary *pendingReplay=self.pendingNativeReplayProgram;
             self.pendingNativeReplayProgram=nil;
+            self.activeCatchupProgramTitle=[pendingReplay[@"title"] isKindOfClass:NSString.class]&&[pendingReplay[@"title"] length]?pendingReplay[@"title"]:nil;
+            self.activeCatchupStart=[pendingReplay[@"start"] doubleValue];
+            self.activeCatchupEnd=[pendingReplay[@"end"] doubleValue];
             dispatch_async(dispatch_get_main_queue(),^{
                 [self seekNativeStart:[pendingReplay[@"start"] doubleValue] end:[pendingReplay[@"end"] doubleValue]];
             });
@@ -1028,12 +1040,71 @@
 - (void)showPlaybackInfo {
     UINavigationController *nav=[[UINavigationController alloc] initWithRootViewController:[self playbackInformationPage]];HostStyleNavigation(nav);nav.navigationBar.prefersLargeTitles=NO;nav.modalPresentationStyle=UIModalPresentationPageSheet;nav.sheetPresentationController.detents=@[UISheetPresentationControllerDetent.mediumDetent,UISheetPresentationControllerDetent.largeDetent];nav.sheetPresentationController.prefersGrabberVisible=YES;[self presentViewController:nav animated:YES completion:nil];
 }
-- (void)showNativeTimeshiftActions {
-    UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"时移 / 回看" message:@"由频道服务确认可用时间范围与版权；不支持的时间会返回失败。" preferredStyle:UIAlertControllerStyleActionSheet];
-    for(NSNumber *minutes in @[@1,@5,@30]){
-        [sheet addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"回退 %@ 分钟",minutes] style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self seekNativeStart:NSDate.date.timeIntervalSince1970-minutes.doubleValue*60 end:0];}]];
+- (BOOL)isCatchupOrTimeshiftActive {
+    return self.nativeTimeShiftActive || self.remoteCatchupActive;
+}
+- (void)returnToLivePlayback {
+    if (self.remoteCatchupActive) {
+        NSDictionary *liveChannel = self.activeCatchupLiveChannel ?: [self channelWithID:self.channelID];
+        self.remoteCatchupActive = NO;
+        self.activeCatchupProgramTitle = nil;
+        self.activeCatchupStart = 0;
+        self.activeCatchupEnd = 0;
+        self.activeCatchupLiveChannel = nil;
+        if (liveChannel) {
+            [self log:@"从订阅回看返回实时直播：%@", liveChannel[@"name"] ?: self.channelName ?: @""];
+            [self playRemote:liveChannel];
+        }
+        return;
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"返回直播" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self returnToNativeLive];}]];
+    [self returnToNativeLive];
+}
+- (void)seekCurrentChannelByOffsetMinutes:(double)minutes {
+    if (minutes <= 0) return;
+    NSTimeInterval now = NSDate.date.timeIntervalSince1970;
+    NSTimeInterval baseTime = (self.remoteCatchupActive && self.activeCatchupStart > 0) ? self.activeCatchupStart : now;
+    NSTimeInterval targetStart = baseTime - minutes * 60.0;
+    if (self.currentPlayer && !self.avPlayer) {
+        self.activeCatchupProgramTitle = [NSString stringWithFormat:@"回退 %.0f 分钟", minutes];
+        self.activeCatchupStart = targetStart;
+        self.activeCatchupEnd = 0;
+        [self seekNativeStart:targetStart end:0];
+        return;
+    }
+    NSDictionary *channel = self.activeCatchupLiveChannel ?: [self channelWithID:self.channelID];
+    if (!channel && self.channelID.length) channel = @{@"id":self.channelID, @"name":self.channelName ?: self.channelID, @"remoteURL":self.currentRemoteURL ?: @""};
+    NSDictionary *catchupRow = [self catchupChannelForChannel:channel];
+    if ([catchupRow[@"catchupSource"] isKindOfClass:NSString.class] && [catchupRow[@"catchupSource"] length]) {
+        NSString *label = [NSString stringWithFormat:@"回退 %.0f 分钟", minutes];
+        if (![self startRemoteCatchupForChannel:channel program:@{@"title":label, @"start":@(targetStart), @"end":@(now)} start:targetStart end:now]) {
+            [self showServiceError:@"所选回退时间超出该订阅源支持的回看窗口或模板格式不受支持。"];
+        }
+        return;
+    }
+    NSDictionary *nativeFallback = (![channel[@"remoteURL"] length]) ? channel : [self nativeFallbackChannelForChannel:channel];
+    NSString *nativeID = [nativeFallback[@"id"] isKindOfClass:NSString.class] ? nativeFallback[@"id"] : @"";
+    if (nativeFallback && nativeID.length) {
+        self.pendingNativeReplayProgram = @{@"channelID":nativeID, @"start":@(targetStart), @"end":@0, @"title":[NSString stringWithFormat:@"回退 %.0f 分钟", minutes]};
+        [self playChannel:nativeFallback route:nil];
+        return;
+    }
+    [self showServiceError:@"当前频道线路暂未声明 M3U 回看模板（catchup-source），请打开节目单或切换支持回看的源。"];
+}
+- (void)showNativeTimeshiftActions {
+    NSDictionary *channel = self.activeCatchupLiveChannel ?: [self channelWithID:self.channelID];
+    BOOL isRemoteCatchupCapable = ([self catchupChannelForChannel:channel] != nil);
+    NSString *msg = (self.currentPlayer && !self.avPlayer)
+        ? @"由频道服务确认可用时间范围与版权；不支持的时间会返回失败。"
+        : (isRemoteCatchupCapable ? @"支持按时间快速回退或打开节目单点选已播节目回看。" : @"可切换至官方 SDK 线路或打开节目单按时段回看。");
+    UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"时移 / 回看" message:msg preferredStyle:UIAlertControllerStyleActionSheet];
+    for(NSNumber *minutes in @[@1,@5,@15,@30,@60]){
+        [sheet addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"回退 %@ 分钟",minutes] style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+            if(self.currentPlayer && !self.avPlayer){[self seekNativeStart:NSDate.date.timeIntervalSince1970-minutes.doubleValue*60 end:0];}
+            else{[self seekCurrentChannelByOffsetMinutes:minutes.doubleValue];}
+        }]];
+    }
+    [sheet addAction:[UIAlertAction actionWithTitle:@"打开节目单选时段回看" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self openEPG];}]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"返回直播" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self returnToLivePlayback];}]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     sheet.popoverPresentationController.sourceView=self.moreBtn;sheet.popoverPresentationController.sourceRect=self.moreBtn.bounds;[self presentViewController:sheet animated:YES completion:nil];
 }
@@ -1073,6 +1144,9 @@
     if (!self.timeshiftController) [self rebuildTimeshiftController];
     [self beginNativeTransition:@"返回直播"];
     self.nativeTimeShiftActive = NO;
+    self.activeCatchupProgramTitle = nil;
+    self.activeCatchupStart = 0;
+    self.activeCatchupEnd = 0;
     [self.timeshiftController returnToLive];
 }
 
@@ -1236,9 +1310,11 @@
     [sheet addAction:[UIAlertAction actionWithTitle:@"上一个频道" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[self playAdjacentChannel:-1];}]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"下一个频道" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[self playAdjacentChannel:1];}]];
     if(self.nativePlaybackFailed||self.remotePlaybackFailed)[sheet addAction:[UIAlertAction actionWithTitle:@"换线路 / 换源重试" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[self retryPlaybackWithAlternateSource];}]];
-    if(self.currentPlayer && !self.avPlayer){
+    NSDictionary *activeChannel = self.activeCatchupLiveChannel ?: [self channelWithID:self.channelID];
+    BOOL canTimeshiftOrCatchup = (self.currentPlayer && !self.avPlayer) || [self channelSupportsCatchup:activeChannel] || ([self nativeFallbackChannelForChannel:activeChannel] != nil) || [self isCatchupOrTimeshiftActive];
+    if(canTimeshiftOrCatchup){
         [sheet addAction:[UIAlertAction actionWithTitle:@"时移 / 回看" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[self showNativeTimeshiftActions];}]];
-        if(self.nativeTimeShiftActive)[sheet addAction:[UIAlertAction actionWithTitle:@"返回直播" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[self returnToNativeLive];}]];
+        if([self isCatchupOrTimeshiftActive])[sheet addAction:[UIAlertAction actionWithTitle:@"返回直播" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[self returnToLivePlayback];}]];
     }
     [sheet addAction:[UIAlertAction actionWithTitle:@"播放信息" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){ [self showPlaybackInfo]; }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"画中画" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){ [self togglePiP]; }]];

@@ -82,15 +82,19 @@ static NSDictionary *MediaPlaybackComponents(NSDictionary *context, NSInteger li
     }
 }
 + (NSDictionary *)historyEntryForContext:(NSDictionary *)context lineIndex:(NSInteger)lineIndex episodeIndex:(NSInteger)episodeIndex {
-    NSString *key = MediaPlaybackComponents(context ?: @{}, lineIndex, episodeIndex)[@"key"];
-    for (NSDictionary *entry in self.watchHistory) if ([entry[@"key"] isEqual:key]) return entry;
-    return nil;
+    @synchronized(self){
+        NSString *key = MediaPlaybackComponents(context ?: @{}, lineIndex, episodeIndex)[@"key"];
+        for (NSDictionary *entry in self.watchHistory) if ([entry[@"key"] isEqual:key]) return entry;
+        return nil;
+    }
 }
 + (NSDictionary *)latestHistoryForSourceID:(NSString *)sourceID provider:(NSString *)provider itemID:(NSString *)itemID {
-    for (NSDictionary *entry in self.watchHistory) {
-        if ([entry[@"sourceID"] isEqual:sourceID ?: @""] && [entry[@"provider"] isEqual:provider ?: @""] && [entry[@"itemID"] isEqual:itemID ?: @""]) return entry;
+    @synchronized(self){
+        for (NSDictionary *entry in self.watchHistory) {
+            if ([entry[@"sourceID"] isEqual:sourceID ?: @""] && [entry[@"provider"] isEqual:provider ?: @""] && [entry[@"itemID"] isEqual:itemID ?: @""]) return entry;
+        }
+        return nil;
     }
-    return nil;
 }
 + (void)recordContext:(NSDictionary *)context lineIndex:(NSInteger)lineIndex episodeIndex:(NSInteger)episodeIndex position:(NSTimeInterval)position duration:(NSTimeInterval)duration completed:(BOOL)completed {
     @synchronized(self){
@@ -128,8 +132,10 @@ static NSDictionary *MediaPlaybackComponents(NSDictionary *context, NSInteger li
     }
 }
 + (NSDictionary *)skipPointsForContext:(NSDictionary *)context {
-    NSDictionary *parts = MediaPlaybackComponents(context ?: @{}, 0, 0);
-    return [NSUserDefaults.standardUserDefaults dictionaryForKey:MediaSkipPointsDefaultsKey][parts[@"seriesKey"]] ?: @{};
+    @synchronized(self){
+        NSDictionary *parts = MediaPlaybackComponents(context ?: @{}, 0, 0);
+        return [NSUserDefaults.standardUserDefaults dictionaryForKey:MediaSkipPointsDefaultsKey][parts[@"seriesKey"]] ?: @{};
+    }
 }
 + (NSTimeInterval)introEndForContext:(NSDictionary *)context { id value=[self skipPointsForContext:context][@"introEnd"];return [value respondsToSelector:@selector(doubleValue)]?[value doubleValue]:0; }
 + (NSTimeInterval)outroSkipForContext:(NSDictionary *)context { id value=[self skipPointsForContext:context][@"outroSkip"];return [value respondsToSelector:@selector(doubleValue)]?[value doubleValue]:0; }

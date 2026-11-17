@@ -578,7 +578,7 @@
     task=[NSURLSession.sharedSession downloadTaskWithRequest:request completionHandler:^(NSURL *location,NSURLResponse *response,NSError *error){
         NSNumber *size=nil;[location getResourceValue:&size forKey:NSURLFileSizeKey error:NULL];
         NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]?[(NSHTTPURLResponse *)response statusCode]:0;
-        NSData *data=(location&&size&&!error&&status>=200&&status<300&&size.unsignedLongLongValue<=10*1024*1024)?[NSData dataWithContentsOfURL:location]:nil;
+        NSData *data=(location.path.length&&size&&!error&&status>=200&&status<300&&size.unsignedLongLongValue<=10*1024*1024)?[NSData dataWithContentsOfFile:location.path options:NSDataReadingMappedIfSafe error:NULL]:nil;
         NSString *text=data?[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]:nil;
         NSArray *channels=text.length?[M3UParser parse:text baseURL:response.URL?:[NSURL URLWithString:url]]:nil;
         dispatch_async(dispatch_get_main_queue(),^{RootViewController *owner=weakSelf;if(!owner||owner.subscriptionEditTasks[source]!=(id)task)return;[owner.subscriptionEditTasks removeObjectForKey:source];
@@ -618,10 +618,18 @@
     [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[a addAction:[UIAlertAction actionWithTitle:@"保存" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){NSMutableDictionary *m=[[NSUserDefaults.standardUserDefaults dictionaryForKey:@"epgMappings"]?:@{} mutableCopy];NSString *key=ch[@"id"];NSString *value=[a.textFields.firstObject.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];if(value.length)m[key]=value;else[m removeObjectForKey:key];[NSUserDefaults.standardUserDefaults setObject:m forKey:@"epgMappings"];[self.epgCache removeObjectForKey:key];[self saveEPGCache];[self applyFilter];}]];[self presentViewController:a animated:YES completion:nil];
 }
 - (void)showRemoteTools:(NSDictionary *)ch {
-    UIAlertController *a=[UIAlertController alertControllerWithTitle:ch[@"name"] message:@"订阅频道 · AVPlayer" preferredStyle:UIAlertControllerStyleActionSheet];
+    BOOL supportsCatchup = [self channelSupportsCatchup:ch];
+    NSString *subtitle = supportsCatchup ? @"订阅频道 · 支持节目回看" : @"订阅频道 · AVPlayer";
+    UIAlertController *a=[UIAlertController alertControllerWithTitle:ch[@"name"] message:subtitle preferredStyle:UIAlertControllerStyleActionSheet];
+    if ([ch[@"id"] isEqualToString:self.channelID] && self.remoteCatchupActive) {
+        [a addAction:[UIAlertAction actionWithTitle:@"返回实时直播" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){[self returnToLivePlayback];}]];
+    }
     [a addAction:[UIAlertAction actionWithTitle:@"重新播放" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){[self routePlayback:ch];}]];
     for(NSString *url in self.altSources[CCTVRouteGroupKey(ch)]){if([url isEqual:ch[@"remoteURL"]])continue;[a addAction:[UIAlertAction actionWithTitle:[NSURL URLWithString:url].host?:@"备用源" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){NSMutableDictionary *other=[ch mutableCopy];other[@"remoteURL"]=url;[self routePlayback:other];}]];}
-    [a addAction:[UIAlertAction actionWithTitle:@"节目单" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){[self openEPGforChannel:ch[@"id"] name:ch[@"name"]];}]];
+    [a addAction:[UIAlertAction actionWithTitle:supportsCatchup?@"节目单与回看":@"节目单" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){[self openEPGforChannel:ch[@"id"] name:ch[@"name"]];}]];
+    if ([ch[@"id"] isEqualToString:self.channelID] && (supportsCatchup || [self nativeFallbackChannelForChannel:ch])) {
+        [a addAction:[UIAlertAction actionWithTitle:@"时移 / 快速回退" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){[self showNativeTimeshiftActions];}]];
+    }
     [a addAction:[UIAlertAction actionWithTitle:@"EPG 手动匹配" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){[self editEPGMapping:ch];}]];
     [a addAction:[UIAlertAction actionWithTitle:@"静音预览（30 秒）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){[self previewChannel:ch];}]];
     [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];a.popoverPresentationController.sourceView=self.bottomBar;a.popoverPresentationController.sourceRect=self.bottomBar.bounds;[self presentViewController:a animated:YES completion:nil];

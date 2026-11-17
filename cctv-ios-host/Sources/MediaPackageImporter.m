@@ -254,7 +254,12 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     if(!routerText.length && [fm fileExistsAtPath:[root stringByAppendingPathComponent:@"src/router.js"]])routerText=[[NSString alloc] initWithData:ReadBounded([NSURL fileURLWithPath:[root stringByAppendingPathComponent:@"src/router.js"]],PackageFileLimit,NULL) encoding:NSUTF8StringEncoding]?:@"";
     NSString *serviceText=[NSString stringWithFormat:@"%@\n%@",text,routerText];
     NSDictionary *nanoDeclaration=nil;
-    NSTextCheckingResult *nanoMatch=[[NSRegularExpression regularExpressionWithPattern:@"/\\*\\s*nanoTV-declaration\\s*([\\s\\S]*?)\\s*\\*/" options:0 error:NULL] firstMatchInString:text options:0 range:NSMakeRange(0,text.length)];
+    static NSRegularExpression *nanoRe=nil;
+    static dispatch_once_t nanoRegexOnce;
+    dispatch_once(&nanoRegexOnce,^{
+        nanoRe=[NSRegularExpression regularExpressionWithPattern:@"/\\*\\s*nanoTV-declaration\\s*([\\s\\S]*?)\\s*\\*/" options:0 error:NULL];
+    });
+    NSTextCheckingResult *nanoMatch=[nanoRe firstMatchInString:text options:0 range:NSMakeRange(0,text.length)];
     if(nanoMatch){NSString *json=[text substringWithRange:[nanoMatch rangeAtIndex:1]];NSData *jsonData=[json dataUsingEncoding:NSUTF8StringEncoding];id parsed=jsonData?[NSJSONSerialization JSONObjectWithData:jsonData options:0 error:NULL]:nil;if([parsed isKindOfClass:NSDictionary.class])nanoDeclaration=parsed;else{PackageError(error,@"NanoTV 声明头不是有效 JSON");return nil;}}
     NSDictionary *nanoManifest=[nanoDeclaration[@"manifest"] isKindOfClass:NSDictionary.class]?nanoDeclaration[@"manifest"]:@{};
     NSArray *nanoCapabilities=[nanoManifest[@"capabilities"] isKindOfClass:NSArray.class]?nanoManifest[@"capabilities"]:@[];
@@ -349,13 +354,20 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     NSMutableDictionary *clean=[@{@"schemaVersion":@1,@"entry":entry,@"runtime":runtime,@"protocol":protocol,@"moduleType":moduleType,@"name":defaultName} mutableCopy];
     NSString *pluginVersion=[result[@"pluginVersion"] isKindOfClass:NSString.class]?result[@"pluginVersion"]:([result[@"version"] isKindOfClass:NSString.class]?result[@"version"]:([package[@"version"] isKindOfClass:NSString.class]?package[@"version"]:@""));
     if(weboxSource){
+        static NSRegularExpression *weboxNameRe=nil;
+        static NSRegularExpression *weboxVerRe=nil;
+        static dispatch_once_t weboxMetaRegexOnce;
+        dispatch_once(&weboxMetaRegexOnce,^{
+            weboxNameRe=[NSRegularExpression regularExpressionWithPattern:@"WeBox\\s*\\.\\s*define\\s*\\(\\s*\\{[\\s\\S]{0,1200}?\\bname\\s*:\\s*['\"]([^'\"]{1,128})['\"]" options:0 error:NULL];
+            weboxVerRe=[NSRegularExpression regularExpressionWithPattern:@"WeBox\\s*\\.\\s*define\\s*\\(\\s*\\{[\\s\\S]{0,1200}?\\bversion\\s*:\\s*['\"]([^'\"]{1,64})['\"]" options:0 error:NULL];
+        });
         NSRange scanRange=NSMakeRange(0,MIN(text.length,(NSUInteger)4096));
         if(!result[@"name"]&&!package[@"name"]){
-            NSTextCheckingResult *nameMatch=[[NSRegularExpression regularExpressionWithPattern:@"WeBox\\s*\\.\\s*define\\s*\\(\\s*\\{[\\s\\S]{0,1200}?\\bname\\s*:\\s*['\"]([^'\"]{1,128})['\"]" options:0 error:NULL] firstMatchInString:text options:0 range:scanRange];
+            NSTextCheckingResult *nameMatch=[weboxNameRe firstMatchInString:text options:0 range:scanRange];
             if(nameMatch&&nameMatch.numberOfRanges>1){NSString *weboxName=[[text substringWithRange:[nameMatch rangeAtIndex:1]] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];if(weboxName.length)clean[@"name"]=weboxName;}
         }
         if(!pluginVersion.length){
-            NSTextCheckingResult *verMatch=[[NSRegularExpression regularExpressionWithPattern:@"WeBox\\s*\\.\\s*define\\s*\\(\\s*\\{[\\s\\S]{0,1200}?\\bversion\\s*:\\s*['\"]([^'\"]{1,64})['\"]" options:0 error:NULL] firstMatchInString:text options:0 range:scanRange];
+            NSTextCheckingResult *verMatch=[weboxVerRe firstMatchInString:text options:0 range:scanRange];
             if(verMatch&&verMatch.numberOfRanges>1)pluginVersion=[[text substringWithRange:[verMatch rangeAtIndex:1]] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
         }
     }

@@ -8,6 +8,20 @@
 #import "M3UParser.h"
 #import "RuntimeDiagnostics.h"
 
+static NSString *PluginResourceFormattedTimestamp(NSTimeInterval ts) {
+    if (ts <= 0) return @"尚无成功记录";
+    static NSDateFormatter *formatter = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        formatter = [NSDateFormatter new];
+        formatter.locale = [NSLocale localeWithLocaleIdentifier:@"zh_CN"];
+        formatter.dateFormat = @"yyyy-MM-dd HH:mm";
+    });
+    @synchronized(formatter) {
+        return [formatter stringFromDate:[NSDate dateWithTimeIntervalSince1970:ts]] ?: @"尚无成功记录";
+    }
+}
+
 @interface PluginResourceDetailViewController () <UITableViewDataSource,UITableViewDelegate,NSURLSessionDataDelegate,NSURLSessionTaskDelegate>
 @property(nonatomic,strong) UILabel *notice;
 @property(nonatomic) BOOL operationPending;
@@ -70,15 +84,17 @@
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task didReceiveResponse:(NSURLResponse *)response completionHandler:(void (^)(NSURLSessionResponseDisposition))completion {BOOL valid=task==self.probeTask&&[response isKindOfClass:NSHTTPURLResponse.class]&&response.expectedContentLength<=1024*1024;if(task==self.probeTask){self.probeStatusCode=[response isKindOfClass:NSHTTPURLResponse.class]?((NSHTTPURLResponse *)response).statusCode:0;self.probeResponseURL=response.URL;}completion(valid?NSURLSessionResponseAllow:NSURLSessionResponseCancel);}
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task didReceiveData:(NSData *)data {if(task!=self.probeTask)return;if(self.probeData.length+data.length>1024*1024){[task cancel];return;}[self.probeData appendData:data];}
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
-    if(task!=self.probeTask)return;
+    if(task!=self.probeTask){if(session!=self.probeSession)[session finishTasksAndInvalidate];return;}
     NSUInteger generation=self.probeGeneration;
     NSData *data=[self.probeData copy];
     NSInteger status=self.probeStatusCode;
     NSURL *url=self.probeResponseURL;
     NSUInteger pathIndex=self.probePathIndex;
     NSString *attemptedPath=pathIndex<self.probePaths.count?self.probePaths[pathIndex]:@"";
+    __weak typeof(self) weakSelf=self;
     dispatch_async(dispatch_get_main_queue(),^{
-        if(generation!=self.probeGeneration)return;
+        PluginResourceDetailViewController *self=weakSelf;
+        if(!self||generation!=self.probeGeneration){[session finishTasksAndInvalidate];return;}
         self.probeTask=nil;
         if(error){self.probeLastFailure=error.code==NSURLErrorCancelled?@"响应超过 1 MiB 或请求已取消":(error.localizedDescription?:@"连接失败");self.probeLastHTTPStatus=0;}
         else{
@@ -123,14 +139,15 @@
     });
 }
 - (void)probeLocalEPGCandidatesForSubscription:(NSString *)subscriptionURL index:(NSUInteger)index generation:(NSUInteger)generation {
-    if(generation!=self.probeGeneration||!subscriptionURL.length||!self.running)return;
+    if(generation!=self.probeGeneration||!subscriptionURL.length||!self.running){[self.epgProbeSession finishTasksAndInvalidate];self.epgProbeSession=nil;self.epgProbeTask=nil;return;}
     NSArray<NSString *> *candidates=[ServiceStore epgPathCandidatesForService:self.service];
-    if(index>=candidates.count){[self.epgProbeSession finishTasksAndInvalidate];self.epgProbeSession=nil;return;}
+    if(index>=candidates.count){[self.epgProbeSession finishTasksAndInvalidate];self.epgProbeSession=nil;self.epgProbeTask=nil;return;}
     if(!self.epgProbeSession){
         NSURLSessionConfiguration *config=NSURLSessionConfiguration.ephemeralSessionConfiguration;
         config.timeoutIntervalForRequest=1.5;config.timeoutIntervalForResource=2.0;config.URLCache=nil;
         self.epgProbeSession=[NSURLSession sessionWithConfiguration:config];
     }
+    NSURLSession *epgSession=self.epgProbeSession;
     NSString *candidatePath=candidates[index];
     NSURL *epgURL=[NSURL URLWithString:[NSString stringWithFormat:@"%@%@",self.baseURL,candidatePath]];
     if(!epgURL||![epgURL.host isEqualToString:@"127.0.0.1"]){
@@ -141,10 +158,10 @@
     req.HTTPMethod=@"GET";req.timeoutInterval=1.5;
     [req setValue:@"bytes=0-4095" forHTTPHeaderField:@"Range"];
     __weak typeof(self) weakSelf=self;
-    self.epgProbeTask=[self.epgProbeSession dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+    self.epgProbeTask=[epgSession dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         dispatch_async(dispatch_get_main_queue(),^{
             PluginResourceDetailViewController *owner=weakSelf;
-            if(!owner||generation!=owner.probeGeneration)return;
+            if(!owner||generation!=owner.probeGeneration){[epgSession finishTasksAndInvalidate];return;}
             NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]?((NSHTTPURLResponse *)response).statusCode:0;
             BOOL validXMLTV=NO;
             if(!error&&status>=200&&status<300&&data.length>=2){
@@ -221,7 +238,7 @@
     if(ip.section==0)return self.resourceRows[ip.row];
     NSString *port=[NSString stringWithFormat:@"%@",self.service[@"port"]?:@"未知"];
     if(ip.section==1){NSString *serviceStatus=[self.service[@"status"] isKindOfClass:NSString.class]?self.service[@"status"]:@"暂无状态信息";NSArray *rows=@[@{@"title":@"服务进程",@"value":self.operationPending?@"正在启停…":(self.running?@"运行中 · 视频解码状态未知":@"已停止")},@{@"title":self.running?@"停止服务":@"启动服务",@"value":self.running?@"仅停止此服务":@"按需启动此服务",@"action":@"toggle"},@{@"title":@"读取直播频道清单",@"value":self.probeStatus?:@"检测本机播放列表；不验证视频解码",@"action":@"probe"},@{@"title":@"运行状态说明",@"value":serviceStatus}];return rows[(!self.liveCapable&&ip.row==2)?3:ip.row];}
-    if(ip.section==2){NSString *resolvedPath=self.resolvedPlaylistPath;NSString *pendingPath=self.playlistCandidates.firstObject;NSString *playlist=resolvedPath?: (pendingPath.length?[NSString stringWithFormat:@"待验证 · %@",pendingPath]:@"未发现 · 点击上方检测资源接口");NSInteger servicePort=[self.service[@"port"] integerValue];NSString *resolvedURL=[ServiceStore subscriptionURLForService:self.service];NSString *subscription=resolvedURL?: (pendingPath.length&&servicePort>0?[NSString stringWithFormat:@"待验证 · http://127.0.0.1:%ld%@",(long)servicePort,pendingPath]:@"未识别 · 点击上方检测后加入资源列表");NSString *epg=[ServiceStore epgURLForService:self.service]?:@"尚未从订阅清单中识别";NSDictionary *metadata=resolvedURL.length?[ProfileStore metadata:resolvedURL]:@{};NSArray *cached=[metadata[@"cachedChannels"] isKindOfClass:NSArray.class]?metadata[@"cachedChannels"]:@[];NSString *count=cached.count?[NSString stringWithFormat:@"%lu 个缓存频道",(unsigned long)cached.count]:(self.probePlaylistChecked?[NSString stringWithFormat:@"%ld 个 · 最近一次接口检测",(long)self.probeChannelCount]:@"未知 · 尚未读取有效清单");NSString *status=[metadata[@"status"] isKindOfClass:NSString.class]?metadata[@"status"]:(resolvedURL.length?(self.running?@"服务运行中 · 等待读取":@"服务已停止"): @"未配置已验证的播放列表");NSTimeInterval updated=[metadata[@"updatedAt"] doubleValue];NSDateFormatter *formatter=[NSDateFormatter new];formatter.locale=[NSLocale localeWithLocaleIdentifier:@"zh_CN"];formatter.dateFormat=@"yyyy-MM-dd HH:mm";NSString *last=updated>0?[formatter stringFromDate:[NSDate dateWithTimeIntervalSince1970:updated]]:@"尚无成功记录";NSArray *rows=@[@{@"title":@"复制本机服务地址",@"value":[NSString stringWithFormat:@"http://127.0.0.1:%@",port],@"action":@"copy"},@{@"title":@"服务订阅地址",@"value":subscription},@{@"title":@"节目单地址",@"value":epg},@{@"title":@"播放列表路径",@"value":playlist},@{@"title":@"频道数量",@"value":count},@{@"title":@"订阅清单状态",@"value":status},@{@"title":@"最近成功刷新",@"value":last}];NSMutableDictionary *row=[rows[ip.row] mutableCopy];BOOL subscriptionURL=[subscription hasPrefix:@"http://"]||[subscription hasPrefix:@"https://"];BOOL epgURL=[epg hasPrefix:@"http://"]||[epg hasPrefix:@"https://"];if((ip.row==1&&subscriptionURL)||(ip.row==2&&epgURL))row[@"action"]=@"copy";return row;}
+    if(ip.section==2){NSString *resolvedPath=self.resolvedPlaylistPath;NSString *pendingPath=self.playlistCandidates.firstObject;NSString *playlist=resolvedPath?: (pendingPath.length?[NSString stringWithFormat:@"待验证 · %@",pendingPath]:@"未发现 · 点击上方检测资源接口");NSInteger servicePort=[self.service[@"port"] integerValue];NSString *resolvedURL=[ServiceStore subscriptionURLForService:self.service];NSString *subscription=resolvedURL?: (pendingPath.length&&servicePort>0?[NSString stringWithFormat:@"待验证 · http://127.0.0.1:%ld%@",(long)servicePort,pendingPath]:@"未识别 · 点击上方检测后加入资源列表");NSString *epg=[ServiceStore epgURLForService:self.service]?:@"尚未从订阅清单中识别";NSDictionary *metadata=resolvedURL.length?[ProfileStore metadata:resolvedURL]:@{};NSArray *cached=[metadata[@"cachedChannels"] isKindOfClass:NSArray.class]?metadata[@"cachedChannels"]:@[];NSString *count=cached.count?[NSString stringWithFormat:@"%lu 个缓存频道",(unsigned long)cached.count]:(self.probePlaylistChecked?[NSString stringWithFormat:@"%ld 个 · 最近一次接口检测",(long)self.probeChannelCount]:@"未知 · 尚未读取有效清单");NSString *status=[metadata[@"status"] isKindOfClass:NSString.class]?metadata[@"status"]:(resolvedURL.length?(self.running?@"服务运行中 · 等待读取":@"服务已停止"): @"未配置已验证的播放列表");NSTimeInterval updated=[metadata[@"updatedAt"] doubleValue];NSString *last=PluginResourceFormattedTimestamp(updated);NSArray *rows=@[@{@"title":@"复制本机服务地址",@"value":[NSString stringWithFormat:@"http://127.0.0.1:%@",port],@"action":@"copy"},@{@"title":@"服务订阅地址",@"value":subscription},@{@"title":@"节目单地址",@"value":epg},@{@"title":@"播放列表路径",@"value":playlist},@{@"title":@"频道数量",@"value":count},@{@"title":@"订阅清单状态",@"value":status},@{@"title":@"最近成功刷新",@"value":last}];NSMutableDictionary *row=[rows[ip.row] mutableCopy];BOOL subscriptionURL=[subscription hasPrefix:@"http://"]||[subscription hasPrefix:@"https://"];BOOL epgURL=[epg hasPrefix:@"http://"]||[epg hasPrefix:@"https://"];if((ip.row==1&&subscriptionURL)||(ip.row==2&&epgURL))row[@"action"]=@"copy";return row;}
     return self.managementRows[ip.row];
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {NSDictionary *row=[self rowAt:ip];BOOL sourceURL=[row[@"action"] isEqual:@"copySource"],copyURL=[row[@"action"] isEqual:@"copy"];BOOL address=sourceURL||copyURL;BOOL longValue=!address&&[row[@"value"] isKindOfClass:NSString.class]&&[(NSString *)row[@"value"] length]>80;NSString *reuse=address?@"service.resource.address":(longValue?@"service.resource.long-value":@"service.resource.value");UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:reuse];if(!cell)cell=[[UITableViewCell alloc] initWithStyle:(address||longValue)?UITableViewCellStyleSubtitle:UITableViewCellStyleValue1 reuseIdentifier:reuse];cell.backgroundColor=HostCard();cell.layer.cornerRadius=14;cell.layer.cornerCurve=kCACornerCurveContinuous;cell.clipsToBounds=YES;cell.layer.borderWidth=0.6;HostSetLayerBorderColor(cell,HostBorder());
@@ -243,11 +260,18 @@
     if(!paths.count){self.probeStatus=@"此资源未提供本机播放列表接口";[self.tableView reloadSections:[NSIndexSet indexSetWithIndex:1] withRowAnimation:UITableViewRowAnimationNone];return;}
     self.probeGeneration++;[self.probeTask cancel];self.probeTask=nil;[self.probeSession invalidateAndCancel];[self.epgProbeTask cancel];self.epgProbeTask=nil;[self.epgProbeSession invalidateAndCancel];self.epgProbeSession=nil;
     self.probePaths=paths;self.probePathIndex=0;self.probeLastHTTPStatus=0;self.probeLastFailure=@"";self.probeData=[NSMutableData data];self.probeChannelCount=0;self.probePlaylistChecked=NO;self.probingPlaylist=YES;
-    NSURLSessionConfiguration *config=NSURLSessionConfiguration.ephemeralSessionConfiguration;config.timeoutIntervalForRequest=1.5;config.timeoutIntervalForResource=2;config.HTTPMaximumConnectionsPerHost=2;config.URLCache=nil;config.requestCachePolicy=NSURLRequestReloadIgnoringLocalCacheData;self.probeSession=[NSURLSession sessionWithConfiguration:config delegate:self delegateQueue:nil];
+    NSURLSessionConfiguration *config=NSURLSessionConfiguration.ephemeralSessionConfiguration;config.timeoutIntervalForRequest=1.5;config.timeoutIntervalForResource=2;config.HTTPMaximumConnectionsPerHost=2;config.URLCache=nil;config.requestCachePolicy=NSURLRequestReloadIgnoringLocalCacheData;self.probeSession=[NSURLSession sessionWithConfiguration:config delegate:self delegateQueue:NSOperationQueue.mainQueue];
     self.probeStatus=[NSString stringWithFormat:@"正在检测 %lu 个本机节目单地址…",(unsigned long)paths.count];[self.tableView reloadSections:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(1,2)] withRowAnimation:UITableViewRowAnimationNone];[self probeNextPlaylistPath];
 }
 - (void)probeNextPlaylistPath {
-    if(!self.probingPlaylist||self.probePathIndex>=self.probePaths.count)return;
+    if(!self.probingPlaylist)return;
+    if(self.probePathIndex>=self.probePaths.count){
+        self.probingPlaylist=NO;self.probePlaylistChecked=NO;self.probeTask=nil;
+        self.probeStatus=[NSString stringWithFormat:@"未发现有效节目单 · 已检查 %lu 个本机地址 · %@ · 可编辑填写路径",(unsigned long)self.probePaths.count,self.probeLastFailure.length?self.probeLastFailure:@"无有效响应"];
+        [self.probeSession finishTasksAndInvalidate];self.probeSession=nil;
+        [self.tableView reloadSections:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(1,2)] withRowAnimation:UITableViewRowAnimationNone];
+        return;
+    }
     NSString *path=self.probePaths[self.probePathIndex];NSInteger port=[self.service[@"port"] integerValue];
     NSString *trimmed=[path stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     if(port<1||port>65535||![trimmed isEqualToString:path]||![path hasPrefix:@"/"]||[path hasPrefix:@"//"]||[path containsString:@".."]||[path containsString:@"?"]||[path containsString:@"#"]||[path containsString:@"\\"]||[path containsString:@":"]||[path rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location!=NSNotFound){

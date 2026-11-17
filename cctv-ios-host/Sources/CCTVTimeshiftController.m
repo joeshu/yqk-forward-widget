@@ -128,35 +128,40 @@ static NSString *const CCTVTimeshiftErrorDomain = @"CCTVHostTimeshift";
     self.seekStart = start; self.seekEnd = end;
     [self setState:CCTVTimeshiftStateCheckingCopyright];
     NSUInteger generation = self.generation;
+    __weak typeof(self) weakSelf = self;
     [self checkCopyrightForStart:start channelID:channelID completion:^(BOOL allowed, NSError *error) {
-        if (generation != self.generation) return; // 已被新请求/取消取代。
-        if (self.state != CCTVTimeshiftStateCheckingCopyright) return;
+        CCTVTimeshiftController *owner = weakSelf;
+        if (!owner || generation != owner.generation) return; // 已被新请求/取消取代。
+        if (owner.state != CCTVTimeshiftStateCheckingCopyright) return;
         if (error) {
             // 预检本身失败/超时：放行 seek，SDK seek 会再校验版权。
-            [self issueSeekToStart:start end:end channelID:channelID completion:completion];
+            [owner issueSeekToStart:start end:end channelID:channelID completion:completion];
             return;
         }
         if (!allowed) {
-            NSError *noCopyright = [self errorWithCode:CCTVTimeshiftErrorNoCopyright message:@"该时段节目无回看版权，请返回直播或选择其他节目"];
-            [self failWithError:noCopyright completion:completion];
+            NSError *noCopyright = [owner errorWithCode:CCTVTimeshiftErrorNoCopyright message:@"该时段节目无回看版权，请返回直播或选择其他节目"];
+            [owner failWithError:noCopyright completion:completion];
             return;
         }
-        self.seekPreCheckPassed = YES;
-        [self issueSeekToStart:start end:end channelID:channelID completion:completion];
+        owner.seekPreCheckPassed = YES;
+        [owner issueSeekToStart:start end:end channelID:channelID completion:completion];
     }];
 }
 
 - (void)checkCopyrightForStart:(NSTimeInterval)start channelID:(NSString *)channelID completion:(void (^)(BOOL allowed, NSError *error))completion {
     NSString *key = [NSString stringWithFormat:@"%@|%lld", channelID ?: @"", (long long)start];
-    NSDictionary *cached = self.copyrightCache[key];
-    if (cached) {
-        NSTimeInterval at = [cached[@"at"] doubleValue];
-        if (NSProcessInfo.processInfo.systemUptime - at < CCTVTimeshiftCopyrightCacheTTL) {
-            BOOL allowed = [cached[@"public"] boolValue];
-            dispatch_async(dispatch_get_main_queue(), ^{ completion(allowed, nil); });
-            return;
+    NSDictionary *cached = nil;
+    @synchronized(self) {
+        cached = self.copyrightCache[key];
+        if (cached) {
+            NSTimeInterval at = [cached[@"at"] doubleValue];
+            if (NSProcessInfo.processInfo.systemUptime - at < CCTVTimeshiftCopyrightCacheTTL) {
+                BOOL allowed = [cached[@"public"] boolValue];
+                dispatch_async(dispatch_get_main_queue(), ^{ completion(allowed, nil); });
+                return;
+            }
+            [self.copyrightCache removeObjectForKey:key];
         }
-        [self.copyrightCache removeObjectForKey:key];
     }
     // 运行时校验签名：checkPublicPlaytime:completionBlock:（double, block）。
     SEL sel = @selector(checkPublicPlaytime:completionBlock:);
@@ -169,11 +174,16 @@ static NSString *const CCTVTimeshiftErrorDomain = @"CCTVHostTimeshift";
     __block BOOL delivered = NO;
     __weak typeof(self) weakSelf = self;
     void (^deliver)(BOOL, NSError *) = ^(BOOL allowed, NSError *error) {
-        if (delivered) return;
-        delivered = YES;
         CCTVTimeshiftController *owner = weakSelf;
         if (!owner) return;
-        if (!error) owner.copyrightCache[key] = @{@"public": @(allowed), @"at": @(NSProcessInfo.processInfo.systemUptime)};
+        @synchronized(owner) {
+            if (delivered) return;
+            delivered = YES;
+            if (!error) {
+                if (owner.copyrightCache.count >= 64) [owner.copyrightCache removeAllObjects];
+                owner.copyrightCache[key] = @{@"public": @(allowed), @"at": @(NSProcessInfo.processInfo.systemUptime)};
+            }
+        }
         dispatch_async(dispatch_get_main_queue(), ^{ completion(allowed, error); });
     };
     @try {

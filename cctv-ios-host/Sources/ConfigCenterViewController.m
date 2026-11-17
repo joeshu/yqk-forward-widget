@@ -309,7 +309,7 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
 }
 - (void)viewDidDisappear:(BOOL)animated {[super viewDidDisappear:animated];[NSNotificationCenter.defaultCenter removeObserver:self name:PyHostRuntimeStateDidChangeNotification object:nil];}
 - (void)dealloc {[NSNotificationCenter.defaultCenter removeObserver:self];}
-- (void)runtimeStateDidChange {[self reloadProfiles];}
+- (void)runtimeStateDidChange {if(!NSThread.isMainThread){__weak typeof(self) weakSelf=self;dispatch_async(dispatch_get_main_queue(),^{[weakSelf runtimeStateDidChange];});return;}if(!self.isViewLoaded)return;[self reloadProfiles];}
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
     [self updateResourceHeaderLayout];[self layoutCompactHeader];
@@ -797,7 +797,8 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
         [task resume];
     }
     dispatch_group_notify(group,dispatch_get_main_queue(),^{
-        ConfigCenterViewController *owner=weakSelf;if(!owner)return;[session finishTasksAndInvalidate];owner.probingResources=NO;
+        [session finishTasksAndInvalidate];
+        ConfigCenterViewController *owner=weakSelf;if(!owner)return;owner.probingResources=NO;
         [UIView transitionWithView:owner.tableView duration:.18 options:UIViewAnimationOptionTransitionCrossDissolve animations:^{[owner.tableView reloadData];} completion:nil];
     });
 }

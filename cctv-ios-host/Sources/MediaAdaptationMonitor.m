@@ -65,10 +65,92 @@ static NSString *CCTVMonitorInferFormat(NSString *url, NSDictionary *result) {
     return @"auto";
 }
 
+static const NSUInteger MediaAdaptationProbeByteLimit = 4096;
+
+@interface CCTVAdaptationStreamProbe : NSObject <NSURLSessionDataDelegate, NSURLSessionTaskDelegate>
+@property(nonatomic, strong) NSURLSession *session;
+@property(nonatomic, strong) NSURLSessionDataTask *task;
+@property(nonatomic, strong) NSMutableData *buffer;
+@property(nonatomic, strong) NSURLResponse *response;
+@property(nonatomic, copy) void (^completion)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable);
+@property(nonatomic, assign) BOOL finished;
+@property(nonatomic, assign) BOOL cancelledAfterSample;
++ (void)probeWithRequest:(NSURLRequest *)request completion:(void (^)(NSData * _Nullable data, NSURLResponse * _Nullable response, NSError * _Nullable error))completion;
+@end
+
+@implementation CCTVAdaptationStreamProbe
++ (void)probeWithRequest:(NSURLRequest *)request completion:(void (^)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable))completion {
+    CCTVAdaptationStreamProbe *probe = [[CCTVAdaptationStreamProbe alloc] init];
+    probe.buffer = [NSMutableData dataWithCapacity:MediaAdaptationProbeByteLimit];
+    probe.completion = completion;
+    NSURLSessionConfiguration *config = [NSURLSessionConfiguration ephemeralSessionConfiguration];
+    config.timeoutIntervalForRequest = 6.0;
+    config.timeoutIntervalForResource = 7.5;
+    config.URLCache = nil;
+    config.HTTPCookieStorage = nil;
+    config.HTTPShouldSetCookies = NO;
+    config.requestCachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
+    probe.session = [NSURLSession sessionWithConfiguration:config delegate:probe delegateQueue:nil];
+    probe.task = [probe.session dataTaskWithRequest:request];
+    [probe.task resume];
+}
+- (void)finishWithError:(NSError *)error {
+    void (^cb)(NSData *, NSURLResponse *, NSError *) = nil;
+    NSData *snapshot = nil;
+    NSURLResponse *resp = nil;
+    NSURLSession *sess = nil;
+    NSError *finalErr = error;
+    @synchronized(self) {
+        if (self.finished) return;
+        self.finished = YES;
+        if (finalErr && finalErr.code == NSURLErrorCancelled && (self.cancelledAfterSample || self.buffer.length > 0 || self.response != nil)) {
+            finalErr = nil;
+        }
+        snapshot = [self.buffer copy];
+        resp = self.response;
+        cb = self.completion;
+        self.completion = nil;
+        sess = self.session;
+        self.session = nil;
+        self.task = nil;
+    }
+    [sess finishTasksAndInvalidate];
+    if (cb) cb(snapshot, resp, finalErr);
+}
+- (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)dataTask didReceiveResponse:(NSURLResponse *)response completionHandler:(void (^)(NSURLSessionResponseDisposition))completionHandler {
+    @synchronized(self) {
+        self.response = response;
+    }
+    completionHandler(NSURLSessionResponseAllow);
+}
+- (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)dataTask didReceiveData:(NSData *)data {
+    BOOL reachedLimit = NO;
+    @synchronized(self) {
+        if (self.finished) return;
+        NSUInteger remaining = self.buffer.length < MediaAdaptationProbeByteLimit ? (MediaAdaptationProbeByteLimit - self.buffer.length) : 0;
+        if (remaining > 0 && data.length > 0) {
+            [self.buffer appendBytes:data.bytes length:MIN(remaining, data.length)];
+        }
+        if (self.buffer.length >= MediaAdaptationProbeByteLimit) {
+            self.cancelledAfterSample = YES;
+            reachedLimit = YES;
+        }
+    }
+    if (reachedLimit) {
+        [dataTask cancel];
+        [self finishWithError:nil];
+    }
+}
+- (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
+    [self finishWithError:error];
+}
+@end
+
 @interface MediaAdaptationMonitor ()
 @property(nonatomic, strong) dispatch_queue_t queue;
 @property(nonatomic, strong) NSMutableArray<NSDictionary *> *records;
 @property(nonatomic, strong) NSDateFormatter *timeFormatter;
+@property(nonatomic, assign) BOOL persistScheduled;
 @end
 
 @implementation MediaAdaptationMonitor
@@ -116,13 +198,19 @@ static NSString *CCTVMonitorInferFormat(NSString *url, NSDictionary *result) {
     });
 }
 
+- (NSString *)formattedTimestampForDate:(NSDate *)date {
+    @synchronized(self.timeFormatter) {
+        return [self.timeFormatter stringFromDate:date ?: NSDate.date] ?: @"";
+    }
+}
+
 - (void)appendRecord:(NSDictionary *)record {
     if (![record isKindOfClass:NSDictionary.class] || !self.isMonitoringEnabled) return;
     NSMutableDictionary *enriched = [record mutableCopy];
     if (!enriched[@"id"]) enriched[@"id"] = NSUUID.UUID.UUIDString.lowercaseString;
     NSTimeInterval now = NSDate.date.timeIntervalSince1970;
     if (!enriched[@"timestamp"]) enriched[@"timestamp"] = @(now);
-    if (!enriched[@"timeText"]) enriched[@"timeText"] = [self.timeFormatter stringFromDate:[NSDate dateWithTimeIntervalSince1970:now]] ?: @"";
+    if (!enriched[@"timeText"]) enriched[@"timeText"] = [self formattedTimestampForDate:[NSDate dateWithTimeIntervalSince1970:now]];
     NSString *advice = [self diagnosisAndRecommendationForRecord:enriched];
     if (advice.length) enriched[@"advice"] = advice;
     NSDictionary *immutable = CCTVMonitorSanitizedRecord(enriched);
@@ -131,11 +219,22 @@ static NSString *CCTVMonitorInferFormat(NSString *url, NSDictionary *result) {
         while (self.records.count > CCTVMediaAdaptationMonitorMaxRecords) {
             [self.records removeLastObject];
         }
-        NSArray *snapshot = [self.records copy];
-        [NSUserDefaults.standardUserDefaults setObject:snapshot forKey:CCTVMediaAdaptationMonitorRecordsKey];
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [NSNotificationCenter.defaultCenter postNotificationName:CCTVMediaAdaptationMonitorDidUpdateNotification object:self];
-        });
+        if (!self.persistScheduled) {
+            self.persistScheduled = YES;
+            NSArray *snapshot = [self.records copy];
+            [NSUserDefaults.standardUserDefaults setObject:snapshot forKey:CCTVMediaAdaptationMonitorRecordsKey];
+            __weak typeof(self) weakSelf = self;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(80 * NSEC_PER_MSEC)), self.queue, ^{
+                MediaAdaptationMonitor *strongSelf = weakSelf;
+                if (!strongSelf) return;
+                strongSelf.persistScheduled = NO;
+                NSArray *latestSnapshot = [strongSelf.records copy];
+                [NSUserDefaults.standardUserDefaults setObject:latestSnapshot forKey:CCTVMediaAdaptationMonitorRecordsKey];
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [NSNotificationCenter.defaultCenter postNotificationName:CCTVMediaAdaptationMonitorDidUpdateNotification object:strongSelf];
+                });
+            });
+        }
     });
 }
 
@@ -882,7 +981,7 @@ static NSString *CCTVMonitorInferFormat(NSString *url, NSDictionary *result) {
         }
     }];
     CFTimeInterval t0 = CACurrentMediaTime();
-    NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+    [CCTVAdaptationStreamProbe probeWithRequest:req completion:^(NSData *data, NSURLResponse *response, NSError *error) {
         NSInteger elapsed = (NSInteger)(MAX(0, CACurrentMediaTime() - t0) * 1000.0);
         NSHTTPURLResponse *http = [response isKindOfClass:NSHTTPURLResponse.class] ? (NSHTTPURLResponse *)response : nil;
         NSInteger status = http ? http.statusCode : 0;
@@ -993,7 +1092,6 @@ static NSString *CCTVMonitorInferFormat(NSString *url, NSDictionary *result) {
             });
         }
     }];
-    [task resume];
 }
 
 - (NSString *)exportDiagnosticReportText {
@@ -1014,7 +1112,7 @@ static NSString *CCTVMonitorInferFormat(NSString *url, NSDictionary *result) {
         }];
     }
     NSDictionary *payload = @{
-        @"generatedAt": [self.timeFormatter stringFromDate:NSDate.date] ?: @"",
+        @"generatedAt": [self formattedTimestampForDate:NSDate.date],
         @"monitoringEnabled": @(self.isMonitoringEnabled),
         @"playerAdaptationSummary": summary ?: @{},
         @"importedCatalogs": catalogSummaries,
@@ -1027,6 +1125,7 @@ static NSString *CCTVMonitorInferFormat(NSString *url, NSDictionary *result) {
 
 - (void)clearAllRecords {
     dispatch_async(self.queue, ^{
+        self.persistScheduled = NO;
         [self.records removeAllObjects];
         [NSUserDefaults.standardUserDefaults removeObjectForKey:CCTVMediaAdaptationMonitorRecordsKey];
         dispatch_async(dispatch_get_main_queue(), ^{

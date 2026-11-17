@@ -192,8 +192,10 @@
 - (void)startLiveQualityBadgeTimer {
     [self.liveQualityBadgeTimer invalidate];
     __weak typeof(self) weakSelf = self;
-    self.liveQualityBadgeTimer = [NSTimer scheduledTimerWithTimeInterval:2.0 repeats:YES block:^(__unused NSTimer *timer) {
-        [weakSelf updateLiveQualityBadge];
+    self.liveQualityBadgeTimer = [NSTimer scheduledTimerWithTimeInterval:2.0 repeats:YES block:^(NSTimer *timer) {
+        RootViewController *owner = weakSelf;
+        if (!owner) { [timer invalidate]; return; }
+        [owner updateLiveQualityBadge];
     }];
     [self updateLiveQualityBadge];
 }
@@ -338,10 +340,14 @@
     [self.table reloadData];[self.channelGrid reloadData];[self refreshConfigurationPage];
 }
 - (NSString *)channelPreviewCacheDirectory {
-    NSString *caches=NSSearchPathForDirectoriesInDomains(NSCachesDirectory,NSUserDomainMask,YES).firstObject;
-    NSString *dir=[caches stringByAppendingPathComponent:@"ChannelPreviewSnapshots"];
-    [NSFileManager.defaultManager createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:NULL];
-    return dir;
+    static NSString *cachedDir=nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken,^{
+        NSString *caches=NSSearchPathForDirectoriesInDomains(NSCachesDirectory,NSUserDomainMask,YES).firstObject;
+        cachedDir=[caches stringByAppendingPathComponent:@"ChannelPreviewSnapshots"];
+        [NSFileManager.defaultManager createDirectoryAtPath:cachedDir withIntermediateDirectories:YES attributes:nil error:NULL];
+    });
+    return cachedDir;
 }
 - (NSString *)channelPreviewDiskPathForChannelID:(NSString *)cid {
     if(!cid.length)return nil;
@@ -421,7 +427,8 @@
     [self.channelPreviewInflight addObject:cid];
     [self.channelPreviewRefreshPending removeObject:cid];
     self.channelPreviewCapturedAt[cid]=@(NSDate.date.timeIntervalSince1970);
-    NSDictionary *headers=[channel[@"headers"] isKindOfClass:NSDictionary.class]?channel[@"headers"]:nil;
+    NSDictionary *rawHeaders=[channel[@"headers"] isKindOfClass:NSDictionary.class]?channel[@"headers"]:nil;
+    NSDictionary *headers=rawHeaders.count?MediaPlaybackHeadersScopedToURL(rawHeaders,probeURL,probeURL):nil;
     NSDictionary *options=headers.count?@{@"AVURLAssetHTTPHeaderFieldsKey":headers}:nil;
     AVURLAsset *asset=[AVURLAsset URLAssetWithURL:probeURL options:options];
     AVAssetImageGenerator *generator=[AVAssetImageGenerator assetImageGeneratorWithAsset:asset];

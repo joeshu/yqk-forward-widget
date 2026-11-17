@@ -105,7 +105,12 @@
     self.epgRefreshDesired=CCTVBoolPreference(@"autoLoadEPG",YES);
     if (!self.epgRefreshDesired || UIApplication.sharedApplication.applicationState!=UIApplicationStateActive || CACurrentMediaTime()<self.playbackPriorityUntil) { [self.epgTimer invalidate]; self.epgTimer=nil; return; }
     [self.epgTimer invalidate];
-    self.epgTimer = [NSTimer scheduledTimerWithTimeInterval:60 target:self selector:@selector(refreshNowNext) userInfo:nil repeats:YES];
+    __weak typeof(self) weakSelf = self;
+    self.epgTimer = [NSTimer scheduledTimerWithTimeInterval:60 repeats:YES block:^(NSTimer *timer) {
+        RootViewController *strongSelf = weakSelf;
+        if (!strongSelf) { [timer invalidate]; return; }
+        [strongSelf refreshNowNext];
+    }];
 }
 
 - (void)refreshNowNext {
@@ -125,7 +130,7 @@
     if (!cid.length) return;
     self.epgChannel = cid;
     NSDictionary *cached = self.epgCache[cid];
-    if (cached && [cached[@"ts"] doubleValue] <= NSDate.date.timeIntervalSince1970 &&
+    if (!self.nativeTimeShiftActive && !self.remoteCatchupActive && cached && [cached[@"ts"] doubleValue] <= NSDate.date.timeIntervalSince1970 &&
         NSDate.date.timeIntervalSince1970 - [cached[@"ts"] doubleValue] < 6 * 3600) {
         NSMutableArray *cachedParts = [NSMutableArray array];
         if ([cached[@"now"] length]) [cachedParts addObject:[NSString stringWithFormat:@"正在播：%@", cached[@"now"]]];
@@ -167,37 +172,112 @@
                 [weakSelf saveEPGCache];
                 [weakSelf reloadVisibleCatalogItemForChannelID:cid];
             }
-            NSMutableArray *parts = [NSMutableArray array];
-            if (cur) [parts addObject:[NSString stringWithFormat:@"正在播：%@", cur]];
-            if (next) [parts addObject:[NSString stringWithFormat:@"接下来：%@", next]];
-            if (parts.count) weakSelf.infoLabel.text = [parts componentsJoinedByString:@"  "];
+            if (!weakSelf.nativeTimeShiftActive && !weakSelf.remoteCatchupActive) {
+                NSMutableArray *parts = [NSMutableArray array];
+                if (cur) [parts addObject:[NSString stringWithFormat:@"正在播：%@", cur]];
+                if (next) [parts addObject:[NSString stringWithFormat:@"接下来：%@", next]];
+                if (parts.count) weakSelf.infoLabel.text = [parts componentsJoinedByString:@"  "];
+            }
         });
     }];
     [self.epgTask resume];
 }
 
+- (BOOL)startRemoteCatchupForChannel:(NSDictionary *)channel program:(NSDictionary *)program start:(NSTimeInterval)start end:(NSTimeInterval)end {
+    NSDictionary *catchupRow=[self catchupChannelForChannel:channel];
+    if(![catchupRow[@"catchupSource"] isKindOfClass:NSString.class]||![catchupRow[@"catchupSource"] length])return NO;
+    M3UChannel *catchup=[M3UChannel new];
+    catchup.url=catchupRow[@"remoteURL"]?:channel[@"remoteURL"];
+    catchup.catchupSource=catchupRow[@"catchupSource"];
+    catchup.catchupMode=catchupRow[@"catchupMode"]?:@"default";
+    catchup.catchupDays=[catchupRow[@"catchupDays"] doubleValue];
+    catchup.tvgShift=[catchupRow[@"tvgShift"] doubleValue];
+    NSURL *url=[catchup catchupURLForStart:[NSDate dateWithTimeIntervalSince1970:start] end:[NSDate dateWithTimeIntervalSince1970:end]];
+    if(!url)return NO;
+    NSDictionary *liveBase=([self.activeCatchupLiveChannel[@"id"] isEqualToString:channel[@"id"]] && self.activeCatchupLiveChannel)?self.activeCatchupLiveChannel:channel;
+    NSMutableDictionary *replay=[(liveBase?:channel) mutableCopy];
+    NSString *originURL=catchupRow[@"remoteURL"]?:channel[@"remoteURL"]?:@"";
+    NSDictionary *originHeaders=[catchupRow[@"headers"] isKindOfClass:NSDictionary.class]?catchupRow[@"headers"]:([channel[@"headers"] isKindOfClass:NSDictionary.class]?channel[@"headers"]:nil);
+    replay[@"remoteURL"]=url.absoluteString;
+    replay[@"headers"]=MediaPlaybackHeadersScopedToURL(originHeaders,[NSURL URLWithString:originURL],url);
+    replay[@"catchupReplay"]=@YES;
+    NSString *progTitle=[program[@"title"] isKindOfClass:NSString.class]&&[program[@"title"] length]?program[@"title"]:@"节目回看";
+    self.activeCatchupLiveChannel=liveBase;
+    self.remoteCatchupActive=YES;
+    self.activeCatchupProgramTitle=progTitle;
+    self.activeCatchupStart=start;
+    self.activeCatchupEnd=end;
+    [self playRemote:replay];
+    self.routeName=@"回看";
+    self.titleLabel.text=[NSString stringWithFormat:@"%@ · 回看",self.channelName?:@"频道"];
+    self.titleLabel.hidden=NO;
+    self.infoLabel.text=[NSString stringWithFormat:@"回看中 · %@（点更多可返回直播）",progTitle];
+    self.infoLabel.hidden=NO;
+    self.playerTopScrim.hidden=NO;
+    [self log:@"已开启订阅回看：%@ · %@",self.channelName?:@"",progTitle];
+    return YES;
+}
 - (EPGViewController *)epgPageForChannel:(NSString *)cid name:(NSString *)name {
     NSDictionary *channel=[self channelWithID:cid]?:@{@"id":cid?:@"",@"name":name?:@"节目单"};
     EPGViewController *page=[[EPGViewController alloc] initWithChannel:channel officialID:[self epgIDForChannel:channel]?:@""];
+    if([cid isEqualToString:self.channelID] && [self isCatchupOrTimeshiftActive]){
+        page.activeReplayStart=self.remoteCatchupActive?self.activeCatchupStart:self.timeshiftController.currentReplayStart;
+        __weak typeof(self) weakSelf=self;
+        page.onReturnToLive=^{
+            RootViewController *owner=weakSelf;if(!owner)return;
+            [owner.navigationController popToViewController:owner animated:YES];
+            [owner returnToLivePlayback];
+        };
+    }
     if(![channel[@"remoteURL"] length] && ![ProfileStore isHTTP:cid]){
         __weak typeof(self) weakSelf=self;
         page.onReplay=^(NSDictionary *program){
             RootViewController *owner=weakSelf;if(!owner||!cid.length)return;
             [owner.navigationController popToViewController:owner animated:YES];
             owner.playerTabs.selectedSegmentIndex=1;[owner selectPlayerPanel];
+            double start=[program[@"start"] doubleValue];
+            double end=[program[@"liveRestart"] boolValue]?0.0:[program[@"end"] doubleValue];
             if(![owner.channelID isEqualToString:cid] || !owner.currentPlayer || owner.avPlayer || !owner.firstRender){
-                owner.pendingNativeReplayProgram=@{@"channelID":cid?:@"",@"start":@([program[@"start"] doubleValue]),@"end":@([program[@"end"] doubleValue])};
+                owner.pendingNativeReplayProgram=@{@"channelID":cid?:@"",@"start":@(start),@"end":@(end),@"title":([program[@"title"] isKindOfClass:NSString.class]?program[@"title"]:@"")};
                 if(channel&&(![owner.channelID isEqualToString:cid] || !owner.currentPlayer || owner.avPlayer))[owner selectChannel:channel];
                 return;
             }
-            [owner seekNativeStart:[program[@"start"] doubleValue] end:[program[@"end"] doubleValue]];
+            owner.activeCatchupProgramTitle=[program[@"title"] isKindOfClass:NSString.class]?program[@"title"]:nil;
+            owner.activeCatchupStart=start;
+            owner.activeCatchupEnd=[program[@"end"] doubleValue];
+            [owner seekNativeStart:start end:end];
         };
     }
-    if([channel[@"catchupSource"] isKindOfClass:NSString.class]&&[channel[@"catchupSource"] length]){
-        M3UChannel *catchup=[M3UChannel new];catchup.url=channel[@"remoteURL"];catchup.catchupSource=channel[@"catchupSource"];catchup.catchupMode=channel[@"catchupMode"]?:@"default";catchup.catchupDays=[channel[@"catchupDays"] doubleValue];catchup.tvgShift=[channel[@"tvgShift"] doubleValue];
+    NSDictionary *catchupRow=[self catchupChannelForChannel:channel];
+    if([catchupRow[@"catchupSource"] isKindOfClass:NSString.class]&&[catchupRow[@"catchupSource"] length]){
+        M3UChannel *catchup=[M3UChannel new];catchup.url=catchupRow[@"remoteURL"]?:channel[@"remoteURL"];catchup.catchupSource=catchupRow[@"catchupSource"];catchup.catchupMode=catchupRow[@"catchupMode"]?:@"default";catchup.catchupDays=[catchupRow[@"catchupDays"] doubleValue];catchup.tvgShift=[catchupRow[@"tvgShift"] doubleValue];
+        page.catchupDays=(NSInteger)llround(catchup.catchupDays);
         page.canReplay=^BOOL(NSDictionary *program){return [catchup catchupURLForStart:[NSDate dateWithTimeIntervalSince1970:[program[@"start"] doubleValue]] end:[NSDate dateWithTimeIntervalSince1970:[program[@"end"] doubleValue]]]!=nil;};
         __weak typeof(self) weakSelf=self;
-        page.onReplay=^(NSDictionary *program){RootViewController *owner=weakSelf;NSURL *url=[catchup catchupURLForStart:[NSDate dateWithTimeIntervalSince1970:[program[@"start"] doubleValue]] end:[NSDate dateWithTimeIntervalSince1970:[program[@"end"] doubleValue]]];if(!owner||!url)return;NSMutableDictionary *replay=[channel mutableCopy];replay[@"remoteURL"]=url.absoluteString;replay[@"headers"]=MediaPlaybackHeadersScopedToURL(channel[@"headers"],[NSURL URLWithString:channel[@"remoteURL"]?:@""],url);[owner.navigationController popToViewController:owner animated:YES];[owner playRemote:replay];};
+        page.onReplay=^(NSDictionary *program){
+            RootViewController *owner=weakSelf;if(!owner)return;
+            double start=[program[@"start"] doubleValue],end=[program[@"end"] doubleValue];
+            NSURL *url=[catchup catchupURLForStart:[NSDate dateWithTimeIntervalSince1970:start] end:[NSDate dateWithTimeIntervalSince1970:end]];
+            if(!url)return;
+            [owner.navigationController popToViewController:owner animated:YES];
+            owner.playerTabs.selectedSegmentIndex=1;[owner selectPlayerPanel];
+            [owner startRemoteCatchupForChannel:channel program:program start:start end:end];
+        };
+    } else if ([channel[@"remoteURL"] length]) {
+        NSDictionary *nativeFallback=[self nativeFallbackChannelForChannel:channel];
+        NSString *nativeID=[nativeFallback[@"id"] isKindOfClass:NSString.class]?nativeFallback[@"id"]:@"";
+        if(nativeFallback && nativeID.length){
+            __weak typeof(self) weakSelf=self;
+            page.onReplay=^(NSDictionary *program){
+                RootViewController *owner=weakSelf;if(!owner)return;
+                [owner.navigationController popToViewController:owner animated:YES];
+                owner.playerTabs.selectedSegmentIndex=1;[owner selectPlayerPanel];
+                double start=[program[@"start"] doubleValue];
+                double end=[program[@"liveRestart"] boolValue]?0.0:[program[@"end"] doubleValue];
+                owner.pendingNativeReplayProgram=@{@"channelID":nativeID,@"start":@(start),@"end":@(end),@"title":([program[@"title"] isKindOfClass:NSString.class]?program[@"title"]:@"")};
+                [owner playChannel:nativeFallback route:nil];
+            };
+        }
     }
     return page;
 }

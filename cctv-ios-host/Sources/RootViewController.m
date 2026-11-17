@@ -447,6 +447,8 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
     [self.channelPreviewGenerators removeAllObjects];
     for (MediaChannelProbe *probe in self.channelTelemetryTasks.allValues) [probe cancel];
     [self.channelTelemetryTasks removeAllObjects];
+    for (NSURLSessionTask *task in self.subscriptionEditTasks.allValues) [task cancel];
+    [self.subscriptionEditTasks removeAllObjects];
     [self.epgTask cancel];
     [self flushDiagnosticLog];
 }
@@ -743,7 +745,7 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
 - (PlaybackOverlayController *)liveOverlayPolicy {
     if(!self.liveControlsOverlay){self.liveControlsOverlay=[PlaybackOverlayController new];__weak typeof(self) weakSelf=self;
         self.liveControlsOverlay.onVisibilityChanged=^(BOOL visible){[weakSelf setLiveOverlayHidden:!visible];};
-        self.liveControlsOverlay.canAutoHide=^BOOL{RootViewController *owner=weakSelf;return owner&&owner.firstRender&&[owner sessionIsPlaying]&&!owner.livePanActive&&!owner.nativeTimeShiftActive&&!owner.nativePlaybackFailed&&!owner.remotePlaybackFailed;};
+        self.liveControlsOverlay.canAutoHide=^BOOL{RootViewController *owner=weakSelf;return owner&&owner.firstRender&&[owner sessionIsPlaying]&&!owner.livePanActive&&!owner.nativeTimeShiftActive&&!owner.remoteCatchupActive&&!owner.nativePlaybackFailed&&!owner.remotePlaybackFailed;};
         if(self.controlBar.hidden)[self.liveControlsOverlay hide];else[self.liveControlsOverlay show];
     }return self.liveControlsOverlay;
 }

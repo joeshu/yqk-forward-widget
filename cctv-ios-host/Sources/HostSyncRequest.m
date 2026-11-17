@@ -23,7 +23,7 @@
         self.session=[NSURLSession sessionWithConfiguration:configuration delegate:self delegateQueue:delegate];
         [[self.session dataTaskWithRequest:request] resume];
     }
-    if(dispatch_semaphore_wait(self.done,dispatch_time(DISPATCH_TIME_NOW,13*NSEC_PER_SEC))!=0){self.failure=@"同步 JS 请求超时";[self cancel];}
+    if(dispatch_semaphore_wait(self.done,dispatch_time(DISPATCH_TIME_NOW,13*NSEC_PER_SEC))!=0){@synchronized(self){if(!self.failure.length)self.failure=@"同步 JS 请求超时";}[self cancel];}
     @synchronized(self){
         [self.session invalidateAndCancel];self.session=nil;
         if(self.failure.length)return @{@"error":self.failure};
@@ -34,14 +34,14 @@
     }
 }
 - (void)finish:(NSString *)failure {
-    @synchronized(self){if(self.finished)return;self.finished=YES;if(failure.length)self.failure=failure;if(self.done)dispatch_semaphore_signal(self.done);}
+    @synchronized(self){if(self.finished)return;self.finished=YES;if(failure.length&&!self.failure.length)self.failure=failure;if(self.done)dispatch_semaphore_signal(self.done);}
 }
 - (void)cancel {
     @synchronized(self){self.cancelled=YES;[self.session invalidateAndCancel];[self finish:@"请求已取消"];}
 }
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task didReceiveResponse:(NSURLResponse *)response completionHandler:(void (^)(NSURLSessionResponseDisposition))completion {
     BOOL valid=[response isKindOfClass:NSHTTPURLResponse.class] && response.expectedContentLength<=2*1024*1024;
-    if(valid)self.response=(id)response;completion(valid?NSURLSessionResponseAllow:NSURLSessionResponseCancel);if(!valid)[self finish:@"JS 响应无效或超过 2 MB"];
+    if(valid){@synchronized(self){self.response=(id)response;}}completion(valid?NSURLSessionResponseAllow:NSURLSessionResponseCancel);if(!valid)[self finish:@"JS 响应无效或超过 2 MB"];
 }
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task didReceiveData:(NSData *)data {
     @synchronized(self){if(self.finished)return;if(self.body.length+data.length>2*1024*1024){[task cancel];[self finish:@"JS 响应超过 2 MB"];return;}[self.body appendData:data];}

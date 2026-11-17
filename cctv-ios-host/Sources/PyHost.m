@@ -134,6 +134,13 @@ static NSDictionary *pythonProcessMemoryFields(void) {
     return @{@"process_resident_bytes":@(info.resident_size), @"process_phys_footprint_bytes":@(info.phys_footprint)};
 }
 
+static NSString *pythonISO8601Timestamp(void) {
+    static NSISO8601DateFormatter *formatter = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{ formatter = [NSISO8601DateFormatter new]; });
+    @synchronized(formatter) { return [formatter stringFromDate:NSDate.date] ?: @""; }
+}
+
 static NSDictionary *pythonBreadcrumbRecord(PyHostTask *task, NSString *stage) {
     NSString *scriptName = task.scriptPath.lastPathComponent.length ? task.scriptPath.lastPathComponent : @"unknown.py";
     NSMutableDictionary *record = [@{@"process_session_id":pythonProcessSessionID(),
@@ -142,7 +149,7 @@ static NSDictionary *pythonBreadcrumbRecord(PyHostTask *task, NSString *stage) {
                                     @"script_name":scriptName,
                                     @"stage":stage ?: @"unknown",
                                     @"port":@(task.port),
-                                    @"updated_at":[[NSISO8601DateFormatter new] stringFromDate:NSDate.date]} mutableCopy];
+                                    @"updated_at":pythonISO8601Timestamp()} mutableCopy];
     [record addEntriesFromDictionary:pythonProcessMemoryFields()];
     return record;
 }

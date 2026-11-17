@@ -93,31 +93,45 @@ static NSMutableDictionary<NSString *, NSDictionary *> *HLSRouteProbeCacheStore(
 }
 
 - (void)fetch:(NSURL *)url {
-    if (self.cancelled) return;
-    if (![self validURL:url]) { [self finish:NO]; return; }
-    self.body = [NSMutableData data];
-    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
-    [request setValue:@"qqlive" forHTTPHeaderField:@"User-Agent"];
-    [request setValue:@"https://live.cctv.cn/" forHTTPHeaderField:@"Referer"];
-    self.task = [self.session dataTaskWithRequest:request];
-    [self.task resume];
+    NSURLSessionDataTask *newTask = nil;
+    @synchronized(self) {
+        if (self.cancelled) return;
+        if (![self validURL:url]) { [self finish:NO]; return; }
+        self.body = [NSMutableData data];
+        NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
+        [request setValue:@"qqlive" forHTTPHeaderField:@"User-Agent"];
+        [request setValue:@"https://live.cctv.cn/" forHTTPHeaderField:@"Referer"];
+        newTask = [self.session dataTaskWithRequest:request];
+        self.task = newTask;
+    }
+    [newTask resume];
 }
 
 - (void)finish:(BOOL)plain {
-    if (self.cancelled) return;
-    if (plain && self.initialURLKey.length) {
+    void (^done)(BOOL) = nil;
+    NSURLSessionDataTask *task = nil;
+    NSURLSession *session = nil;
+    NSString *urlKey = nil;
+    @synchronized(self) {
+        if (self.cancelled) return;
+        urlKey = self.initialURLKey;
+        done = self.completion;
+        self.completion = nil;
+        task = self.task;
+        self.task = nil;
+        session = self.session;
+        self.session = nil;
+        self.body = nil;
+    }
+    if (plain && urlKey.length) {
         @synchronized(HLSRouteProbeCacheStore()) {
             NSMutableDictionary *store = HLSRouteProbeCacheStore();
             if (store.count >= 64) [store removeAllObjects];
-            store[self.initialURLKey] = @{@"plain": @(plain), @"at": @(NSDate.date.timeIntervalSince1970)};
+            store[urlKey] = @{@"plain": @(plain), @"at": @(NSDate.date.timeIntervalSince1970)};
         }
     }
-    void (^done)(BOOL) = self.completion;
-    self.completion = nil;
-    [self.task cancel];
-    self.task = nil;
-    [self.session invalidateAndCancel];
-    self.session = nil;
+    [task cancel];
+    [session invalidateAndCancel];
     if (!done) return;
     if (NSThread.isMainThread) {
         if (!self.cancelled) done(plain);
@@ -131,29 +145,52 @@ static NSMutableDictionary<NSString *, NSDictionary *> *HLSRouteProbeCacheStore(
 }
 
 - (void)cancel {
-    self.cancelled = YES;
-    self.completion = nil;
-    [self.task cancel];
-    self.task = nil;
-    [self.session invalidateAndCancel];
-    self.session = nil;
-    self.body = nil;
+    NSURLSessionDataTask *task = nil;
+    NSURLSession *session = nil;
+    @synchronized(self) {
+        self.cancelled = YES;
+        self.completion = nil;
+        task = self.task;
+        self.task = nil;
+        session = self.session;
+        self.session = nil;
+        self.body = nil;
+    }
+    [task cancel];
+    [session invalidateAndCancel];
 }
 
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task didReceiveResponse:(NSURLResponse *)response completionHandler:(void (^)(NSURLSessionResponseDisposition))completionHandler {
-    BOOL valid = task == self.task && !self.cancelled && [(NSHTTPURLResponse *)response statusCode] == 200 && response.expectedContentLength <= 256 * 1024;
+    BOOL isCurrentTask = NO;
+    BOOL isCancelled = NO;
+    @synchronized(self) {
+        isCurrentTask = (task == self.task);
+        isCancelled = self.cancelled;
+    }
+    BOOL valid = isCurrentTask && !isCancelled && [(NSHTTPURLResponse *)response statusCode] == 200 && response.expectedContentLength <= 256 * 1024;
     completionHandler(valid ? NSURLSessionResponseAllow : NSURLSessionResponseCancel);
-    if (!valid && task == self.task) [self finish:NO];
+    if (!valid && isCurrentTask) [self finish:NO];
 }
 
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task didReceiveData:(NSData *)data {
-    if (task != self.task || self.cancelled) return;
-    if (data.length > 256 * 1024 - self.body.length) { [self finish:NO]; return; }
-    [self.body appendData:data];
+    NSData *headSample = nil;
+    BOOL exceeded = NO;
+    @synchronized(self) {
+        if (task != self.task || self.cancelled || !self.body) return;
+        if (data.length > 256 * 1024 - self.body.length) {
+            exceeded = YES;
+        } else {
+            [self.body appendData:data];
+            if (self.body.length >= 16) {
+                headSample = [self.body subdataWithRange:NSMakeRange(0, MIN(self.body.length, (NSUInteger)64))];
+            }
+        }
+    }
+    if (exceeded) { [self finish:NO]; return; }
     // Fast-abort non-HLS binary streams or HTML pages on the first >= 16 bytes
     // instead of downloading up to 256 KiB of live video before rejecting.
-    if (self.body.length >= 16) {
-        NSString *magic = [HLSRouteProbe sniffContainerMagic:[self.body subdataWithRange:NSMakeRange(0, MIN(self.body.length, (NSUInteger)64))]];
+    if (headSample) {
+        NSString *magic = [HLSRouteProbe sniffContainerMagic:headSample];
         if (![magic isEqualToString:@"hls"]) {
             [self finish:NO];
             return;
@@ -162,13 +199,22 @@ static NSMutableDictionary<NSString *, NSDictionary *> *HLSRouteProbeCacheStore(
 }
 
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLRequest *)request completionHandler:(void (^)(NSURLRequest *))completionHandler {
-    completionHandler(task == self.task && [self validURL:request.URL] ? request : nil);
+    BOOL allow = NO;
+    @synchronized(self) {
+        BOOL downgrade = [response.URL.scheme.lowercaseString isEqualToString:@"https"] && [request.URL.scheme.lowercaseString isEqualToString:@"http"];
+        allow = (task == self.task && !self.cancelled && [self validURL:request.URL] && !downgrade);
+    }
+    completionHandler(allow ? request : nil);
 }
 
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
-    if (task != self.task || self.cancelled) return;
+    NSData *bodySnapshot = nil;
+    @synchronized(self) {
+        if (task != self.task || self.cancelled) return;
+        bodySnapshot = [self.body copy];
+    }
     if (error) { [self finish:NO]; return; }
-    NSString *text = [[NSString alloc] initWithData:self.body encoding:NSUTF8StringEncoding];
+    NSString *text = bodySnapshot ? [[NSString alloc] initWithData:bodySnapshot encoding:NSUTF8StringEncoding] : nil;
     if ([text hasPrefix:@"\uFEFF"]) text = [text substringFromIndex:1];
     text = [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     if (![text hasPrefix:@"#EXTM3U"]) { [self finish:NO]; return; }

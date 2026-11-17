@@ -265,9 +265,16 @@ static BOOL PackageSameCredentialScope(NSURL *origin,NSURL *target) {
 }
 - (void)cancel {[self finish:nil error:[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil]];}
 - (void)finish:(NSDictionary *)service error:(NSError *)error {
-    @synchronized(self){if(self.finished)return;self.finished=YES;}
-    [self.session invalidateAndCancel];self.session=nil;self.task=nil;self.body=nil;self.scriptData=nil;
-    void (^callback)(NSDictionary *,NSError *)=self.completion;self.completion=nil;self.onProgress=nil;
+    NSURLSession *session=nil;
+    void (^callback)(NSDictionary *,NSError *)=nil;
+    @synchronized(self){
+        if(self.finished)return;
+        self.finished=YES;
+        session=self.session;
+        self.session=nil;self.task=nil;self.body=nil;self.scriptData=nil;
+        callback=self.completion;self.completion=nil;self.onProgress=nil;
+    }
+    [session invalidateAndCancel];
     if(callback)dispatch_async(dispatch_get_main_queue(),^{callback(service,error);});
 }
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task didReceiveResponse:(NSURLResponse *)response completionHandler:(void (^)(NSURLSessionResponseDisposition))completion {
@@ -289,9 +296,14 @@ static BOOL PackageSameCredentialScope(NSURL *origin,NSURL *target) {
     }
 }
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task didReceiveData:(NSData *)data {
-    if(self.finished||task!=self.task)return;
-    if(self.body.length+data.length>self.limit){[task cancel];[self finish:nil error:[self error:[self.stage stringByAppendingString:@"超过大小上限"]]];return;}
-    [self.body appendData:data];[self progress:self.stage];
+    BOOL exceeded=NO;
+    @synchronized(self){
+        if(self.finished||task!=self.task||!self.body)return;
+        if(self.body.length+data.length>self.limit)exceeded=YES;
+        else[self.body appendData:data];
+    }
+    if(exceeded){[task cancel];[self finish:nil error:[self error:[self.stage stringByAppendingString:@"超过大小上限"]]];return;}
+    [self progress:self.stage];
 }
 - (NSString *)readChecksum {
     NSString *text=[[NSString alloc] initWithData:self.body encoding:NSUTF8StringEncoding];

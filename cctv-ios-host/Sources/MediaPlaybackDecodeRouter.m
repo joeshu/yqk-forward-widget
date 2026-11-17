@@ -64,7 +64,11 @@ NSString *MediaPlaybackSniffContainerFormat(NSData *headerBytes) {
     if (len - offset >= 7 && memcmp(b + offset, "#EXTM3U", 7) == 0) return @"hls";
     // Inspect the XML root, not the declaration shared by XMLTV and error pages.
     NSString *prefix=[[NSString alloc] initWithBytes:b+offset length:MIN(len-offset,(NSUInteger)4096) encoding:NSUTF8StringEncoding];
-    NSRegularExpression *mpd=[NSRegularExpression regularExpressionWithPattern:@"^\\s*(?:<\\?xml[^>]*>\\s*)?(?:<!--[^>]*-->\\s*)*<(?:[A-Za-z_][A-Za-z0-9_.-]*:)?MPD(?:\\s|>)" options:0 error:NULL];
+    static NSRegularExpression *mpd=nil;
+    static dispatch_once_t mpdOnce;
+    dispatch_once(&mpdOnce,^{
+        mpd=[NSRegularExpression regularExpressionWithPattern:@"^\\s*(?:<\\?xml[^>]*>\\s*)?(?:<!--[^>]*-->\\s*)*<(?:[A-Za-z_][A-Za-z0-9_.-]*:)?MPD(?:\\s|>)" options:0 error:NULL];
+    });
     if(prefix&&[mpd firstMatchInString:prefix options:0 range:NSMakeRange(0,prefix.length)])return @"dash";
     return nil;
 }

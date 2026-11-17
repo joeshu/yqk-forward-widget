@@ -56,7 +56,27 @@ static const NSUInteger PluginRunMaximumCount = 20;
     // Keep pre-session logs at their historical 512 KiB budget; each new run
     // is independently bounded so one noisy invocation cannot evict another.
     unsigned long long maximum=[path.stringByDeletingLastPathComponent isEqualToString:self.directory]?512*1024:PluginRunMaximumBytes;
-    if(size>maximum){unsigned long long retained=maximum==512*1024?256*1024:PluginRunRetainedBytes;NSFileHandle *reader=[NSFileHandle fileHandleForReadingAtPath:path];[reader seekToFileOffset:size-retained];NSData *tail=[reader readDataOfLength:(NSUInteger)retained];[reader closeFile];NSData *newline=[@"\n" dataUsingEncoding:NSUTF8StringEncoding];NSRange boundary=[tail rangeOfData:newline options:0 range:NSMakeRange(0,tail.length)];if(boundary.location!=NSNotFound)[[tail subdataWithRange:NSMakeRange(NSMaxRange(boundary),tail.length-NSMaxRange(boundary))] writeToFile:path atomically:YES];}
+    if(size>maximum){
+        unsigned long long retained=maximum==512*1024?256*1024:PluginRunRetainedBytes;
+        NSFileHandle *reader=[NSFileHandle fileHandleForReadingAtPath:path];
+        [reader seekToFileOffset:size-retained];
+        NSData *tail=[reader readDataOfLength:(NSUInteger)retained];
+        [reader closeFile];
+        NSData *newline=[@"\n" dataUsingEncoding:NSUTF8StringEncoding];
+        NSRange boundary=[tail rangeOfData:newline options:0 range:NSMakeRange(0,tail.length)];
+        NSUInteger startOffset=0;
+        if(boundary.location!=NSNotFound&&NSMaxRange(boundary)<tail.length){
+            startOffset=NSMaxRange(boundary);
+        }else if(tail.length>0){
+            const uint8_t *bytes=(const uint8_t *)tail.bytes;
+            while(startOffset<tail.length&&startOffset<4&&(bytes[startOffset]&0xC0)==0x80){
+                startOffset++;
+            }
+        }
+        if(tail.length>startOffset){
+            [[tail subdataWithRange:NSMakeRange(startOffset,tail.length-startOffset)] writeToFile:path atomically:YES];
+        }
+    }
 }
 - (void)flushPathNow:(NSString *)path { [self.lock lock];NSUInteger generation=[self.generations[path] unsignedIntegerValue];[self.lock unlock];[self flushPath:path generation:generation]; }
 - (void)flushPathsForIdentifier:(NSString *)identifier {
@@ -97,7 +117,15 @@ static const NSUInteger PluginRunMaximumCount = 20;
 - (NSArray<NSDictionary *> *)runsForIdentifier:(NSString *)identifier {
     if(!identifier.length)return @[];__block NSArray *records=@[];dispatch_sync(self.queue,^{[self flushPathsForIdentifier:identifier];records=[self runRecordsForIdentifier:identifier];});return records;
 }
-- (NSString *)readPath:(NSString *)path {return [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:NULL]?:@"";}
+- (NSString *)readPath:(NSString *)path {
+    NSString *utf8=[NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:NULL];
+    if(utf8)return utf8;
+    NSData *raw=[NSData dataWithContentsOfFile:path options:0 error:NULL];
+    if(!raw.length)return @"";
+    NSString *lossy=nil;
+    [NSString stringEncodingForData:raw encodingOptions:@{NSStringEncodingDetectionSuggestedEncodingsKey:@[@(NSUTF8StringEncoding)],NSStringEncodingDetectionAllowLossyKey:@YES} convertedString:&lossy usedLossyConversion:NULL];
+    return lossy?:([[NSString alloc] initWithData:raw encoding:NSISOLatin1StringEncoding]?:@"");
+}
 - (NSString *)logForIdentifier:(NSString *)identifier runID:(NSString *)runID {
     if(!identifier.length||![self isValidRunID:runID])return @"";__block NSString *text=@"";dispatch_sync(self.queue,^{NSString *path=[runID isEqual:@"legacy"]?[self legacyPathForIdentifier:identifier]:[self runPathForIdentifier:identifier runID:runID];[self flushPathNow:path];text=[self readPath:path];});return [HostLogRedactor redactText:text];
 }

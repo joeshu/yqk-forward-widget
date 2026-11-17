@@ -97,6 +97,13 @@ static void RuntimeDiagnosticsHandleUncaughtException(NSException *exception) {
 - (void)recordEvent:(NSString *)event category:(NSString *)category fields:(nullable NSDictionary<NSString *, id> *)fields synchronously:(BOOL)synchronously;
 @end
 
+static NSString *RuntimeDiagnosticsISO8601String(NSDate *date) {
+    static NSISO8601DateFormatter *formatter = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{ formatter = [NSISO8601DateFormatter new]; });
+    @synchronized(formatter) { return [formatter stringFromDate:date ?: NSDate.date] ?: @""; }
+}
+
 @implementation RuntimeDiagnostics
 
 + (instancetype)shared {
@@ -215,7 +222,7 @@ static void RuntimeDiagnosticsHandleUncaughtException(NSException *exception) {
         if (_diagnosticModeEnabled == enabled) return;
         if (!enabled) {
             [self recordEventSynchronously:@"diagnostics_disabled" category:@"diagnostics" fields:nil];
-            [self writeSessionMarker:@{@"open":@NO, @"session_id":self.sessionID ?: @"unknown", @"last_checkpoint":@"diagnostics_disabled", @"last_checkpoint_at":[[NSISO8601DateFormatter new] stringFromDate:NSDate.date]}];
+            [self writeSessionMarker:@{@"open":@NO, @"session_id":self.sessionID ?: @"unknown", @"last_checkpoint":@"diagnostics_disabled", @"last_checkpoint_at":RuntimeDiagnosticsISO8601String(NSDate.date)}];
         }
         _diagnosticModeEnabled = enabled;
         [NSUserDefaults.standardUserDefaults setBool:enabled forKey:RuntimeDiagnosticsPreferenceKey];
@@ -262,7 +269,7 @@ static void RuntimeDiagnosticsHandleUncaughtException(NSException *exception) {
         recovery[@"interpretation"] = @"上次会话未记录到正常结束；可能是崩溃、系统回收、强制关闭或设备重启，不能仅据此判定原因";
         [self recordEventSynchronously:@"previous_session_unclosed" category:@"lifecycle" fields:recovery];
     }
-    NSString *now = [[NSISO8601DateFormatter new] stringFromDate:NSDate.date];
+    NSString *now = RuntimeDiagnosticsISO8601String(NSDate.date);
     NSMutableDictionary *marker = [NSMutableDictionary dictionaryWithDictionary:fields ?: @{}];
     marker[@"open"] = @YES;
     marker[@"session_id"] = self.sessionID ?: @"unknown";
@@ -286,9 +293,9 @@ static void RuntimeDiagnosticsHandleUncaughtException(NSException *exception) {
                     @"includes_multiple_application_versions":@(payload.includesMultipleApplicationVersions)
                 }];
                 if (payload.timeStampBegin)
-                    fields[@"metric_period_start"] = [[NSISO8601DateFormatter new] stringFromDate:payload.timeStampBegin];
+                    fields[@"metric_period_start"] = RuntimeDiagnosticsISO8601String(payload.timeStampBegin);
                 if (payload.timeStampEnd)
-                    fields[@"metric_period_end"] = [[NSISO8601DateFormatter new] stringFromDate:payload.timeStampEnd];
+                    fields[@"metric_period_end"] = RuntimeDiagnosticsISO8601String(payload.timeStampEnd);
 
                 MXForegroundExitData *foreground = exitMetric.foregroundExitData;
                 if (foreground) {
@@ -369,7 +376,7 @@ static void RuntimeDiagnosticsHandleUncaughtException(NSException *exception) {
     marker[@"open"] = @YES;
     marker[@"session_id"] = self.sessionID ?: @"unknown";
     marker[@"last_checkpoint"] = checkpoint;
-    marker[@"last_checkpoint_at"] = [[NSISO8601DateFormatter new] stringFromDate:NSDate.date];
+    marker[@"last_checkpoint_at"] = RuntimeDiagnosticsISO8601String(NSDate.date);
     NSSet<NSString *> *contextKeys = [NSSet setWithArray:@[@"service_id", @"source_generation", @"render_serial", @"item_count", @"category_count", @"home_mode", @"module_view_count", @"item_index", @"episode_index", @"page", @"provider_count", @"request_id"]];
     NSMutableDictionary *checkpointContext = [NSMutableDictionary dictionary];
     for (NSString *key in contextKeys) {
@@ -399,7 +406,7 @@ static void RuntimeDiagnosticsHandleUncaughtException(NSException *exception) {
     NSMutableDictionary *marker = [NSMutableDictionary dictionaryWithDictionary:previous ?: @{}];
     marker[@"open"] = @NO;
     marker[@"last_checkpoint"] = @"app_will_terminate";
-    marker[@"last_checkpoint_at"] = [[NSISO8601DateFormatter new] stringFromDate:NSDate.date];
+    marker[@"last_checkpoint_at"] = RuntimeDiagnosticsISO8601String(NSDate.date);
     BOOL closed = [self writeSessionMarker:marker];
     [self recordEventSynchronously:@"app_session_closed" category:@"lifecycle" fields:@{
         @"session_marker_closed":@(closed),
@@ -419,7 +426,7 @@ static void RuntimeDiagnosticsHandleUncaughtException(NSException *exception) {
     if (!event.length || !category.length) return;
     @synchronized (self) { if (!self.enabled) return; }
     NSMutableDictionary *record = [NSMutableDictionary dictionary];
-    record[@"time"] = [[NSISO8601DateFormatter new] stringFromDate:NSDate.date];
+    record[@"time"] = RuntimeDiagnosticsISO8601String(NSDate.date);
     record[@"session_id"] = self.sessionID ?: @"unknown";
     record[@"event_id"] = NSUUID.UUID.UUIDString.lowercaseString;
     record[@"category"] = [self safeText:category];
@@ -581,7 +588,7 @@ static void RuntimeDiagnosticsHandleUncaughtException(NSException *exception) {
         NSURL *url = nil;
         if (!data.length) error = [NSError errorWithDomain:@"CCTVHostDiagnostics" code:1 userInfo:@{NSLocalizedDescriptionKey:@"这次运行暂无诊断记录。请先开启运行诊断并复现问题。"}];
         else {
-            NSString *timestamp = [[[NSISO8601DateFormatter new] stringFromDate:NSDate.date] stringByReplacingOccurrencesOfString:@":" withString:@"-"];
+            NSString *timestamp = [RuntimeDiagnosticsISO8601String(NSDate.date) stringByReplacingOccurrencesOfString:@":" withString:@"-"];
             NSString *shortID = sessionID.length > 8 ? [sessionID substringToIndex:8] : sessionID;
             NSString *name = [NSString stringWithFormat:@"CCTVHost-运行诊断-%@-%@.jsonl", timestamp, shortID];
             NSString *path = [NSTemporaryDirectory() stringByAppendingPathComponent:name];
@@ -617,7 +624,7 @@ static void RuntimeDiagnosticsHandleUncaughtException(NSException *exception) {
                 for (NSString *key in @[@"started_at", @"app_version", @"app_build", @"ios_version", @"application_state", @"system_uptime_seconds"]) if (previous[key]) marker[key] = previous[key];
                 if (!marker[@"system_uptime_seconds"] && previous[@"process_uptime_seconds"])
                     marker[@"system_uptime_seconds"] = previous[@"process_uptime_seconds"];
-                marker[@"open"] = @YES; marker[@"session_id"] = self.sessionID ?: @"unknown"; marker[@"last_checkpoint"] = @"diagnostics_cleared"; marker[@"last_checkpoint_at"] = [[NSISO8601DateFormatter new] stringFromDate:NSDate.date];
+                marker[@"open"] = @YES; marker[@"session_id"] = self.sessionID ?: @"unknown"; marker[@"last_checkpoint"] = @"diagnostics_cleared"; marker[@"last_checkpoint_at"] = RuntimeDiagnosticsISO8601String(NSDate.date);
                 [self writeSessionMarker:marker];
             }
             else [fm removeItemAtPath:self.sessionMarkerPath error:NULL];
@@ -638,7 +645,7 @@ static void RuntimeDiagnosticsHandleUncaughtException(NSException *exception) {
         if ([lower containsString:sensitive]) return @"[redacted]";
     if ([value isKindOfClass:NSString.class]) return [self safeText:value];
     if ([value isKindOfClass:NSNumber.class]) return value;
-    if ([value isKindOfClass:NSDate.class]) return [[NSISO8601DateFormatter new] stringFromDate:value];
+    if ([value isKindOfClass:NSDate.class]) return RuntimeDiagnosticsISO8601String(value);
     if ([value isKindOfClass:NSArray.class]) {
         NSMutableArray *array = [NSMutableArray array];
         for (id item in [(NSArray *)value subarrayWithRange:NSMakeRange(0, MIN([(NSArray *)value count], 32))]) [array addObject:[self safeValue:item key:key depth:depth + 1] ?: NSNull.null];
@@ -662,10 +669,14 @@ static void RuntimeDiagnosticsHandleUncaughtException(NSException *exception) {
     NSString *safe = [HostLogRedactor redactText:text];
     safe = [safe stringByReplacingOccurrencesOfString:@"\r" withString:@" "];
     safe = [safe stringByReplacingOccurrencesOfString:@"\n" withString:@" "];
-    NSError *regexError = nil;
-    NSRegularExpression *urlPattern = [NSRegularExpression regularExpressionWithPattern:@"(?i)(https?|file)://[^\\s\\\"'<>]+" options:0 error:&regexError];
+    static NSRegularExpression *urlPattern = nil;
+    static NSRegularExpression *pathPattern = nil;
+    static dispatch_once_t regexOnce;
+    dispatch_once(&regexOnce, ^{
+        urlPattern = [NSRegularExpression regularExpressionWithPattern:@"(?i)(https?|file)://[^\\s\\\"'<>]+" options:0 error:NULL];
+        pathPattern = [NSRegularExpression regularExpressionWithPattern:@"(?:/private/var/|/var/mobile/|/Users/)[^\\s,;]+" options:0 error:NULL];
+    });
     if (urlPattern) safe = [urlPattern stringByReplacingMatchesInString:safe options:0 range:NSMakeRange(0, safe.length) withTemplate:@"[URL redacted]"];
-    NSRegularExpression *pathPattern = [NSRegularExpression regularExpressionWithPattern:@"(?:/private/var/|/var/mobile/|/Users/)[^\\s,;]+" options:0 error:NULL];
     if (pathPattern) safe = [pathPattern stringByReplacingMatchesInString:safe options:0 range:NSMakeRange(0, safe.length) withTemplate:@"[path redacted]"];
     if (safe.length > 512) { NSUInteger end = 512; unichar last = [safe characterAtIndex:end - 1]; if (last >= 0xd800 && last <= 0xdbff) end--; safe = [[safe substringToIndex:end] stringByAppendingString:@"…"]; }
     return safe;

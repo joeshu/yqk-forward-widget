@@ -45,32 +45,64 @@ static NSData *TVBoxBundledWeBoxIndexForURL(NSString *sourceURL) {
     self.task=[self.session dataTaskWithRequest:req];[self.task resume];
 }
 - (void)cancel {[self finish:nil error:[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil]];}
-- (void)finish:(NSDictionary *)catalog error:(NSError *)error { @synchronized(self){if(self.finished)return;self.finished=YES;}[self.session invalidateAndCancel];self.session=nil;self.task=nil;self.data=nil;void (^completion)(NSDictionary *,NSError *)=self.completion;self.completion=nil;if(completion)dispatch_async(dispatch_get_main_queue(),^{completion(catalog,error);}); }
+- (void)finish:(NSDictionary *)catalog error:(NSError *)error {
+    NSURLSession *session=nil;
+    void (^completion)(NSDictionary *,NSError *)=nil;
+    @synchronized(self){
+        if(self.finished)return;
+        self.finished=YES;
+        session=self.session;
+        self.session=nil;self.task=nil;self.data=nil;
+        completion=self.completion;self.completion=nil;
+    }
+    [session invalidateAndCancel];
+    if(completion)dispatch_async(dispatch_get_main_queue(),^{completion(catalog,error);});
+}
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task didReceiveResponse:(NSURLResponse *)response completionHandler:(void (^)(NSURLSessionResponseDisposition))completion {
-    BOOL valid=task==self.task&&[response isKindOfClass:NSHTTPURLResponse.class]&&((NSHTTPURLResponse *)response).statusCode==200&&response.expectedContentLength<=8*1024*1024;completion(valid?NSURLSessionResponseAllow:NSURLSessionResponseCancel);
+    BOOL valid=NO;
+    @synchronized(self){
+        valid=!self.finished&&task==self.task&&[response isKindOfClass:NSHTTPURLResponse.class]&&((NSHTTPURLResponse *)response).statusCode==200&&response.expectedContentLength<=8*1024*1024;
+        if(valid&&response.URL.absoluteString.length)self.source=response.URL.absoluteString;
+    }
+    completion(valid?NSURLSessionResponseAllow:NSURLSessionResponseCancel);
     if(!valid){
         NSData *bundled=TVBoxBundledWeBoxIndexForURL(self.source);
         if(bundled.length){NSError *parseError=nil;NSDictionary *catalog=[TVBoxCatalogStore parseData:bundled sourceURL:self.source error:&parseError];if(catalog){[self finish:catalog error:nil];return;}}
         [self finish:nil error:[self failure:@"配置请求失败、HTTP 状态异常或超过 8 MiB"]];
-    }else if(response.URL.absoluteString.length)self.source=response.URL.absoluteString;
+    }
 }
-- (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task didReceiveData:(NSData *)data {if(task!=self.task||self.finished)return;if(self.data.length+data.length>8*1024*1024){[task cancel];[self finish:nil error:[self failure:@"TVBox 配置超过 8 MiB 上限"]];return;}[self.data appendData:data];}
+- (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task didReceiveData:(NSData *)data {
+    BOOL exceeded=NO;
+    @synchronized(self){
+        if(task!=self.task||self.finished||!self.data)return;
+        if(self.data.length+data.length>8*1024*1024)exceeded=YES;
+        else[self.data appendData:data];
+    }
+    if(exceeded){[task cancel];[self finish:nil error:[self failure:@"TVBox 配置超过 8 MiB 上限"]];}
+}
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLRequest *)request completionHandler:(void (^)(NSURLRequest * _Nullable))completion {
     NSURLComponents *from=[NSURLComponents componentsWithURL:response.URL resolvingAgainstBaseURL:NO],*to=[NSURLComponents componentsWithURL:request.URL resolvingAgainstBaseURL:NO];
-    BOOL valid=task==self.task&&!self.finished&&++self.redirectCount<=5&&to.scheme.length&&[@[@"http",@"https"] containsObject:to.scheme.lowercaseString]&&to.host.length&&!to.user.length&&!to.password.length;
+    BOOL valid=NO;
+    @synchronized(self){
+        valid=task==self.task&&!self.finished&&++self.redirectCount<=5&&to.scheme.length&&[@[@"http",@"https"] containsObject:to.scheme.lowercaseString]&&to.host.length&&!to.user.length&&!to.password.length;
+    }
     if([from.scheme.lowercaseString isEqual:@"https"]&&[to.scheme.lowercaseString isEqual:@"http"])valid=NO;
     completion(valid?request:nil);if(!valid)[self finish:nil error:[self failure:@"TVBox 配置重定向无效、降级或超过 5 次"]];
 }
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
-    if(task!=self.task||self.finished)return;
+    NSData *payload=nil;NSString *sourceURL=nil;
+    @synchronized(self){
+        if(task!=self.task||self.finished)return;
+        payload=[self.data copy];sourceURL=[self.source copy];
+    }
     if(error){
         if(error.code!=NSURLErrorCancelled){
-            NSData *bundled=TVBoxBundledWeBoxIndexForURL(self.source);
-            if(bundled.length){NSError *parseError=nil;NSDictionary *catalog=[TVBoxCatalogStore parseData:bundled sourceURL:self.source error:&parseError];if(catalog){[self finish:catalog error:nil];return;}}
+            NSData *bundled=TVBoxBundledWeBoxIndexForURL(sourceURL);
+            if(bundled.length){NSError *parseError=nil;NSDictionary *catalog=[TVBoxCatalogStore parseData:bundled sourceURL:sourceURL error:&parseError];if(catalog){[self finish:catalog error:nil];return;}}
         }
         [self finish:nil error:error];return;
     }
-    NSError *parseError=nil;NSDictionary *catalog=[TVBoxCatalogStore parseData:self.data sourceURL:self.source error:&parseError];
+    NSError *parseError=nil;NSDictionary *catalog=[TVBoxCatalogStore parseData:payload sourceURL:sourceURL error:&parseError];
     if(!catalog){
         NSData *bundled=TVBoxBundledWeBoxIndexForURL(self.source);
         if(bundled.length)catalog=[TVBoxCatalogStore parseData:bundled sourceURL:self.source error:&parseError];

@@ -18,8 +18,24 @@ static NSString *ServiceProtocolName(NSDictionary *service){
     if(moduleType.length)name=[name stringByAppendingFormat:@" · %@",[moduleType isEqual:@"esm"]?@"ESM":([moduleType isEqual:@"commonjs"]?@"CommonJS":@"脚本")];
     return name;
 }
+static NSString *ServiceFormatDateWithPattern(NSDate *date, NSString *pattern) {
+    if (!date || !pattern.length) return @"";
+    static NSMutableDictionary<NSString *, NSDateFormatter *> *formatters = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{ formatters = [NSMutableDictionary dictionary]; });
+    @synchronized(formatters) {
+        NSDateFormatter *fmt = formatters[pattern];
+        if (!fmt) {
+            fmt = [NSDateFormatter new];
+            fmt.locale = [NSLocale localeWithLocaleIdentifier:@"zh_CN"];
+            fmt.dateFormat = pattern;
+            formatters[pattern] = fmt;
+        }
+        return [fmt stringFromDate:date] ?: @"";
+    }
+}
 static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
-    NSString *result=[snapshot[@"result"] isKindOfClass:NSString.class]?snapshot[@"result"]:@"";NSTimeInterval checked=[snapshot[@"checkedAt"] doubleValue];if(!checked)return result;NSDateFormatter *formatter=[NSDateFormatter new];formatter.locale=[NSLocale localeWithLocaleIdentifier:@"zh_CN"];formatter.dateFormat=@"MM-dd HH:mm";return [NSString stringWithFormat:@"%@ · %@",result,[formatter stringFromDate:[NSDate dateWithTimeIntervalSince1970:checked]]];
+    NSString *result=[snapshot[@"result"] isKindOfClass:NSString.class]?snapshot[@"result"]:@"";NSTimeInterval checked=[snapshot[@"checkedAt"] doubleValue];if(!checked)return result;return [NSString stringWithFormat:@"%@ · %@",result,ServiceFormatDateWithPattern([NSDate dateWithTimeIntervalSince1970:checked],@"MM-dd HH:mm")];
 }
 @interface ServiceProbeRedirectGuard : NSObject <NSURLSessionTaskDelegate>
 @end
@@ -118,6 +134,8 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
 - (NSString *)currentRuntimeStatus {return [PyHost runtimeStatusDescriptionForServiceIdentifier:self.service[@"id"]];}
 - (void)subscriptionMetadataDidChange {if(!NSThread.isMainThread){dispatch_async(dispatch_get_main_queue(),^{[self subscriptionMetadataDidChange];});return;}if(self.isViewLoaded&&self.view.window)[self.tableView reloadSections:[NSIndexSet indexSetWithIndex:2] withRowAnimation:UITableViewRowAnimationNone];}
 - (void)runtimeStateDidChange {
+    if(!NSThread.isMainThread){__weak typeof(self) weakSelf=self;dispatch_async(dispatch_get_main_queue(),^{[weakSelf runtimeStateDidChange];});return;}
+    if(!self.isViewLoaded)return;
     BOOL wasRunning=self.displayedRunning;
     BOOL running=[self running];NSString *status=[self currentRuntimeStatus];
     BOOL changed=running!=self.displayedRunning||![status isEqualToString:self.displayedRuntimeStatus];
@@ -157,7 +175,7 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
         for(NSDictionary *record in runs){
             if([record[@"legacy"] boolValue])continue;
             NSTimeInterval started=[record[@"startedAt"] doubleValue];
-            if(started>0){NSDateFormatter *fmt=[NSDateFormatter new];fmt.locale=[NSLocale localeWithLocaleIdentifier:@"zh_CN"];fmt.dateFormat=@"yyyy-MM-dd HH:mm";value=[fmt stringFromDate:[NSDate dateWithTimeIntervalSince1970:started]];break;}
+            if(started>0){value=ServiceFormatDateWithPattern([NSDate dateWithTimeIntervalSince1970:started],@"yyyy-MM-dd HH:mm");break;}
         }
     }
     if((value&&![value isEqualToString:self.currentRunStartedAt])||(!value&&self.currentRunStartedAt)){self.currentRunStartedAt=value;if(self.isViewLoaded&&self.view.window)[self.tableView reloadSections:[NSIndexSet indexSetWithIndex:2] withRowAnimation:UITableViewRowAnimationNone];}
@@ -237,14 +255,12 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
     } else if (ip.section == 2) {
         c.textLabel.text = @[ @"运行引擎", @"资源协议识别", @"版本", @"代码来源", @"入口文件", @"上次更新", @"源地址", @"服务订阅地址", @"节目单地址", @"订阅清单状态", @"频道数量", @"最近成功刷新", @"本次启动时间" ][ip.row];
         NSDate *updated = [NSDate dateWithTimeIntervalSince1970:[self.service[@"updated"] doubleValue]];
-        NSDateFormatter *fmt = [NSDateFormatter new];
-        fmt.dateFormat = @"yyyy-MM-dd HH:mm";
         NSDictionary *manifest=[self.service[@"manifest"] isKindOfClass:NSDictionary.class]?self.service[@"manifest"]:@{};
         id rawVersion=manifest[@"version"]?:manifest[@"pluginVersion"]?:self.service[@"version"];
         NSString *version=[rawVersion isKindOfClass:NSString.class]&&[rawVersion length]?rawVersion:@"未知";
         NSString *playlistURL=[ServiceStore subscriptionURLForService:self.service];NSDictionary *playlistMetadata=playlistURL.length?[ProfileStore metadata:playlistURL]:@{};NSArray *cachedChannels=[playlistMetadata[@"cachedChannels"] isKindOfClass:NSArray.class]?playlistMetadata[@"cachedChannels"]:@[];
         NSString *playlistStatus=[playlistMetadata[@"status"] isKindOfClass:NSString.class]?playlistMetadata[@"status"]:(playlistURL.length?([self running]?@"等待读取订阅清单":@"服务已停止 · 保留最近频道"):@"未配置播放列表路径");
-        NSString *lastRefresh=[playlistMetadata[@"updatedAt"] doubleValue]>0?[fmt stringFromDate:[NSDate dateWithTimeIntervalSince1970:[playlistMetadata[@"updatedAt"] doubleValue]]]:@"尚无成功记录";
+        NSString *lastRefresh=[playlistMetadata[@"updatedAt"] doubleValue]>0?ServiceFormatDateWithPattern([NSDate dateWithTimeIntervalSince1970:[playlistMetadata[@"updatedAt"] doubleValue]],@"yyyy-MM-dd HH:mm"):@"尚无成功记录";
         NSString *sourceURL=[self.service[@"url"] length]?self.service[@"url"]:@"随应用提供";
         NSString *epgURL=[ServiceStore epgURLForService:self.service];
         NSString *codeName=[ServiceStore codePath:self.service].lastPathComponent;
@@ -256,7 +272,7 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
                 ? @"内置"
                 : ([self.service[@"url"] length] ? @"远程链接" : @"本地文件 / 代码"),
             codeName.length ? codeName : @"—",
-            [self.service[@"updated"] doubleValue] > 0 ? [fmt stringFromDate:updated] : @"随应用更新",
+            [self.service[@"updated"] doubleValue] > 0 ? ServiceFormatDateWithPattern(updated,@"yyyy-MM-dd HH:mm") : @"随应用更新",
             sourceURL,
             playlistURL.length ? playlistURL : @"未声明或未识别播放列表路径",
             epgURL.length ? epgURL : @"尚未从订阅清单中识别",
@@ -326,19 +342,23 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
     r.cachePolicy=NSURLRequestReloadIgnoringLocalCacheData;
     NSUInteger generation=++self.probeGeneration;
     __weak typeof(self) w = self;
+    [self.probeTask cancel];self.probeTask=nil;
+    [self.probeSession invalidateAndCancel];self.probeSession=nil;
     NSURLSessionConfiguration *configuration=NSURLSessionConfiguration.ephemeralSessionConfiguration;configuration.URLCache=nil;configuration.requestCachePolicy=NSURLRequestReloadIgnoringLocalCacheData;
-    self.probeSession=[NSURLSession sessionWithConfiguration:configuration delegate:[ServiceProbeRedirectGuard new] delegateQueue:nil];
-    self.probeTask = [self.probeSession
+    NSURLSession *createdSession=[NSURLSession sessionWithConfiguration:configuration delegate:[ServiceProbeRedirectGuard new] delegateQueue:nil];
+    self.probeSession=createdSession;
+    self.probeTask = [createdSession
         dataTaskWithRequest:r
           completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
             dispatch_async(dispatch_get_main_queue(), ^{
+              [createdSession finishTasksAndInvalidate];
               if(!w||generation!=w.probeGeneration)return;
               w.probing = NO;
               w.probeTask=nil;
               [w.probeSession finishTasksAndInvalidate];w.probeSession=nil;
               NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]?[(NSHTTPURLResponse *)response statusCode]:0;
               if(!error&&status)w.lastProbeResponseAt=NSDate.date;
-              NSDateFormatter *clock=[NSDateFormatter new];clock.dateFormat=@"HH:mm";NSString *time=w.lastProbeResponseAt?[NSString stringWithFormat:@" · 最近 HTTP 响应 %@",[clock stringFromDate:w.lastProbeResponseAt]]:@"";
+              NSString *time=w.lastProbeResponseAt?[NSString stringWithFormat:@" · 最近 HTTP 响应 %@",ServiceFormatDateWithPattern(w.lastProbeResponseAt,@"HH:mm")]:@"";
               if(error)w.health=[NSString stringWithFormat:@"连接失败：%@",error.localizedDescription?:@"未知错误"];
               else if(status<200||status>=300)w.health=[NSString stringWithFormat:@"HTTP 可达 · 返回 %ld · 服务状态未知%@",(long)status,time];
               else if(manifestService){id json=data.length?[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL]:nil;BOOL healthy=[json isKindOfClass:NSDictionary.class]&&[json[@"ok"] isKindOfClass:NSNumber.class]&&[json[@"ok"] boolValue];w.health=[(healthy?@"健康检查通过 · GET /health":@"HTTP 可访问 · /health 未确认健康字段") stringByAppendingString:time];}
@@ -538,7 +558,7 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
     [NSNotificationCenter.defaultCenter removeObserver:self name:PyHostRuntimeStateDidChangeNotification object:nil];
 }
 - (void)dealloc {[NSNotificationCenter.defaultCenter removeObserver:self];}
-- (void)runtimeStateDidChange {if(!self.changingServiceIDs.count)[self refresh];}
+- (void)runtimeStateDidChange {if(!NSThread.isMainThread){__weak typeof(self) weakSelf=self;dispatch_async(dispatch_get_main_queue(),^{[weakSelf runtimeStateDidChange];});return;}if(!self.isViewLoaded)return;if(!self.changingServiceIDs.count)[self refresh];}
 - (void)refresh {
     NSArray *all = [ServiceStore services];
     NSString *q = self.search.searchBar.text.lowercaseString;
