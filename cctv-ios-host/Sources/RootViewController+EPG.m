@@ -221,7 +221,7 @@
     NSDictionary *channel=[self channelWithID:cid]?:@{@"id":cid?:@"",@"name":name?:@"节目单"};
     EPGViewController *page=[[EPGViewController alloc] initWithChannel:channel officialID:[self epgIDForChannel:channel]?:@""];
     if([cid isEqualToString:self.channelID] && [self isCatchupOrTimeshiftActive]){
-        page.activeReplayStart=self.remoteCatchupActive?self.activeCatchupStart:self.timeshiftController.currentReplayStart;
+        page.activeReplayStart=self.remoteCatchupActive?self.activeCatchupStart:self.timeshiftController.seekStart;
         __weak typeof(self) weakSelf=self;
         page.onReturnToLive=^{
             RootViewController *owner=weakSelf;if(!owner)return;

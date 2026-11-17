@@ -267,11 +267,6 @@
     [self stopAutoRefreshTimer];
 }
 
-- (void)dealloc {
-    [self.autoRefreshTimer invalidate];
-    self.autoRefreshTimer = nil;
-}
-
 - (void)startAutoRefreshTimer {
     [self stopAutoRefreshTimer];
     if (self.autoRefreshInterval <= 0.1) return;
