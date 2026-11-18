@@ -503,6 +503,119 @@ def safe_error_summary(error):
     return text[:180]
 
 
+def _segment_directory(uri, playlist_url):
+    """Directory a segment URI resolves to, as (scheme, host, path dir)."""
+    target = urllib.parse.urljoin(playlist_url or '', (uri or '').strip())
+    parsed = urllib.parse.urlsplit(target)
+    directory = parsed.path.rsplit('/', 1)[0] + '/'
+    return (parsed.scheme.lower(), parsed.netloc.lower(), directory)
+
+
+def _drop_spliced_ad_segments(text, playlist_url):
+    """Drop discontinuity-bounded ad splices from an HLS media playlist.
+
+    Returns (filtered_text, dropped_segment_count).
+
+    Some sources splice a short promo clip into the stream: a few segments
+    from a different video directory, wrapped in #EXT-X-DISCONTINUITY
+    markers (a pre-roll, and the same clip again mid-roll). The relay
+    already rewrites every segment URI, so dropping those blocks here also
+    keeps prefetch/warmup from downloading them, and playback starts on
+    the real content instead of the ad.
+
+    A block is dropped only when ALL of these hold, so ordinary
+    multi-CDN / multi-encoding playlists are left alone:
+    - the playlist is a media playlist (has #EXTINF, no #EXT-X-STREAM-INF)
+      with at least one #EXT-X-DISCONTINUITY and no
+      #EXT-X-DISCONTINUITY-SEQUENCE (renumbering that is out of scope);
+    - at least 20 segments, and one directory holds a strict majority;
+    - the block's segments all resolve to ONE directory different from the
+      majority directory, number at least 2, at most 10% of all segments,
+      and total at most 120 seconds.
+    Kept blocks are rejoined with their discontinuity marker preserved
+    only when the neighbouring block was also kept; a marker that only
+    delimited a dropped splice is removed with it, because the remaining
+    stream is continuous.
+    """
+    if not isinstance(text, str) or '#EXTINF' not in text:
+        return text, 0
+    if '#EXT-X-STREAM-INF' in text or '#EXT-X-DISCONTINUITY-SEQUENCE' in text:
+        return text, 0
+    if '#EXT-X-DISCONTINUITY' not in text:
+        return text, 0
+    lines = text.split('\n')
+    blocks = []  # each: {'lines': [...], 'segments': [(dir, dur)], 'had_marker': bool}
+    preamble = []  # header tags before the first segment; always kept
+    current = {'lines': [], 'segments': [], 'had_marker': False}
+    pending_duration = None
+    seen_segment = False
+    for line in lines:
+        if not seen_segment and not line.startswith('#EXTINF:'):
+            preamble.append(line)
+            continue
+        if line.startswith('#EXT-X-DISCONTINUITY'):
+            blocks.append(current)
+            current = {'lines': [], 'segments': [], 'had_marker': True}
+            pending_duration = None
+            continue
+        if line.startswith('#EXTINF:'):
+            seen_segment = True
+            try:
+                pending_duration = float(line.split(':', 1)[1].split(',', 1)[0].strip())
+            except (ValueError, IndexError):
+                pending_duration = None
+            current['lines'].append(line)
+            continue
+        if line and not line.startswith('#'):
+            seen_segment = True
+            if pending_duration is None:
+                return text, 0
+            current['segments'].append((_segment_directory(line, playlist_url), pending_duration))
+            pending_duration = None
+        current['lines'].append(line)
+    blocks.append(current)
+    total = sum(len(block['segments']) for block in blocks)
+    if total < 20:
+        return text, 0
+    counts = collections.Counter()
+    for block in blocks:
+        for directory, _ in block['segments']:
+            counts[directory] += 1
+    if not counts:
+        return text, 0
+    majority, majority_count = counts.most_common(1)[0]
+    if majority_count * 2 <= total:
+        return text, 0
+    dropped = 0
+    kept_indexes = set()
+    for index, block in enumerate(blocks):
+        segments = block['segments']
+        droppable = (
+            len(segments) >= 2
+            and len(segments) * 10 <= total
+            and all(directory != majority for directory, _ in segments)
+            and len({directory for directory, _ in segments}) == 1
+            and sum(duration for _, duration in segments) <= 120.0
+        )
+        if droppable:
+            dropped += len(segments)
+        else:
+            kept_indexes.add(index)
+    if not dropped:
+        return text, 0
+    output = list(preamble)
+    previous_kept = False
+    for index, block in enumerate(blocks):
+        if index not in kept_indexes:
+            previous_kept = False
+            continue
+        if block['had_marker'] and previous_kept:
+            output.append('#EXT-X-DISCONTINUITY')
+        output.extend(block['lines'])
+        previous_kept = True
+    return '\n'.join(output), dropped
+
+
 class MediaRelay:
     def __init__(self, limit=256, segment_limit=16384, stream_media=False, speculative_warmup=None):
         self.limit = limit
@@ -518,6 +631,7 @@ class MediaRelay:
         # playlist. The exact token/URL/headers/server isolate playback scopes.
         self.manifest_flights = {}
         self.refreshFailures = {}
+        self.ad_segments_dropped = 0
         self.diagnosed_manifests = set()
         self.diagnosed_resources = collections.OrderedDict()
         self.inline_keys = collections.OrderedDict()
@@ -800,6 +914,11 @@ class MediaRelay:
                 refresh=None, refresh_after=0, refresh_interval=0,
                 refresh_relative_base=None, resource_scope=None):
         parent = urllib.parse.urlsplit(url)
+        # Drop spliced ad blocks before rewriting, so their segments are
+        # never registered, prefetched, or warmed up.
+        text, dropped_ad_segments = _drop_spliced_ad_segments(text, url)
+        if dropped_ad_segments:
+            self.ad_segments_dropped += dropped_ad_segments
         # Delivery directives apply to manifest reloads, not media/key requests.
         inherited_query = '&'.join(item for item in parent.query.split('&') if item and urllib.parse.unquote(item.split('=', 1)[0]) not in ('_HLS_msn', '_HLS_part', '_HLS_skip'))
         segment_count = 0
