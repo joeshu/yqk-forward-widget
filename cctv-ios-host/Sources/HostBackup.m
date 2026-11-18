@@ -1,6 +1,5 @@
 #import "HostBackup.h"
 #import "ProfileStore.h"
-#import <AVFoundation/AVFoundation.h>
 static NSArray<NSString *> *booleanPreferenceKeys(void){return @[@"nativeChannelsEnabled",@"resumeLastChannel",@"autoLoadEPG",@"allowBackgroundAudio",@"autoPiP",@"legacyNativePlayback",@"preloadNativeChannel",@"fastNativeStartup",@"nativeSDKVerboseLogs",@"runtimeDiagnosticsEnabled",@"cctv.adaptationMonitor.enabled",@"channelGridMode",@"nativeChannelLogoEnabled",@"nativePlayerCornerLogoEnabled",@"nativeChannelPreviewEnabled",@"nativeChannelTelemetryEnabled",@"cctv.restoreLastTab.v1",@"cctv.mediaAutoPlayNext",@"cctv.mediaAutoSkipIntroOutro",@"cctv.mediaKeepScreenAwake",@"cctv.mediaEpisodeShowBadge.v1",@"cctv.mediaEpisodeAutoExpand.v1",@"media.globalSearchHistoryEnabled.v1",@"hostDarkTheme"];}
 static NSArray<NSString *> *numberPreferenceKeys(void){return @[@"cctv.mediaPlaybackRate",@"cctv.channelGridColumns.v1",@"cctv.channelSortMode.v1",@"cctv.mediaGridColumns.v1",@"cctv.mediaEpisodeLayoutStyle.v1",@"cctv.networkTimeout.v1",@"cctv.appFontSize.v1"];}
 static NSArray<NSString *> *stringPreferenceKeys(void){return @[@"cctv.mediaVideoGravity",@"cctv.mediaPreferredQuality.v1",@"hostThemeMode",@"cctv.themeIdentifier.v1"];}
@@ -66,7 +65,7 @@ static NSArray<NSString *> *stringPreferenceKeys(void){return @[@"cctv.mediaVide
                 if([k isEqual:@"cctv.appFontSize.v1"]&&([value integerValue]<0||[value integerValue]>2))goto invalid;
             }else if([strKeys containsObject:k]){
                 if(![value isKindOfClass:NSString.class])goto invalid;
-                if([k isEqual:@"cctv.mediaVideoGravity"]&&![@[AVLayerVideoGravityResizeAspect,AVLayerVideoGravityResizeAspectFill,AVLayerVideoGravityResize] containsObject:value])goto invalid;
+                if([k isEqual:@"cctv.mediaVideoGravity"]&&![@[@"AVLayerVideoGravityResizeAspect",@"AVLayerVideoGravityResizeAspectFill",@"AVLayerVideoGravityResize"] containsObject:value])goto invalid;
                 if([k isEqual:@"cctv.mediaPreferredQuality.v1"]&&![@[@"auto",@"smooth",@"hd",@"uhd"] containsObject:value])goto invalid;
                 if([k isEqual:@"hostThemeMode"]&&![@[@"system",@"light",@"dark"] containsObject:value])goto invalid;
                 if([k isEqual:@"cctv.themeIdentifier.v1"]&&![@[@"midnight",@"obsidian",@"ocean",@"amber",@"daylight",@"snow"] containsObject:value])goto invalid;
