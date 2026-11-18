@@ -472,7 +472,6 @@ static NSString *PluginResourceFormattedTimestamp(NSTimeInterval ts) {
         });
     }] resume];
 }
-@
 - (void)tableView:(UITableView *)tableView didHighlightRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell=[tableView cellForRowAtIndexPath:indexPath];
     if(!cell||UIAccessibilityIsReduceMotionEnabled())return;
