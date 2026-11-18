@@ -371,4 +371,29 @@
         else if([action isEqual:@"delete"]){[self confirmDeleteSubscription];}
     }
 }
+- (void)tableView:(UITableView *)tableView didHighlightRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell=[tableView cellForRowAtIndexPath:indexPath];
+    if(!cell||UIAccessibilityIsReduceMotionEnabled())return;
+    [UIView animateWithDuration:0.10 delay:0 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{cell.transform=CGAffineTransformMakeScale(0.985,0.985);} completion:nil];
+}
+- (void)tableView:(UITableView *)tableView didUnhighlightRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell=[tableView cellForRowAtIndexPath:indexPath];
+    if(!cell)return;
+    [UIView animateWithDuration:0.22 delay:0 usingSpringWithDamping:0.78 initialSpringVelocity:0.25 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{cell.transform=CGAffineTransformIdentity;} completion:nil];
+}
+- (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)ip point:(CGPoint)point {
+    (void)point;if(self.editingResource)return nil;
+    UITableViewCell *cell=[tableView cellForRowAtIndexPath:ip];
+    NSString *title=cell.textLabel.text?:@"";NSString *detail=cell.detailTextLabel.text?:@"";
+    if(!title.length&&!detail.length)return nil;
+    __weak typeof(self) weakSelf=self;
+    return [UIContextMenuConfiguration configurationWithIdentifier:ip previewProvider:nil actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggested){
+        NSMutableArray<UIMenuElement *> *items=[NSMutableArray array];
+        if(detail.length){
+            [items addObject:[UIAction actionWithTitle:@"复制此项内容" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){UIPasteboard.generalPasteboard.string=detail;weakSelf.notice=@"已复制到剪贴板";[weakSelf.tableView reloadData];}]];
+        }
+        [items addObject:[UIAction actionWithTitle:@"复制完整键值" image:[UIImage systemImageNamed:@"list.clipboard"] identifier:nil handler:^(__unused UIAction *a){UIPasteboard.generalPasteboard.string=detail.length?[NSString stringWithFormat:@"%@：%@",title,detail]:title;}]];
+        return [UIMenu menuWithTitle:title children:items];
+    }];
+}
 @end

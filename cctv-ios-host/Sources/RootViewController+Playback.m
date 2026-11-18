@@ -257,7 +257,7 @@
     @try{[inst setValue:@YES forKey:@"autoPlay"];}@catch(NSException *e){}
     self.nativePlaybackFailed=NO;
     self.nativeStartupTuner=!self.nativeSafeStartupActive && CCTVBoolPreference(@"fastNativeStartup",YES)?[NativeStartupTuner new]:nil;
-    NSDictionary *options=@{kOptTitle:title?:cid};
+    NSDictionary *options=@{kOptTitle:title?:cid,CCTVTimeshiftConfigKeyLivePublicCheck:@NO,CCTVTimeshiftConfigKeyTimeshiftingChannelID:cid};
     [self log:@"原生起播 %@ · %@",cid,self.nativeSafeStartupActive?@"SDK 默认配置恢复":(legacy?@"0.12 兼容复用":@"独立实例对比")];
     id accepted=@YES;
     if(prepared){
@@ -784,6 +784,11 @@
         [self log:@"原生起播等待 %.2fs · %@ · %@",elapsed,self.directNativeRouteActive?@"SDK URL 路径":(vdnDone?@"VDN 已完成":@"VDN 尚未完成"),self.startupTrace.summary];
     }
     if(attemptElapsed>=25 || elapsed>=50){
+        if(self.nativeTimeShiftActive || self.nativeTransitionKind.length){
+            [timer invalidate];self.watchdog=nil;
+            [self failNativeTransition:@"时移定位响应超时，已保留当前直播会话。"];
+            return;
+        }
         if(elapsed<50 && [self recoverNativeStartupForReason:@"first_frame_timeout"])return;
         [timer invalidate];[self log:@"%@ · 总计 %.2fs / 本次 %.2fs · %@",self.nativeStartupRecoveryUsed?@"SDK 默认配置恢复后仍未首帧":@"原生起播等待超时",elapsed,attemptElapsed,self.startupTrace.summary];
         [self displayNativePlaybackFailure:@"起播超时" error:nil];
@@ -916,8 +921,16 @@
         [self endPlaybackPriority];
         [self.spinner stopAnimating];
         self.playPauseBtn.enabled=YES;[self.playPauseBtn setTitle:@"暂停" forState:UIControlStateNormal];[self syncPlayPauseButtonIcon];
-        self.titleLabel.text = self.channelName;
+        self.titleLabel.text = self.nativeTimeShiftActive ? [NSString stringWithFormat:@"%@ · 回看", self.channelName ?: @"频道"] : self.channelName;
         if(!self.nativeTimeShiftActive){self.titleLabel.hidden=YES;self.infoLabel.hidden=YES;}if(!self.nativeTimeShiftActive){self.playerTopScrim.hidden=YES;}
+        if(self.nativeTimeShiftActive){
+            self.titleLabel.hidden=NO;
+            NSTimeInterval behind=self.timeshiftController.behindLiveSeconds>0?self.timeshiftController.behindLiveSeconds:(self.activeCatchupStart>0?MAX(0,NSDate.date.timeIntervalSince1970-self.activeCatchupStart):0);
+            NSString *prog=self.activeCatchupProgramTitle.length?[NSString stringWithFormat:@" · %@",self.activeCatchupProgramTitle]:@"";
+            self.infoLabel.text=behind>0?[NSString stringWithFormat:@"回看中%@ · 距直播 %.0f 分钟（点更多可返回直播）",prog,MAX(1.0,round(behind/60.0))]:[NSString stringWithFormat:@"回看中%@（点更多可返回直播）",prog];
+            self.infoLabel.hidden=NO;
+            self.playerTopScrim.hidden=NO;
+        }
         [self loadPlayerChannelLogoAfterFirstFrame];
         [self captureLivePreviewSnapshotForChannelID:self.channelID];
         [self startLiveQualityBadgeTimer];
@@ -1092,12 +1105,23 @@
     [self returnToNativeLive];
 }
 - (void)seekCurrentChannelByOffsetMinutes:(double)minutes {
-    if (minutes <= 0) return;
+    if (fabs(minutes) < 0.01) return;
     NSTimeInterval now = NSDate.date.timeIntervalSince1970;
-    NSTimeInterval baseTime = (self.remoteCatchupActive && self.activeCatchupStart > 0) ? self.activeCatchupStart : now;
-    NSTimeInterval targetStart = baseTime - minutes * 60.0;
+    NSTimeInterval currentAnchor = now;
+    if (self.remoteCatchupActive && self.activeCatchupStart > 0) {
+        currentAnchor = self.activeCatchupStart;
+    } else if (self.nativeTimeShiftActive && (self.activeCatchupStart > 0 || self.timeshiftController.seekStart > 0)) {
+        currentAnchor = self.activeCatchupStart > 0 ? self.activeCatchupStart : self.timeshiftController.seekStart;
+    }
+    NSTimeInterval targetStart = currentAnchor - minutes * 60.0;
+    if (targetStart >= now - 15.0) {
+        [self returnToLivePlayback];
+        return;
+    }
+    double totalBehindMinutes = MAX(1.0, round((now - targetStart) / 60.0));
+    NSString *label = [NSString stringWithFormat:@"距直播 %.0f 分钟", totalBehindMinutes];
     if (self.currentPlayer && !self.avPlayer) {
-        self.activeCatchupProgramTitle = [NSString stringWithFormat:@"回退 %.0f 分钟", minutes];
+        self.activeCatchupProgramTitle = label;
         self.activeCatchupStart = targetStart;
         self.activeCatchupEnd = 0;
         [self seekNativeStart:targetStart end:0];
@@ -1105,10 +1129,9 @@
     }
     NSDictionary *channel = self.activeCatchupLiveChannel ?: [self channelWithID:self.channelID];
     if (!channel && self.channelID.length) channel = @{@"id":self.channelID, @"name":self.channelName ?: self.channelID, @"remoteURL":self.currentRemoteURL ?: @""};
-    NSDictionary *catchupRow = [self catchupChannelForChannel:channel];
+    NSDictionary *catchupRow = [self catchupChannelForChannel:channel] ?: [self anyCatchupChannelForStation:channel];
     if ([catchupRow[@"catchupSource"] isKindOfClass:NSString.class] && [catchupRow[@"catchupSource"] length]) {
-        NSString *label = [NSString stringWithFormat:@"回退 %.0f 分钟", minutes];
-        if (![self startRemoteCatchupForChannel:channel program:@{@"title":label, @"start":@(targetStart), @"end":@(now)} start:targetStart end:now]) {
+        if (![self startRemoteCatchupForChannel:catchupRow program:@{@"title":label, @"start":@(targetStart), @"end":@(now)} start:targetStart end:now]) {
             [self showServiceError:@"所选回退时间超出该订阅源支持的回看窗口或模板格式不受支持。"];
         }
         return;
@@ -1116,7 +1139,7 @@
     NSDictionary *nativeFallback = (![channel[@"remoteURL"] length]) ? channel : [self nativeFallbackChannelForChannel:channel];
     NSString *nativeID = [nativeFallback[@"id"] isKindOfClass:NSString.class] ? nativeFallback[@"id"] : @"";
     if (nativeFallback && nativeID.length) {
-        self.pendingNativeReplayProgram = @{@"channelID":nativeID, @"start":@(targetStart), @"end":@0, @"title":[NSString stringWithFormat:@"回退 %.0f 分钟", minutes]};
+        self.pendingNativeReplayProgram = @{@"channelID":nativeID, @"start":@(targetStart), @"end":@0, @"title":label};
         [self playChannel:nativeFallback route:nil];
         return;
     }
@@ -1124,16 +1147,22 @@
 }
 - (void)showNativeTimeshiftActions {
     NSDictionary *channel = self.activeCatchupLiveChannel ?: [self channelWithID:self.channelID];
-    BOOL isRemoteCatchupCapable = ([self catchupChannelForChannel:channel] != nil);
+    BOOL isRemoteCatchupCapable = ([self catchupChannelForChannel:channel] != nil || [self anyCatchupChannelForStation:channel] != nil);
     NSString *msg = (self.currentPlayer && !self.avPlayer)
-        ? @"由频道服务确认可用时间范围与版权；不支持的时间会返回失败。"
+        ? @"支持连续回退、快进微调或从节目单点选 7 天回看；若原生线路受限将自动尝试同台回看源。"
         : (isRemoteCatchupCapable ? @"支持按时间快速回退或打开节目单点选已播节目回看。" : @"可切换至官方 SDK 线路或打开节目单按时段回看。");
     UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"时移 / 回看" message:msg preferredStyle:UIAlertControllerStyleActionSheet];
     for(NSNumber *minutes in @[@1,@5,@15,@30,@60]){
         [sheet addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"回退 %@ 分钟",minutes] style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-            if(self.currentPlayer && !self.avPlayer){[self seekNativeStart:NSDate.date.timeIntervalSince1970-minutes.doubleValue*60 end:0];}
-            else{[self seekCurrentChannelByOffsetMinutes:minutes.doubleValue];}
+            [self seekCurrentChannelByOffsetMinutes:minutes.doubleValue];
         }]];
+    }
+    if([self isCatchupOrTimeshiftActive]){
+        for(NSNumber *forwardMinutes in @[@1,@5]){
+            [sheet addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"快进 %@ 分钟",forwardMinutes] style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+                [self seekCurrentChannelByOffsetMinutes:-forwardMinutes.doubleValue];
+            }]];
+        }
     }
     [sheet addAction:[UIAlertAction actionWithTitle:@"打开节目单选时段回看" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self openEPG];}]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"返回直播" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self returnToLivePlayback];}]];
@@ -1147,10 +1176,12 @@
     self.titleLabel.text=[NSString stringWithFormat:@"%@ · %@中",self.channelName,kind];self.titleLabel.hidden=NO;[self.spinner startAnimating];[self startWatchdog];
 }
 - (void)seekNativeStart:(NSTimeInterval)start end:(NSTimeInterval)end {
-    if (!self.currentPlayer || self.avPlayer || !self.firstRender) {
+    if (!self.currentPlayer || self.avPlayer || (!self.firstRender && !self.nativeTimeShiftActive && !self.nativeTransitionKind.length)) {
         [self showServiceError:@"请等待 CCTV 原生频道起播完成后再操作。"]; return;
     }
     if (!self.timeshiftController) [self rebuildTimeshiftController];
+    self.activeCatchupStart = start;
+    self.activeCatchupEnd = end;
     [self beginNativeTransition:end == 0 ? @"时移" : @"回看"];
     self.nativeTimeShiftActive = YES;
     NSUInteger generation = self.playbackGeneration;
@@ -1159,20 +1190,27 @@
     [self.timeshiftController requestSeekToStart:start end:end channelID:self.channelID completion:^(BOOL ok, NSError *error) {
         if (generation != weakSelf.playbackGeneration || player != weakSelf.currentPlayer) return;
         if (!ok || error) {
+            NSDictionary *channel = [weakSelf channelWithID:weakSelf.channelID];
+            NSDictionary *catchupFallback = [weakSelf anyCatchupChannelForStation:channel];
+            NSTimeInterval fallbackEnd = end > start ? end : NSDate.date.timeIntervalSince1970;
+            if (catchupFallback && [weakSelf startRemoteCatchupForChannel:catchupFallback program:@{@"title":weakSelf.activeCatchupProgramTitle ?: @"节目回看", @"start":@(start), @"end":@(fallbackEnd)} start:start end:fallbackEnd]) {
+                [weakSelf log:@"原生时移未放行，已自动切换至同台 M3U 回看源"];
+                return;
+            }
             [weakSelf failNativeTransition:error.localizedDescription.length
                 ? error.localizedDescription
                 : @"频道未允许该时间的时移/回看，请返回直播或重新选台。"];
         } else {
             [weakSelf log:@"原生时移请求已完成，等待/确认首帧"];
-            if (weakSelf.startupTrace.stages[@"prepared"] != nil || weakSelf.timeshiftController.state == CCTVTimeshiftStatePlayingReplay) {
+            if (weakSelf.startupTrace.stages[@"prepared"] != nil || weakSelf.timeshiftController.state == CCTVTimeshiftStatePlayingReplay || weakSelf.timeshiftController.seekLatency > 0) {
                 [weakSelf completeNativeFirstRenderIfNeededForTrigger:@"timeshift_seek_completed"];
             }
         }
     }];
 }
 - (void)failNativeTransition:(NSString *)message {
-    [self.nativeTimeshift cancel];self.nativeTransitionKind=nil;self.nativePlaybackFailed=YES;[self.watchdog invalidate];[self.spinner stopAnimating];[self endPlaybackPriority];
-    self.titleLabel.text=[NSString stringWithFormat:@"%@ · 时移操作失败",self.channelName];[self log:@"%@",message];[self showServiceError:message];
+    [self.nativeTimeshift cancel];[self.timeshiftController cancel];self.nativeTimeShiftActive=NO;self.nativeTransitionKind=nil;self.nativePlaybackFailed=(self.currentPlayer==nil);if(self.currentPlayer)self.firstRender=YES;[self.watchdog invalidate];self.watchdog=nil;[self.spinner stopAnimating];[self endPlaybackPriority];
+    self.titleLabel.text=[NSString stringWithFormat:@"%@ · 时移操作失败",self.channelName];self.titleLabel.hidden=NO;self.infoLabel.text=message;self.infoLabel.hidden=NO;[self log:@"%@",message];[self showServiceError:message];
 }
 - (void)returnToNativeLive {
     if (!self.currentPlayer || self.avPlayer) return;
@@ -1183,6 +1221,13 @@
     self.activeCatchupStart = 0;
     self.activeCatchupEnd = 0;
     [self.timeshiftController returnToLive];
+    NSUInteger generation = self.playbackGeneration;
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (!weakSelf || generation != weakSelf.playbackGeneration || weakSelf.nativeTimeShiftActive) return;
+        [weakSelf.timeshiftController noteReturnedToLive];
+        [weakSelf completeNativeFirstRenderIfNeededForTrigger:@"back_to_live_completed"];
+    });
 }
 
 - (NSString *)activeAirPlayDeviceName {

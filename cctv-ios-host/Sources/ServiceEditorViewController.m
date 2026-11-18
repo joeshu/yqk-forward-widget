@@ -909,8 +909,12 @@
         else{c.textLabel.text=@"直播列表路径";input=self.playlistPathField;}
     } else {
         c.textLabel.text = @"保存服务";
+        c.textLabel.font = HostRoundedFont(16.0, UIFontWeightBold, UIFontTextStyleHeadline);
         c.textLabel.textColor = HostAccent();
         c.textLabel.textAlignment = NSTextAlignmentCenter;
+        c.backgroundColor = HostSelectedSurface();
+        c.layer.borderWidth = 0.9;
+        HostSetLayerBorderColor(c, [HostAccent() colorWithAlphaComponent:0.45]);
         c.selectionStyle = UITableViewCellSelectionStyleDefault;
     }
     if (input) {

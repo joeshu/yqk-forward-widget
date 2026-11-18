@@ -203,6 +203,7 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
     self.title = @"";
     self.tableView.backgroundColor = HostBackground();
+    self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
     self.tableView.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever;
     self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
     self.tableView.rowHeight = UITableViewAutomaticDimension;
@@ -1126,6 +1127,8 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     if([p[@"type"] isEqual:@"plugin"])return;
     [self reloadProfiles];
 }
+- (void)tableView:(UITableView *)tableView didHighlightRowAtIndexPath:(NSIndexPath *)ip { UITableViewCell *c=[tableView cellForRowAtIndexPath:ip]; if(!c||UIAccessibilityIsReduceMotionEnabled())return; [UIView animateWithDuration:0.10 delay:0 usingSpringWithDamping:0.8 initialSpringVelocity:0.2 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{c.transform=CGAffineTransformMakeScale(0.984,0.984);} completion:nil]; }
+- (void)tableView:(UITableView *)tableView didUnhighlightRowAtIndexPath:(NSIndexPath *)ip { UITableViewCell *c=[tableView cellForRowAtIndexPath:ip]; if(!c)return; [UIView animateWithDuration:0.22 delay:0 usingSpringWithDamping:0.75 initialSpringVelocity:0.2 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{c.transform=CGAffineTransformIdentity;} completion:nil]; }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)ip {
     [tableView deselectRowAtIndexPath:ip animated:YES];
     if(ip.row<0||ip.row>=self.profiles.count)return;

@@ -1208,6 +1208,9 @@ static const NSUInteger MediaAdaptationProbeByteLimit = 4096;
     self.segmentControl = [[UISegmentedControl alloc] initWithItems:@[@"全部记录", @"站点健康", @"播放适配", @"网址/流探测"]];
     self.segmentControl.translatesAutoresizingMaskIntoConstraints = NO;
     self.segmentControl.selectedSegmentIndex = 0;
+    self.segmentControl.selectedSegmentTintColor = HostAccent();
+    [self.segmentControl setTitleTextAttributes:@{NSForegroundColorAttributeName: HostText(), NSFontAttributeName: [UIFont systemFontOfSize:13 weight:UIFontWeightMedium]} forState:UIControlStateNormal];
+    [self.segmentControl setTitleTextAttributes:@{NSForegroundColorAttributeName: HostOnAccent(), NSFontAttributeName: [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold]} forState:UIControlStateSelected];
     self.segmentControl.accessibilityIdentifier = @"adaptation-monitor-segments";
     [self.segmentControl addTarget:self action:@selector(segmentChanged) forControlEvents:UIControlEventValueChanged];
     [self.view addSubview:self.segmentControl];
@@ -1228,6 +1231,11 @@ static const NSUInteger MediaAdaptationProbeByteLimit = 4096;
     self.tableView.delegate = self;
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 88;
+    self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
+    UIRefreshControl *monRefresh = [UIRefreshControl new];
+    monRefresh.tintColor = HostAccent();
+    [monRefresh addTarget:self action:@selector(reloadMonitorData) forControlEvents:UIControlEventValueChanged];
+    self.tableView.refreshControl = monRefresh;
     self.tableView.accessibilityIdentifier = @"adaptation-monitor-table";
     [self.view addSubview:self.tableView];
 
@@ -1268,6 +1276,11 @@ static const NSUInteger MediaAdaptationProbeByteLimit = 4096;
     if (!self.isViewLoaded) return;
     self.view.backgroundColor = HostBackground();
     self.tableView.backgroundColor = HostBackground();
+    self.segmentControl.selectedSegmentTintColor = HostAccent();
+    [self.segmentControl setTitleTextAttributes:@{NSForegroundColorAttributeName: HostText(), NSFontAttributeName: [UIFont systemFontOfSize:13 weight:UIFontWeightMedium]} forState:UIControlStateNormal];
+    [self.segmentControl setTitleTextAttributes:@{NSForegroundColorAttributeName: HostOnAccent(), NSFontAttributeName: [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold]} forState:UIControlStateSelected];
+    if (self.probePanel) HostStyleGlassCard(self.probePanel, 16);
+    self.probeResultLabel.textColor = HostSecondaryText();
     [self.tableView reloadData];
 }
 
@@ -1508,6 +1521,7 @@ static const NSUInteger MediaAdaptationProbeByteLimit = 4096;
     self.displayedRecords = [MediaAdaptationMonitor.shared recordsFilteredByKind:kind searchQuery:q];
     self.displayedSites = [MediaAdaptationMonitor.shared siteHealthSummaries];
     self.adaptationSummary = [MediaAdaptationMonitor.shared playerAdaptationSummary];
+    [self.tableView.refreshControl endRefreshing];
     [self.tableView reloadData];
 }
 
@@ -1527,6 +1541,21 @@ static const NSUInteger MediaAdaptationProbeByteLimit = 4096;
     return 0;
 }
 
+- (void)tableView:(UITableView *)tableView willDisplayHeaderView:(UIView *)view forSection:(NSInteger)section { HostStyleSectionHeaderView(view); }
+- (void)tableView:(UITableView *)tableView didHighlightRowAtIndexPath:(NSIndexPath *)indexPath { UITableViewCell *c = [tableView cellForRowAtIndexPath:indexPath]; if (!c || UIAccessibilityIsReduceMotionEnabled()) return; [UIView animateWithDuration:0.10 delay:0 usingSpringWithDamping:0.8 initialSpringVelocity:0.2 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{ c.transform = CGAffineTransformMakeScale(0.982, 0.982); } completion:nil]; }
+- (void)tableView:(UITableView *)tableView didUnhighlightRowAtIndexPath:(NSIndexPath *)indexPath { UITableViewCell *c = [tableView cellForRowAtIndexPath:indexPath]; if (!c) return; [UIView animateWithDuration:0.22 delay:0 usingSpringWithDamping:0.75 initialSpringVelocity:0.2 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{ c.transform = CGAffineTransformIdentity; } completion:nil]; }
+- (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoint)point {
+    UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
+    NSString *title = cell.textLabel.text ?: @"";
+    NSString *detail = cell.detailTextLabel.text ?: @"";
+    if (!title.length && !detail.length) return nil;
+    return [UIContextMenuConfiguration configurationWithIdentifier:indexPath previewProvider:nil actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggested) {
+        UIAction *copyRow = [UIAction actionWithTitle:@"复制此项监测内容" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a) {
+            UIPasteboard.generalPasteboard.string = detail.length ? [NSString stringWithFormat:@"%@\n%@", title, detail] : title;
+        }];
+        return [UIMenu menuWithTitle:title children:@[copyRow]];
+    }];
+}
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
     NSInteger seg = self.segmentControl.selectedSegmentIndex;
     if (seg == 0) {
@@ -1569,9 +1598,15 @@ static const NSUInteger MediaAdaptationProbeByteLimit = 4096;
         cell.detailTextLabel.font = [UIFont systemFontOfSize:12.5 weight:UIFontWeightRegular];
     }
     cell.backgroundColor = HostCard();
+    cell.layer.cornerRadius = 14;
+    cell.layer.cornerCurve = kCACornerCurveContinuous;
+    cell.clipsToBounds = YES;
+    cell.layer.borderWidth = 0.6;
+    HostSetLayerBorderColor(cell, HostBorder());
     cell.textLabel.textColor = HostText();
     cell.detailTextLabel.textColor = HostSecondaryText();
     cell.accessoryType = UITableViewCellAccessoryNone;
+    cell.imageView.image = nil;
 
     NSInteger seg = self.segmentControl.selectedSegmentIndex;
     if (seg == 0) {

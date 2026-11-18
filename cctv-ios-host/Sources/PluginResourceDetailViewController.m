@@ -254,7 +254,7 @@ static NSString *PluginResourceFormattedTimestamp(NSTimeInterval ts) {
     if(ip.section==2){NSString *resolvedPath=self.resolvedPlaylistPath;NSString *pendingPath=self.playlistCandidates.firstObject;NSString *playlist=resolvedPath?: (pendingPath.length?[NSString stringWithFormat:@"待验证 · %@",pendingPath]:@"未发现 · 点击上方检测资源接口");NSInteger servicePort=[self.service[@"port"] integerValue];NSString *resolvedURL=[ServiceStore subscriptionURLForService:self.service];NSString *subscription=resolvedURL?: (pendingPath.length&&servicePort>0?[NSString stringWithFormat:@"待验证 · http://127.0.0.1:%ld%@",(long)servicePort,pendingPath]:@"未识别 · 点击上方检测后加入资源列表");NSString *epg=[ServiceStore epgURLForService:self.service]?:@"尚未从订阅清单中识别";NSDictionary *metadata=resolvedURL.length?[ProfileStore metadata:resolvedURL]:@{};NSArray *cached=[metadata[@"cachedChannels"] isKindOfClass:NSArray.class]?metadata[@"cachedChannels"]:@[];NSString *count=cached.count?[NSString stringWithFormat:@"%lu 个缓存频道",(unsigned long)cached.count]:(self.probePlaylistChecked?[NSString stringWithFormat:@"%ld 个 · 最近一次接口检测",(long)self.probeChannelCount]:@"未知 · 尚未读取有效清单");NSString *status=[metadata[@"status"] isKindOfClass:NSString.class]?metadata[@"status"]:(resolvedURL.length?(self.running?@"服务运行中 · 等待读取":@"服务已停止"): @"未配置已验证的播放列表");NSTimeInterval updated=[metadata[@"updatedAt"] doubleValue];NSString *last=PluginResourceFormattedTimestamp(updated);NSArray *rows=@[@{@"title":@"复制本机服务地址",@"value":[NSString stringWithFormat:@"http://127.0.0.1:%@",port],@"action":@"copy"},@{@"title":@"服务订阅地址",@"value":subscription},@{@"title":@"节目单地址",@"value":epg},@{@"title":@"播放列表路径",@"value":playlist},@{@"title":@"频道数量",@"value":count},@{@"title":@"订阅清单状态",@"value":status},@{@"title":@"最近成功刷新",@"value":last}];NSMutableDictionary *row=[rows[ip.row] mutableCopy];BOOL subscriptionURL=[subscription hasPrefix:@"http://"]||[subscription hasPrefix:@"https://"];BOOL epgURL=[epg hasPrefix:@"http://"]||[epg hasPrefix:@"https://"];if((ip.row==1&&subscriptionURL)||(ip.row==2&&epgURL))row[@"action"]=@"copy";return row;}
     return self.managementRows[ip.row];
 }
-- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {NSDictionary *row=[self rowAt:ip];BOOL sourceURL=[row[@"action"] isEqual:@"copySource"],copyURL=[row[@"action"] isEqual:@"copy"];BOOL address=sourceURL||copyURL;BOOL longValue=!address&&[row[@"value"] isKindOfClass:NSString.class]&&[(NSString *)row[@"value"] length]>80;NSString *reuse=address?@"service.resource.address":(longValue?@"service.resource.long-value":@"service.resource.value");UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:reuse];if(!cell)cell=[[UITableViewCell alloc] initWithStyle:(address||longValue)?UITableViewCellStyleSubtitle:UITableViewCellStyleValue1 reuseIdentifier:reuse];cell.backgroundColor=HostCard();cell.layer.cornerRadius=14;cell.layer.cornerCurve=kCACornerCurveContinuous;cell.clipsToBounds=YES;cell.layer.borderWidth=0.6;HostSetLayerBorderColor(cell,HostBorder());
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {NSDictionary *row=[self rowAt:ip];BOOL sourceURL=[row[@"action"] isEqual:@"copySource"],copyURL=[row[@"action"] isEqual:@"copy"];BOOL address=sourceURL||copyURL;BOOL longValue=!address&&[row[@"value"] isKindOfClass:NSString.class]&&([(NSString *)row[@"value"] length]>80||(ip.section==1&&(ip.row==0||ip.row==2||ip.row==3))||[(NSString *)row[@"value"] length]>28);NSString *reuse=address?@"service.resource.address":(longValue?@"service.resource.long-value":@"service.resource.value");UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:reuse];if(!cell)cell=[[UITableViewCell alloc] initWithStyle:(address||longValue)?UITableViewCellStyleSubtitle:UITableViewCellStyleValue1 reuseIdentifier:reuse];cell.backgroundColor=HostCard();cell.layer.cornerRadius=14;cell.layer.cornerCurve=kCACornerCurveContinuous;cell.clipsToBounds=YES;cell.layer.borderWidth=0.6;HostSetLayerBorderColor(cell,HostBorder());
     NSString *title=row[@"title"]?:@"";NSString *action=row[@"action"];
     cell.textLabel.text=title;BOOL isRemove=[action isEqual:@"remove"];BOOL isPrimary=[action isEqual:@"use"]||[action isEqual:@"toggle"];cell.textLabel.textColor=isRemove?UIColor.systemRedColor:(isPrimary?HostAccent():HostText());cell.textLabel.numberOfLines=0;cell.textLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];cell.textLabel.adjustsFontForContentSizeCategory=YES;cell.detailTextLabel.text=address?[HostLogRedactor redactText:row[@"value"]?:@""]:row[@"value"];
     BOOL isProcessRow=(ip.section==1&&ip.row==0);
@@ -471,5 +471,32 @@ static NSString *PluginResourceFormattedTimestamp(NSTimeInterval ts) {
             [owner.tableView reloadData];
         });
     }] resume];
+}
+@
+- (void)tableView:(UITableView *)tableView didHighlightRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell=[tableView cellForRowAtIndexPath:indexPath];
+    if(!cell||UIAccessibilityIsReduceMotionEnabled())return;
+    [UIView animateWithDuration:0.10 delay:0 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{cell.transform=CGAffineTransformMakeScale(0.985,0.985);} completion:nil];
+}
+- (void)tableView:(UITableView *)tableView didUnhighlightRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell=[tableView cellForRowAtIndexPath:indexPath];
+    if(!cell)return;
+    [UIView animateWithDuration:0.22 delay:0 usingSpringWithDamping:0.78 initialSpringVelocity:0.25 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{cell.transform=CGAffineTransformIdentity;} completion:nil];
+}
+- (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)ip point:(CGPoint)point {
+    (void)tableView;(void)point;
+    NSDictionary *row=[self rowAt:ip];
+    NSString *title=[row[@"title"] isKindOfClass:NSString.class]?row[@"title"]:@"";
+    NSString *value=[row[@"value"] isKindOfClass:NSString.class]?row[@"value"]:@"";
+    if(!title.length&&!value.length)return nil;
+    __weak typeof(self) weakSelf=self;
+    return [UIContextMenuConfiguration configurationWithIdentifier:ip previewProvider:nil actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggested){
+        NSMutableArray<UIMenuElement *> *items=[NSMutableArray array];
+        if(value.length){
+            [items addObject:[UIAction actionWithTitle:@"复制此项内容" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){UIPasteboard.generalPasteboard.string=value;[weakSelf showNotice:@"已复制到剪贴板"];}]];
+        }
+        [items addObject:[UIAction actionWithTitle:@"复制完整键值" image:[UIImage systemImageNamed:@"list.clipboard"] identifier:nil handler:^(__unused UIAction *a){UIPasteboard.generalPasteboard.string=value.length?[NSString stringWithFormat:@"%@：%@",title,value]:title;[weakSelf showNotice:@"已复制到剪贴板"];}]];
+        return [UIMenu menuWithTitle:title children:items];
+    }];
 }
 @end

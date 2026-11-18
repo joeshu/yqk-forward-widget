@@ -359,19 +359,27 @@
     return [self.snapshotRows[(NSUInteger)ip.row] isKindOfClass:NSDictionary.class] ? self.snapshotRows[(NSUInteger)ip.row] : @{};
 }
 
+- (void)tableView:(UITableView *)tableView willDisplayHeaderView:(UIView *)view forSection:(NSInteger)section {
+    (void)tableView; (void)section;
+    HostStyleSectionHeaderView(view);
+}
+
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {
     NSDictionary *row = [self rowDictionaryAtIndexPath:ip];
-    UITableViewCell *c = [tableView dequeueReusableCellWithIdentifier:@"playback.info.row"];
-    if (!c) c = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"playback.info.row"];
+    NSString *titleText = [(row[@"title"] ?: @"") description];
+    NSString *valueText = [(row[@"value"] ?: @"") description];
+    BOOL useSubtitle = valueText.length > 26 || [titleText containsString:@"地址"] || [titleText containsString:@"阶段"] || [titleText containsString:@"错误"] || [titleText containsString:@"参数"];
+    NSString *reuse = useSubtitle ? @"playback.info.subtitle" : @"playback.info.row";
+    UITableViewCell *c = [tableView dequeueReusableCellWithIdentifier:reuse];
+    if (!c) c = [[UITableViewCell alloc] initWithStyle:useSubtitle ? UITableViewCellStyleSubtitle : UITableViewCellStyleValue1 reuseIdentifier:reuse];
     c.backgroundColor = HostCard();
     c.layer.cornerRadius = 13;
     c.layer.cornerCurve = kCACornerCurveContinuous;
     c.clipsToBounds = YES;
     c.layer.borderWidth = 0.6;
     HostSetLayerBorderColor(c, HostBorder());
-    NSString *titleText = [(row[@"title"] ?: @"") description];
     c.textLabel.text = titleText;
-    c.detailTextLabel.text = [(row[@"value"] ?: @"") description];
+    c.detailTextLabel.text = valueText;
     NSString *symbol = ([titleText containsString:@"带宽"] || [titleText containsString:@"速率"] || [titleText containsString:@"码率"]) ? @"speedometer" :
         (([titleText containsString:@"分辨率"] || [titleText containsString:@"画面"] || [titleText containsString:@"帧率"]) ? @"rectangle.expand.vertical" :
         (([titleText containsString:@"节点"] || [titleText containsString:@"线路"] || [titleText containsString:@"地址"] || [titleText containsString:@"备用"]) ? @"network" :
@@ -403,5 +411,44 @@
     UIPasteboard.generalPasteboard.string = line;
     [self showTransientPrompt:@"指标已复制"];
     UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification, @"指标已复制");
+}
+
+- (void)tableView:(UITableView *)tableView didHighlightRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
+    if (!cell || UIAccessibilityIsReduceMotionEnabled()) return;
+    [UIView animateWithDuration:0.10 delay:0 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{
+        cell.transform = CGAffineTransformMakeScale(0.985, 0.985);
+    } completion:nil];
+}
+
+- (void)tableView:(UITableView *)tableView didUnhighlightRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
+    if (!cell) return;
+    [UIView animateWithDuration:0.22 delay:0 usingSpringWithDamping:0.78 initialSpringVelocity:0.25 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{
+        cell.transform = CGAffineTransformIdentity;
+    } completion:nil];
+}
+
+- (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)ip point:(CGPoint)point {
+    (void)tableView; (void)point;
+    NSDictionary *row = [self rowDictionaryAtIndexPath:ip];
+    NSString *title = [(row[@"title"] ?: @"") description];
+    NSString *value = [(row[@"value"] ?: @"") description];
+    if (!title.length && !value.length) return nil;
+    __weak typeof(self) weakSelf = self;
+    return [UIContextMenuConfiguration configurationWithIdentifier:ip previewProvider:nil actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggested) {
+        UIAction *copyVal = [UIAction actionWithTitle:@"复制指标数值" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a) {
+            UIPasteboard.generalPasteboard.string = value.length ? value : title;
+            [weakSelf showTransientPrompt:@"指标已复制"];
+        }];
+        UIAction *copyPair = [UIAction actionWithTitle:@"复制完整键值" image:[UIImage systemImageNamed:@"list.clipboard"] identifier:nil handler:^(__unused UIAction *a) {
+            UIPasteboard.generalPasteboard.string = [NSString stringWithFormat:@"%@：%@", title, value];
+            [weakSelf showTransientPrompt:@"指标已复制"];
+        }];
+        UIAction *copyAll = [UIAction actionWithTitle:@"复制全部播放诊断信息" image:[UIImage systemImageNamed:@"doc.on.clipboard"] identifier:nil handler:^(__unused UIAction *a) {
+            [weakSelf copyAllDiagnostics];
+        }];
+        return [UIMenu menuWithTitle:title children:@[copyVal, copyPair, copyAll]];
+    }];
 }
 @end

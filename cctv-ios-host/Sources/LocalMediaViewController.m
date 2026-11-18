@@ -11,6 +11,7 @@
 @property(nonatomic,strong) UILabel *progressLabel;
 @property(nonatomic,strong) UIButton *stopButton;
 @property(nonatomic,strong) UILabel *emptyLabel;
+- (void)tableView:(UITableView *)t commitEditingStyle:(UITableViewCellEditingStyle)s forRowAtIndexPath:(NSIndexPath *)ip;
 @end
 
 @implementation LocalMediaViewController
@@ -46,8 +47,26 @@
 }
 - (void)stopImport {[self.store stopAfterCurrentFile];}
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {return self.files.count;}
+- (void)tableView:(UITableView *)tableView willDisplayHeaderView:(UIView *)view forSection:(NSInteger)section { (void)tableView;(void)section;HostStyleSectionHeaderView(view); }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)path {
-    UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:@"local"];if(!cell)cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"local"];if(path.row<0||path.row>=self.files.count)return cell;NSURL *url=self.files[path.row];NSString *name=[self displayNameForURL:url];NSNumber *size=nil;[url getResourceValue:&size forKey:NSURLFileSizeKey error:nil];NSString *kind=[url.pathExtension.lowercaseString isEqualToString:@"mp3"]||[url.pathExtension.lowercaseString isEqualToString:@"m4a"]?@"音频文件":@"视频文件";cell.textLabel.text=name;cell.detailTextLabel.text=[NSString stringWithFormat:@"%@ · %@",kind,[NSByteCountFormatter stringFromByteCount:size.longLongValue countStyle:NSByteCountFormatterCountStyleFile]];cell.textLabel.numberOfLines=2;cell.textLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];cell.textLabel.adjustsFontForContentSizeCategory=YES;cell.detailTextLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];cell.detailTextLabel.adjustsFontForContentSizeCategory=YES;cell.backgroundColor=HostCard();cell.textLabel.textColor=HostText();cell.detailTextLabel.textColor=HostSecondaryText();cell.accessoryType=UITableViewCellAccessoryDisclosureIndicator;cell.accessibilityIdentifier=[@"local-media:" stringByAppendingString:url.lastPathComponent];return cell;
+    UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:@"local"];if(!cell)cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"local"];if(path.row<0||path.row>=self.files.count)return cell;NSURL *url=self.files[path.row];NSString *name=[self displayNameForURL:url];NSNumber *size=nil;[url getResourceValue:&size forKey:NSURLFileSizeKey error:nil];BOOL isAudio=[url.pathExtension.lowercaseString isEqualToString:@"mp3"]||[url.pathExtension.lowercaseString isEqualToString:@"m4a"]||[url.pathExtension.lowercaseString isEqualToString:@"aac"]||[url.pathExtension.lowercaseString isEqualToString:@"flac"]||[url.pathExtension.lowercaseString isEqualToString:@"wav"];NSString *kind=isAudio?@"音频文件":@"视频文件";cell.textLabel.text=name;cell.detailTextLabel.text=[NSString stringWithFormat:@"%@ · %@",kind,[NSByteCountFormatter stringFromByteCount:size.longLongValue countStyle:NSByteCountFormatterCountStyleFile]];cell.imageView.image=[UIImage systemImageNamed:isAudio?@"waveform.circle.fill":@"film.fill"];cell.imageView.tintColor=HostAccent();cell.textLabel.numberOfLines=2;cell.textLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];cell.textLabel.adjustsFontForContentSizeCategory=YES;cell.detailTextLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];cell.detailTextLabel.adjustsFontForContentSizeCategory=YES;cell.backgroundColor=HostCard();cell.layer.cornerRadius=14;cell.layer.cornerCurve=kCACornerCurveContinuous;cell.clipsToBounds=YES;cell.layer.borderWidth=0.6;HostSetLayerBorderColor(cell,HostBorder());cell.textLabel.textColor=HostText();cell.detailTextLabel.textColor=HostSecondaryText();cell.accessoryType=UITableViewCellAccessoryDisclosureIndicator;cell.accessibilityIdentifier=[@"local-media:" stringByAppendingString:url.lastPathComponent];return cell;
+}
+- (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)path point:(CGPoint)point {
+    (void)point;if(path.row<0||path.row>=(NSInteger)self.files.count)return nil;
+    NSURL *url=self.files[(NSUInteger)path.row];NSString *name=[self displayNameForURL:url];__weak typeof(self) weakSelf=self;
+    return [UIContextMenuConfiguration configurationWithIdentifier:path previewProvider:nil actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggested){
+        UIAction *playAct=[UIAction actionWithTitle:@"播放此文件" image:[UIImage systemImageNamed:@"play.fill"] identifier:nil handler:^(__unused UIAction *a){[weakSelf tableView:tableView didSelectRowAtIndexPath:path];}];
+        UIAction *shareAct=[UIAction actionWithTitle:@"分享或导出文件" image:[UIImage systemImageNamed:@"square.and.arrow.up"] identifier:nil handler:^(__unused UIAction *a){
+            LocalMediaViewController *owner=weakSelf;if(!owner)return;
+            UIActivityViewController *av=[[UIActivityViewController alloc] initWithActivityItems:@[url] applicationActivities:nil];
+            UITableViewCell *c=[tableView cellForRowAtIndexPath:path];av.popoverPresentationController.sourceView=c?:owner.view;av.popoverPresentationController.sourceRect=c?c.bounds:CGRectMake(CGRectGetMidX(owner.view.bounds),CGRectGetMidY(owner.view.bounds),1,1);
+            [owner presentViewController:av animated:YES completion:nil];
+        }];
+        UIAction *copyName=[UIAction actionWithTitle:@"复制文件名称" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){UIPasteboard.generalPasteboard.string=name;}];
+        UIAction *delAct=[UIAction actionWithTitle:@"删除本机副本" image:[UIImage systemImageNamed:@"trash"] identifier:nil handler:^(__unused UIAction *a){[weakSelf tableView:tableView commitEditingStyle:UITableViewCellEditingStyleDelete forRowAtIndexPath:path];}];
+        delAct.attributes=UIMenuElementAttributesDestructive;
+        return [UIMenu menuWithTitle:name children:@[playAct,shareAct,copyName,delAct]];
+    }];
 }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)path {
     [tableView deselectRowAtIndexPath:path animated:YES];if(path.row<0||path.row>=self.files.count)return;NSURL *url=self.files[path.row];NSString *name=[self displayNameForURL:url];MediaPlaybackViewController *page=[MediaPlaybackViewController new];page.title=name;page.context=@{@"localMedia":@YES,@"source":@{@"id":@"local-media",@"name":@"本地媒体"},@"item":@{@"name":name,@"id":url.absoluteString},@"detail":@{@"name":name,@"id":url.absoluteString}};page.result=@{@"url":url.absoluteString,@"directMedia":@YES};[self.navigationController pushViewController:page animated:YES];

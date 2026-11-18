@@ -70,6 +70,16 @@ static NSString *SettingsEPGCacheSizeText(void) {
     return [NSString stringWithFormat:@"%@ · 下次打开频道时重新获取",size];
 }
 
+static NSString *SettingsCompactCacheSizeText(void) {
+    unsigned long long epgBytes=SettingsEPGCacheBytes();
+    NSDictionary *mediaSummary=MediaMetadataCache.shared.summary;
+    unsigned long long mediaBytes=[mediaSummary[@"bytes"] unsignedLongLongValue];
+    NSUInteger mediaEntries=[mediaSummary[@"entries"] unsignedIntegerValue];
+    unsigned long long total=epgBytes+mediaBytes;
+    if(total==0&&mediaEntries==0)return @"无缓存";
+    return [NSByteCountFormatter stringFromByteCount:(long long)total countStyle:NSByteCountFormatterCountStyleMemory];
+}
+
 static NSString *SettingsAllCachesSummaryText(void) {
     unsigned long long epgBytes=SettingsEPGCacheBytes();
     NSDictionary *mediaSummary=MediaMetadataCache.shared.summary;
@@ -122,23 +132,173 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
     return count?[NSString stringWithFormat:@"已设置 %lu 项节目单预约提醒",(unsigned long)count]:@"暂无节目单预约提醒";
 }
 
+// ---------- Spatial Glass 2.0 Semantic Palette & Squircle Icon Badge Engine ----------
+
+static NSCache<NSString *, UIImage *> *SettingsIconBadgeCache(void) {
+    static NSCache<NSString *, UIImage *> *cache=nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken,^{
+        cache=[NSCache new];
+        cache.countLimit=160;
+    });
+    return cache;
+}
+
+static void SettingsTriggerHapticSelection(void) {
+    if(UIAccessibilityIsReduceMotionEnabled())return;
+    UISelectionFeedbackGenerator *gen=[UISelectionFeedbackGenerator new];
+    [gen prepare];
+    [gen selectionChanged];
+}
+
+static void SettingsTriggerHapticImpact(UIImpactFeedbackStyle style) {
+    if(UIAccessibilityIsReduceMotionEnabled())return;
+    UIImpactFeedbackGenerator *gen=[[UIImpactFeedbackGenerator alloc] initWithStyle:style];
+    [gen prepare];
+    [gen impactOccurred];
+}
+
+static UIColor *SettingsSemanticTintForCategoryAndRole(NSString *category, NSString *role, BOOL isDark) {
+    if([role isEqualToString:@"destructive"]){
+        return isDark?[UIColor colorWithRed:0.98 green:0.36 blue:0.38 alpha:1.0]:[UIColor colorWithRed:0.84 green:0.18 blue:0.22 alpha:1.0];
+    }
+    if([role isEqualToString:@"cache"]){
+        return isDark?[UIColor colorWithRed:0.98 green:0.60 blue:0.22 alpha:1.0]:[UIColor colorWithRed:0.84 green:0.44 blue:0.08 alpha:1.0];
+    }
+    if([category isEqualToString:@"appearance"]){
+        return isDark?[UIColor colorWithRed:0.48 green:0.52 blue:0.98 alpha:1.0]:[UIColor colorWithRed:0.32 green:0.36 blue:0.86 alpha:1.0];
+    }
+    if([category isEqualToString:@"live"]){
+        return isDark?[UIColor colorWithRed:0.22 green:0.72 blue:0.98 alpha:1.0]:[UIColor colorWithRed:0.04 green:0.50 blue:0.82 alpha:1.0];
+    }
+    if([category isEqualToString:@"vod"]){
+        return isDark?[UIColor colorWithRed:0.96 green:0.64 blue:0.22 alpha:1.0]:[UIColor colorWithRed:0.82 green:0.46 blue:0.06 alpha:1.0];
+    }
+    if([category isEqualToString:@"engine"]){
+        return isDark?[UIColor colorWithRed:0.18 green:0.82 blue:0.64 alpha:1.0]:[UIColor colorWithRed:0.06 green:0.62 blue:0.46 alpha:1.0];
+    }
+    if([category isEqualToString:@"diagnostics"]){
+        return isDark?[UIColor colorWithRed:0.82 green:0.44 blue:0.96 alpha:1.0]:[UIColor colorWithRed:0.62 green:0.24 blue:0.82 alpha:1.0];
+    }
+    if([category isEqualToString:@"storage"]){
+        return isDark?[UIColor colorWithRed:0.32 green:0.62 blue:0.98 alpha:1.0]:[UIColor colorWithRed:0.14 green:0.46 blue:0.86 alpha:1.0];
+    }
+    return HostAccent();
+}
+
+static UIImage *SettingsSquircleBadgeImage(NSString *symbolName, UIColor *tintColor, BOOL isDark, CGFloat boxSize) {
+    NSString *safeSymbol=symbolName.length?symbolName:@"gearshape";
+    CGFloat r=0,g=0,b=0,a=0;
+    [tintColor getRed:&r green:&g blue:&b alpha:&a];
+    NSString *cacheKey=[NSString stringWithFormat:@"%@:%.2f-%.2f-%.2f:%d:%.0f",safeSymbol,r,g,b,isDark?1:0,boxSize];
+    UIImage *cached=[SettingsIconBadgeCache() objectForKey:cacheKey];
+    if(cached)return cached;
+
+    CGSize size=CGSizeMake(boxSize,boxSize);
+    UIGraphicsImageRendererFormat *fmt=[UIGraphicsImageRendererFormat defaultFormat];
+    fmt.opaque=NO;
+    UIGraphicsImageRenderer *renderer=[[UIGraphicsImageRenderer alloc] initWithSize:size format:fmt];
+    UIImage *rendered=[renderer imageWithActions:^(UIGraphicsImageRendererContext *ctx){
+        CGContextRef cg=ctx.CGContext;
+        CGRect rect=CGRectMake(0.5,0.5,boxSize-1.0,boxSize-1.0);
+        CGFloat radius=round(boxSize*0.28);
+        UIBezierPath *squircle=[UIBezierPath bezierPathWithRoundedRect:rect cornerRadius:radius];
+        CGContextSaveGState(cg);
+        [squircle addClip];
+
+        UIColor *topFill=[tintColor colorWithAlphaComponent:isDark?0.24:0.16];
+        UIColor *bottomFill=[tintColor colorWithAlphaComponent:isDark?0.09:0.06];
+        NSArray *colors=@[(id)topFill.CGColor,(id)bottomFill.CGColor];
+        CGColorSpaceRef space=CGColorSpaceCreateDeviceRGB();
+        CGFloat locations[2]={0.0,1.0};
+        CGGradientRef grad=CGGradientCreateWithColors(space,(__bridge CFArrayRef)colors,locations);
+        if(grad){
+            CGContextDrawLinearGradient(cg,grad,CGPointMake(0,0),CGPointMake(boxSize,boxSize),0);
+            CGGradientRelease(grad);
+        }
+        CGColorSpaceRelease(space);
+
+        // Top specular rim inside squircle
+        UIBezierPath *topArc=[UIBezierPath bezierPathWithRoundedRect:CGRectInset(rect,0.5,0.5) cornerRadius:MAX(1,radius-0.5)];
+        [[UIColor colorWithWhite:1.0 alpha:isDark?0.12:0.35] setStroke];
+        topArc.lineWidth=0.6;
+        [topArc stroke];
+        CGContextRestoreGState(cg);
+
+        [[tintColor colorWithAlphaComponent:isDark?0.42:0.28] setStroke];
+        squircle.lineWidth=0.8;
+        [squircle stroke];
+
+        CGFloat symPt=round(boxSize*0.45);
+        UIImageSymbolConfiguration *symCfg=[UIImageSymbolConfiguration configurationWithPointSize:symPt weight:UIImageSymbolWeightSemibold];
+        UIImage *sym=[[UIImage systemImageNamed:safeSymbol withConfiguration:symCfg] imageWithTintColor:tintColor renderingMode:UIImageRenderingModeAlwaysOriginal];
+        if(!sym){
+            sym=[[UIImage systemImageNamed:@"gearshape" withConfiguration:symCfg] imageWithTintColor:tintColor renderingMode:UIImageRenderingModeAlwaysOriginal];
+        }
+        if(sym){
+            CGSize imgSize=sym.size;
+            CGRect drawRect=CGRectMake((boxSize-imgSize.width)/2.0,(boxSize-imgSize.height)/2.0,imgSize.width,imgSize.height);
+            [sym drawInRect:drawRect];
+        }
+    }];
+    rendered=[rendered imageWithRenderingMode:UIImageRenderingModeAlwaysOriginal];
+    if(rendered)[SettingsIconBadgeCache() setObject:rendered forKey:cacheKey];
+    return rendered;
+}
+
+static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
+    if(!palette)return nil;
+    NSString *key=[NSString stringWithFormat:@"swatch:%@",palette.identifier?:@"default"];
+    UIImage *cached=[SettingsIconBadgeCache() objectForKey:key];
+    if(cached)return cached;
+    UIGraphicsImageRendererFormat *fmt=[UIGraphicsImageRendererFormat defaultFormat];
+    fmt.opaque=NO;
+    UIGraphicsImageRenderer *renderer=[[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(22,14) format:fmt];
+    UIImage *img=[renderer imageWithActions:^(UIGraphicsImageRendererContext *ctx){
+        CGRect bgCircle=CGRectMake(1,1,12,12);
+        CGRect accentCircle=CGRectMake(9,1,12,12);
+        UIBezierPath *p1=[UIBezierPath bezierPathWithOvalInRect:bgCircle];
+        [palette.background setFill];
+        [p1 fill];
+        [[palette.accent colorWithAlphaComponent:0.55] setStroke];
+        p1.lineWidth=1.0;
+        [p1 stroke];
+
+        UIBezierPath *p2=[UIBezierPath bezierPathWithOvalInRect:accentCircle];
+        [palette.accent setFill];
+        [p2 fill];
+        [[UIColor colorWithWhite:1.0 alpha:0.65] setStroke];
+        p2.lineWidth=0.9;
+        [p2 stroke];
+    }];
+    img=[img imageWithRenderingMode:UIImageRenderingModeAlwaysOriginal];
+    if(img)[SettingsIconBadgeCache() setObject:img forKey:key];
+    return img;
+}
+
 @interface SettingsViewController () <UITableViewDataSource, UITableViewDelegate, UITextFieldDelegate>
 @property(nonatomic,strong) UITableView *table;
 @property(nonatomic,strong) UIView *heroHeaderView;
 @property(nonatomic,strong) UIView *settingsTopImmersiveScrim;
 @property(nonatomic,strong) CAGradientLayer *settingsTopImmersiveGradient;
 @property(nonatomic,strong) UIStackView *heroSummaryChipsStack;
+@property(nonatomic,strong) UIStackView *heroQuickTilesStack;
+@property(nonatomic,strong) UIButton *heroMoreButton;
 @property(nonatomic,strong) UITextField *settingsSearchField;
+@property(nonatomic,strong) UILabel *searchMatchCountBadge;
 @property(nonatomic,strong) UIScrollView *categoryFilterScroll;
 @property(nonatomic,strong) UIStackView *categoryFilterStack;
 @property(nonatomic,copy) NSString *selectedCategoryKey;
 @property(nonatomic,copy) NSString *searchKeyword;
+@property(nonatomic,strong) NSMutableSet<NSString *> *collapsedCategories;
 @property(nonatomic) CGFloat bottomOverlayInset;
 @property(nonatomic,strong) NSArray<NSDictionary *> *allSections;
 @property(nonatomic,strong) NSArray<NSDictionary *> *sections;
 @property(nonatomic,copy,nullable) NSString *lastUpdateCheckText;
 @property(nonatomic,assign) BOOL checkingUpdate;
 @property(nonatomic,assign) BOOL clearedImagesState;
+- (NSIndexPath *)indexPathForRowAction:(NSString *)action;
+- (void)resetSingleRowToDefault:(NSDictionary *)row atIndexPath:(NSIndexPath *)ip;
 @end
 
 @implementation SettingsViewController
@@ -158,77 +318,77 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
 
 - (void)buildSettingsSchema {
     self.allSections=@[
-      @{ @"category":@"appearance", @"title":@"外观与界面导航", @"footer":@"主题实时应用于全局；下方色板提供 6 套主题（4 套深色沉浸、2 套浅色），点选即时生效，无需重启。字号与底部导航偏好即时刷新生效。", @"rows":@[
-        @{ @"title":@"全局主题", @"detail":@"系统 / 浅色 / 深色 · 全端即时响应", @"key":HostThemeModePreferenceKey, @"appearance":@YES, @"icon":@"circle.lefthalf.filled" },
-        @{ @"title":@"主题色板", @"detail":@"午夜影院", @"action":@"themePalette", @"icon":@"paintpalette" },
-        @{ @"title":@"字号", @"detail":@"应用内全局动态字号档位", @"key":@"cctv.appFontSize.v1", @"segmented":@YES, @"options":@[@"标准",@"大",@"特大"], @"values":@[@0,@1,@2], @"default":@0, @"icon":@"textformat.size" },
-        @{ @"title":@"启动时恢复上次打开的页面", @"detail":@"关闭后每次启动默认进入央视直播页", @"key":@"cctv.restoreLastTab.v1", @"icon":@"arrow.uturn.left", @"default":@YES }
+      @{ @"category":@"appearance", @"icon":@"paintbrush.fill", @"subtitle":@"主题色板 · 全局字号 · 导航恢复", @"title":@"外观与界面导航", @"footer":@"主题实时应用于全局；下方色板提供 6 套主题（4 套深色沉浸、2 套浅色），点选即时生效，无需重启。字号与底部导航偏好即时刷新生效。", @"rows":@[
+        @{ @"title":@"全局主题", @"detail":@"系统 / 浅色 / 深色 · 全端即时响应", @"key":HostThemeModePreferenceKey, @"appearance":@YES, @"icon":@"circle.lefthalf.filled", @"subgroup":@"视觉风格" },
+        @{ @"title":@"主题色板", @"detail":@"午夜影院", @"action":@"themePalette", @"icon":@"paintpalette", @"subgroup":@"视觉风格" },
+        @{ @"title":@"字号", @"detail":@"应用内全局动态字号档位", @"key":@"cctv.appFontSize.v1", @"segmented":@YES, @"options":@[@"标准",@"大",@"特大"], @"values":@[@0,@1,@2], @"default":@0, @"icon":@"textformat.size", @"subgroup":@"界面排版" },
+        @{ @"title":@"启动时恢复上次打开的页面", @"detail":@"关闭后每次启动默认进入央视直播页", @"key":@"cctv.restoreLastTab.v1", @"icon":@"arrow.uturn.left", @"default":@YES, @"subgroup":@"导航记忆" }
       ]},
-      @{ @"category":@"live", @"title":@"直播与频道管理", @"footer":@"集中管理内置央视频道展示、频道网格/列表视图、排序方式及直播画中画。播放时屏幕常亮对央视与订阅直播同时生效。", @"rows":@[
-        @{ @"title":@"显示内置央视频道", @"detail":@"在直播与频道列表中展示内置央视/卫视频道", @"key":@"nativeChannelsEnabled", @"icon":@"tv.badge.wifi", @"default":@YES },
-        @{ @"title":@"内置央视频道台标", @"detail":@"控制央视页列表与播放器右上角高清台标展示（默认关闭）", @"key":@"nativeChannelLogoEnabled", @"icon":@"sparkles.tv", @"default":@NO },
-        @{ @"title":@"内置央视播放器右上角台标", @"detail":@"独立控制内置央视播放画面右上角台标展示（默认关闭）", @"key":@"nativePlayerCornerLogoEnabled", @"icon":@"tv.inset.filled", @"default":@NO },
-        @{ @"title":@"内置央视频道实时预览图", @"detail":@"在频道列表刷新时检测并展示最新真实画面缩略图（默认关闭）", @"key":@"nativeChannelPreviewEnabled", @"icon":@"photo.tv", @"default":@NO },
-        @{ @"title":@"内置央视频道速率与延迟", @"detail":@"在央视页与频道页展示实时网速与毫秒级响应延迟角标（默认关闭）", @"key":@"nativeChannelTelemetryEnabled", @"icon":@"speedometer", @"default":@NO },
-        @{ @"title":@"频道用网格显示", @"detail":@"切换频道列表为海报卡片网格或紧凑列表", @"key":@"channelGridMode", @"icon":@"square.grid.2x2", @"default":@YES },
-        @{ @"title":@"频道网格列数", @"detail":@"网格模式下的单行频道卡片数量", @"key":@"cctv.channelGridColumns.v1", @"segmented":@YES, @"options":@[@"3 列",@"4 列"], @"values":@[@3,@4], @"default":@4, @"icon":@"rectangle.grid.3x2" },
-        @{ @"title":@"频道排序方式", @"detail":@"按默认频道分组顺序或按频道名称排序", @"key":@"cctv.channelSortMode.v1", @"segmented":@YES, @"options":@[@"默认",@"名称"], @"values":@[@0,@1], @"default":@0, @"icon":@"arrow.up.arrow.down" },
-        @{ @"title":@"播放时屏幕常亮", @"detail":@"直播与点播播放期间防止自动锁屏息屏", @"key":@"cctv.mediaKeepScreenAwake", @"icon":@"sun.max", @"default":@YES },
-        @{ @"title":@"允许后台音频播放", @"detail":@"切到后台或锁屏时保持直播声音输出", @"key":@"allowBackgroundAudio", @"icon":@"speaker.wave.2", @"default":@YES },
-        @{ @"title":@"订阅流自动画中画", @"detail":@"退回主屏幕时自动开启系统内联画中画", @"key":@"autoPiP", @"icon":@"pip", @"default":@NO },
-        @{ @"title":@"自动获取节目单", @"detail":@"打开频道时自动同步并刷新 EPG 节目预告", @"key":@"autoLoadEPG", @"icon":@"list.bullet.rectangle", @"default":@YES },
-        @{ @"title":@"记住上次观看频道", @"detail":@"记录最后一次播放的直播频道", @"key":@"rememberLastChannel", @"icon":@"bookmark", @"default":@YES },
-        @{ @"title":@"启动时自动续播上次频道", @"detail":@"进入应用时自动拉起上次记住的频道", @"key":@"resumeLastChannel", @"icon":@"arrow.counterclockwise", @"default":@NO },
-        @{ @"title":@"默认清晰度", @"detail":SettingsPreferredQualityText(), @"action":@"defaultQuality", @"icon":@"4k.tv" }
+      @{ @"category":@"live", @"icon":@"dot.radiowaves.left.and.right", @"subtitle":@"内置央视增强 · 频道网格 · 直播画中画与节目单", @"title":@"直播与频道管理", @"footer":@"集中管理内置央视频道展示、频道网格/列表视图、排序方式及直播画中画。播放时屏幕常亮对央视与订阅直播同时生效。", @"rows":@[
+        @{ @"title":@"显示内置央视频道", @"detail":@"在直播与频道列表中展示内置央视/卫视频道", @"key":@"nativeChannelsEnabled", @"icon":@"tv.badge.wifi", @"default":@YES, @"subgroup":@"内置央视" },
+        @{ @"title":@"内置央视频道台标", @"detail":@"控制央视页列表与播放器右上角高清台标展示（默认关闭）", @"key":@"nativeChannelLogoEnabled", @"icon":@"sparkles.tv", @"default":@NO, @"subgroup":@"内置央视" },
+        @{ @"title":@"内置央视播放器右上角台标", @"detail":@"独立控制内置央视播放画面右上角台标展示（默认关闭）", @"key":@"nativePlayerCornerLogoEnabled", @"icon":@"tv.inset.filled", @"default":@NO, @"subgroup":@"内置央视" },
+        @{ @"title":@"内置央视频道实时预览图", @"detail":@"在频道列表刷新时检测并展示最新真实画面缩略图（默认关闭）", @"key":@"nativeChannelPreviewEnabled", @"icon":@"photo.tv", @"default":@NO, @"subgroup":@"内置央视" },
+        @{ @"title":@"内置央视频道速率与延迟", @"detail":@"在央视页与频道页展示实时网速与毫秒级响应延迟角标（默认关闭）", @"key":@"nativeChannelTelemetryEnabled", @"icon":@"speedometer", @"default":@NO, @"subgroup":@"内置央视" },
+        @{ @"title":@"频道用网格显示", @"detail":@"切换频道列表为海报卡片网格或紧凑列表", @"key":@"channelGridMode", @"icon":@"square.grid.2x2", @"default":@YES, @"subgroup":@"频道布局" },
+        @{ @"title":@"频道网格列数", @"detail":@"网格模式下的单行频道卡片数量", @"key":@"cctv.channelGridColumns.v1", @"segmented":@YES, @"options":@[@"3 列",@"4 列"], @"values":@[@3,@4], @"default":@4, @"icon":@"rectangle.grid.3x2", @"subgroup":@"频道布局" },
+        @{ @"title":@"频道排序方式", @"detail":@"按默认频道分组顺序或按频道名称排序", @"key":@"cctv.channelSortMode.v1", @"segmented":@YES, @"options":@[@"默认",@"名称"], @"values":@[@0,@1], @"default":@0, @"icon":@"arrow.up.arrow.down", @"subgroup":@"频道布局" },
+        @{ @"title":@"播放时屏幕常亮", @"detail":@"直播与点播播放期间防止自动锁屏息屏", @"key":@"cctv.mediaKeepScreenAwake", @"icon":@"sun.max", @"default":@YES, @"subgroup":@"播放交互" },
+        @{ @"title":@"允许后台音频播放", @"detail":@"切到后台或锁屏时保持直播声音输出", @"key":@"allowBackgroundAudio", @"icon":@"speaker.wave.2", @"default":@YES, @"subgroup":@"播放交互" },
+        @{ @"title":@"订阅流自动画中画", @"detail":@"退回主屏幕时自动开启系统内联画中画", @"key":@"autoPiP", @"icon":@"pip", @"default":@NO, @"subgroup":@"播放交互" },
+        @{ @"title":@"自动获取节目单", @"detail":@"打开频道时自动同步并刷新 EPG 节目预告", @"key":@"autoLoadEPG", @"icon":@"list.bullet.rectangle", @"default":@YES, @"subgroup":@"节目单与续播" },
+        @{ @"title":@"记住上次观看频道", @"detail":@"记录最后一次播放的直播频道", @"key":@"rememberLastChannel", @"icon":@"bookmark", @"default":@YES, @"subgroup":@"节目单与续播" },
+        @{ @"title":@"启动时自动续播上次频道", @"detail":@"进入应用时自动拉起上次记住的频道", @"key":@"resumeLastChannel", @"icon":@"arrow.counterclockwise", @"default":@NO, @"subgroup":@"节目单与续播" },
+        @{ @"title":@"默认清晰度", @"detail":SettingsPreferredQualityText(), @"action":@"defaultQuality", @"icon":@"4k.tv", @"subgroup":@"画质策略" }
       ]},
-      @{ @"category":@"vod", @"title":@"影视与点播体验", @"footer":@"调整影视精选首页模块、海报网格列数与点播默认策略。自动跳过仅对已标记片头片尾位置的剧集生效；播放参数在播放器内也可随时调整。", @"rows":@[
-        @{ @"title":@"媒体显示", @"detail":SettingsMediaDisplaySummaryText(), @"action":@"mediaDisplay", @"icon":@"rectangle.grid.2x2" },
-        @{ @"title":@"影视海报网格列数", @"detail":@"分类浏览与聚合列表的海报卡片密度", @"key":@"cctv.mediaGridColumns.v1", @"segmented":@YES, @"options":@[@"3 列",@"4 列"], @"values":@[@3,@4], @"default":@3, @"icon":@"square.grid.3x2" },
-        @{ @"title":@"详情与选集列表样式", @"detail":@"切换影视详情页与选集页的分集排列视图样式", @"key":@"cctv.mediaEpisodeLayoutStyle.v1", @"segmented":@YES, @"options":@[@"四列",@"单列",@"双列",@"三列"], @"values":@[@0,@1,@2,@3], @"default":@0, @"icon":@"list.bullet.below.rectangle" },
-        @{ @"title":@"显示分集备注与状态角标", @"detail":@"在单列/双列选集视图中展示分集副标题、清晰度与播放状态", @"key":@"cctv.mediaEpisodeShowBadge.v1", @"icon":@"tag", @"default":@YES },
-        @{ @"title":@"进入选集页自动展开全集", @"detail":@"打开选集页时默认展开完整分集列表，无需手动点按展开", @"key":@"cctv.mediaEpisodeAutoExpand.v1", @"icon":@"rectangle.expand.vertical", @"default":@NO },
-        @{ @"title":@"自动连播下一集", @"detail":@"本集播放结束后自动切换并播放下一集", @"key":@"cctv.mediaAutoPlayNext", @"icon":@"forward.end.fill", @"default":@YES },
-        @{ @"title":@"自动跳过片头片尾", @"detail":@"按本机已保存的片头片尾锚点自动跳过", @"key":@"cctv.mediaAutoSkipIntroOutro", @"icon":@"forward.end.circle", @"default":@NO },
-        @{ @"title":@"默认播放速度", @"detail":SettingsPlaybackRateText(), @"action":@"defaultPlaybackRate", @"icon":@"speedometer" },
-        @{ @"title":@"默认画面比例", @"detail":SettingsVideoGravityText(), @"action":@"defaultVideoGravity", @"icon":@"aspectratio" },
-        @{ @"title":@"保存搜索历史", @"detail":@"在影视全局搜索与分类浏览中保留历史搜索词", @"key":@"media.globalSearchHistoryEnabled.v1", @"icon":@"magnifyingglass", @"default":@NO }
+      @{ @"category":@"vod", @"icon":@"film.stack", @"subtitle":@"首页海报密度 · 选集视图样式 · 连播与片头片尾", @"title":@"影视与点播体验", @"footer":@"调整影视精选首页模块、海报网格列数与点播默认策略。自动跳过仅对已标记片头片尾位置的剧集生效；播放参数在播放器内也可随时调整。", @"rows":@[
+        @{ @"title":@"媒体显示", @"detail":SettingsMediaDisplaySummaryText(), @"action":@"mediaDisplay", @"icon":@"rectangle.grid.2x2", @"subgroup":@"首页与海报" },
+        @{ @"title":@"影视海报网格列数", @"detail":@"分类浏览与聚合列表的海报卡片密度", @"key":@"cctv.mediaGridColumns.v1", @"segmented":@YES, @"options":@[@"3 列",@"4 列"], @"values":@[@3,@4], @"default":@3, @"icon":@"square.grid.3x2", @"subgroup":@"首页与海报" },
+        @{ @"title":@"详情与选集列表样式", @"detail":@"切换影视详情页与选集页的分集排列视图样式", @"key":@"cctv.mediaEpisodeLayoutStyle.v1", @"segmented":@YES, @"options":@[@"四列",@"单列",@"双列",@"三列"], @"values":@[@0,@1,@2,@3], @"default":@0, @"icon":@"list.bullet.below.rectangle", @"subgroup":@"选集交互" },
+        @{ @"title":@"显示分集备注与状态角标", @"detail":@"在单列/双列选集视图中展示分集副标题、清晰度与播放状态", @"key":@"cctv.mediaEpisodeShowBadge.v1", @"icon":@"tag", @"default":@YES, @"subgroup":@"选集交互" },
+        @{ @"title":@"进入选集页自动展开全集", @"detail":@"打开选集页时默认展开完整分集列表，无需手动点按展开", @"key":@"cctv.mediaEpisodeAutoExpand.v1", @"icon":@"rectangle.expand.vertical", @"default":@NO, @"subgroup":@"选集交互" },
+        @{ @"title":@"自动连播下一集", @"detail":@"本集播放结束后自动切换并播放下一集", @"key":@"cctv.mediaAutoPlayNext", @"icon":@"forward.end.fill", @"default":@YES, @"subgroup":@"点播策略" },
+        @{ @"title":@"自动跳过片头片尾", @"detail":@"按本机已保存的片头片尾锚点自动跳过", @"key":@"cctv.mediaAutoSkipIntroOutro", @"icon":@"forward.end.circle", @"default":@NO, @"subgroup":@"点播策略" },
+        @{ @"title":@"默认播放速度", @"detail":SettingsPlaybackRateText(), @"action":@"defaultPlaybackRate", @"icon":@"speedometer", @"subgroup":@"点播策略" },
+        @{ @"title":@"默认画面比例", @"detail":SettingsVideoGravityText(), @"action":@"defaultVideoGravity", @"icon":@"aspectratio", @"subgroup":@"点播策略" },
+        @{ @"title":@"保存搜索历史", @"detail":@"在影视全局搜索与分类浏览中保留历史搜索词", @"key":@"media.globalSearchHistoryEnabled.v1", @"icon":@"magnifyingglass", @"default":@NO, @"subgroup":@"搜索偏好" }
       ]},
-      @{ @"category":@"engine", @"title":@"播放引擎与网络性能", @"footer":@"快速起播降低首帧前的缓冲门槛，出画面后恢复 SDK 原值；预解析提前缓存相邻频道信息。网络请求超时统一控制 Spider、TVBox、MacCMS 与全局搜索等待时间。", @"rows":@[
-        @{ @"title":@"原生播放器快速起播", @"detail":@"降低首帧前缓冲水位，提升切台响应速度", @"key":@"fastNativeStartup", @"icon":@"bolt", @"default":@YES },
-        @{ @"title":@"预解析下一个 CCTV 频道", @"detail":@"空闲时预热相邻央视频道线路信息", @"key":@"preloadNativeChannel", @"icon":@"forward.end", @"default":@YES },
-        @{ @"title":@"复用原生播放器", @"detail":@"切台时复用已有播放器实例以减少重建开销", @"key":@"legacyNativePlayback", @"icon":@"backward.end", @"default":@YES },
-        @{ @"title":@"网络请求超时", @"detail":@"影视接口、目录抓取与搜索请求超时上限", @"key":@"cctv.networkTimeout.v1", @"segmented":@YES, @"options":@[@"10 秒",@"20 秒",@"40 秒"], @"values":@[@10,@20,@40], @"default":@20, @"icon":@"network" },
-        @{ @"title":@"SDK 详细日志（诊断）", @"detail":@"输出底层播放器 SDK 调试日志供排障分析", @"key":@"nativeSDKVerboseLogs", @"icon":@"doc.text", @"default":@NO }
+      @{ @"category":@"engine", @"icon":@"bolt.horizontal.fill", @"subtitle":@"首帧秒开优化 · 邻台预热 · 全局网络超时", @"title":@"播放引擎与网络性能", @"footer":@"快速起播降低首帧前的缓冲门槛，出画面后恢复 SDK 原值；预解析提前缓存相邻频道信息。网络请求超时统一控制 Spider、TVBox、MacCMS 与全局搜索等待时间。", @"rows":@[
+        @{ @"title":@"原生播放器快速起播", @"detail":@"降低首帧前缓冲水位，提升切台响应速度", @"key":@"fastNativeStartup", @"icon":@"bolt", @"default":@YES, @"subgroup":@"起播加速" },
+        @{ @"title":@"预解析下一个 CCTV 频道", @"detail":@"空闲时预热相邻央视频道线路信息", @"key":@"preloadNativeChannel", @"icon":@"forward.end", @"default":@YES, @"subgroup":@"起播加速" },
+        @{ @"title":@"复用原生播放器", @"detail":@"切台时复用已有播放器实例以减少重建开销", @"key":@"legacyNativePlayback", @"icon":@"backward.end", @"default":@YES, @"subgroup":@"起播加速" },
+        @{ @"title":@"网络请求超时", @"detail":@"影视接口、目录抓取与搜索请求超时上限", @"key":@"cctv.networkTimeout.v1", @"segmented":@YES, @"options":@[@"10 秒",@"20 秒",@"40 秒"], @"values":@[@10,@20,@40], @"default":@20, @"icon":@"network", @"subgroup":@"网络策略" },
+        @{ @"title":@"SDK 详细日志（诊断）", @"detail":@"输出底层播放器 SDK 调试日志供排障分析", @"key":@"nativeSDKVerboseLogs", @"icon":@"doc.text", @"default":@NO, @"subgroup":@"底层调试" }
       ]},
-      @{ @"category":@"diagnostics", @"title":@"运行诊断与日志中心", @"footer":@"开启后记录应用启动、影视加载与播放阶段、海报失败和系统内存告警。站点与播放适配监测支持实时追踪站点连通性、容器编码、播放器内核选路及网址/流媒体探测。", @"rows":@[
-        @{ @"title":@"站点与播放适配监测记录", @"detail":@"自动记录站点接口、CENC/代理、播放器内核与适配建议", @"key":@"cctv.adaptationMonitor.enabled", @"icon":@"waveform.badge.magnifyingglass", @"default":@YES },
-        @{ @"title":@"站点与播放适配监测中心", @"detail":@"查看站点健康度、播放器适配矩阵与网址/流实时探测", @"action":@"adaptationMonitor", @"icon":@"antenna.radiowaves.left.and.right" },
-        @{ @"title":@"运行诊断模式", @"detail":@"先开启再复现；若闪退，重开 App 后导出", @"key":@"runtimeDiagnosticsEnabled", @"icon":@"waveform.path.ecg", @"default":@NO },
-        @{ @"title":@"运行诊断记录", @"detail":@"按 App 运行分开查看 · 可单次导出、删除或清空", @"action":@"runtimeDiagnostics", @"icon":@"list.bullet.rectangle" },
-        @{ @"title":@"日志中心", @"action":@"logs", @"detail":@"总日志与各插件独立日志", @"icon":@"doc.text.magnifyingglass" }
+      @{ @"category":@"diagnostics", @"icon":@"waveform.path.ecg", @"subtitle":@"站点健康度 · 播放内核选路 · 会话崩溃追踪", @"title":@"运行诊断与日志中心", @"footer":@"开启后记录应用启动、影视加载与播放阶段、海报失败和系统内存告警。站点与播放适配监测支持实时追踪站点连通性、容器编码、播放器内核选路及网址/流媒体探测。", @"rows":@[
+        @{ @"title":@"站点与播放适配监测记录", @"detail":@"自动记录站点接口、CENC/代理、播放器内核与适配建议", @"key":@"cctv.adaptationMonitor.enabled", @"icon":@"waveform.badge.magnifyingglass", @"default":@YES, @"subgroup":@"适配监测" },
+        @{ @"title":@"站点与播放适配监测中心", @"detail":@"查看站点健康度、播放器适配矩阵与网址/流实时探测", @"action":@"adaptationMonitor", @"icon":@"antenna.radiowaves.left.and.right", @"subgroup":@"适配监测", @"badge":@"探测面板" },
+        @{ @"title":@"运行诊断模式", @"detail":@"先开启再复现；若闪退，重开 App 后导出", @"key":@"runtimeDiagnosticsEnabled", @"icon":@"waveform.path.ecg", @"default":@NO, @"subgroup":@"会话追踪" },
+        @{ @"title":@"运行诊断记录", @"detail":@"按 App 运行分开查看 · 可单次导出、删除或清空", @"action":@"runtimeDiagnostics", @"icon":@"list.bullet.rectangle", @"subgroup":@"会话追踪", @"badge":@"按次归档" },
+        @{ @"title":@"日志中心", @"action":@"logs", @"detail":@"总日志与各插件独立日志", @"icon":@"doc.text.magnifyingglass", @"subgroup":@"插件日志", @"badge":@"实时日志" }
       ]},
-      @{ @"category":@"storage", @"title":@"数据备份与存储管理", @"footer":@"目录、分类和搜索结果可保存；影片详情仅短时缓存在内存中，播放地址不持久化。清理缓存或恢复默认偏好时，收藏、观看历史、订阅和插件数据会保留。", @"rows":@[
-        @{ @"title":@"导出本机配置", @"detail":@"导出订阅、收藏、观看历史与全量偏好备份", @"action":@"export", @"icon":@"square.and.arrow.up" },
-        @{ @"title":@"导入配置文件", @"detail":@"从 JSON 备份恢复配置并立即应用主题与字号", @"action":@"import", @"icon":@"square.and.arrow.down" },
-        @{ @"title":@"恢复默认偏好设置", @"detail":@"重置界面与播放偏好为默认值（保留订阅与收藏）", @"action":@"resetDefaultPreferences", @"icon":@"arrow.counterclockwise.circle" },
-        @{ @"title":@"清理全部缓存", @"detail":@"节目单、台标与影视元数据缓存", @"icon":@"trash.fill", @"action":@"clearAllCaches" },
-        @{ @"title":@"清理节目单缓存", @"detail":SettingsEPGCacheSizeText(), @"icon":@"trash", @"action":@"clearEPG" },
-        @{ @"title":@"清理台标缓存", @"detail":@"清理内存中的缩略图", @"icon":@"photo", @"action":@"clearImages" },
-        @{ @"title":@"清理影视元数据缓存", @"detail":MediaMetadataCacheSummaryText(), @"icon":@"film", @"action":@"clearMediaMetadata" },
-        @{ @"title":@"清除观看历史", @"detail":SettingsWatchHistorySummaryText(), @"icon":@"clock.arrow.circlepath", @"action":@"clearWatchHistory" },
-        @{ @"title":@"清除收藏", @"detail":SettingsFavoritesSummaryText(), @"icon":@"heart.slash", @"action":@"clearFavorites" },
-        @{ @"title":@"清除节目单预约提醒", @"detail":SettingsEPGRemindersSummaryText(), @"icon":@"bell.slash", @"action":@"clearEPGReminders" },
-        @{ @"title":@"清除搜索历史", @"detail":SettingsSearchHistorySummaryText(), @"icon":@"magnifyingglass.circle", @"action":@"clearSearchHistory" }
+      @{ @"category":@"storage", @"icon":@"externaldrive.fill.badge.checkmark", @"subtitle":@"全量配置备份恢复 · 磁盘缓存释放 · 隐私记录清理", @"title":@"数据备份与存储管理", @"footer":@"目录、分类和搜索结果可保存；影片详情仅短时缓存在内存中，播放地址不持久化。清理缓存或恢复默认偏好时，收藏、观看历史、订阅和插件数据会保留。", @"rows":@[
+        @{ @"title":@"导出本机配置", @"detail":@"导出订阅、收藏、观看历史与全量偏好备份", @"action":@"export", @"icon":@"square.and.arrow.up", @"subgroup":@"配置迁移", @"badge":@"JSON 备份" },
+        @{ @"title":@"导入配置文件", @"detail":@"从 JSON 备份恢复配置并立即应用主题与字号", @"action":@"import", @"icon":@"square.and.arrow.down", @"subgroup":@"配置迁移", @"badge":@"恢复备份" },
+        @{ @"title":@"恢复默认偏好设置", @"detail":@"重置界面与播放偏好为默认值（保留订阅与收藏）", @"action":@"resetDefaultPreferences", @"icon":@"arrow.counterclockwise.circle", @"subgroup":@"偏好重置", @"role":@"destructive", @"badge":@"重置偏好" },
+        @{ @"title":@"清理全部缓存", @"detail":@"节目单、台标与影视元数据缓存", @"icon":@"trash.fill", @"action":@"clearAllCaches", @"subgroup":@"缓存清理", @"role":@"cache" },
+        @{ @"title":@"清理节目单缓存", @"detail":SettingsEPGCacheSizeText(), @"icon":@"trash", @"action":@"clearEPG", @"subgroup":@"缓存清理", @"role":@"cache" },
+        @{ @"title":@"清理台标缓存", @"detail":@"清理内存中的缩略图", @"icon":@"photo", @"action":@"clearImages", @"subgroup":@"缓存清理", @"role":@"cache" },
+        @{ @"title":@"清理影视元数据缓存", @"detail":MediaMetadataCacheSummaryText(), @"icon":@"film", @"action":@"clearMediaMetadata", @"subgroup":@"缓存清理", @"role":@"cache" },
+        @{ @"title":@"清除观看历史", @"detail":SettingsWatchHistorySummaryText(), @"icon":@"clock.arrow.circlepath", @"action":@"clearWatchHistory", @"subgroup":@"记录清理", @"role":@"destructive" },
+        @{ @"title":@"清除收藏", @"detail":SettingsFavoritesSummaryText(), @"icon":@"heart.slash", @"action":@"clearFavorites", @"subgroup":@"记录清理", @"role":@"destructive" },
+        @{ @"title":@"清除节目单预约提醒", @"detail":SettingsEPGRemindersSummaryText(), @"icon":@"bell.slash", @"action":@"clearEPGReminders", @"subgroup":@"记录清理", @"role":@"destructive" },
+        @{ @"title":@"清除搜索历史", @"detail":SettingsSearchHistorySummaryText(), @"icon":@"magnifyingglass.circle", @"action":@"clearSearchHistory", @"subgroup":@"记录清理", @"role":@"destructive" }
       ]},
-      @{ @"category":@"about", @"title":@"服务直达与关于", @"footer":@"只保存在本机，不会上传到任何服务器。内置 Python / Node.js Mobile / JavaScriptCore 引擎在本地沙盒安全运行。", @"rows":@[
-        @{ @"title":@"央视直播", @"detail":@"官方 CNPlayerSDK · VDN 自动选线", @"action":@"openTabLive", @"icon":@"tv" },
-        @{ @"title":@"M3U / HLS 订阅", @"detail":@"AVPlayer · iOS 系统解码", @"action":@"openTabChannels", @"icon":@"play.rectangle" },
-        @{ @"title":@"影视点播库", @"detail":@"Spider / TVBox / MacCMS 聚合影院", @"action":@"openTabMedia", @"icon":@"film" },
-        @{ @"title":@"资源与配置中心", @"detail":@"管理直播订阅、影视站点与插件包", @"action":@"openTabResources", @"icon":@"square.stack.3d.up" },
-        @{ @"title":@"内置插件", @"detail":@"Python / JavaScriptCore · 本机运行", @"action":@"openServices", @"icon":@"curlybraces" },
-        @{ @"title":@"隐私说明", @"detail":@"数据如何保存与使用", @"action":@"privacy", @"icon":@"hand.raised" },
-        @{ @"title":@"CCTVHost", @"detail":[NSString stringWithFormat:@"%@ (%@) · %@",[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"]?:@"开发版",[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleVersion"]?:@"?",[[NSBundle.mainBundle objectForInfoDictionaryKey:@"CCTVHostBuildVariant"] isEqual:@"no-python"]?@"无 Python 诊断版":@"完整版"], @"action":@"copyVersionDiagnostics", @"icon":@"info.circle" },
-        @{ @"title":@"检查更新", @"detail":@"点按检查最新发布", @"action":@"checkUpdate", @"icon":@"arrow.down.circle" }
+      @{ @"category":@"about", @"icon":@"info.circle.fill", @"subtitle":@"五大核心模块直达 · 本地沙盒隐私承诺 · 版本检查", @"title":@"服务直达与关于", @"footer":@"只保存在本机，不会上传到任何服务器。内置 Python / Node.js Mobile / JavaScriptCore 引擎在本地沙盒安全运行。", @"rows":@[
+        @{ @"title":@"央视直播", @"detail":@"官方 CNPlayerSDK · VDN 自动选线", @"action":@"openTabLive", @"icon":@"tv", @"subgroup":@"核心导航", @"badge":@"直达" },
+        @{ @"title":@"M3U / HLS 订阅", @"detail":@"AVPlayer · iOS 系统解码", @"action":@"openTabChannels", @"icon":@"play.rectangle", @"subgroup":@"核心导航", @"badge":@"直达" },
+        @{ @"title":@"影视点播库", @"detail":@"Spider / TVBox / MacCMS 聚合影院", @"action":@"openTabMedia", @"icon":@"film", @"subgroup":@"核心导航", @"badge":@"直达" },
+        @{ @"title":@"资源与配置中心", @"detail":@"管理直播订阅、影视站点与插件包", @"action":@"openTabResources", @"icon":@"square.stack.3d.up", @"subgroup":@"核心导航", @"badge":@"直达" },
+        @{ @"title":@"内置插件", @"detail":@"Python / JavaScriptCore · 本机运行", @"action":@"openServices", @"icon":@"curlybraces", @"subgroup":@"核心导航", @"badge":@"服务页" },
+        @{ @"title":@"隐私说明", @"detail":@"数据如何保存与使用", @"action":@"privacy", @"icon":@"hand.raised", @"subgroup":@"关于与更新", @"badge":@"纯本地" },
+        @{ @"title":@"CCTVHost", @"detail":[NSString stringWithFormat:@"%@ (%@) · %@",[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"]?:@"开发版",[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleVersion"]?:@"?",[[NSBundle.mainBundle objectForInfoDictionaryKey:@"CCTVHostBuildVariant"] isEqual:@"no-python"]?@"无 Python 诊断版":@"完整版"], @"action":@"copyVersionDiagnostics", @"icon":@"info.circle", @"subgroup":@"关于与更新", @"badge":@"复制摘要" },
+        @{ @"title":@"检查更新", @"detail":@"点按检查最新发布", @"action":@"checkUpdate", @"icon":@"arrow.down.circle", @"subgroup":@"关于与更新" }
       ]}
     ];
     [self applyCategoryFilter];
@@ -236,6 +396,24 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
 
 - (void)dealloc {
     [NSNotificationCenter.defaultCenter removeObserver:self];
+}
+
+- (NSUInteger)totalRowCountForCategory:(NSString *)categoryID {
+    NSUInteger count=0;
+    for(NSDictionary *sec in self.allSections){
+        if([categoryID isEqualToString:@"all"] || [sec[@"category"] isEqualToString:categoryID]){
+            count+=[sec[@"rows"] count];
+        }
+    }
+    return count;
+}
+
+- (NSUInteger)visibleRowCountAcrossSections {
+    NSUInteger count=0;
+    for(NSDictionary *sec in self.sections){
+        count+=[sec[@"rows"] count];
+    }
+    return count;
 }
 
 - (UIView *)buildSettingsSearchEmptyView {
@@ -275,11 +453,30 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
     return container;
 }
 
+- (void)updateSearchMatchCountBadge {
+    if(!self.searchMatchCountBadge||!self.settingsSearchField)return;
+    if(!self.searchKeyword.length){
+        self.searchMatchCountBadge.hidden=YES;
+        self.settingsSearchField.rightViewMode=UITextFieldViewModeNever;
+        return;
+    }
+    NSUInteger matched=[self visibleRowCountAcrossSections];
+    self.searchMatchCountBadge.text=[NSString stringWithFormat:@"  %lu 项  ",(unsigned long)matched];
+    self.searchMatchCountBadge.textColor=matched?HostOnAccent():HostSecondaryText();
+    self.searchMatchCountBadge.backgroundColor=matched?HostAccent():HostNeutralSurface();
+    [self.searchMatchCountBadge sizeToFit];
+    CGRect f=self.searchMatchCountBadge.frame;
+    self.searchMatchCountBadge.frame=CGRectMake(0,0,MAX(42,CGRectGetWidth(f)+4),20);
+    self.searchMatchCountBadge.hidden=NO;
+    self.settingsSearchField.rightViewMode=UITextFieldViewModeUnlessEditing;
+}
+
 - (void)settingsSearchChanged:(UITextField *)sender {
     NSString *trimmed=[sender.text?:@"" stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     if([trimmed isEqualToString:(self.searchKeyword?:@"")])return;
     self.searchKeyword=trimmed;
     [self applyCategoryFilter];
+    [self updateSearchMatchCountBadge];
     [self.table reloadData];
 }
 
@@ -288,24 +485,34 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
     return YES;
 }
 
-- (void)clearSettingsSearchFilter {
-    self.searchKeyword=@"";
-    self.settingsSearchField.text=@"";
-    [self.settingsSearchField resignFirstResponder];
-    self.selectedCategoryKey=@"all";
-    [self applyCategoryFilter];
+- (void)refreshCategoryPillAppearance {
     NSArray<NSDictionary *> *categories=[self categoryFilterDefinitions];
     NSArray<UIView *> *pills=self.categoryFilterStack.arrangedSubviews;
     for(NSUInteger idx=0; idx<pills.count && idx<categories.count; idx++){
         if(![pills[idx] isKindOfClass:UIButton.class])continue;
         UIButton *pill=(UIButton *)pills[idx];
-        BOOL selected=[categories[idx][@"id"] isEqualToString:@"all"];
-        pill.titleLabel.font=[UIFont systemFontOfSize:13 weight:selected?UIFontWeightSemibold:UIFontWeightMedium];
+        NSDictionary *cat=categories[idx];
+        NSString *catID=cat[@"id"];
+        BOOL selected=[catID isEqualToString:(self.selectedCategoryKey?:@"all")];
+        NSUInteger count=[self totalRowCountForCategory:catID];
+        [pill setTitle:[NSString stringWithFormat:@" %@ · %lu",cat[@"title"],(unsigned long)count] forState:UIControlStateNormal];
+        pill.titleLabel.font=HostRoundedFont(12.5,selected?UIFontWeightBold:UIFontWeightMedium,UIFontTextStyleCaption1);
         pill.tintColor=selected?HostOnAccent():HostSecondaryText();
         [pill setTitleColor:selected?HostOnAccent():HostText() forState:UIControlStateNormal];
         pill.backgroundColor=selected?HostAccent():HostCard();
         HostSetLayerBorderColor(pill,selected?HostAccent():HostBorder());
     }
+}
+
+- (void)clearSettingsSearchFilter {
+    SettingsTriggerHapticSelection();
+    self.searchKeyword=@"";
+    self.settingsSearchField.text=@"";
+    [self.settingsSearchField resignFirstResponder];
+    self.selectedCategoryKey=@"all";
+    [self applyCategoryFilter];
+    [self updateSearchMatchCountBadge];
+    [self refreshCategoryPillAppearance];
     [self.table reloadData];
 }
 
@@ -330,14 +537,16 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
     for(NSDictionary *sec in baseSections){
         NSString *secTitle=[sec[@"title"] isKindOfClass:NSString.class]?[sec[@"title"] lowercaseString]:@"";
         NSString *secFooter=[sec[@"footer"] isKindOfClass:NSString.class]?[sec[@"footer"] lowercaseString]:@"";
-        BOOL secMatched=[secTitle containsString:kw]||[secFooter containsString:kw];
+        NSString *secSub=[sec[@"subtitle"] isKindOfClass:NSString.class]?[sec[@"subtitle"] lowercaseString]:@"";
+        BOOL secMatched=[secTitle containsString:kw]||[secFooter containsString:kw]||[secSub containsString:kw];
         NSMutableArray<NSDictionary *> *matchedRows=[NSMutableArray array];
         for(NSDictionary *row in sec[@"rows"]){
             NSString *rTitle=[row[@"title"] isKindOfClass:NSString.class]?[row[@"title"] lowercaseString]:@"";
             NSString *rDetail=[row[@"detail"] isKindOfClass:NSString.class]?[row[@"detail"] lowercaseString]:@"";
             NSString *rKey=[row[@"key"] isKindOfClass:NSString.class]?[row[@"key"] lowercaseString]:@"";
             NSString *rAction=[row[@"action"] isKindOfClass:NSString.class]?[row[@"action"] lowercaseString]:@"";
-            if(secMatched||[rTitle containsString:kw]||[rDetail containsString:kw]||[rKey containsString:kw]||[rAction containsString:kw]){
+            NSString *rSubgroup=[row[@"subgroup"] isKindOfClass:NSString.class]?[row[@"subgroup"] lowercaseString]:@"";
+            if(secMatched||[rTitle containsString:kw]||[rDetail containsString:kw]||[rKey containsString:kw]||[rAction containsString:kw]||[rSubgroup containsString:kw]){
                 [matchedRows addObject:row];
             }
         }
@@ -356,6 +565,7 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
     self.title=@"设置";
     self.selectedCategoryKey=@"all";
     self.searchKeyword=@"";
+    self.collapsedCategories=[NSMutableSet set];
     self.view.backgroundColor=HostBackground();
     self.navigationController.navigationBar.tintColor=HostAccent();
     [self buildSettingsSchema];
@@ -368,6 +578,8 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
     self.table.keyboardDismissMode=UIScrollViewKeyboardDismissModeOnDrag;
     self.table.rowHeight=UITableViewAutomaticDimension;
     self.table.estimatedRowHeight=68;
+    self.table.sectionHeaderHeight=UITableViewAutomaticDimension;
+    self.table.estimatedSectionHeaderHeight=48;
     self.table.tintColor=HostAccent();
     self.table.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever;
     self.table.separatorStyle=UITableViewCellSeparatorStyleNone;
@@ -405,15 +617,29 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
 }
 
 - (void)refreshHeroSummaryChips {
-    if(!self.heroSummaryChipsStack)return;
-    NSArray<UIView *> *chips=self.heroSummaryChipsStack.arrangedSubviews;
-    NSArray<NSString *> *texts=@[
-        [NSString stringWithFormat:@"  🎨 %@  ", [HostThemePalette currentPalette].displayName],
-        [NSString stringWithFormat:@"  📺 画质·%@  ", SettingsPreferredQualityText()],
-        @"  🛡️ 纯本地无上传  "
-    ];
-    for(NSUInteger i=0;i<chips.count&&i<texts.count;i++){
-        if([chips[i] isKindOfClass:UILabel.class])((UILabel *)chips[i]).text=texts[i];
+    if(self.heroSummaryChipsStack){
+        NSArray<UIView *> *chips=self.heroSummaryChipsStack.arrangedSubviews;
+        NSArray<NSString *> *texts=@[
+            [NSString stringWithFormat:@"  🎨 %@  ", [HostThemePalette currentPalette].displayName],
+            [NSString stringWithFormat:@"  📺 画质·%@  ", SettingsPreferredQualityText()],
+            @"  🛡️ 纯本地无上传  "
+        ];
+        for(NSUInteger i=0;i<chips.count&&i<texts.count;i++){
+            if([chips[i] isKindOfClass:UILabel.class])((UILabel *)chips[i]).text=texts[i];
+        }
+    }
+    if(self.heroQuickTilesStack){
+        NSArray<UIView *> *tiles=self.heroQuickTilesStack.arrangedSubviews;
+        NSArray<NSString *> *subtitles=@[
+            [HostThemePalette currentPalette].displayName?:@"午夜影院",
+            SettingsPreferredQualityText(),
+            MediaAdaptationMonitor.shared.monitoringEnabled?@"实时监测中":@"已暂停",
+            SettingsCompactCacheSizeText()
+        ];
+        for(NSUInteger i=0;i<tiles.count&&i<subtitles.count;i++){
+            UILabel *subLabel=(UILabel *)[tiles[i] viewWithTag:2002];
+            if([subLabel isKindOfClass:UILabel.class])subLabel.text=subtitles[i];
+        }
     }
 }
 
@@ -439,17 +665,82 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
     }
 }
 
+- (UIView *)buildQuickControlTileWithTitle:(NSString *)title
+                                  subtitle:(NSString *)subtitle
+                                      icon:(NSString *)iconName
+                                  category:(NSString *)category
+                                      role:(nullable NSString *)role
+                                identifier:(NSString *)identifier
+                                       tag:(NSInteger)tag {
+    BOOL isDark=HostIsDarkThemeSelected();
+    UIColor *tint=SettingsSemanticTintForCategoryAndRole(category,role,isDark);
+    UIButton *tile=[UIButton buttonWithType:UIButtonTypeCustom];
+    tile.translatesAutoresizingMaskIntoConstraints=NO;
+    tile.tag=tag;
+    tile.accessibilityIdentifier=identifier;
+    tile.accessibilityLabel=[NSString stringWithFormat:@"%@，当前%@",title,subtitle];
+    tile.backgroundColor=[HostText() colorWithAlphaComponent:isDark?0.055:0.04];
+    tile.layer.cornerRadius=12;
+    tile.layer.cornerCurve=kCACornerCurveContinuous;
+    tile.layer.borderWidth=0.6;
+    HostSetLayerBorderColor(tile,HostBorder());
+    tile.clipsToBounds=YES;
+    HostInstallPressFeedback(tile);
+    [tile addTarget:self action:@selector(handleHeroQuickTileTap:) forControlEvents:UIControlEventTouchUpInside];
+
+    UIImageView *iconView=[[UIImageView alloc] initWithImage:[UIImage systemImageNamed:iconName withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:13 weight:UIImageSymbolWeightSemibold]]];
+    iconView.translatesAutoresizingMaskIntoConstraints=NO;
+    iconView.tintColor=tint;
+    iconView.userInteractionEnabled=NO;
+    [tile addSubview:iconView];
+
+    UILabel *titleLbl=[UILabel new];
+    titleLbl.translatesAutoresizingMaskIntoConstraints=NO;
+    titleLbl.text=title;
+    titleLbl.font=HostRoundedFont(11.0,UIFontWeightSemibold,UIFontTextStyleCaption2);
+    titleLbl.textColor=HostSecondaryText();
+    titleLbl.userInteractionEnabled=NO;
+    [tile addSubview:titleLbl];
+
+    UILabel *subLbl=[UILabel new];
+    subLbl.translatesAutoresizingMaskIntoConstraints=NO;
+    subLbl.tag=2002;
+    subLbl.text=subtitle;
+    subLbl.font=HostRoundedFont(12.0,UIFontWeightBold,UIFontTextStyleCaption1);
+    subLbl.textColor=HostText();
+    subLbl.lineBreakMode=NSLineBreakByTruncatingTail;
+    subLbl.userInteractionEnabled=NO;
+    [tile addSubview:subLbl];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [iconView.leadingAnchor constraintEqualToAnchor:tile.leadingAnchor constant:9],
+        [iconView.topAnchor constraintEqualToAnchor:tile.topAnchor constant:8],
+        [iconView.widthAnchor constraintEqualToConstant:14],
+        [iconView.heightAnchor constraintEqualToConstant:14],
+
+        [titleLbl.leadingAnchor constraintEqualToAnchor:iconView.trailingAnchor constant:4],
+        [titleLbl.centerYAnchor constraintEqualToAnchor:iconView.centerYAnchor],
+        [titleLbl.trailingAnchor constraintLessThanOrEqualToAnchor:tile.trailingAnchor constant:-6],
+
+        [subLbl.leadingAnchor constraintEqualToAnchor:tile.leadingAnchor constant:9],
+        [subLbl.trailingAnchor constraintEqualToAnchor:tile.trailingAnchor constant:-6],
+        [subLbl.bottomAnchor constraintEqualToAnchor:tile.bottomAnchor constant:-7]
+    ]];
+    return tile;
+}
+
 - (void)setupHeroHeaderView {
     if(self.heroHeaderView){
         [self.heroHeaderView removeFromSuperview];
         self.heroHeaderView=nil;
     }
-    UIView *header=[[UIView alloc] initWithFrame:CGRectMake(0,0,CGRectGetWidth(self.view.bounds)?:390,214)];
+    CGFloat width=CGRectGetWidth(self.view.bounds)?:390;
+    UIView *header=[[UIView alloc] initWithFrame:CGRectMake(0,0,width,274)];
     header.autoresizingMask=UIViewAutoresizingFlexibleWidth;
 
     UIView *card=[UIView new];
     card.translatesAutoresizingMaskIntoConstraints=NO;
-    HostStyleGlassCard(card,18);
+    HostStyleGlassCard(card,20);
     [header addSubview:card];
 
     UIView *iconBox=[UIView new];
@@ -457,6 +748,8 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
     iconBox.backgroundColor=[HostAccent() colorWithAlphaComponent:0.18];
     iconBox.layer.cornerRadius=14;
     iconBox.layer.cornerCurve=kCACornerCurveContinuous;
+    iconBox.layer.borderWidth=0.6;
+    HostSetLayerBorderColor(iconBox,[HostAccent() colorWithAlphaComponent:0.35]);
     iconBox.clipsToBounds=YES;
     [card addSubview:iconBox];
 
@@ -480,6 +773,22 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
     subtitleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
     [card addSubview:subtitleLabel];
 
+    UIButton *moreBtn=[UIButton buttonWithType:UIButtonTypeSystem];
+    moreBtn.translatesAutoresizingMaskIntoConstraints=NO;
+    moreBtn.accessibilityIdentifier=@"settings.hero.more";
+    moreBtn.accessibilityLabel=@"设置页快捷操作菜单";
+    [moreBtn setImage:[UIImage systemImageNamed:@"slider.horizontal.3" withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:14 weight:UIImageSymbolWeightSemibold]] forState:UIControlStateNormal];
+    moreBtn.tintColor=HostAccent();
+    moreBtn.backgroundColor=[HostAccent() colorWithAlphaComponent:0.14];
+    moreBtn.layer.cornerRadius=17;
+    moreBtn.layer.cornerCurve=kCACornerCurveContinuous;
+    moreBtn.layer.borderWidth=0.6;
+    HostSetLayerBorderColor(moreBtn,[HostAccent() colorWithAlphaComponent:0.32]);
+    HostInstallPressFeedback(moreBtn);
+    [moreBtn addTarget:self action:@selector(presentHeroQuickActionsSheet:) forControlEvents:UIControlEventTouchUpInside];
+    [card addSubview:moreBtn];
+    self.heroMoreButton=moreBtn;
+
     UIStackView *chipsStack=[UIStackView new];
     chipsStack.translatesAutoresizingMaskIntoConstraints=NO;
     chipsStack.axis=UILayoutConstraintAxisHorizontal;
@@ -490,12 +799,16 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
 
     NSString *qualityLabel=SettingsPreferredQualityText();
     NSArray<NSDictionary *> *chipData=@[
-        @{@"text":[NSString stringWithFormat:@"  🎨 %@  ", [HostThemePalette currentPalette].displayName]},
-        @{@"text":[NSString stringWithFormat:@"  📺 画质·%@  ", qualityLabel]},
-        @{@"text":@"  🛡️ 纯本地无上传  "}
+        @{@"text":[NSString stringWithFormat:@"  🎨 %@  ", [HostThemePalette currentPalette].displayName], @"id":@"settings.hero.chip.theme"},
+        @{@"text":[NSString stringWithFormat:@"  📺 画质·%@  ", qualityLabel], @"id":@"settings.hero.chip.quality"},
+        @{@"text":@"  🛡️ 纯本地无上传  ", @"id":@"settings.hero.chip.privacy"}
     ];
-    for(NSDictionary *item in chipData){
+    for(NSUInteger idx=0; idx<chipData.count; idx++){
+        NSDictionary *item=chipData[idx];
         UILabel *chip=[UILabel new];
+        chip.tag=(NSInteger)idx;
+        chip.accessibilityIdentifier=item[@"id"];
+        chip.userInteractionEnabled=YES;
         chip.text=item[@"text"];
         chip.font=HostRoundedFont(11,UIFontWeightSemibold,UIFontTextStyleCaption2);
         chip.textColor=HostSecondaryText();
@@ -506,7 +819,30 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
         HostSetLayerBorderColor(chip,HostBorder());
         chip.clipsToBounds=YES;
         chip.textAlignment=NSTextAlignmentCenter;
+        UITapGestureRecognizer *tap=[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleHeroSummaryChipTap:)];
+        [chip addGestureRecognizer:tap];
         [chipsStack addArrangedSubview:chip];
+    }
+
+    UIStackView *quickTilesStack=[UIStackView new];
+    quickTilesStack.translatesAutoresizingMaskIntoConstraints=NO;
+    quickTilesStack.axis=UILayoutConstraintAxisHorizontal;
+    quickTilesStack.spacing=8;
+    quickTilesStack.distribution=UIStackViewDistributionFillEqually;
+    quickTilesStack.accessibilityIdentifier=@"settings.hero.quickTiles";
+    [card addSubview:quickTilesStack];
+    self.heroQuickTilesStack=quickTilesStack;
+
+    NSArray<NSDictionary *> *quickSpecs=@[
+        @{@"title":@"外观色板", @"sub":[HostThemePalette currentPalette].displayName?:@"午夜影院", @"icon":@"paintpalette.fill", @"cat":@"appearance", @"id":@"settings.quick.theme"},
+        @{@"title":@"默认画质", @"sub":qualityLabel, @"icon":@"4k.tv", @"cat":@"live", @"id":@"settings.quick.quality"},
+        @{@"title":@"适配监测", @"sub":MediaAdaptationMonitor.shared.monitoringEnabled?@"实时监测中":@"已暂停", @"icon":@"waveform.path.ecg", @"cat":@"diagnostics", @"id":@"settings.quick.monitor"},
+        @{@"title":@"释放缓存", @"sub":SettingsCompactCacheSizeText(), @"icon":@"sparkles", @"cat":@"storage", @"role":@"cache", @"id":@"settings.quick.cache"}
+    ];
+    for(NSUInteger i=0;i<quickSpecs.count;i++){
+        NSDictionary *spec=quickSpecs[i];
+        UIView *tile=[self buildQuickControlTileWithTitle:spec[@"title"] subtitle:spec[@"sub"] icon:spec[@"icon"] category:spec[@"cat"] role:spec[@"role"] identifier:spec[@"id"] tag:(NSInteger)i];
+        [quickTilesStack addArrangedSubview:tile];
     }
 
     UITextField *searchField=[[UITextField alloc] initWithFrame:CGRectZero];
@@ -529,17 +865,29 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
     searchField.returnKeyType=UIReturnKeySearch;
     searchField.autocorrectionType=UITextAutocorrectionTypeNo;
     searchField.autocapitalizationType=UITextAutocapitalizationTypeNone;
-    UIView *leftWrap=[[UIView alloc] initWithFrame:CGRectMake(0,0,28,30)];
+    UIView *leftWrap=[[UIView alloc] initWithFrame:CGRectMake(0,0,28,32)];
     UIImageView *magIcon=[[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"magnifyingglass" withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:12 weight:UIImageSymbolWeightMedium]]];
     magIcon.tintColor=HostSecondaryText();
-    magIcon.frame=CGRectMake(8,8,14,14);
+    magIcon.frame=CGRectMake(8,9,14,14);
     [leftWrap addSubview:magIcon];
     searchField.leftView=leftWrap;
     searchField.leftViewMode=UITextFieldViewModeAlways;
+
+    UILabel *matchBadge=[[UILabel alloc] initWithFrame:CGRectMake(0,0,50,20)];
+    matchBadge.font=HostMonospacedDigitFont(10.5,UIFontWeightBold,UIFontTextStyleCaption2);
+    matchBadge.layer.cornerRadius=10;
+    matchBadge.layer.cornerCurve=kCACornerCurveContinuous;
+    matchBadge.clipsToBounds=YES;
+    matchBadge.textAlignment=NSTextAlignmentCenter;
+    matchBadge.hidden=YES;
+    self.searchMatchCountBadge=matchBadge;
+    searchField.rightView=matchBadge;
+
     if(self.searchKeyword.length)searchField.text=self.searchKeyword;
     [searchField addTarget:self action:@selector(settingsSearchChanged:) forControlEvents:UIControlEventEditingChanged];
     [card addSubview:searchField];
     self.settingsSearchField=searchField;
+    [self updateSearchMatchCountBadge];
 
     UIScrollView *filterScroll=[UIScrollView new];
     filterScroll.translatesAutoresizingMaskIntoConstraints=NO;
@@ -559,26 +907,28 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
     NSArray<NSDictionary *> *categories=[self categoryFilterDefinitions];
     for(NSUInteger idx=0; idx<categories.count; idx++){
         NSDictionary *cat=categories[idx];
-        BOOL selected=[cat[@"id"] isEqualToString:(self.selectedCategoryKey?:@"all")];
+        NSString *catID=cat[@"id"];
+        BOOL selected=[catID isEqualToString:(self.selectedCategoryKey?:@"all")];
+        NSUInteger count=[self totalRowCountForCategory:catID];
         UIButton *pill=[UIButton buttonWithType:UIButtonTypeSystem];
         pill.translatesAutoresizingMaskIntoConstraints=NO;
         pill.tag=(NSInteger)idx;
-        pill.accessibilityIdentifier=[NSString stringWithFormat:@"settings.category.%@",cat[@"id"]];
+        pill.accessibilityIdentifier=[NSString stringWithFormat:@"settings.category.%@",catID];
         pill.accessibilityLabel=[NSString stringWithFormat:@"筛选%@",cat[@"title"]];
         UIImageSymbolConfiguration *symCfg=[UIImageSymbolConfiguration configurationWithPointSize:12 weight:UIImageSymbolWeightSemibold];
         UIImage *icon=[UIImage systemImageNamed:cat[@"icon"] withConfiguration:symCfg];
         [pill setImage:icon forState:UIControlStateNormal];
-        [pill setTitle:[NSString stringWithFormat:@" %@",cat[@"title"]] forState:UIControlStateNormal];
-        pill.titleLabel.font=[UIFont systemFontOfSize:13 weight:selected?UIFontWeightSemibold:UIFontWeightMedium];
+        [pill setTitle:[NSString stringWithFormat:@" %@ · %lu",cat[@"title"],(unsigned long)count] forState:UIControlStateNormal];
+        pill.titleLabel.font=HostRoundedFont(12.5,selected?UIFontWeightBold:UIFontWeightMedium,UIFontTextStyleCaption1);
         pill.tintColor=selected?HostOnAccent():HostSecondaryText();
         [pill setTitleColor:selected?HostOnAccent():HostText() forState:UIControlStateNormal];
         pill.backgroundColor=selected?HostAccent():HostCard();
-        pill.layer.cornerRadius=16;
+        pill.layer.cornerRadius=17;
         pill.layer.cornerCurve=kCACornerCurveContinuous;
         pill.layer.borderWidth=0.6;
         HostSetLayerBorderColor(pill,selected?HostAccent():HostBorder());
-        pill.contentEdgeInsets=UIEdgeInsetsMake(6,12,6,12);
-        [pill.heightAnchor constraintGreaterThanOrEqualToConstant:32].active=YES;
+        pill.contentEdgeInsets=UIEdgeInsetsMake(7,12,7,12);
+        [pill.heightAnchor constraintGreaterThanOrEqualToConstant:34].active=YES;
         HostInstallPressFeedback(pill);
         [pill addTarget:self action:@selector(selectCategoryPill:) forControlEvents:UIControlEventTouchUpInside];
         [filterStack addArrangedSubview:pill];
@@ -588,7 +938,7 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
         [card.topAnchor constraintEqualToAnchor:header.topAnchor constant:4],
         [card.leadingAnchor constraintEqualToAnchor:header.leadingAnchor constant:16],
         [card.trailingAnchor constraintEqualToAnchor:header.trailingAnchor constant:-16],
-        [card.heightAnchor constraintEqualToConstant:154],
+        [card.heightAnchor constraintEqualToConstant:214],
 
         [iconBox.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:16],
         [iconBox.topAnchor constraintEqualToAnchor:card.topAnchor constant:14],
@@ -600,28 +950,38 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
         [iconView.widthAnchor constraintEqualToConstant:24],
         [iconView.heightAnchor constraintEqualToConstant:24],
 
+        [moreBtn.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-14],
+        [moreBtn.centerYAnchor constraintEqualToAnchor:iconBox.centerYAnchor],
+        [moreBtn.widthAnchor constraintEqualToConstant:34],
+        [moreBtn.heightAnchor constraintEqualToConstant:34],
+
         [titleLabel.leadingAnchor constraintEqualToAnchor:iconBox.trailingAnchor constant:14],
         [titleLabel.topAnchor constraintEqualToAnchor:card.topAnchor constant:14],
-        [titleLabel.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-16],
+        [titleLabel.trailingAnchor constraintLessThanOrEqualToAnchor:moreBtn.leadingAnchor constant:-8],
 
         [subtitleLabel.leadingAnchor constraintEqualToAnchor:titleLabel.leadingAnchor],
         [subtitleLabel.topAnchor constraintEqualToAnchor:titleLabel.bottomAnchor constant:2],
-        [subtitleLabel.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-16],
+        [subtitleLabel.trailingAnchor constraintLessThanOrEqualToAnchor:moreBtn.leadingAnchor constant:-8],
 
         [chipsStack.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:16],
         [chipsStack.trailingAnchor constraintLessThanOrEqualToAnchor:card.trailingAnchor constant:-16],
         [chipsStack.topAnchor constraintEqualToAnchor:iconBox.bottomAnchor constant:10],
         [chipsStack.heightAnchor constraintEqualToConstant:24],
 
+        [quickTilesStack.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:16],
+        [quickTilesStack.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-16],
+        [quickTilesStack.topAnchor constraintEqualToAnchor:chipsStack.bottomAnchor constant:10],
+        [quickTilesStack.heightAnchor constraintEqualToConstant:48],
+
         [searchField.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:16],
         [searchField.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-16],
         [searchField.bottomAnchor constraintEqualToAnchor:card.bottomAnchor constant:-10],
-        [searchField.heightAnchor constraintEqualToConstant:30],
+        [searchField.heightAnchor constraintEqualToConstant:32],
 
         [filterScroll.topAnchor constraintEqualToAnchor:card.bottomAnchor constant:10],
         [filterScroll.leadingAnchor constraintEqualToAnchor:header.leadingAnchor],
         [filterScroll.trailingAnchor constraintEqualToAnchor:header.trailingAnchor],
-        [filterScroll.heightAnchor constraintEqualToConstant:38],
+        [filterScroll.heightAnchor constraintEqualToConstant:40],
 
         [filterStack.leadingAnchor constraintEqualToAnchor:filterScroll.contentLayoutGuide.leadingAnchor constant:16],
         [filterStack.trailingAnchor constraintEqualToAnchor:filterScroll.contentLayoutGuide.trailingAnchor constant:-16],
@@ -632,30 +992,97 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
     self.table.tableHeaderView=header;
 }
 
+- (void)handleHeroSummaryChipTap:(UITapGestureRecognizer *)recognizer {
+    UIView *chip=recognizer.view;
+    if(!chip)return;
+    SettingsTriggerHapticSelection();
+    HostAnimateSelection(chip);
+    if(chip.tag==0){
+        NSIndexPath *ip=[self indexPathForRowAction:@"themePalette"]?:[NSIndexPath indexPathForRow:0 inSection:0];
+        [self presentThemePicker:ip];
+    }else if(chip.tag==1){
+        NSIndexPath *ip=[self indexPathForRowAction:@"defaultQuality"]?:[NSIndexPath indexPathForRow:0 inSection:0];
+        [self presentPreferredQualityPicker:ip];
+    }else{
+        [self showPrivacyStatement];
+    }
+}
+
+- (void)handleHeroQuickTileTap:(UIButton *)sender {
+    SettingsTriggerHapticSelection();
+    HostAnimateSelection(sender);
+    if(sender.tag==0){
+        NSIndexPath *ip=[self indexPathForRowAction:@"themePalette"]?:[NSIndexPath indexPathForRow:0 inSection:0];
+        [self presentThemePicker:ip];
+    }else if(sender.tag==1){
+        NSIndexPath *ip=[self indexPathForRowAction:@"defaultQuality"]?:[NSIndexPath indexPathForRow:0 inSection:0];
+        [self presentPreferredQualityPicker:ip];
+    }else if(sender.tag==2){
+        MediaAdaptationMonitorViewController *monitor=[[MediaAdaptationMonitorViewController alloc] initWithContext:nil];
+        if(self.navigationController)[self.navigationController pushViewController:monitor animated:YES];
+        else{UINavigationController *nav=[[UINavigationController alloc] initWithRootViewController:monitor];[self presentViewController:nav animated:YES completion:nil];}
+    }else if(sender.tag==3){
+        [self confirmClearAllCaches];
+    }
+}
+
+- (void)presentHeroQuickActionsSheet:(UIButton *)sender {
+    if(self.presentedViewController)return;
+    SettingsTriggerHapticSelection();
+    UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"设置中心全局操作" message:@"支持一键展开或收起分组、快速释放缓存、导出备份或复制诊断快照。" preferredStyle:UIAlertControllerStyleActionSheet];
+    BOOL hasCollapsed=self.collapsedCategories.count>0;
+    [sheet addAction:[UIAlertAction actionWithTitle:hasCollapsed?@"展开全部分组":@"收起非首屏分组" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+        if(hasCollapsed){
+            [self.collapsedCategories removeAllObjects];
+        }else{
+            for(NSDictionary *sec in self.allSections){
+                NSString *cat=sec[@"category"];
+                if(cat.length && ![cat isEqualToString:@"appearance"])[self.collapsedCategories addObject:cat];
+            }
+        }
+        [self.table reloadData];
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"一键清理全部缓存（%@）",SettingsCompactCacheSizeText()] style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+        [self confirmClearAllCaches];
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"导出本机配置备份" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+        if(self.onExportData)self.onExportData();
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"复制版本与运行环境摘要" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+        [self copyVersionDiagnosticsFromIndexPath:nil];
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"恢复默认偏好设置" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action){
+        [self confirmResetDefaultPreferences];
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    sheet.popoverPresentationController.sourceView=sender?:self.view;
+    sheet.popoverPresentationController.sourceRect=sender?sender.bounds:CGRectMake(CGRectGetMidX(self.view.bounds),60,1,1);
+    [self presentViewController:sheet animated:YES completion:nil];
+}
+
 - (void)selectCategoryPill:(UIButton *)sender {
     NSArray<NSDictionary *> *categories=[self categoryFilterDefinitions];
     if(sender.tag<0 || sender.tag>=(NSInteger)categories.count)return;
     NSString *nextKey=categories[sender.tag][@"id"];
     if([self.selectedCategoryKey isEqualToString:nextKey])return;
+    SettingsTriggerHapticSelection();
+    HostAnimateSelection(sender);
     self.selectedCategoryKey=nextKey;
+    if(![nextKey isEqualToString:@"all"])[self.collapsedCategories removeObject:nextKey];
     [self applyCategoryFilter];
-    NSArray<UIView *> *pills=self.categoryFilterStack.arrangedSubviews;
-    for(NSUInteger idx=0; idx<pills.count && idx<categories.count; idx++){
-        if(![pills[idx] isKindOfClass:UIButton.class])continue;
-        UIButton *pill=(UIButton *)pills[idx];
-        BOOL selected=[categories[idx][@"id"] isEqualToString:nextKey];
-        pill.titleLabel.font=[UIFont systemFontOfSize:13 weight:selected?UIFontWeightSemibold:UIFontWeightMedium];
-        pill.tintColor=selected?HostOnAccent():HostSecondaryText();
-        [pill setTitleColor:selected?HostOnAccent():HostText() forState:UIControlStateNormal];
-        pill.backgroundColor=selected?HostAccent():HostCard();
-        HostSetLayerBorderColor(pill,selected?HostAccent():HostBorder());
-    }
+    [self refreshCategoryPillAppearance];
     if(self.categoryFilterScroll)[self.categoryFilterScroll scrollRectToVisible:CGRectInset(sender.frame,-16,0) animated:YES];
     [self.table reloadData];
 }
 
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
+    if(self.heroHeaderView && fabs(CGRectGetWidth(self.heroHeaderView.frame)-CGRectGetWidth(self.table.bounds))>0.5 && CGRectGetWidth(self.table.bounds)>0){
+        CGRect f=self.heroHeaderView.frame;
+        f.size.width=CGRectGetWidth(self.table.bounds);
+        self.heroHeaderView.frame=f;
+        self.table.tableHeaderView=self.heroHeaderView;
+    }
     [self updateImmersiveTableInsets];
 }
 
@@ -703,11 +1130,34 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
     }
 }
 
+- (BOOL)isSectionCollapsedAtIndex:(NSInteger)section {
+    if(section<0 || section>=(NSInteger)self.sections.count)return NO;
+    if(self.searchKeyword.length>0)return NO;
+    if(self.selectedCategoryKey.length && ![self.selectedCategoryKey isEqualToString:@"all"])return NO;
+    NSString *cat=self.sections[section][@"category"];
+    return cat.length && [self.collapsedCategories containsObject:cat];
+}
+
+- (void)toggleSectionHeaderButton:(UIButton *)sender {
+    NSInteger section=sender.tag;
+    if(section<0 || section>=(NSInteger)self.sections.count)return;
+    NSString *cat=self.sections[section][@"category"];
+    if(!cat.length)return;
+    SettingsTriggerHapticImpact(UIImpactFeedbackStyleLight);
+    BOOL collapsed=[self.collapsedCategories containsObject:cat];
+    if(collapsed)[self.collapsedCategories removeObject:cat];
+    else [self.collapsedCategories addObject:cat];
+    [self.table reloadSections:[NSIndexSet indexSetWithIndex:(NSUInteger)section] withRowAnimation:UITableViewRowAnimationFade];
+    NSString *title=self.sections[section][@"title"]?:@"分组";
+    UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,[NSString stringWithFormat:@"%@已%@",title,collapsed?@"展开":@"收起"]);
+}
+
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
     return self.sections.count;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    if([self isSectionCollapsedAtIndex:section])return 0;
     return [self.sections[section][@"rows"] count];
 }
 
@@ -716,8 +1166,110 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+    if([self isSectionCollapsedAtIndex:section])return nil;
     return self.sections[section][@"footer"];
 }
+
+- (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section {
+    (void)tableView;
+    if(section<0 || section>=(NSInteger)self.sections.count)return 0.01;
+    BOOL isAccessibility=UIContentSizeCategoryIsAccessibilityCategory(self.traitCollection.preferredContentSizeCategory);
+    return isAccessibility?58.0:48.0;
+}
+
+- (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
+    if(section<0 || section>=(NSInteger)self.sections.count)return nil;
+    NSDictionary *sec=self.sections[section];
+    NSString *cat=sec[@"category"]?:@"all";
+    NSString *title=sec[@"title"]?:@"";
+    NSString *subtitle=sec[@"subtitle"]?:@"";
+    NSString *iconName=sec[@"icon"]?:@"gearshape.fill";
+    NSUInteger rowCount=[sec[@"rows"] count];
+    BOOL collapsed=[self isSectionCollapsedAtIndex:section];
+    BOOL isDark=HostIsDarkThemeSelected();
+    UIColor *domainTint=SettingsSemanticTintForCategoryAndRole(cat,nil,isDark);
+
+    UIView *container=[[UIView alloc] initWithFrame:CGRectMake(0,0,CGRectGetWidth(tableView.bounds)?:390,46)];
+    container.backgroundColor=UIColor.clearColor;
+
+    UIImageView *badgeView=[[UIImageView alloc] initWithImage:SettingsSquircleBadgeImage(iconName,domainTint,isDark,26)];
+    badgeView.translatesAutoresizingMaskIntoConstraints=NO;
+    [container addSubview:badgeView];
+
+    UILabel *titleLbl=[UILabel new];
+    titleLbl.translatesAutoresizingMaskIntoConstraints=NO;
+    titleLbl.text=title;
+    titleLbl.font=HostRoundedFont(14.0,UIFontWeightBold,UIFontTextStyleSubheadline);
+    titleLbl.textColor=HostText();
+    titleLbl.adjustsFontForContentSizeCategory=YES;
+    [container addSubview:titleLbl];
+
+    UILabel *subLbl=[UILabel new];
+    subLbl.translatesAutoresizingMaskIntoConstraints=NO;
+    subLbl.text=subtitle;
+    subLbl.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption2];
+    subLbl.textColor=HostMutedText();
+    subLbl.lineBreakMode=NSLineBreakByTruncatingTail;
+    [container addSubview:subLbl];
+
+    UILabel *countBadge=[UILabel new];
+    countBadge.translatesAutoresizingMaskIntoConstraints=NO;
+    countBadge.text=[NSString stringWithFormat:@"  %lu 项  ",(unsigned long)rowCount];
+    countBadge.font=HostMonospacedDigitFont(11.0,UIFontWeightSemibold,UIFontTextStyleCaption2);
+    countBadge.textColor=domainTint;
+    countBadge.backgroundColor=[domainTint colorWithAlphaComponent:isDark?0.16:0.10];
+    countBadge.layer.cornerRadius=9;
+    countBadge.layer.cornerCurve=kCACornerCurveContinuous;
+    countBadge.clipsToBounds=YES;
+    [container addSubview:countBadge];
+
+    UIImageView *chevron=[[UIImageView alloc] initWithImage:[UIImage systemImageNamed:collapsed?@"chevron.right":@"chevron.down" withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:11 weight:UIImageSymbolWeightBold]]];
+    chevron.translatesAutoresizingMaskIntoConstraints=NO;
+    chevron.tintColor=HostSecondaryText();
+    [container addSubview:chevron];
+
+    UIButton *headerBtn=[UIButton buttonWithType:UIButtonTypeCustom];
+    headerBtn.translatesAutoresizingMaskIntoConstraints=NO;
+    headerBtn.tag=section;
+    headerBtn.accessibilityIdentifier=[NSString stringWithFormat:@"settings.section.header.%@",cat];
+    headerBtn.accessibilityLabel=[NSString stringWithFormat:@"%@，共 %lu 项，当前%@",title,(unsigned long)rowCount,collapsed?@"已收起":@"已展开"];
+    headerBtn.accessibilityHint=@"点按展开或收起本分组";
+    [headerBtn addTarget:self action:@selector(toggleSectionHeaderButton:) forControlEvents:UIControlEventTouchUpInside];
+    [container addSubview:headerBtn];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [container.heightAnchor constraintGreaterThanOrEqualToConstant:44],
+        [badgeView.leadingAnchor constraintEqualToAnchor:container.leadingAnchor constant:4],
+        [badgeView.centerYAnchor constraintEqualToAnchor:container.centerYAnchor],
+        [badgeView.widthAnchor constraintEqualToConstant:26],
+        [badgeView.heightAnchor constraintEqualToConstant:26],
+
+        [chevron.trailingAnchor constraintEqualToAnchor:container.trailingAnchor constant:-6],
+        [chevron.centerYAnchor constraintEqualToAnchor:container.centerYAnchor],
+        [chevron.widthAnchor constraintEqualToConstant:12],
+        [chevron.heightAnchor constraintEqualToConstant:12],
+
+        [countBadge.trailingAnchor constraintEqualToAnchor:chevron.leadingAnchor constant:-6],
+        [countBadge.centerYAnchor constraintEqualToAnchor:container.centerYAnchor],
+        [countBadge.heightAnchor constraintEqualToConstant:18],
+
+        [titleLbl.leadingAnchor constraintEqualToAnchor:badgeView.trailingAnchor constant:9],
+        [titleLbl.topAnchor constraintEqualToAnchor:container.topAnchor constant:5],
+        [titleLbl.trailingAnchor constraintLessThanOrEqualToAnchor:countBadge.leadingAnchor constant:-8],
+
+        [subLbl.leadingAnchor constraintEqualToAnchor:titleLbl.leadingAnchor],
+        [subLbl.topAnchor constraintEqualToAnchor:titleLbl.bottomAnchor constant:1],
+        [subLbl.trailingAnchor constraintLessThanOrEqualToAnchor:countBadge.leadingAnchor constant:-8],
+        [subLbl.bottomAnchor constraintLessThanOrEqualToAnchor:container.bottomAnchor constant:-4],
+
+        [headerBtn.topAnchor constraintEqualToAnchor:container.topAnchor],
+        [headerBtn.leadingAnchor constraintEqualToAnchor:container.leadingAnchor],
+        [headerBtn.trailingAnchor constraintEqualToAnchor:container.trailingAnchor],
+        [headerBtn.bottomAnchor constraintEqualToAnchor:container.bottomAnchor]
+    ]];
+    return container;
+}
+
 - (void)tableView:(UITableView *)tableView willDisplayHeaderView:(UIView *)view forSection:(NSInteger)section {
     HostStyleSectionHeaderView(view);
 }
@@ -725,15 +1277,161 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
     HostStyleSectionFooterView(view);
 }
 
+- (NSAttributedString *)highlightedAttributedString:(NSString *)text
+                                           baseFont:(UIFont *)baseFont
+                                          baseColor:(UIColor *)baseColor
+                                     subgroupPrefix:(nullable NSString *)subgroup
+                                       subgroupTint:(nullable UIColor *)subgroupTint {
+    NSString *safeText=text?:@"";
+    NSString *fullString=subgroup.length?[NSString stringWithFormat:@"%@ · %@",subgroup,safeText]:safeText;
+    NSMutableAttributedString *attr=[[NSMutableAttributedString alloc] initWithString:fullString attributes:@{
+        NSFontAttributeName:baseFont?:[UIFont preferredFontForTextStyle:UIFontTextStyleBody],
+        NSForegroundColorAttributeName:baseColor?:HostText()
+    }];
+    if(subgroup.length && subgroupTint){
+        NSRange subRange=NSMakeRange(0,subgroup.length);
+        UIFont *subFont=HostRoundedFont(11.5,UIFontWeightSemibold,UIFontTextStyleCaption1);
+        [attr addAttributes:@{
+            NSFontAttributeName:subFont,
+            NSForegroundColorAttributeName:subgroupTint
+        } range:subRange];
+    }
+    if(self.searchKeyword.length){
+        NSRange searchRange=NSMakeRange(0,fullString.length);
+        while(searchRange.location<fullString.length){
+            NSRange found=[fullString rangeOfString:self.searchKeyword options:NSCaseInsensitiveSearch range:searchRange];
+            if(found.location==NSNotFound)break;
+            [attr addAttributes:@{
+                NSForegroundColorAttributeName:HostAccent(),
+                NSBackgroundColorAttributeName:[HostAccent() colorWithAlphaComponent:0.20]
+            } range:found];
+            searchRange.location=NSMaxRange(found);
+            searchRange.length=fullString.length-searchRange.location;
+        }
+    }
+    return attr;
+}
+
+- (NSString *)trailingBadgeTextForActionRow:(NSDictionary *)row {
+    NSString *action=row[@"action"];
+    if([action isEqualToString:@"themePalette"])return [HostThemePalette currentPalette].displayName;
+    if([action isEqualToString:@"defaultQuality"])return SettingsPreferredQualityText();
+    if([action isEqualToString:@"defaultPlaybackRate"])return SettingsPlaybackRateText();
+    if([action isEqualToString:@"defaultVideoGravity"])return SettingsVideoGravityText();
+    if([action isEqualToString:@"mediaDisplay"]){
+        NSInteger cols=[[NSUserDefaults standardUserDefaults] integerForKey:@"cctv.mediaGridColumns.v1"]==4?4:3;
+        return [NSString stringWithFormat:@"%ld 列",(long)cols];
+    }
+    if([action isEqualToString:@"clearAllCaches"])return SettingsCompactCacheSizeText();
+    if([action isEqualToString:@"clearEPG"]){
+        unsigned long long b=SettingsEPGCacheBytes();
+        return b?[NSByteCountFormatter stringFromByteCount:(long long)b countStyle:NSByteCountFormatterCountStyleMemory]:@"无缓存";
+    }
+    if([action isEqualToString:@"clearMediaMetadata"]){
+        NSDictionary *summary=MediaMetadataCache.shared.summary;
+        return [NSString stringWithFormat:@"%lu 项",(unsigned long)[summary[@"entries"] unsignedIntegerValue]];
+    }
+    if([action isEqualToString:@"clearImages"])return self.clearedImagesState?@"已清理":@"清理";
+    if([action isEqualToString:@"clearWatchHistory"]||[action isEqualToString:@"clearFavorites"]||[action isEqualToString:@"clearEPGReminders"]||[action isEqualToString:@"clearSearchHistory"])return @"清空";
+    if([action isEqualToString:@"checkUpdate"])return self.checkingUpdate?@"检查中":@"检查";
+    if([row[@"badge"] isKindOfClass:NSString.class])return row[@"badge"];
+    return nil;
+}
+
+- (UIView *)buildActionAccessoryViewForRow:(NSDictionary *)row inCategory:(NSString *)category {
+    NSString *action=row[@"action"];
+    NSString *role=row[@"role"];
+    BOOL isDestructive=[role isEqualToString:@"destructive"];
+    BOOL isDark=HostIsDarkThemeSelected();
+    UIColor *tint=SettingsSemanticTintForCategoryAndRole(category,role,isDark);
+    NSString *badgeText=[self trailingBadgeTextForActionRow:row];
+
+    UIView *wrap=[[UIView alloc] initWithFrame:CGRectMake(0,0,120,30)];
+    wrap.accessibilityIdentifier=@"settings.row.accessory";
+    wrap.userInteractionEnabled=NO;
+
+    CGFloat rightEdge=0;
+    UIImageView *chevron=[[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"chevron.right" withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:12 weight:UIImageSymbolWeightSemibold]]];
+    chevron.tintColor=isDestructive?tint:HostMutedText();
+    [chevron sizeToFit];
+
+    UIView *pillView=nil;
+    if([action isEqualToString:@"checkUpdate"] && self.checkingUpdate){
+        UIActivityIndicatorView *spinner=[[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
+        spinner.color=HostAccent();
+        [spinner startAnimating];
+        pillView=spinner;
+    }else if(badgeText.length){
+        UIView *pill=[[UIView alloc] initWithFrame:CGRectZero];
+        pill.backgroundColor=isDestructive?[tint colorWithAlphaComponent:isDark?0.18:0.12]:[HostText() colorWithAlphaComponent:isDark?0.07:0.05];
+        pill.layer.cornerRadius=11;
+        pill.layer.cornerCurve=kCACornerCurveContinuous;
+        pill.layer.borderWidth=0.5;
+        HostSetLayerBorderColor(pill,isDestructive?[tint colorWithAlphaComponent:0.35]:HostBorder());
+
+        CGFloat x=8;
+        if([action isEqualToString:@"themePalette"]){
+            UIImageView *swatch=[[UIImageView alloc] initWithImage:SettingsThemeSwatchPreviewImage([HostThemePalette currentPalette])];
+            swatch.frame=CGRectMake(x,4,22,14);
+            [pill addSubview:swatch];
+            x+=26;
+        }
+        UILabel *lbl=[UILabel new];
+        lbl.text=badgeText;
+        lbl.font=HostMonospacedDigitFont(11.5,UIFontWeightSemibold,UIFontTextStyleCaption1);
+        lbl.textColor=isDestructive?tint:HostSecondaryText();
+        [lbl sizeToFit];
+        CGFloat maxLblW=112;
+        CGFloat lblW=MIN(maxLblW,CGRectGetWidth(lbl.frame));
+        lbl.frame=CGRectMake(x,3,lblW,16);
+        [pill addSubview:lbl];
+        pill.frame=CGRectMake(0,4,x+lblW+8,22);
+        pillView=pill;
+    }
+
+    CGFloat totalW=CGRectGetWidth(chevron.frame);
+    if(pillView){
+        totalW+=CGRectGetWidth(pillView.frame)+6;
+    }
+    wrap.frame=CGRectMake(0,0,totalW,30);
+    rightEdge=totalW;
+    chevron.frame=CGRectMake(rightEdge-CGRectGetWidth(chevron.frame),(30-CGRectGetHeight(chevron.frame))/2.0,CGRectGetWidth(chevron.frame),CGRectGetHeight(chevron.frame));
+    [wrap addSubview:chevron];
+    if(pillView){
+        CGRect pf=pillView.frame;
+        pf.origin.x=CGRectGetMinX(chevron.frame)-6-CGRectGetWidth(pf);
+        pf.origin.y=(30-CGRectGetHeight(pf))/2.0;
+        pillView.frame=pf;
+        [wrap addSubview:pillView];
+    }
+    return wrap;
+}
+
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {
     UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:@"setting.row"];
     if(!cell)cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"setting.row"];
-    NSDictionary *row=self.sections[ip.section][@"rows"][ip.row];
-    cell.textLabel.text=row[@"title"];
-    cell.textLabel.textColor=HostText();
-    cell.textLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];
+    NSDictionary *sec=self.sections[ip.section];
+    NSString *secCategory=sec[@"category"]?:@"all";
+    NSDictionary *row=sec[@"rows"][ip.row];
+    BOOL isDark=HostIsDarkThemeSelected();
+    NSString *role=row[@"role"];
+    BOOL isDestructive=[role isEqualToString:@"destructive"];
+    UIColor *semanticTint=SettingsSemanticTintForCategoryAndRole(secCategory,role,isDark);
+
+    NSString *titleText=row[@"title"]?:@"";
+    UIFont *titleFont=HostRoundedFont(16.0,isDestructive?UIFontWeightSemibold:UIFontWeightMedium,UIFontTextStyleBody);
+    UIColor *titleColor=isDestructive?semanticTint:HostText();
+    cell.textLabel.attributedText=nil;
+    cell.detailTextLabel.attributedText=nil;
+    cell.textLabel.text=titleText;
+    cell.textLabel.textColor=titleColor;
+    cell.textLabel.font=titleFont;
     cell.textLabel.adjustsFontForContentSizeCategory=YES;
     cell.textLabel.numberOfLines=0;
+    if(self.searchKeyword.length){
+        cell.textLabel.attributedText=[self highlightedAttributedString:titleText baseFont:titleFont baseColor:titleColor subgroupPrefix:nil subgroupTint:nil];
+    }
+
     cell.detailTextLabel.text=row[@"detail"];
 
     if([row[@"action"] isEqualToString:@"mediaDisplay"])cell.detailTextLabel.text=SettingsMediaDisplaySummaryText();
@@ -751,17 +1449,20 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
     if([row[@"action"] isEqualToString:@"themePalette"])cell.detailTextLabel.text=[HostThemePalette currentPalette].displayName;
     if([row[@"action"] isEqualToString:@"checkUpdate"])cell.detailTextLabel.text=self.lastUpdateCheckText?:@"点按检查最新发布";
 
+    UIFont *detailFont=[UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
     cell.detailTextLabel.textColor=HostSecondaryText();
-    cell.detailTextLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
+    cell.detailTextLabel.font=detailFont;
     cell.detailTextLabel.adjustsFontForContentSizeCategory=YES;
     cell.detailTextLabel.numberOfLines=0;
+    NSString *subgroup=row[@"subgroup"];
+    if(subgroup.length || self.searchKeyword.length){
+        cell.detailTextLabel.attributedText=[self highlightedAttributedString:cell.detailTextLabel.text baseFont:detailFont baseColor:HostSecondaryText() subgroupPrefix:subgroup subgroupTint:semanticTint];
+    }
 
     // 2026 Spatial Glass Squircle Icon Badge
     NSString *iconName=row[@"icon"]?:@"gearshape";
-    UIImageSymbolConfiguration *symCfg=[UIImageSymbolConfiguration configurationWithPointSize:16 weight:UIImageSymbolWeightMedium];
-    UIImage *baseImg=[UIImage systemImageNamed:iconName withConfiguration:symCfg];
-    cell.imageView.image=baseImg;
-    cell.imageView.tintColor=HostAccent();
+    cell.imageView.image=SettingsSquircleBadgeImage(iconName,semanticTint,isDark,34);
+    cell.imageView.tintColor=semanticTint;
 
     cell.backgroundColor=HostCard(); cell.layer.cornerRadius=14; cell.layer.cornerCurve=kCACornerCurveContinuous; cell.clipsToBounds=YES; cell.layer.borderWidth=0.6; HostSetLayerBorderColor(cell,HostBorder());
     cell.accessoryView=nil;
@@ -771,6 +1472,7 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
     NSString *key=row[@"key"];
     if([row[@"appearance"] boolValue]){
         UISegmentedControl *style=[[UISegmentedControl alloc] initWithItems:@[@"系统",@"浅色",@"深色"]];
+        style.apportionsSegmentWidthsByContent=YES;
         UIFont *segFont=HostRoundedFont(12.5,UIFontWeightSemibold,UIFontTextStyleSubheadline);
         NSString *mode=HostThemeMode();
         style.selectedSegmentIndex=[mode isEqual:@"system"]?0:([mode isEqual:@"light"]?1:2);
@@ -786,6 +1488,7 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
     else if([row[@"segmented"] boolValue]){
         NSArray *options=row[@"options"];
         UISegmentedControl *seg=[[UISegmentedControl alloc] initWithItems:options];
+        seg.apportionsSegmentWidthsByContent=YES;
         UIFont *segFont=HostRoundedFont(12.5,UIFontWeightSemibold,UIFontTextStyleSubheadline);
         NSInteger saved=[[NSUserDefaults standardUserDefaults] objectForKey:key]?[[NSUserDefaults standardUserDefaults] integerForKey:key]:[row[@"default"] integerValue];
         NSInteger index=[row[@"values"] indexOfObject:@(saved)];
@@ -817,6 +1520,7 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
         cell.selectionStyle=UITableViewCellSelectionStyleNone;
     }
     else if(row[@"action"]){
+        cell.accessoryView=[self buildActionAccessoryViewForRow:row inCategory:secCategory];
         cell.accessoryType=UITableViewCellAccessoryDisclosureIndicator;
         cell.selectionStyle=UITableViewCellSelectionStyleDefault;
     }
@@ -826,12 +1530,138 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
     return cell;
 }
 
+- (void)tableView:(UITableView *)tableView didHighlightRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell=[tableView cellForRowAtIndexPath:indexPath];
+    if(!cell || UIAccessibilityIsReduceMotionEnabled())return;
+    [UIView animateWithDuration:0.12 delay:0 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{
+        cell.transform=CGAffineTransformMakeScale(0.984,0.984);
+        cell.backgroundColor=HostHighlightedSurface();
+        HostSetLayerBorderColor(cell,HostAccent());
+    } completion:nil];
+}
+
+- (void)tableView:(UITableView *)tableView didUnhighlightRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell=[tableView cellForRowAtIndexPath:indexPath];
+    if(!cell)return;
+    [UIView animateWithDuration:0.24 delay:0 usingSpringWithDamping:0.76 initialSpringVelocity:0.3 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{
+        cell.transform=CGAffineTransformIdentity;
+        cell.backgroundColor=HostCard();
+        HostSetLayerBorderColor(cell,HostBorder());
+    } completion:nil];
+}
+
+- (nullable UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoint)point {
+    (void)point;
+    if(indexPath.section<0 || indexPath.section>=(NSInteger)self.sections.count)return nil;
+    NSArray *rows=self.sections[indexPath.section][@"rows"];
+    if(indexPath.row<0 || indexPath.row>=(NSInteger)rows.count)return nil;
+    NSDictionary *row=rows[indexPath.row];
+    NSString *title=row[@"title"]?:@"设置项";
+    NSString *key=row[@"key"];
+    NSString *action=row[@"action"];
+    __weak typeof(self) weakSelf=self;
+
+    return [UIContextMenuConfiguration configurationWithIdentifier:indexPath previewProvider:nil actionProvider:^UIMenu * _Nullable(NSArray<UIMenuElement *> * _Nonnull suggestedActions) {
+        (void)suggestedActions;
+        NSMutableArray<UIMenuElement *> *actions=[NSMutableArray array];
+        if(action.length){
+            [actions addObject:[UIAction actionWithTitle:@"打开或执行此项" image:[UIImage systemImageNamed:@"hand.tap"] identifier:nil handler:^(__kindof UIAction * _Nonnull act) {
+                SettingsViewController *owner=weakSelf;
+                if(!owner)return;
+                [owner tableView:owner.table didSelectRowAtIndexPath:indexPath];
+            }]];
+        }
+        BOOL isResettablePickerAction=[@[@"defaultQuality",@"defaultPlaybackRate",@"defaultVideoGravity",@"themePalette"] containsObject:action?:@""];
+        if((key.length && row[@"default"]!=nil) || isResettablePickerAction){
+            [actions addObject:[UIAction actionWithTitle:@"恢复此项默认值" image:[UIImage systemImageNamed:@"arrow.counterclockwise"] identifier:nil handler:^(__kindof UIAction * _Nonnull act) {
+                [weakSelf resetSingleRowToDefault:row atIndexPath:indexPath];
+            }]];
+        }
+        [actions addObject:[UIAction actionWithTitle:@"复制设置项状态" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__kindof UIAction * _Nonnull act) {
+            SettingsViewController *owner=weakSelf;
+            if(!owner)return;
+            UITableViewCell *cell=[owner.table cellForRowAtIndexPath:indexPath];
+            NSString *detail=cell.detailTextLabel.text?:row[@"detail"]?:@"";
+            UIPasteboard.generalPasteboard.string=[NSString stringWithFormat:@"%@：%@",title,detail];
+            SettingsTriggerHapticSelection();
+            UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,@"已复制设置项状态");
+        }]];
+        return [UIMenu menuWithTitle:title children:actions];
+    }];
+}
+
+- (void)resetSingleRowToDefault:(NSDictionary *)row atIndexPath:(NSIndexPath *)ip {
+    NSString *key=row[@"key"];
+    NSString *action=row[@"action"];
+    if(!key.length && !action.length)return;
+    SettingsTriggerHapticImpact(UIImpactFeedbackStyleMedium);
+    NSUserDefaults *defaults=NSUserDefaults.standardUserDefaults;
+    if(!key.length && action.length){
+        if([action isEqualToString:@"defaultQuality"]){
+            [defaults setObject:@"auto" forKey:@"cctv.mediaPreferredQuality.v1"];
+            if(self.onPreferenceChanged)self.onPreferenceChanged(@"cctv.mediaPreferredQuality.v1",YES);
+        }else if([action isEqualToString:@"defaultPlaybackRate"]){
+            [defaults setDouble:1.0 forKey:@"cctv.mediaPlaybackRate"];
+            if(self.onPreferenceChanged)self.onPreferenceChanged(@"cctv.mediaPlaybackRate",YES);
+        }else if([action isEqualToString:@"defaultVideoGravity"]){
+            [defaults setObject:AVLayerVideoGravityResizeAspect forKey:@"cctv.mediaVideoGravity"];
+            if(self.onPreferenceChanged)self.onPreferenceChanged(@"cctv.mediaVideoGravity",YES);
+        }else if([action isEqualToString:@"themePalette"]){
+            [HostThemePalette setCurrentPaletteIdentifier:HostThemePaletteDefaultIdentifier];
+            [defaults setObject:@"dark" forKey:HostThemeModePreferenceKey];
+            [defaults setBool:YES forKey:HostDarkThemePreferenceKey];
+            UIWindow *window=self.view.window;
+            if(window){HostApplyThemeToWindow(window);HostStyleNavigation(self.navigationController);HostRefreshAppearanceLayers(window);}
+            [self reloadThemeAppearance];
+            if(self.onPreferenceChanged)self.onPreferenceChanged(HostThemePaletteIdentifierPreferenceKey,YES);
+            [[NSNotificationCenter defaultCenter] postNotificationName:@"HostThemeDidChangeNotification" object:nil];
+        }
+        [self refreshHeroSummaryChips];
+        if(ip)[self.table reloadRowsAtIndexPaths:@[ip] withRowAnimation:UITableViewRowAnimationNone];
+        else [self.table reloadData];
+        UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,[NSString stringWithFormat:@"%@已恢复默认值",row[@"title"]?:@"设置项"]);
+        return;
+    }
+    if([row[@"segmented"] boolValue]){
+        NSInteger defVal=[row[@"default"] integerValue];
+        if([key isEqualToString:@"cctv.mediaEpisodeLayoutStyle.v1"]){
+            CCTVEpisodeSetLayoutStyle((CCTVEpisodeLayoutStyle)defVal);
+        }else{
+            [defaults setInteger:defVal forKey:key];
+        }
+        if(self.onIntegerPreferenceChanged)self.onIntegerPreferenceChanged(key,defVal);
+    }else{
+        BOOL defBool=[row[@"default"] boolValue];
+        if([key isEqualToString:@"cctv.adaptationMonitor.enabled"]){
+            MediaAdaptationMonitor.shared.monitoringEnabled=defBool;
+        }else if([key isEqualToString:@"cctv.mediaEpisodeShowBadge.v1"]){
+            CCTVEpisodeSetShowRemarksBadgeEnabled(defBool);
+        }else if([key isEqualToString:@"cctv.mediaEpisodeAutoExpand.v1"]){
+            CCTVEpisodeSetAutoExpandEnabled(defBool);
+            [NSNotificationCenter.defaultCenter postNotificationName:CCTVMediaEpisodeLayoutStyleDidChangeNotification object:nil];
+        }else{
+            [defaults setBool:defBool forKey:key];
+        }
+        if([key isEqualToString:@"nativeChannelLogoEnabled"])[ProfileStore setChannelLogoEnabled:defBool forSource:@""];
+        else if([key isEqualToString:@"nativePlayerCornerLogoEnabled"])[ProfileStore setPlayerCornerLogoEnabled:defBool forSource:@""];
+        else if([key isEqualToString:@"nativeChannelPreviewEnabled"])[ProfileStore setChannelPreviewEnabled:defBool forSource:@""];
+        else if([key isEqualToString:@"nativeChannelTelemetryEnabled"])[ProfileStore setChannelTelemetryEnabled:defBool forSource:@""];
+        if(self.onPreferenceChanged)self.onPreferenceChanged(key,defBool);
+    }
+    [self refreshHeroSummaryChips];
+    if(ip)[self.table reloadRowsAtIndexPaths:@[ip] withRowAnimation:UITableViewRowAnimationNone];
+    else [self.table reloadData];
+    UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,[NSString stringWithFormat:@"%@已恢复默认值",row[@"title"]?:@"设置项"]);
+}
+
 - (void)toggle:(UISwitch *)sender {
     if(!sender.accessibilityIdentifier.length)return;
+    SettingsTriggerHapticSelection();
     NSString *key=sender.accessibilityIdentifier;
     NSUserDefaults *defaults=NSUserDefaults.standardUserDefaults;
     if([key isEqualToString:@"cctv.adaptationMonitor.enabled"]){
         MediaAdaptationMonitor.shared.monitoringEnabled=sender.on;
+        [self refreshHeroSummaryChips];
     }else if([key isEqualToString:@"cctv.mediaEpisodeShowBadge.v1"]){
         CCTVEpisodeSetShowRemarksBadgeEnabled(sender.on);
     }else if([key isEqualToString:@"cctv.mediaEpisodeAutoExpand.v1"]){
@@ -844,7 +1674,21 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
     else if([key isEqualToString:@"nativePlayerCornerLogoEnabled"])[ProfileStore setPlayerCornerLogoEnabled:sender.on forSource:@""];
     else if([key isEqualToString:@"nativeChannelPreviewEnabled"])[ProfileStore setChannelPreviewEnabled:sender.on forSource:@""];
     else if([key isEqualToString:@"nativeChannelTelemetryEnabled"])[ProfileStore setChannelTelemetryEnabled:sender.on forSource:@""];
-    if ([key isEqualToString:@"rememberLastChannel"] && !sender.on) [defaults removeObjectForKey:@"lastChannel"];
+    if ([key isEqualToString:@"rememberLastChannel"] && !sender.on) {
+        [defaults removeObjectForKey:@"lastChannel"];
+        if ([defaults boolForKey:@"resumeLastChannel"]) {
+            [defaults setBool:NO forKey:@"resumeLastChannel"];
+            if (self.onPreferenceChanged) self.onPreferenceChanged(@"resumeLastChannel", NO);
+            [self.table reloadData];
+        }
+    }
+    if ([key isEqualToString:@"resumeLastChannel"] && sender.on) {
+        if ([defaults objectForKey:@"rememberLastChannel"] && ![defaults boolForKey:@"rememberLastChannel"]) {
+            [defaults setBool:YES forKey:@"rememberLastChannel"];
+            if (self.onPreferenceChanged) self.onPreferenceChanged(@"rememberLastChannel", YES);
+            [self.table reloadData];
+        }
+    }
     if ([key isEqualToString:@"cctv.restoreLastTab.v1"] && !sender.on) [defaults removeObjectForKey:@"cctv.lastBottomTab.v1"];
     if ([key isEqualToString:@"media.globalSearchHistoryEnabled.v1"]) {
         [NSNotificationCenter.defaultCenter postNotificationName:@"MediaGlobalSearchHistoryDidChange" object:nil userInfo:@{@"enabled":@(sender.on),@"cleared":@NO}];
@@ -858,6 +1702,7 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
         for(NSDictionary *row in section[@"rows"])
             if([row[@"key"] isEqualToString:sender.accessibilityIdentifier]&&[row[@"segmented"] boolValue])values=row[@"values"];
     if(!values||sender.selectedSegmentIndex<0||sender.selectedSegmentIndex>=(NSInteger)values.count)return;
+    SettingsTriggerHapticSelection();
     NSInteger value=[values[sender.selectedSegmentIndex] integerValue];
     if([sender.accessibilityIdentifier isEqualToString:@"cctv.mediaEpisodeLayoutStyle.v1"]){
         CCTVEpisodeSetLayoutStyle((CCTVEpisodeLayoutStyle)value);
@@ -877,13 +1722,13 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)ip {
     [tableView deselectRowAtIndexPath:ip animated:YES];
     NSDictionary *row=self.sections[ip.section][@"rows"][ip.row];
+    if(row[@"action"])SettingsTriggerHapticSelection();
     if([row[@"action"] isEqualToString:@"clearEPG"]) [self confirmClearEPG];
     else if([row[@"action"] isEqualToString:@"clearImages"]){
         [HostImageLoader.shared clearCache];
         self.clearedImagesState=YES;
         UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,@"台标缓存已清理");
-        UITableViewCell *cell=[tableView cellForRowAtIndexPath:ip];
-        cell.detailTextLabel.text=@"已清理，下次加载时重新获取";
+        [self.table reloadRowsAtIndexPaths:@[ip] withRowAnimation:UITableViewRowAnimationNone];
     }
     else if([row[@"action"] isEqualToString:@"clearMediaMetadata"]) [self confirmClearMediaMetadata:ip];
     else if([row[@"action"] isEqualToString:@"clearAllCaches"]) [self confirmClearAllCaches];
@@ -1110,7 +1955,7 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
         NSUserDefaults *d=NSUserDefaults.standardUserDefaults;
         NSArray<NSString *> *keysToReset=@[
             HostThemeModePreferenceKey, HostDarkThemePreferenceKey, HostThemePaletteIdentifierPreferenceKey,
-            @"cctv.appFontSize.v1", @"cctv.restoreLastTab.v1",
+            @"cctv.appFontSize.v1", @"cctv.restoreLastTab.v1", @"cctv.lastBottomTab.v1",
             @"nativeChannelsEnabled", @"nativeChannelLogoEnabled", @"nativePlayerCornerLogoEnabled", @"nativeChannelPreviewEnabled", @"nativeChannelTelemetryEnabled", @"enabledChannelLogoSources", @"enabledPlayerCornerLogoSources", @"enabledChannelPreviewSources", @"enabledChannelTelemetrySources", @"disabledChannelLogoSources", @"disabledPlayerCornerLogoSources", @"disabledChannelPreviewSources", @"disabledChannelTelemetrySources", @"channelGridMode", @"cctv.channelGridColumns.v1", @"cctv.channelSortMode.v1",
             @"cctv.mediaEpisodeLayoutStyle.v1", @"cctv.mediaEpisodeShowBadge.v1", @"cctv.mediaEpisodeAutoExpand.v1",
             @"cctv.mediaKeepScreenAwake", @"allowBackgroundAudio", @"autoPiP", @"autoLoadEPG",
@@ -1142,7 +1987,8 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     [alert addAction:[UIAlertAction actionWithTitle:@"清理缓存" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action){
         [MediaMetadataCache.shared clear];
-        [self.table reloadRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationNone];
+        [self refreshHeroSummaryChips];
+        [self.table reloadData];
         UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,@"影视元数据缓存已清理");
     }]];
     [self presentViewController:alert animated:YES completion:nil];
@@ -1157,6 +2003,7 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
         [HostImageLoader.shared clearCache];
         self.clearedImagesState=YES;
         [MediaMetadataCache.shared clear];
+        [self refreshHeroSummaryChips];
         [self.table reloadData];
         UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,@"全部缓存已清理");
     }]];
@@ -1238,6 +2085,7 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
 }
 
 - (void)appearanceChanged:(UISegmentedControl *)sender {
+    SettingsTriggerHapticSelection();
     NSString *mode=sender.selectedSegmentIndex==0?@"system":(sender.selectedSegmentIndex==1?@"light":@"dark");
     BOOL dark=[mode isEqual:@"dark"];
     [NSUserDefaults.standardUserDefaults setObject:mode forKey:HostThemeModePreferenceKey];
@@ -1278,6 +2126,7 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
         BOOL ok=SettingsRemoveEPGCacheFile();
         if(ok&&self.onClearEPG) self.onClearEPG();
         if(ok){
+            [self refreshHeroSummaryChips];
             NSIndexPath *epgRow=[self indexPathForRowAction:@"clearEPG"];
             if(epgRow)[self.table reloadRowsAtIndexPaths:@[epgRow] withRowAnimation:UITableViewRowAnimationNone];
         }

@@ -43,6 +43,9 @@
     self.table.rowHeight = UITableViewAutomaticDimension; self.table.estimatedRowHeight = 86;
     self.table.tintColor = HostAccent();
     HostInstallGlassBackdrop(self.table);
+    UIRefreshControl *rc = [UIRefreshControl new];
+    [rc addTarget:self action:@selector(reloadRecords) forControlEvents:UIControlEventValueChanged];
+    self.table.refreshControl = rc;
     [self.view addSubview:self.table];
     [NSLayoutConstraint activateConstraints:@[[self.table.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor], [self.table.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor], [self.table.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor], [self.table.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]]];
 
@@ -130,6 +133,17 @@
     });
 }
 
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    if (self.table.tableHeaderView && CGRectGetWidth(self.table.bounds) > 0 && fabs(CGRectGetWidth(self.table.tableHeaderView.frame) - CGRectGetWidth(self.table.bounds)) > 0.5) {
+        UIView *header = self.table.tableHeaderView;
+        CGRect f = header.frame;
+        f.size.width = CGRectGetWidth(self.table.bounds);
+        header.frame = f;
+        self.table.tableHeaderView = header;
+    }
+}
+
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     [self reloadRecords];
@@ -145,6 +159,7 @@
             dispatch_block_t applyBlock = ^{
                 RuntimeDiagnosticsViewController *owner = weakSelf; if (!owner||owner.reloadGeneration!=generation) return;
                 owner.allEvents = events ?: @[];
+                [owner.table.refreshControl endRefreshing];
                 [owner applyEventCategoryFilter];
                 if (!owner.allEvents.count) owner.table.backgroundView = [owner emptyViewWithText:error.localizedDescription ?: @"这次运行没有诊断记录。"];
             };
@@ -157,6 +172,7 @@
                 owner.sessions = sessions ?: @[];
                 owner.clearButton.enabled = owner.sessions.count > 0;
                 owner.table.backgroundView = owner.sessions.count ? nil : [owner emptyViewWithText:error.localizedDescription ?: @"暂无运行记录。开启运行诊断并复现问题后，每次 App 运行会单独出现在这里。"];
+                [owner.table.refreshControl endRefreshing];
                 [owner.table reloadData];
             };
             if (NSThread.isMainThread) applyBlock(); else dispatch_async(dispatch_get_main_queue(), applyBlock);
@@ -225,6 +241,7 @@
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 1; }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return self.sessionID.length ? self.events.count : self.sessions.count; }
+- (void)tableView:(UITableView *)tableView willDisplayHeaderView:(UIView *)view forSection:(NSInteger)section { (void)tableView; (void)section; HostStyleSectionHeaderView(view); }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section { return self.sessionID.length ? [NSString stringWithFormat:@"事件 · %lu 条 · 点按可复制", (unsigned long)self.events.count] : [NSString stringWithFormat:@"按次记录 · %lu 次", (unsigned long)self.sessions.count]; }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -255,6 +272,8 @@
         BOOL isErrEvent = [eventName localizedCaseInsensitiveContainsString:@"fail"] || [eventName localizedCaseInsensitiveContainsString:@"error"] || [eventName localizedCaseInsensitiveContainsString:@"timeout"] || [eventName localizedCaseInsensitiveContainsString:@"reject"] || [eventName localizedCaseInsensitiveContainsString:@"exception"];
         if (isErrEvent) { cell.layer.borderWidth = 1.0; HostSetLayerBorderColor(cell, [UIColor.systemRedColor colorWithAlphaComponent:0.65]); }
         else if (elapsedNum && elapsedNum.integerValue >= 3000) { cell.layer.borderWidth = 0.9; HostSetLayerBorderColor(cell, [UIColor.systemOrangeColor colorWithAlphaComponent:0.65]); }
+        cell.imageView.image = [UIImage systemImageNamed:isErrEvent ? @"exclamationmark.triangle.fill" : (elapsedNum.integerValue >= 3000 ? @"clock.badge.exclamationmark" : @"waveform.path.ecg")];
+        cell.imageView.tintColor = isErrEvent ? UIColor.systemRedColor : (elapsedNum.integerValue >= 3000 ? UIColor.systemOrangeColor : HostAccent());
         cell.textLabel.text = [NSString stringWithFormat:@"%@ · %@%@", eventName, category, elapsedBadge];
         cell.detailTextLabel.text = payload.length ? [NSString stringWithFormat:@"%@\n%@", time, payload] : time;
         cell.detailTextLabel.font = [UIFont monospacedSystemFontOfSize:[UIFont preferredFontForTextStyle:UIFontTextStyleFootnote].pointSize weight:UIFontWeightRegular];
@@ -274,6 +293,8 @@
         unsigned long eventCount=[session[@"event_count"] isKindOfClass:NSNumber.class]?[session[@"event_count"] unsignedIntegerValue]:0;NSString *lastEvent=[session[@"last_event"] isKindOfClass:NSString.class]?session[@"last_event"]:@"未知";
         unsigned long errorCount=[session[@"error_count"] isKindOfClass:NSNumber.class]?[session[@"error_count"] unsignedIntegerValue]:0;
         NSString *errBadge = errorCount > 0 ? [NSString stringWithFormat:@" · 异常 %lu", errorCount] : @"";
+        cell.imageView.image = [UIImage systemImageNamed:(!cleanlyEnded && !isOpen && !isCurrent) ? @"exclamationmark.shield.fill" : (isCurrent ? @"bolt.horizontal.circle.fill" : @"checkmark.seal.fill")];
+        cell.imageView.tintColor = (!cleanlyEnded && !isOpen && !isCurrent) ? UIColor.systemRedColor : (isCurrent ? HostAccent() : HostSecondaryText());
         cell.detailTextLabel.text = [NSString stringWithFormat:@"%@\n%lu 条事件%@ · %@ · 最后事件：%@", version, eventCount, errBadge, size, lastEvent];
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator; cell.selectionStyle = UITableViewCellSelectionStyleDefault;
     }

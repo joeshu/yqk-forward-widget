@@ -130,7 +130,7 @@
     }
     UIBarButtonItem *more=[[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"] style:UIBarButtonItemStylePlain target:nil action:nil];
     more.accessibilityLabel=@"合集操作";more.menu=[UIMenu menuWithChildren:@[[UIMenu menuWithTitle:@"导出与复制" children:exportChildren],[UIMenu menuWithTitle:@"高级操作" children:@[bulk]],remove]];self.navigationItem.rightBarButtonItem=more;
-    self.contentFilter=[[UISegmentedControl alloc] initWithItems:@[@"全部",@"影视",@"直播",@"不支持"]];self.contentFilter.selectedSegmentIndex=0;self.contentFilter.selectedSegmentTintColor=HostAccent();[self.contentFilter addTarget:self action:@selector(filterChanged) forControlEvents:UIControlEventValueChanged];
+    self.contentFilter=[[UISegmentedControl alloc] initWithItems:@[@"全部",@"影视",@"直播",@"不支持"]];self.contentFilter.selectedSegmentIndex=0;self.contentFilter.selectedSegmentTintColor=HostAccent();[self.contentFilter setTitleTextAttributes:@{NSForegroundColorAttributeName:HostText(),NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1]} forState:UIControlStateNormal];[self.contentFilter setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent(),NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1]} forState:UIControlStateSelected];[self.contentFilter addTarget:self action:@selector(filterChanged) forControlEvents:UIControlEventValueChanged];
     UIView *header=[[UIView alloc] initWithFrame:CGRectMake(0,0,self.tableView.bounds.size.width,92)];
     UIView *headerCard=[[UIView alloc] initWithFrame:CGRectMake(16,4,MAX(1,header.bounds.size.width-32),80)];
     headerCard.autoresizingMask=UIViewAutoresizingFlexibleWidth;
@@ -153,6 +153,8 @@
     self.tableView.backgroundColor=HostBackground();
     self.summaryLabel.textColor=HostSecondaryText();
     self.contentFilter.selectedSegmentTintColor=HostAccent();
+    [self.contentFilter setTitleTextAttributes:@{NSForegroundColorAttributeName:HostText(),NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1]} forState:UIControlStateNormal];
+    [self.contentFilter setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent(),NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1]} forState:UIControlStateSelected];
     [self updateEmptyState];
     [self.tableView reloadData];
 }
@@ -208,5 +210,15 @@
     else {[alert addAction:[UIAlertAction actionWithTitle:@"导入并打开资源" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){if(self.onImportSite)self.onImportSite(row,YES);}]];[alert addAction:[UIAlertAction actionWithTitle:@"仅导入到资源页" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){if(self.onImportSite)self.onImportSite(row,NO);}]];}
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     UITableViewCell *cell=[tableView cellForRowAtIndexPath:ip];[self presentCatalogAlert:alert sourceView:cell sourceRect:cell.bounds];
+}
+- (void)tableView:(UITableView *)tableView didHighlightRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell=[tableView cellForRowAtIndexPath:indexPath];
+    if(!cell||UIAccessibilityIsReduceMotionEnabled())return;
+    [UIView animateWithDuration:0.10 delay:0 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{cell.transform=CGAffineTransformMakeScale(0.985,0.985);} completion:nil];
+}
+- (void)tableView:(UITableView *)tableView didUnhighlightRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell=[tableView cellForRowAtIndexPath:indexPath];
+    if(!cell)return;
+    [UIView animateWithDuration:0.22 delay:0 usingSpringWithDamping:0.78 initialSpringVelocity:0.25 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{cell.transform=CGAffineTransformIdentity;} completion:nil];
 }
 @end

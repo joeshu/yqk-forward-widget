@@ -59,6 +59,7 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
 @property(nonatomic) BOOL observingLogUpdates;
 @property(nonatomic) BOOL hasLoadedSnapshot;
 - (void)applyFilterFollowingTail:(BOOL)followsTail;
+- (void)filterChanged;
 @end
 
 @implementation LogCenterViewController
@@ -84,6 +85,7 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
     self.searchBar=[UISearchBar new];self.searchBar.translatesAutoresizingMaskIntoConstraints=NO;self.searchBar.delegate=self;self.searchBar.placeholder=@"搜索日志内容";self.searchBar.searchBarStyle=UISearchBarStyleMinimal;self.searchBar.autocapitalizationType=UITextAutocapitalizationTypeNone;self.searchBar.accessibilityIdentifier=@"diagnostic.logs.search";
     self.summaryLabel=[UILabel new];self.summaryLabel.translatesAutoresizingMaskIntoConstraints=NO;self.summaryLabel.numberOfLines=0;self.summaryLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];self.summaryLabel.adjustsFontForContentSizeCategory=YES;self.summaryLabel.textColor=HostSecondaryText();
     self.tableView=[[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];self.tableView.translatesAutoresizingMaskIntoConstraints=NO;self.tableView.backgroundColor=HostBackground();self.tableView.separatorStyle=UITableViewCellSeparatorStyleNone;self.tableView.dataSource=self;self.tableView.delegate=self;self.tableView.estimatedRowHeight=54;self.tableView.rowHeight=UITableViewAutomaticDimension;self.tableView.accessibilityIdentifier=@"diagnostic.logs.list";[self.tableView registerClass:DiagnosticLogLineCell.class forCellReuseIdentifier:@"diagnostic.line"];HostInstallGlassBackdrop(self.tableView);
+    UIRefreshControl *rc=[UIRefreshControl new];[rc addTarget:self action:@selector(pullRefreshLogs:) forControlEvents:UIControlEventValueChanged];self.tableView.refreshControl=rc;
     self.emptyLabel=[UILabel new];self.emptyLabel.translatesAutoresizingMaskIntoConstraints=NO;self.emptyLabel.numberOfLines=0;self.emptyLabel.text=@"暂无日志";self.emptyLabel.textColor=HostSecondaryText();self.emptyLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];self.emptyLabel.adjustsFontForContentSizeCategory=YES;self.emptyLabel.textAlignment=NSTextAlignmentCenter;
     [self.view addSubview:self.categories];[self.view addSubview:self.searchBar];[self.view addSubview:self.summaryLabel];[self.view addSubview:self.tableView];[self.view addSubview:self.emptyLabel];
     UILayoutGuide *safe=self.view.safeAreaLayoutGuide;
@@ -205,6 +207,30 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section{return self.visibleLines.count;}
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     DiagnosticLogLineCell *cell=[tableView dequeueReusableCellWithIdentifier:@"diagnostic.line" forIndexPath:indexPath];if(indexPath.row<0||indexPath.row>=self.visibleLines.count)return cell;NSString *line=self.visibleLines[indexPath.row];DiagnosticLogCategory cat=[self categoryForLine:line];UIColor *color=[self colorForLine:line];cell.cardView.backgroundColor=HostCard();cell.cardView.layer.borderWidth=cat==DiagnosticLogCategoryError?0.9:0.6;HostSetLayerBorderColor(cell.cardView,cat==DiagnosticLogCategoryError?[UIColor.systemRedColor colorWithAlphaComponent:0.45]:HostBorder());cell.messageLabel.attributedText=nil;cell.messageLabel.text=line;cell.messageLabel.textColor=color;NSString *q=self.searchBar.text?:@"";if(q.length){NSRange match=[line rangeOfString:q options:NSCaseInsensitiveSearch];if(match.location!=NSNotFound){NSMutableAttributedString *attr=[[NSMutableAttributedString alloc] initWithString:line attributes:@{NSForegroundColorAttributeName:color,NSFontAttributeName:cell.messageLabel.font}];[attr addAttributes:@{NSBackgroundColorAttributeName:[HostAccent() colorWithAlphaComponent:0.25],NSForegroundColorAttributeName:HostText()} range:match];cell.messageLabel.attributedText=attr;}}cell.categoryDot.backgroundColor=color;cell.accessibilityHint=@"点按复制这行日志";return cell;
+}
+- (void)pullRefreshLogs:(UIRefreshControl *)sender {[self refreshLog];[sender endRefreshing];}
+- (void)tableView:(UITableView *)tableView didHighlightRowAtIndexPath:(NSIndexPath *)indexPath {
+    DiagnosticLogLineCell *cell=(DiagnosticLogLineCell *)[tableView cellForRowAtIndexPath:indexPath];
+    if(!cell||UIAccessibilityIsReduceMotionEnabled())return;
+    [UIView animateWithDuration:0.10 delay:0 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{cell.cardView.transform=CGAffineTransformMakeScale(0.985,0.985);} completion:nil];
+}
+- (void)tableView:(UITableView *)tableView didUnhighlightRowAtIndexPath:(NSIndexPath *)indexPath {
+    DiagnosticLogLineCell *cell=(DiagnosticLogLineCell *)[tableView cellForRowAtIndexPath:indexPath];
+    if(!cell)return;
+    [UIView animateWithDuration:0.22 delay:0 usingSpringWithDamping:0.78 initialSpringVelocity:0.25 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{cell.cardView.transform=CGAffineTransformIdentity;} completion:nil];
+}
+- (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoint)point {
+    (void)tableView;(void)point;
+    if(indexPath.row<0||indexPath.row>=(NSInteger)self.visibleLines.count)return nil;
+    NSString *line=self.visibleLines[(NSUInteger)indexPath.row];
+    DiagnosticLogCategory cat=[self categoryForLine:line];
+    __weak typeof(self) weakSelf=self;
+    return [UIContextMenuConfiguration configurationWithIdentifier:indexPath previewProvider:nil actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggested){
+        UIAction *copyLine=[UIAction actionWithTitle:@"复制此行日志" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){UIPasteboard.generalPasteboard.string=line;[weakSelf showTransientPrompt:@"日志内容已复制"];}];
+        NSInteger targetSeg=(cat==DiagnosticLogCategoryPlayback)?1:((cat==DiagnosticLogCategoryPlugin)?2:((cat==DiagnosticLogCategoryError)?3:0));
+        UIAction *filterCat=[UIAction actionWithTitle:@"仅看同类日志" image:[UIImage systemImageNamed:@"line.3.horizontal.decrease.circle"] identifier:nil handler:^(__unused UIAction *a){weakSelf.categories.selectedSegmentIndex=targetSeg;[weakSelf filterChanged];}];
+        return [UIMenu menuWithTitle:@"日志操作" children:@[copyLine,filterCat]];
+    }];
 }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {if(indexPath.row<self.visibleLines.count){UIPasteboard.generalPasteboard.string=self.visibleLines[indexPath.row];[self showTransientPrompt:@"日志内容已复制"];UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,@"日志内容已复制");}[tableView deselectRowAtIndexPath:indexPath animated:YES];}
 - (void)filterChanged {[self applyFilter];}

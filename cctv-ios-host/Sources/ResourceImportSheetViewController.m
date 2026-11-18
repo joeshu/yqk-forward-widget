@@ -20,6 +20,8 @@
 
     self.layer.cornerRadius=16;
     self.layer.cornerCurve=kCACornerCurveContinuous;
+    self.layer.borderWidth=0.6;
+    HostSetLayerBorderColor(self,HostBorder());
     _iconBackground=[UIView new];
     _iconBackground.layer.cornerRadius=16;
     _iconBackground.layer.cornerCurve=kCACornerCurveContinuous;
@@ -91,6 +93,7 @@
 - (void)configureWithTitle:(NSString *)title detail:(NSString *)detail icon:(NSString *)icon color:(UIColor *)color {
     self.backgroundColor=HostCard();
     self.contentView.backgroundColor=HostCard();
+    HostSetLayerBorderColor(self,HostBorder());
     _titleLabel.textColor=HostText();
     _detailLabel.textColor=HostSecondaryText();
     _titleLabel.text=title;
@@ -269,6 +272,16 @@
     ResourceImportOption option=(ResourceImportOption)storedOption.integerValue;
     void (^selection)(ResourceImportOption)=self.onSelect;
     [self dismissViewControllerAnimated:YES completion:^{if(selection)selection(option);}];
+}
+- (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoint)point {
+    NSArray *options=[self optionsForSection:indexPath.section];if(indexPath.row<0||indexPath.row>=options.count)return nil;
+    NSDictionary *item=options[indexPath.row];NSString *title=item[@"title"]?:@"导入方式",*detail=item[@"detail"]?:@"";
+    __weak typeof(self) weakSelf=self;
+    return [UIContextMenuConfiguration configurationWithIdentifier:indexPath previewProvider:nil actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggested){
+        UIAction *select=[UIAction actionWithTitle:@"使用此方式导入" image:[UIImage systemImageNamed:item[@"icon"]?:@"plus.circle"] identifier:nil handler:^(__unused UIAction *a){[weakSelf tableView:tableView didSelectRowAtIndexPath:indexPath];}];
+        UIAction *copy=[UIAction actionWithTitle:@"复制导入说明" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){UIPasteboard.generalPasteboard.string=[NSString stringWithFormat:@"%@：%@",title,detail];}];
+        return [UIMenu menuWithTitle:title children:@[select,copy]];
+    }];
 }
 - (void)closeSheet { [self dismissViewControllerAnimated:YES completion:nil]; }
 @end

@@ -227,7 +227,7 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
     self.refreshButton=[self iconButton:@"arrow.clockwise" label:@"刷新影片分集" action:@selector(refreshDetail)];self.refreshButton.accessibilityIdentifier=@"media-episode-refresh";[header addArrangedSubview:self.refreshButton];[self.refreshButton.widthAnchor constraintEqualToConstant:44].active=YES;[self.refreshButton.heightAnchor constraintEqualToConstant:44].active=YES;
     self.refreshSpinner=[[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];self.refreshSpinner.translatesAutoresizingMaskIntoConstraints=NO;self.refreshSpinner.color=UIColor.whiteColor;self.refreshSpinner.hidesWhenStopped=YES;[self.refreshButton addSubview:self.refreshSpinner];[NSLayoutConstraint activateConstraints:@[[self.refreshSpinner.centerXAnchor constraintEqualToAnchor:self.refreshButton.centerXAnchor],[self.refreshSpinner.centerYAnchor constraintEqualToAnchor:self.refreshButton.centerYAnchor]]];
 
-    self.scrollView=[UIScrollView new];self.scrollView.translatesAutoresizingMaskIntoConstraints=NO;self.scrollView.alwaysBounceVertical=YES;self.scrollView.showsVerticalScrollIndicator=NO;self.scrollView.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever;[self.view addSubview:self.scrollView];
+    self.scrollView=[UIScrollView new];self.scrollView.translatesAutoresizingMaskIntoConstraints=NO;self.scrollView.alwaysBounceVertical=YES;self.scrollView.showsVerticalScrollIndicator=NO;self.scrollView.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever;UIRefreshControl *epRefresh=[UIRefreshControl new];epRefresh.tintColor=HostAccent();epRefresh.accessibilityIdentifier=@"media.episode.refreshControl";[epRefresh addTarget:self action:@selector(refreshDetail) forControlEvents:UIControlEventValueChanged];self.scrollView.refreshControl=epRefresh;[self.view addSubview:self.scrollView];
     self.contentStack=[UIStackView new];self.contentStack.translatesAutoresizingMaskIntoConstraints=NO;self.contentStack.axis=UILayoutConstraintAxisVertical;self.contentStack.spacing=15;self.contentStack.layoutMargins=UIEdgeInsetsMake(8,16,24,16);self.contentStack.layoutMarginsRelativeArrangement=YES;[self.scrollView addSubview:self.contentStack];
 
     UIView *playBar=[UIView new];playBar.translatesAutoresizingMaskIntoConstraints=NO;playBar.backgroundColor=[UIColor colorWithRed:.035 green:.039 blue:.052 alpha:.97];playBar.layer.borderColor=[UIColor colorWithWhite:1 alpha:.10].CGColor;playBar.layer.borderWidth=.6;[self.view addSubview:playBar];
@@ -295,12 +295,12 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
     self.heroCredits.text=credits.count?[credits componentsJoinedByString:@"\n"]:@"";self.heroCredits.hidden=!credits.count;
 }
 - (void)refreshDetail {
-    if(!self.refreshClient||self.refreshSpinner.isAnimating)return;
+    if(!self.refreshClient||self.refreshSpinner.isAnimating){[self.scrollView.refreshControl endRefreshing];return;}
     NSUInteger generation=++self.refreshGeneration;[self.refreshSpinner startAnimating];self.refreshButton.tintColor=UIColor.clearColor;
     NSMutableDictionary *args=[@{@"id":self.item[@"id"]?:self.detail[@"id"]?:@"",@"refresh":@YES} mutableCopy];if(self.provider.length)args[@"provider"]=self.provider;
     __weak typeof(self) weakSelf=self;
     [self.refreshClient call:@"detail" arguments:args correlationID:self.correlationID completion:^(id result,NSError *error){
-        MediaEpisodeSelectionViewController *owner=weakSelf;if(!owner||owner.refreshGeneration!=generation)return;[owner.refreshSpinner stopAnimating];owner.refreshButton.tintColor=UIColor.whiteColor;
+        MediaEpisodeSelectionViewController *owner=weakSelf;if(!owner||owner.refreshGeneration!=generation)return;[owner.scrollView.refreshControl endRefreshing];[owner.refreshSpinner stopAnimating];owner.refreshButton.tintColor=UIColor.whiteColor;
         NSDictionary *sanitized=MediaEpisodeSelectionSanitizedDetail(result);if(error||!sanitized){owner.statusLabel.text=[NSString stringWithFormat:@"刷新失败，保留当前分集：%@",error.localizedDescription?:@"来源未返回详情"];owner.statusLabel.hidden=NO;return;}
         owner.generation++;owner.inFlightEpisodeSignature=nil;owner.inFlightEpisodeStartedAt=0;[owner.client cancel];[owner.playSpinner stopAnimating];owner.playSpinner.hidden=YES;owner.continueButton.enabled=YES;
         NSDictionary *oldSeason=owner.currentSeason;NSString *seasonID=[oldSeason[@"id"] description]?:@"",*seasonName=[oldSeason[@"name"] description]?:@"";

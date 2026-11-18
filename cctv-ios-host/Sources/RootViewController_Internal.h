@@ -686,6 +686,7 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 @end
 
 @interface RootViewController (Catalog)
+- (NSDictionary *)anyCatchupChannelForStation:(NSDictionary *)channel;
 - (void)loadChannels;
 - (UISwipeActionsConfiguration *)tableView:(UITableView *)t trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)ip;
 - (NSArray<NSString *> *)currentCatalogGroupTitles;
@@ -746,6 +747,7 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 @end
 
 @interface RootViewController (Playback)
+- (void)completeNativeFirstRenderIfNeededForTrigger:(NSString *)trigger;
 - (void)registerCallbackProtocol;
 - (void)activateAudioSession;
 - (void)configureSDKLogging;

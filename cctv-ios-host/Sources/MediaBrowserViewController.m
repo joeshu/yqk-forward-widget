@@ -92,7 +92,7 @@ static BOOL MediaBrowserIdentityNameMatches(id value, NSString *savedName) {
 - (BOOL)shouldAutorotate {return YES;}
 - (UIInterfaceOrientationMask)supportedInterfaceOrientations {return UIInterfaceOrientationMaskPortrait;}
 - (void)viewDidLoad {
-    [super viewDidLoad];self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();self.title=self.screenTitle?:@"影视资源";self.shown=self.choices?:@[];self.selectedScope=@"*";self.tableView.backgroundColor=HostBackground();self.tableView.rowHeight=UITableViewAutomaticDimension;self.tableView.estimatedRowHeight=76;self.tableView.tableFooterView=[UIView new];
+    [super viewDidLoad];self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();self.title=self.screenTitle?:@"影视资源";self.shown=self.choices?:@[];self.selectedScope=@"*";self.tableView.backgroundColor=HostBackground();self.tableView.keyboardDismissMode=UIScrollViewKeyboardDismissModeOnDrag;self.tableView.rowHeight=UITableViewAutomaticDimension;self.tableView.estimatedRowHeight=76;self.tableView.tableFooterView=[UIView new];
     self.search=[[UISearchController alloc] initWithSearchResultsController:nil];self.search.obscuresBackgroundDuringPresentation=NO;self.search.searchResultsUpdater=self;self.search.searchBar.placeholder=([self.title containsString:@"平台"]||[self.title containsString:@"站点"])?@"搜索当前资源的站点":([self.title containsString:@"资源"]?@"搜索已导入资源":@"搜索选项");self.search.searchBar.autocapitalizationType=UITextAutocapitalizationTypeNone;self.navigationItem.searchController=self.search;self.navigationItem.hidesSearchBarWhenScrolling=NO;self.definesPresentationContext=YES;
     self.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(closePicker)];
     [self configureScopes];
@@ -111,6 +111,22 @@ static BOOL MediaBrowserIdentityNameMatches(id value, NSString *savedName) {
 - (void)reloadThemeAppearance {self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();if(!self.isViewLoaded)return;self.view.backgroundColor=HostBackground();self.view.tintColor=HostAccent();self.tableView.backgroundColor=HostBackground();self.tableView.separatorColor=HostSeparator();for(UIButton *button in self.scopeStack.arrangedSubviews){BOOL selected=[button.accessibilityIdentifier isEqual:self.selectedScope];HostStylePillButton(button,selected);MediaBrowserApplyScaledPillFont(button);}[self.tableView reloadData];}
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)index {UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:@"source"];if(!cell)cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"source"];NSDictionary *choice=index.row<self.shown.count?self.shown[index.row]:nil;if(![choice isKindOfClass:NSDictionary.class]){cell.textLabel.text=@"";cell.detailTextLabel.text=@"";cell.accessoryType=UITableViewCellAccessoryNone;return cell;}BOOL selected=[choice[@"selected"] isKindOfClass:NSNumber.class]?[choice[@"selected"] boolValue]:NO;cell.backgroundColor=selected?HostSelectedSurface():HostCard();cell.layer.cornerRadius=14;cell.layer.cornerCurve=kCACornerCurveContinuous;cell.clipsToBounds=YES;cell.layer.borderWidth=selected?1.1:0.6;HostSetLayerBorderColor(cell,selected?HostAccent():HostBorder());cell.textLabel.text=[choice[@"name"] isKindOfClass:NSString.class]?choice[@"name"]:@"";cell.textLabel.textColor=selected?HostAccent():HostText();cell.textLabel.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleHeadline] scaledFontForFont:[UIFont systemFontOfSize:15.5 weight:selected?UIFontWeightBold:UIFontWeightSemibold]];cell.textLabel.adjustsFontForContentSizeCategory=YES;cell.textLabel.numberOfLines=0;NSMutableArray *details=[NSMutableArray array];NSString *subtitle=[choice[@"subtitle"] isKindOfClass:NSString.class]?choice[@"subtitle"]:nil;if(subtitle.length)[details addObject:subtitle];NSString *url=[choice[@"url"] isKindOfClass:NSString.class]?choice[@"url"]:nil;if(url.length)[details addObject:url];cell.detailTextLabel.text=[details componentsJoinedByString:@"\n"];cell.detailTextLabel.textColor=HostSecondaryText();cell.detailTextLabel.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:12 weight:UIFontWeightRegular]];cell.detailTextLabel.adjustsFontForContentSizeCategory=YES;cell.detailTextLabel.numberOfLines=0;cell.tintColor=HostAccent();cell.accessoryType=selected?UITableViewCellAccessoryCheckmark:UITableViewCellAccessoryDisclosureIndicator;return cell;}
 - (void)updateSearchResultsForSearchController:(UISearchController *)controller {NSString *query=controller.searchBar.text?:@"";self.shown=[self.choices filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *choice,NSDictionary *bindings){if(![choice isKindOfClass:NSDictionary.class])return NO;NSString *scope=[choice[@"scope"] isKindOfClass:NSString.class]?choice[@"scope"]:@"";if(![self.selectedScope isEqual:@"*"]&&![scope isEqual:self.selectedScope])return NO;BOOL matches=![query length];for(NSString *key in @[@"name",@"subtitle",@"url"]){NSString *value=[choice[key] isKindOfClass:NSString.class]?choice[key]:@"";if(query.length&&[value rangeOfString:query options:NSCaseInsensitiveSearch|NSDiacriticInsensitiveSearch].location!=NSNotFound)matches=YES;}return matches;}]];if(!self.shown.count){UILabel *empty=[UILabel new];empty.text=query.length?@"没有匹配的选项，请修改或清除搜索词":@"当前分组暂无选项，请切换到全部";empty.numberOfLines=0;empty.textAlignment=NSTextAlignmentCenter;empty.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];empty.adjustsFontForContentSizeCategory=YES;empty.textColor=HostSecondaryText();empty.accessibilityIdentifier=@"media-picker-empty";self.tableView.backgroundView=empty;}else self.tableView.backgroundView=nil;[self.tableView reloadData];}
+- (void)tableView:(UITableView *)tableView didHighlightRowAtIndexPath:(NSIndexPath *)index {UITableViewCell *c=[tableView cellForRowAtIndexPath:index];if(!c||UIAccessibilityIsReduceMotionEnabled())return;[UIView animateWithDuration:0.10 delay:0 usingSpringWithDamping:0.8 initialSpringVelocity:0.2 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{c.transform=CGAffineTransformMakeScale(0.982,0.982);} completion:nil];}
+- (void)tableView:(UITableView *)tableView didUnhighlightRowAtIndexPath:(NSIndexPath *)index {UITableViewCell *c=[tableView cellForRowAtIndexPath:index];if(!c)return;[UIView animateWithDuration:0.22 delay:0 usingSpringWithDamping:0.75 initialSpringVelocity:0.2 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{c.transform=CGAffineTransformIdentity;} completion:nil];}
+- (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)index point:(CGPoint)point {
+    if(index.row<0||index.row>=self.shown.count)return nil;
+    NSDictionary *choice=self.shown[index.row];if(![choice isKindOfClass:NSDictionary.class])return nil;
+    NSString *name=[choice[@"name"] isKindOfClass:NSString.class]?choice[@"name"]:@"选项";
+    NSString *url=[choice[@"url"] isKindOfClass:NSString.class]?choice[@"url"]:@"";
+    __weak typeof(self) weakSelf=self;
+    return [UIContextMenuConfiguration configurationWithIdentifier:@"media.picker.context" previewProvider:nil actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggested){
+        NSMutableArray<UIMenuElement *> *actions=[NSMutableArray array];
+        [actions addObject:[UIAction actionWithTitle:@"选择此项" image:[UIImage systemImageNamed:@"checkmark.circle"] identifier:nil handler:^(__unused UIAction *a){void(^onSelect)(NSDictionary *)=weakSelf.onSelect;[weakSelf.navigationController dismissViewControllerAnimated:YES completion:^{if(onSelect)onSelect(choice);}];}]];
+        [actions addObject:[UIAction actionWithTitle:@"复制名称" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){UIPasteboard.generalPasteboard.string=name;}]];
+        if(url.length)[actions addObject:[UIAction actionWithTitle:@"复制地址" image:[UIImage systemImageNamed:@"link"] identifier:nil handler:^(__unused UIAction *a){UIPasteboard.generalPasteboard.string=url;}]];
+        return [UIMenu menuWithTitle:name children:actions];
+    }];
+}
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)index {if(index.row<0||index.row>=self.shown.count)return;NSDictionary *choice=self.shown[index.row];if(![choice isKindOfClass:NSDictionary.class])return;void(^onSelect)(NSDictionary *)=self.onSelect;[self.navigationController dismissViewControllerAnimated:YES completion:^{if(onSelect)onSelect(choice);}];}
 @end
 
@@ -332,7 +348,7 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
     [button.heightAnchor constraintGreaterThanOrEqualToConstant:42].active=YES;[button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];return button;
 }
 - (void)buildDetailLayout {
-    self.scrollView=[UIScrollView new];self.scrollView.translatesAutoresizingMaskIntoConstraints=NO;self.scrollView.alwaysBounceVertical=YES;self.scrollView.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever;self.scrollView.accessibilityIdentifier=@"media-detail-scroll";[self.view addSubview:self.scrollView];
+    self.scrollView=[UIScrollView new];self.scrollView.translatesAutoresizingMaskIntoConstraints=NO;self.scrollView.alwaysBounceVertical=YES;self.scrollView.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever;self.scrollView.accessibilityIdentifier=@"media-detail-scroll";UIRefreshControl *detailRefresh=[UIRefreshControl new];detailRefresh.tintColor=HostAccent();detailRefresh.accessibilityIdentifier=@"media.detail.refresh";[detailRefresh addTarget:self action:@selector(reloadDetail) forControlEvents:UIControlEventValueChanged];self.scrollView.refreshControl=detailRefresh;[self.view addSubview:self.scrollView];
     self.contentStack=[UIStackView new];self.contentStack.translatesAutoresizingMaskIntoConstraints=NO;self.contentStack.axis=UILayoutConstraintAxisVertical;self.contentStack.spacing=9;
     self.contentStack.layoutMargins=UIEdgeInsetsMake(0,14,20,14);self.contentStack.layoutMarginsRelativeArrangement=YES;[self.scrollView addSubview:self.contentStack];
     self.detailScrollTopConstraint=[self.scrollView.topAnchor constraintEqualToAnchor:self.view.topAnchor];
@@ -561,7 +577,7 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
             }];
             return;
         }
-        [owner.spinner stopAnimating];
+        [owner.spinner stopAnimating];[owner.scrollView.refreshControl endRefreshing];
         NSInteger elapsedMS=(NSInteger)(MAX(0,CACurrentMediaTime()-startedAt)*1000);
         if(error||![result isKindOfClass:NSDictionary.class]){
             BOOL connRefused=[error.domain isEqualToString:NSURLErrorDomain]&&error.code==NSURLErrorCannotConnectToHost;
@@ -920,6 +936,7 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
 @end
 @implementation MediaFavoritesViewController
 - (instancetype)init {return [super initWithStyle:UITableViewStyleInsetGrouped];}
+- (void)viewWillAppear:(BOOL)animated {[super viewWillAppear:animated];[self reloadFavoriteEntries];[self.tableView reloadData];}
 - (void)viewDidLoad {
     [super viewDidLoad];self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();self.title=@"影视收藏";self.view.backgroundColor=HostBackground();self.view.tintColor=HostAccent();self.tableView.backgroundColor=HostBackground();self.tableView.separatorColor=HostSeparator();self.tableView.rowHeight=MAX(92,24+2*[UIFont preferredFontForTextStyle:UIFontTextStyleHeadline].lineHeight+2*[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1].lineHeight);self.tableView.estimatedRowHeight=92;
     [self reloadFavoriteEntries];
@@ -953,6 +970,21 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
     NSMutableArray *parts=[NSMutableArray array];if([entry[@"sourceName"] length])[parts addObject:entry[@"sourceName"]];if([entry[@"provider"] length])[parts addObject:entry[@"provider"]];if([item[@"remarks"] length])[parts addObject:item[@"remarks"]];cell.detailTextLabel.text=[parts componentsJoinedByString:@" · "];cell.detailTextLabel.textColor=HostSecondaryText();cell.detailTextLabel.numberOfLines=2;cell.accessoryType=UITableViewCellAccessoryDisclosureIndicator;
     NSString *poster=[item[@"poster"] isKindOfClass:NSString.class]?item[@"poster"]:@"";if(poster.length)MediaLoadPosterWithRetry(poster,cell.imageView,1);else{cell.imageView.image=[UIImage systemImageNamed:@"film"];cell.imageView.accessibilityIdentifier=nil;cell.imageView.contentMode=UIViewContentModeCenter;cell.imageView.tintColor=HostSecondaryText();}return cell;
 }
+- (void)tableView:(UITableView *)tableView willDisplayHeaderView:(UIView *)view forSection:(NSInteger)section {HostStyleSectionHeaderView(view);}
+- (void)tableView:(UITableView *)tableView didHighlightRowAtIndexPath:(NSIndexPath *)indexPath {UITableViewCell *c=[tableView cellForRowAtIndexPath:indexPath];if(!c||UIAccessibilityIsReduceMotionEnabled())return;[UIView animateWithDuration:0.10 delay:0 usingSpringWithDamping:0.8 initialSpringVelocity:0.2 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{c.transform=CGAffineTransformMakeScale(0.982,0.982);} completion:nil];}
+- (void)tableView:(UITableView *)tableView didUnhighlightRowAtIndexPath:(NSIndexPath *)indexPath {UITableViewCell *c=[tableView cellForRowAtIndexPath:indexPath];if(!c)return;[UIView animateWithDuration:0.22 delay:0 usingSpringWithDamping:0.75 initialSpringVelocity:0.2 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{c.transform=CGAffineTransformIdentity;} completion:nil];}
+- (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoint)point {
+    if(indexPath.row<0||indexPath.row>=self.entries.count)return nil;
+    NSDictionary *entry=self.entries[indexPath.row],*item=entry[@"item"]?:@{};
+    NSString *title=item[@"name"]?:@"影片",*favKey=entry[@"__favoriteKey"]?:@"";
+    __weak typeof(self) weakSelf=self;
+    return [UIContextMenuConfiguration configurationWithIdentifier:@"media.favorite.context" previewProvider:nil actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggested){
+        UIAction *open=[UIAction actionWithTitle:@"打开影片详情" image:[UIImage systemImageNamed:@"play.rectangle"] identifier:nil handler:^(__unused UIAction *a){if(weakSelf.onSelect)weakSelf.onSelect(entry);}];
+        UIAction *copy=[UIAction actionWithTitle:@"复制影片名称" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){UIPasteboard.generalPasteboard.string=title;}];
+        UIAction *unfav=[UIAction actionWithTitle:@"取消收藏" image:[UIImage systemImageNamed:@"heart.slash"] identifier:nil handler:^(__unused UIAction *a){if(!favKey.length)return;NSMutableDictionary *saved=[[NSUserDefaults.standardUserDefaults dictionaryForKey:@"cctv.mediaFavorites.v1"] mutableCopy]?:[NSMutableDictionary dictionary];[saved removeObjectForKey:favKey];[NSUserDefaults.standardUserDefaults setObject:saved forKey:@"cctv.mediaFavorites.v1"];[weakSelf reloadFavoriteEntries];[weakSelf.tableView reloadData];}];unfav.attributes=UIMenuElementAttributesDestructive;
+        return [UIMenu menuWithTitle:title children:@[open,copy,unfav]];
+    }];
+}
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {[tableView deselectRowAtIndexPath:indexPath animated:YES];if(self.onSelect&&indexPath.row<self.entries.count)self.onSelect(self.entries[indexPath.row]);}
 - (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
     if(indexPath.row>=self.entries.count)return nil;
@@ -974,6 +1006,7 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
 @end
 @implementation MediaWatchHistoryViewController
 - (instancetype)init { return [super initWithStyle:UITableViewStyleInsetGrouped]; }
+- (void)viewWillAppear:(BOOL)animated {[super viewWillAppear:animated];self.entries=MediaPlaybackStateStore.watchHistory;[self updateClearHistoryButton];[self.tableView reloadData];}
 - (void)viewDidLoad {
     [super viewDidLoad];self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();self.title=@"观看历史";self.view.backgroundColor=HostBackground();self.view.tintColor=HostAccent();self.tableView.backgroundColor=HostBackground();self.tableView.separatorColor=HostSeparator();self.tableView.rowHeight=MAX(92,24+2*[UIFont preferredFontForTextStyle:UIFontTextStyleHeadline].lineHeight+2*[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1].lineHeight);self.tableView.estimatedRowHeight=92;
     self.entries=MediaPlaybackStateStore.watchHistory;
@@ -1000,6 +1033,21 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
     float ratio=[entry[@"completed"] boolValue]?1.0f:(duration>0?(float)MIN(1.0,MAX(0.04,position/duration)):0.15f);
     watchProgress.progress=ratio;watchProgress.frame=CGRectMake(16,MAX(0,CGRectGetHeight(cell.contentView.bounds)-3),MAX(0,CGRectGetWidth(cell.contentView.bounds)-32),2.5);
     NSString *poster=[item[@"poster"] isKindOfClass:NSString.class]?item[@"poster"]:@"";if(poster.length)MediaLoadPosterWithRetry(poster,cell.imageView,1);else{cell.imageView.image=[UIImage systemImageNamed:@"film"];cell.imageView.accessibilityIdentifier=nil;cell.imageView.contentMode=UIViewContentModeCenter;cell.imageView.tintColor=HostSecondaryText();}return cell;
+}
+- (void)tableView:(UITableView *)tableView willDisplayHeaderView:(UIView *)view forSection:(NSInteger)section {HostStyleSectionHeaderView(view);}
+- (void)tableView:(UITableView *)tableView didHighlightRowAtIndexPath:(NSIndexPath *)indexPath {UITableViewCell *c=[tableView cellForRowAtIndexPath:indexPath];if(!c||UIAccessibilityIsReduceMotionEnabled())return;[UIView animateWithDuration:0.10 delay:0 usingSpringWithDamping:0.8 initialSpringVelocity:0.2 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{c.transform=CGAffineTransformMakeScale(0.982,0.982);} completion:nil];}
+- (void)tableView:(UITableView *)tableView didUnhighlightRowAtIndexPath:(NSIndexPath *)indexPath {UITableViewCell *c=[tableView cellForRowAtIndexPath:indexPath];if(!c)return;[UIView animateWithDuration:0.22 delay:0 usingSpringWithDamping:0.75 initialSpringVelocity:0.2 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{c.transform=CGAffineTransformIdentity;} completion:nil];}
+- (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoint)point {
+    if(indexPath.row<0||indexPath.row>=self.entries.count)return nil;
+    NSDictionary *entry=self.entries[indexPath.row],*item=entry[@"item"]?:@{};
+    NSString *title=item[@"name"]?:@"影片",*ep=entry[@"episodeName"]?:@"";
+    __weak typeof(self) weakSelf=self;
+    return [UIContextMenuConfiguration configurationWithIdentifier:@"media.history.context" previewProvider:nil actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggested){
+        UIAction *resume=[UIAction actionWithTitle:@"继续观看" image:[UIImage systemImageNamed:@"play.fill"] identifier:nil handler:^(__unused UIAction *a){if(weakSelf.onSelect)weakSelf.onSelect(entry);}];
+        UIAction *copy=[UIAction actionWithTitle:@"复制影片与分集" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){UIPasteboard.generalPasteboard.string=ep.length?[NSString stringWithFormat:@"%@ · %@",title,ep]:title;}];
+        UIAction *remove=[UIAction actionWithTitle:@"移除此条记录" image:[UIImage systemImageNamed:@"trash"] identifier:nil handler:^(__unused UIAction *a){[MediaPlaybackStateStore removeHistoryEntryWithKey:entry[@"key"]];weakSelf.entries=MediaPlaybackStateStore.watchHistory;[weakSelf updateClearHistoryButton];[weakSelf.tableView reloadData];}];remove.attributes=UIMenuElementAttributesDestructive;
+        return [UIMenu menuWithTitle:title children:@[resume,copy,remove]];
+    }];
 }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {[tableView deselectRowAtIndexPath:indexPath animated:YES];if(self.onSelect&&indexPath.row<self.entries.count)self.onSelect(self.entries[indexPath.row]);}
 - (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {

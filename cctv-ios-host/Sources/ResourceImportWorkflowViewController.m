@@ -580,6 +580,34 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
     return 1+(failed>0?1:0)+(ready>0?2:0);
 }
 - (void)tableView:(UITableView *)tableView willDisplayHeaderView:(UIView *)view forSection:(NSInteger)section { HostStyleSectionHeaderView(view); }
+- (void)tableView:(UITableView *)tableView didHighlightRowAtIndexPath:(NSIndexPath *)ip { if(ip.section==0&&ip.row==0)return; UITableViewCell *c=[tableView cellForRowAtIndexPath:ip]; if(!c||UIAccessibilityIsReduceMotionEnabled())return; [UIView animateWithDuration:0.10 delay:0 usingSpringWithDamping:0.8 initialSpringVelocity:0.2 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{c.transform=CGAffineTransformMakeScale(0.982,0.982);} completion:nil]; }
+- (void)tableView:(UITableView *)tableView didUnhighlightRowAtIndexPath:(NSIndexPath *)ip { UITableViewCell *c=[tableView cellForRowAtIndexPath:ip]; if(!c)return; [UIView animateWithDuration:0.22 delay:0 usingSpringWithDamping:0.75 initialSpringVelocity:0.2 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{c.transform=CGAffineTransformIdentity;} completion:nil]; }
+- (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)ip point:(CGPoint)point {
+    if(ip.section!=1||ip.row<=0||ip.row-1>=(NSInteger)self.candidates.count)return nil;
+    NSUInteger index=(NSUInteger)(ip.row-1);
+    NSMutableDictionary *row=self.candidates[index];
+    NSString *name=row[@"name"]?:@"资源";
+    NSString *summary=row[@"saveError"]?:row[@"error"]?:row[@"summary"]?:@"";
+    __weak typeof(self) weakSelf=self;
+    return [UIContextMenuConfiguration configurationWithIdentifier:ip previewProvider:nil actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggested){
+        NSMutableArray<UIMenuElement *> *actions=[NSMutableArray array];
+        if(!row[@"saved"]&&!row[@"error"]){
+            BOOL sel=[row[@"selected"] boolValue];
+            [actions addObject:[UIAction actionWithTitle:sel?@"取消勾选此项":@"勾选此项" image:[UIImage systemImageNamed:sel?@"circle":@"checkmark.circle.fill"] identifier:nil handler:^(__unused UIAction *a){weakSelf.editRevision++;row[@"selected"]=@(!sel);weakSelf.finished=NO;[weakSelf updateView];}]];
+            [actions addObject:[UIAction actionWithTitle:@"重命名此资源" image:[UIImage systemImageNamed:@"pencil"] identifier:nil handler:^(__unused UIAction *a){[weakSelf promptRenameCandidateAtIndex:index];}]];
+        }
+        if(row[@"error"]||row[@"saveError"]){
+            [actions addObject:[UIAction actionWithTitle:@"重试此项" image:[UIImage systemImageNamed:@"arrow.clockwise"] identifier:nil handler:^(__unused UIAction *a){[weakSelf retryCandidateAtIndex:index];}]];
+        }
+        [actions addObject:[UIAction actionWithTitle:@"复制名称与识别摘要" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){UIPasteboard.generalPasteboard.string=summary.length?[NSString stringWithFormat:@"%@ · %@",name,summary]:name;}]];
+        if(!weakSelf.busy){
+            UIAction *remove=[UIAction actionWithTitle:@"从预览列表移除" image:[UIImage systemImageNamed:@"trash"] identifier:nil handler:^(__unused UIAction *a){if(index<weakSelf.candidates.count){NSDictionary *r=weakSelf.candidates[index];if(r[@"service"]&&![r[@"saved"] boolValue])[ServiceStore remove:r[@"service"][@"id"]];[weakSelf.candidates removeObjectAtIndex:index];[weakSelf updateView];}}];
+            remove.attributes=UIMenuElementAttributesDestructive;
+            [actions addObject:remove];
+        }
+        return [UIMenu menuWithTitle:name children:actions];
+    }];
+}
 - (void)tableView:(UITableView *)tableView willDisplayFooterView:(UIView *)view forSection:(NSInteger)section { HostStyleSectionFooterView(view); }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {return @[@"选择导入方式",self.stage?:@"识别预览",@"任务操作"][section];}
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {

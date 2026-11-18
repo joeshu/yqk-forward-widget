@@ -109,6 +109,8 @@ static void MediaFeedLoadPosterWithRetry(NSString *url, UIImageView *imageView, 
 @property(nonatomic,strong) UIButton *actionButton;
 @property(nonatomic,copy) dispatch_block_t onAction;
 @end
+
+
 @implementation MediaFeedHeader
 - (instancetype)initWithFrame:(CGRect)frame {if((self=[super initWithFrame:frame])){self.accentBar=[UIView new];self.accentBar.backgroundColor=HostAccent();self.accentBar.layer.cornerRadius=1.75;self.accentBar.layer.cornerCurve=kCACornerCurveContinuous;[self addSubview:self.accentBar];self.titleLabel=[UILabel new];self.titleLabel.textColor=HostText();self.titleLabel.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleHeadline] scaledFontForFont:[UIFont systemFontOfSize:17 weight:UIFontWeightSemibold]];self.titleLabel.adjustsFontForContentSizeCategory=YES;self.titleLabel.lineBreakMode=NSLineBreakByTruncatingTail;[self addSubview:self.titleLabel];self.actionButton=[UIButton buttonWithType:UIButtonTypeSystem];self.actionButton.titleLabel.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleSubheadline] scaledFontForFont:[UIFont systemFontOfSize:13.5 weight:UIFontWeightSemibold]];self.actionButton.tintColor=HostSecondaryText();self.actionButton.titleLabel.adjustsFontForContentSizeCategory=YES;[self.actionButton addTarget:self action:@selector(performAction) forControlEvents:UIControlEventTouchUpInside];[self addSubview:self.actionButton];}return self;}
 - (void)prepareForReuse {[super prepareForReuse];self.onAction=nil;self.titleLabel.text=nil;self.actionButton.hidden=YES;}
@@ -255,6 +257,22 @@ static void MediaFeedLoadPosterWithRetry(NSString *url, UIImageView *imageView, 
 }
 - (UICollectionReusableView *)collectionView:(UICollectionView *)collectionView viewForSupplementaryElementOfKind:(NSString *)kind atIndexPath:(NSIndexPath *)indexPath {MediaFeedHeader *header=[self dequeueReusableSupplementaryViewOfKind:kind withReuseIdentifier:@"feed.header" forIndexPath:indexPath];NSDictionary *section=[self sectionAt:indexPath.section];header.titleLabel.textColor=HostText();header.actionButton.tintColor=HostSecondaryText();header.titleLabel.text=MediaFeedString(section[@"title"]);NSString *action=MediaFeedString(section[@"actionTitle"]);[header.actionButton setTitle:action forState:UIControlStateNormal];header.actionButton.hidden=!action.length;header.actionButton.accessibilityLabel=[NSString stringWithFormat:@"%@%@",action,header.titleLabel.text?:@""];__weak typeof(self) weakSelf=self;header.onAction=^{MediaFeedView *owner=weakSelf;if(owner.onSelectSection)owner.onSelectSection(section);};return header;}
 - (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:(NSIndexPath *)indexPath {NSDictionary *section=[self sectionAt:indexPath.section];NSString *kind=MediaFeedString(section[@"kind"]);if([@[@"hero",@"status",@"skeleton"] containsObject:kind])return;NSArray *items=MediaFeedItems(section);if(indexPath.item<items.count&&self.onSelectItem)self.onSelectItem(items[indexPath.item],section);}
+- (UIContextMenuConfiguration *)collectionView:(UICollectionView *)collectionView contextMenuConfigurationForItemAtIndexPath:(NSIndexPath *)indexPath point:(CGPoint)point {
+    NSDictionary *section=[self sectionAt:indexPath.section];NSString *kind=MediaFeedString(section[@"kind"]);
+    if([@[@"hero",@"status",@"skeleton"] containsObject:kind])return nil;
+    NSArray *items=MediaFeedItems(section);if(indexPath.item<0||indexPath.item>=(NSInteger)items.count)return nil;
+    NSDictionary *item=[items[indexPath.item] isKindOfClass:NSDictionary.class]?items[indexPath.item]:nil;if(!item)return nil;
+    NSString *name=MediaFeedString(item[@"name"]).length?item[@"name"]:@"影片";
+    NSString *remarks=MediaFeedString(item[@"remarks"]);
+    __weak typeof(self) weakSelf=self;
+    return [UIContextMenuConfiguration configurationWithIdentifier:indexPath previewProvider:nil actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggested){
+        NSMutableArray<UIMenuElement *> *actions=[NSMutableArray array];
+        [actions addObject:[UIAction actionWithTitle:[item[@"directory"] boolValue]?@"打开文件夹":@"查看影片详情" image:[UIImage systemImageNamed:[item[@"directory"] boolValue]?@"folder":@"play.rectangle"] identifier:nil handler:^(__unused UIAction *a){if(weakSelf.onSelectItem)weakSelf.onSelectItem(item,section);}]];
+        [actions addObject:[UIAction actionWithTitle:@"复制影片名称" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){UIPasteboard.generalPasteboard.string=name;}]];
+        if(remarks.length)[actions addObject:[UIAction actionWithTitle:@"复制名称与备注" image:[UIImage systemImageNamed:@"list.clipboard"] identifier:nil handler:^(__unused UIAction *a){UIPasteboard.generalPasteboard.string=[NSString stringWithFormat:@"%@ (%@)",name,remarks];}]];
+        return [UIMenu menuWithTitle:name children:actions];
+    }];
+}
 - (void)collectionView:(UICollectionView *)collectionView willDisplayCell:(UICollectionViewCell *)cell forItemAtIndexPath:(NSIndexPath *)indexPath {if(self.visibleRenderSerial!=self.renderSerial){self.visibleRenderSerial=self.renderSerial;[RuntimeDiagnostics.shared recordLifecycleCheckpoint:@"media_grid_first_cell_will_display" fields:[self diagnosticFieldsForIndexPath:indexPath]];}if([cell isKindOfClass:MediaFeedHeroCell.class])((MediaFeedHeroCell *)cell).feedVisible=YES;[self notifyVisibleCategories];}
 - (void)collectionView:(UICollectionView *)collectionView didEndDisplayingCell:(UICollectionViewCell *)cell forItemAtIndexPath:(NSIndexPath *)indexPath {if([cell isKindOfClass:MediaFeedHeroCell.class])((MediaFeedHeroCell *)cell).feedVisible=NO;}
 - (void)notifyVisibleCategories {

@@ -44,6 +44,23 @@
          (unsigned long)[[self.allChannels valueForKeyPath:@"@sum.routes.@count"] integerValue]];
 }
 
+- (UIContextMenuConfiguration *)tableView:(UITableView *)t contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)ip point:(CGPoint)point {
+    NSArray *rows=[self channelsForSection:ip.section tableView:t];
+    if(ip.row<0||ip.row>=(NSInteger)rows.count)return nil;
+    NSDictionary *ch=rows[(NSUInteger)ip.row];__weak typeof(self) w=self;
+    return [UIContextMenuConfiguration configurationWithIdentifier:ch[@"id"] previewProvider:nil actionProvider:^UIMenu *(NSArray *suggested){
+        BOOL favorite=[w.favorites containsObject:ch[@"id"]];
+        UIAction *fav=[UIAction actionWithTitle:favorite?@"取消收藏":@"收藏频道" image:[UIImage systemImageNamed:favorite?@"heart.slash":@"heart"] identifier:nil handler:^(UIAction *a){if(favorite)[w.favorites removeObject:ch[@"id"]];else[w.favorites addObject:ch[@"id"]];[NSUserDefaults.standardUserDefaults setObject:w.favorites forKey:@"favorites"];[w configureCatalogNavigation];[w applyFilter];}];
+        UIAction *route=[UIAction actionWithTitle:@"线路与节目单" image:[UIImage systemImageNamed:@"list.bullet"] identifier:nil handler:^(UIAction *a){if([ch[@"remoteURL"] length])[w openEPGforChannel:ch[@"id"] name:ch[@"name"]];else[w presentRouteSheetForChannel:ch fromIndexPath:ip];}];
+        NSMutableArray *actions=[NSMutableArray arrayWithObjects:fav,route,nil];
+        if([ch[@"remoteURL"] length]){
+            [actions addObject:[UIAction actionWithTitle:@"静音预览（30 秒）" image:[UIImage systemImageNamed:@"play.rectangle"] identifier:nil handler:^(UIAction *a){[w previewChannel:ch];}]];
+            [actions addObject:[UIAction actionWithTitle:@"EPG 手动匹配" image:[UIImage systemImageNamed:@"calendar"] identifier:nil handler:^(UIAction *a){[w editEPGMapping:ch];}]];
+        }
+        [actions addObject:[UIAction actionWithTitle:@"电视台增强与同台多源" image:[UIImage systemImageNamed:@"sparkles.tv"] identifier:nil handler:^(UIAction *a){[w presentStationEnhancementSheetForChannel:ch sourceView:t];}]];
+        return [UIMenu menuWithTitle:ch[@"name"]?:@"频道操作" children:actions];
+    }];
+}
 - (UISwipeActionsConfiguration *)tableView:(UITableView *)t trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)ip {
     NSArray *rows = [self channelsForSection:ip.section tableView:t];
     if (ip.row >= rows.count) return nil;
@@ -256,6 +273,11 @@
     if (![channel isKindOfClass:NSDictionary.class]) return nil;
     if ([channel[@"catchupSource"] isKindOfClass:NSString.class] && [channel[@"catchupSource"] length] > 0) return channel;
     if (![channel[@"remoteURL"] length]) return nil;
+    return [self anyCatchupChannelForStation:channel];
+}
+- (NSDictionary *)anyCatchupChannelForStation:(NSDictionary *)channel {
+    if (![channel isKindOfClass:NSDictionary.class]) return nil;
+    if ([channel[@"catchupSource"] isKindOfClass:NSString.class] && [channel[@"catchupSource"] length] > 0 && [channel[@"remoteURL"] length]) return channel;
     NSString *groupKey = CCTVRouteGroupKey(channel);
     NSString *canonical = [ProfileStore canonicalStationIDForChannel:channel];
     for (NSDictionary *cand in self.allChannels) {
@@ -368,6 +390,8 @@
     cell.accessibilityIdentifier=[@"channel-card-" stringByAppendingString:channelID];cell.accessibilityLabel=name;cell.accessibilityValue=[self telemetryAccessibilityValueForChannel:ch selected:selected];cell.accessibilityHint=@"轻点播放，长按选择线路与节目单";
     NSString *xmlSource=[ProfileStore epgSourceForChannel:ch];if(xmlSource.length && !self.epgCache[channelID])[self cacheXMLRows:[[XMLTVStore shared] cachedRowsForSource:xmlSource channel:[ProfileStore epgIDForChannel:ch]] channel:channelID];if(!self.epgCache[channelID] && !collectionView.isDragging && !collectionView.isDecelerating){[self loadEPGForChannel:channelID channel:ch section:ip];}subtitle.text=[self catalogSubtitleForChannel:ch];return cell;
 }
+- (void)collectionView:(UICollectionView *)collectionView didHighlightItemAtIndexPath:(NSIndexPath *)ip { UICollectionViewCell *c=[collectionView cellForItemAtIndexPath:ip]; if(!c||UIAccessibilityIsReduceMotionEnabled())return; [UIView animateWithDuration:0.10 delay:0 usingSpringWithDamping:0.78 initialSpringVelocity:0.25 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{c.transform=CGAffineTransformMakeScale(0.968,0.968);} completion:nil]; }
+- (void)collectionView:(UICollectionView *)collectionView didUnhighlightItemAtIndexPath:(NSIndexPath *)ip { UICollectionViewCell *c=[collectionView cellForItemAtIndexPath:ip]; if(!c)return; [UIView animateWithDuration:0.24 delay:0 usingSpringWithDamping:0.74 initialSpringVelocity:0.25 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{c.transform=CGAffineTransformIdentity;} completion:nil]; }
 - (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:(NSIndexPath *)ip { if(ip.item<0||ip.item>=(NSInteger)self.shownChannels.count)return;HostAnimateSelection([collectionView cellForItemAtIndexPath:ip]);[self selectChannel:self.shownChannels[ip.item]]; }
 - (UIContextMenuConfiguration *)collectionView:(UICollectionView *)collectionView contextMenuConfigurationForItemAtIndexPath:(NSIndexPath *)ip point:(CGPoint)point {
     if(ip.item<0||ip.item>=(NSInteger)self.shownChannels.count)return nil;

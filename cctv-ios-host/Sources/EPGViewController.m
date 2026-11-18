@@ -30,6 +30,9 @@
 @property(nonatomic,strong) UIBarButtonItem *jumpToLiveItem;
 @property(nonatomic,strong) UIBarButtonItem *filterMenuItem;
 @property(nonatomic,assign) NSInteger programFilterMode;
+@property(nonatomic,strong) UIView *hintCard;
+@property(nonatomic,strong) NSMutableSet<NSString *> *loadedOfficialDates;
+- (void)fetchOfficialSevenDayLookback;
 @end
 
 @implementation EPGViewController
@@ -58,6 +61,10 @@
     self.filterMenuItem.accessibilityLabel=@"筛选节目单与预约管理";
     self.navigationItem.rightBarButtonItems=@[self.jumpToLiveItem, self.filterMenuItem, [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"info.circle"] style:UIBarButtonItemStylePlain target:self action:@selector(showSourceInfo)]];
 
+    self.loadedOfficialDates = [NSMutableSet set];
+    self.hintCard = [[UIView alloc] initWithFrame:CGRectMake(16, 12, self.view.bounds.size.width - 32, 28)];
+    HostStyleGlassCard(self.hintCard, 10);
+    [self.view addSubview:self.hintCard];
     self.hint = [[UILabel alloc] initWithFrame:CGRectMake(16, 12, self.view.bounds.size.width - 32, 20)];
     self.hint.textColor = HostSecondaryText();
     self.hint.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:12]];
@@ -113,6 +120,7 @@
     self.view.backgroundColor = HostBackground();
     self.view.tintColor = HostAccent();
     self.hint.textColor = HostSecondaryText();
+    if (self.hintCard) HostStyleGlassCard(self.hintCard, 10);
     self.emptyLabel.textColor = HostSecondaryText();
     self.table.backgroundColor = HostBackground();
     self.table.separatorColor = HostSeparator();
@@ -214,7 +222,7 @@
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];CGFloat top=self.view.safeAreaInsets.top;CGFloat bottom=self.view.safeAreaInsets.bottom;CGFloat width=self.view.bounds.size.width;
     CGFloat hintHeight=ceil(self.hint.font.lineHeight*2);
-    self.dates.frame=CGRectMake(16,top+8,width-32,44);self.dateMenuButton.frame=self.dates.frame;self.hint.frame=CGRectMake(16,top+60,width-32,hintHeight);self.table.frame=CGRectMake(0,top+60+hintHeight+8,width,MAX(0,self.view.bounds.size.height-top-60-hintHeight-8-bottom));self.spinner.center=CGPointMake(width/2,top+150);
+    self.dates.frame=CGRectMake(16,top+8,width-32,44);self.dateMenuButton.frame=self.dates.frame;self.hintCard.frame=CGRectMake(16,top+58,width-32,hintHeight+4);self.hint.frame=CGRectMake(26,top+60,MAX(0,width-52),hintHeight);self.table.frame=CGRectMake(0,top+60+hintHeight+8,width,MAX(0,self.view.bounds.size.height-top-60-hintHeight-8-bottom));self.spinner.center=CGPointMake(width/2,top+150);
 }
 - (void)updateEmptyState {
     self.emptyLabel.hidden = self.rows.count > 0 || self.spinner.isAnimating;
@@ -258,12 +266,75 @@
     UIAction *clearReminders=[UIAction actionWithTitle:@"清空本频道预约提醒" image:[UIImage systemImageNamed:@"bell.slash"] identifier:nil handler:^(__unused UIAction *a){[weakSelf clearChannelReminders];}];
     clearReminders.attributes=UIMenuElementAttributesDestructive;
     NSMutableArray<UIMenuElement *> *items=[NSMutableArray arrayWithObjects:all,replayOnly,remindedOnly,nil];
+    if(!self.xmlSource.length && self.channelID.length){
+        UIAction *load7Days=[UIAction actionWithTitle:@"加载近 7 天完整回看节目单" image:[UIImage systemImageNamed:@"calendar.badge.clock"] identifier:@"epg.load.7days" handler:^(__unused UIAction *a){[weakSelf fetchOfficialSevenDayLookback];}];
+        [items addObject:load7Days];
+    }
     if(self.onReturnToLive){
         UIAction *backLive=[UIAction actionWithTitle:@"返回实时直播" image:[UIImage systemImageNamed:@"dot.radiowaves.left.and.right"] identifier:@"epg.return.live" handler:^(__unused UIAction *a){if(weakSelf.onReturnToLive)weakSelf.onReturnToLive();}];
         [items addObject:backLive];
     }
     [items addObject:clearReminders];
     return [UIMenu menuWithTitle:@"节目筛选与预约" children:items];
+}
+
+- (void)fetchOfficialSevenDayLookback {
+    if (!self.channelID.length) return;
+    NSString *encoded = [self.channelID stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet] ?: @"";
+    if (!encoded.length) return;
+    self.hint.text = @"正在同步近 7 天央视官方回看节目单…";
+    [self.spinner startAnimating];
+    NSDateFormatter *compactFmt = [NSDateFormatter new];
+    compactFmt.timeZone = [NSTimeZone timeZoneWithName:@"Asia/Shanghai"];
+    compactFmt.dateFormat = @"yyyyMMdd";
+    NSTimeInterval now = NSDate.date.timeIntervalSince1970;
+    NSMutableArray<NSString *> *dayStrings = [NSMutableArray arrayWithCapacity:7];
+    for (NSInteger offset = -6; offset <= 0; offset++) {
+        NSString *d = [compactFmt stringFromDate:[NSDate dateWithTimeIntervalSince1970:now + offset * 86400.0]];
+        if (d.length) [dayStrings addObject:d];
+    }
+    NSUInteger generation = ++self.requestGeneration;
+    __weak typeof(self) weakSelf = self;
+    dispatch_group_t group = dispatch_group_create();
+    NSMutableArray<NSDictionary *> *collected = [NSMutableArray array];
+    for (NSString *dayStr in dayStrings) {
+        dispatch_group_enter(group);
+        NSString *u = [NSString stringWithFormat:@"https://api.cntv.cn/epg/epginfo3?serviceId=cbox&c=%@&d=%@", encoded, dayStr];
+        NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:u] cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:8];
+        [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *err) {
+            if (!err && data.length > 0 && data.length <= 4 * 1024 * 1024) {
+                id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
+                if ([json isKindOfClass:NSDictionary.class]) {
+                    NSDictionary *channelNode = [json[weakSelf.channelID] isKindOfClass:NSDictionary.class] ? json[weakSelf.channelID] : json;
+                    NSArray *programList = [channelNode[@"program"] isKindOfClass:NSArray.class] ? channelNode[@"program"] : (channelNode[@"EPG"] ?: channelNode[@"data"]);
+                    if ([programList isKindOfClass:NSArray.class]) {
+                        NSArray *norm = [weakSelf normalize:programList];
+                        @synchronized(collected) { [collected addObjectsFromArray:norm]; }
+                    }
+                }
+            }
+            dispatch_group_leave(group);
+        }] resume];
+    }
+    dispatch_group_notify(group, dispatch_get_main_queue(), ^{
+        EPGViewController *owner = weakSelf;
+        if (!owner || generation != owner.requestGeneration) return;
+        [owner.spinner stopAnimating];
+        if (collected.count) {
+            NSMutableDictionary<NSNumber *, NSDictionary *> *dedup = [NSMutableDictionary dictionary];
+            for (NSDictionary *r in owner.allRows ?: @[]) dedup[r[@"start"] ?: @0] = r;
+            for (NSDictionary *r in collected) dedup[r[@"start"] ?: @0] = r;
+            NSArray *merged = [dedup.allValues sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+                return [a[@"start"] compare:b[@"start"]];
+            }];
+            owner.allRows = merged;
+            [owner rebuildDates];
+            owner.hint.text = [NSString stringWithFormat:@"已加载 %lu 天共 %lu 个节目 · 点选任意已播节目即可回看", (unsigned long)owner.dateKeys.count, (unsigned long)merged.count];
+        } else {
+            owner.hint.text = @"近 7 天扩展节目单暂不可用，已保留当前节目单";
+        }
+        [owner updateEmptyState];
+    });
 }
 
 - (void)clearChannelReminders {
@@ -393,7 +464,9 @@
                  [fmt stringFromDate:[NSDate dateWithTimeIntervalSince1970:start]],
                  [fmt stringFromDate:[NSDate dateWithTimeIntervalSince1970:end]]];
     }
-    cell.textLabel.text = row[@"title"];
+    cell.textLabel.attributedText = nil;
+    NSString *rawTitle = [row[@"title"] isKindOfClass:NSString.class] ? row[@"title"] : @"";
+    cell.textLabel.text = rawTitle;
     cell.detailTextLabel.text = range;
     cell.detailTextLabel.textColor = HostSecondaryText();
 
@@ -455,6 +528,57 @@
     }
     if(end>now || (self.canReplay&&!self.canReplay(program)))return;
     self.onReplay(program);
+}
+
+- (void)tableView:(UITableView *)tableView didHighlightRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
+    if (!cell || UIAccessibilityIsReduceMotionEnabled()) return;
+    [UIView animateWithDuration:0.10 delay:0 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{
+        cell.transform = CGAffineTransformMakeScale(0.985, 0.985);
+    } completion:nil];
+}
+
+- (void)tableView:(UITableView *)tableView didUnhighlightRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
+    if (!cell) return;
+    [UIView animateWithDuration:0.22 delay:0 usingSpringWithDamping:0.78 initialSpringVelocity:0.25 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{
+        cell.transform = CGAffineTransformIdentity;
+    } completion:nil];
+}
+
+- (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoint)point {
+    (void)point;
+    if (indexPath.row < 0 || indexPath.row >= (NSInteger)self.rows.count) return nil;
+    NSDictionary *program = self.rows[(NSUInteger)indexPath.row];
+    NSString *title = [program[@"title"] isKindOfClass:NSString.class] ? program[@"title"] : @"节目";
+    NSTimeInterval start = [program[@"start"] doubleValue], end = [program[@"end"] doubleValue];
+    NSTimeInterval now = NSDate.date.timeIntervalSince1970;
+    BOOL live = (now >= start && now < end);
+    NSDictionary *liveCandidate = live ? @{@"start":@(start), @"end":@(MAX(start + 1, now)), @"title":title, @"liveRestart":@YES} : program;
+    BOOL replayable = self.onReplay && (end <= now || (live && (now - start >= 15))) && (!self.canReplay || self.canReplay(live ? liveCandidate : program));
+    BOOL reminded = [self isProgramReminded:program];
+    __weak typeof(self) weakSelf = self;
+    return [UIContextMenuConfiguration configurationWithIdentifier:indexPath previewProvider:nil actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggested) {
+        NSMutableArray<UIMenuElement *> *actions = [NSMutableArray array];
+        if (replayable) {
+            [actions addObject:[UIAction actionWithTitle:live ? @"从头回看本节目" : @"回看此节目" image:[UIImage systemImageNamed:@"clock.arrow.circlepath"] identifier:nil handler:^(__unused UIAction *a) {
+                EPGViewController *owner = weakSelf;
+                if (owner && owner.onReplay) owner.onReplay(live ? liveCandidate : program);
+            }]];
+        }
+        if (start > now) {
+            [actions addObject:[UIAction actionWithTitle:reminded ? @"取消开播提醒" : @"预约开播前 5 分钟提醒" image:[UIImage systemImageNamed:reminded ? @"bell.slash" : @"bell.badge"] identifier:nil handler:^(__unused UIAction *a) {
+                [weakSelf toggleReminderForProgram:program];
+            }]];
+        }
+        [actions addObject:[UIAction actionWithTitle:@"复制节目名称与时间" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a) {
+            UITableViewCell *c = [tableView cellForRowAtIndexPath:indexPath];
+            NSString *detail = c.detailTextLabel.text ?: @"";
+            UIPasteboard.generalPasteboard.string = detail.length ? [NSString stringWithFormat:@"%@（%@）", title, detail] : title;
+            weakSelf.hint.text = [NSString stringWithFormat:@"已复制节目：%@", title];
+        }]];
+        return [UIMenu menuWithTitle:title children:actions];
+    }];
 }
 
 @end

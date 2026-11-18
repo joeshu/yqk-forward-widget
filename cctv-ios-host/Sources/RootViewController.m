@@ -60,6 +60,19 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
     NSString *symbol=item[@"symbol"];cell.imageView.image=symbol.length?[UIImage systemImageNamed:symbol]:nil;cell.imageView.tintColor=HostAccent();
     return cell;
 }
+- (void)tableView:(UITableView *)tableView didHighlightRowAtIndexPath:(NSIndexPath *)indexPath { UITableViewCell *c=[tableView cellForRowAtIndexPath:indexPath]; if(!c||UIAccessibilityIsReduceMotionEnabled())return; [UIView animateWithDuration:0.10 delay:0 usingSpringWithDamping:0.8 initialSpringVelocity:0.2 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{c.transform=CGAffineTransformMakeScale(0.982,0.982);} completion:nil]; }
+- (void)tableView:(UITableView *)tableView didUnhighlightRowAtIndexPath:(NSIndexPath *)indexPath { UITableViewCell *c=[tableView cellForRowAtIndexPath:indexPath]; if(!c)return; [UIView animateWithDuration:0.22 delay:0 usingSpringWithDamping:0.75 initialSpringVelocity:0.2 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{c.transform=CGAffineTransformIdentity;} completion:nil]; }
+- (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoint)point {
+    if(indexPath.row<0||indexPath.row>=(NSInteger)self.items.count)return nil;
+    NSDictionary *item=self.items[indexPath.row];
+    NSString *title=item[@"title"]?:@"选项",*detail=item[@"detail"]?:@"";
+    __weak typeof(self) weakSelf=self;
+    return [UIContextMenuConfiguration configurationWithIdentifier:@"cctv.playback.panel.context" previewProvider:nil actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggested){
+        UIAction *select=[UIAction actionWithTitle:@"切换至此项" image:[UIImage systemImageNamed:item[@"symbol"]?:@"checkmark.circle"] identifier:nil handler:^(__unused UIAction *a){if(weakSelf.selectionHandler)weakSelf.selectionHandler(item);}];
+        UIAction *copy=[UIAction actionWithTitle:@"复制名称与详情" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){UIPasteboard.generalPasteboard.string=detail.length?[NSString stringWithFormat:@"%@ · %@",title,detail]:title;}];
+        return [UIMenu menuWithTitle:title children:@[select,copy]];
+    }];
+}
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];if(indexPath.row>=self.items.count)return;
     if(self.selectionHandler)self.selectionHandler(self.items[indexPath.row]);
@@ -1435,7 +1448,14 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
         }
         if ([key isEqualToString:@"runtimeDiagnosticsEnabled"]) [RuntimeDiagnostics.shared setEnabled:value];
         if ([key isEqualToString:@"nativeSDKVerboseLogs"]) [weakSelf configureSDKLogging];
-        if ([key isEqualToString:@"preloadNativeChannel"] && !value) [weakSelf.nativePreloader cancel];
+        if ([key isEqualToString:@"preloadNativeChannel"]) { if (!value) [weakSelf.nativePreloader cancel]; else [weakSelf prepareNextNativeChannelForGeneration:weakSelf.playbackGeneration]; }
+        if ([key isEqualToString:@"legacyNativePlayback"] && !value && weakSelf.sdkPlayer && weakSelf.sdkPlayer != weakSelf.currentPlayer) { [weakSelf call:weakSelf.sdkPlayer sel:@"reset"]; weakSelf.sdkPlayer = nil; weakSelf.sdkPlayerUsed = NO; }
+        if (([key isEqualToString:@"rememberLastChannel"] || [key isEqualToString:@"resumeLastChannel"]) && value && weakSelf.channelID.length) { NSDictionary *ch = [weakSelf channelWithID:weakSelf.channelID]; if (ch) [NSUserDefaults.standardUserDefaults setObject:ch forKey:@"lastChannel"]; }
+        if ([key isEqualToString:@"cctv.mediaPreferredQuality.v1"] && weakSelf.avPlayer.currentItem) {
+            NSString *pref = [[NSUserDefaults standardUserDefaults] stringForKey:@"cctv.mediaPreferredQuality.v1"] ?: @"auto";
+            double peak = [pref isEqualToString:@"smooth"] ? 1500000 : ([pref isEqualToString:@"hd"] ? 4000000 : ([pref isEqualToString:@"uhd"] ? 8000000 : 0));
+            weakSelf.avPlayer.currentItem.preferredPeakBitRate = peak;
+        }
         if ([key isEqualToString:@"allowBackgroundAudio"]) [weakSelf activateAudioSession];
         if ([key isEqualToString:@"autoLoadEPG"]) { [weakSelf.epgTimer invalidate]; weakSelf.epgTimer=nil; weakSelf.epgRefreshDesired=value;if(value) [weakSelf restartEPGTimer]; else weakSelf.infoLabel.text=@"节目单自动获取已关闭"; }
         if ([key isEqualToString:@"nativeChannelsEnabled"]) { [weakSelf configureCatalogNavigation]; [weakSelf applyFilter]; [weakSelf updateLiveResourceCapsule]; }

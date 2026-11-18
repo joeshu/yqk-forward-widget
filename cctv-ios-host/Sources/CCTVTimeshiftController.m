@@ -81,7 +81,7 @@ static NSString *const CCTVTimeshiftErrorDomain = @"CCTVHostTimeshift";
 - (void)failWithError:(NSError *)error completion:(void (^)(BOOL, NSError *))completion {
     [self setState:CCTVTimeshiftStateFailed];
     if (completion) completion(NO, error);
-    if (self.onFailure) self.onFailure(error);
+    else if (self.onFailure) self.onFailure(error);
 }
 
 #pragma mark - Seek（防抖 + 版权预检 + 一次重试）
@@ -225,12 +225,22 @@ static NSString *const CCTVTimeshiftErrorDomain = @"CCTVHostTimeshift";
 
 - (void)handleSeekCompletionAllowed:(BOOL)allowed error:(NSError *)error start:(NSTimeInterval)start end:(NSTimeInterval)end channelID:(NSString *)channelID completion:(void (^)(BOOL, NSError *))completion {
     if (allowed && !error) {
-        self.seekLatency = NSProcessInfo.processInfo.systemUptime - self.seekIssuedAt;
+        self.seekLatency = MAX(0.001, NSProcessInfo.processInfo.systemUptime - self.seekIssuedAt);
+        [self updateBehindLive];
         if (self.prepareDoneDuringSeek && self.state == CCTVTimeshiftStateSeeking) {
             [self recordSeekFirstFrame];
+        } else if (self.state == CCTVTimeshiftStateSeeking) {
+            NSUInteger settleGen = self.generation;
+            __weak typeof(self) weakSelf = self;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.65 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                CCTVTimeshiftController *owner = weakSelf;
+                if (owner && settleGen == owner.generation && owner.state == CCTVTimeshiftStateSeeking) {
+                    [owner recordSeekFirstFrame];
+                }
+            });
         }
         // 首帧可能已先于本回调到达（已转 PlayingReplay），接受仍要回调宿主；
-        // 首帧尚未确认时留待 SeekSucceed / FirstRender 回调再转态。
+        // 首帧尚未确认时留待 SeekSucceed / FirstRender 或 0.65s 静默确认兜底转态。
         if (completion) completion(YES, nil);
         return;
     }

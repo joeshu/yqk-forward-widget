@@ -12,6 +12,8 @@
 @property(nonatomic,strong) UIButton *stopButton;
 @property(nonatomic,strong) UIButton *restartButton;
 @property(nonatomic,strong) UIView *statusDot;
+@property(nonatomic,strong) UIScrollView *scrollView;
+@property(nonatomic,strong) UIButton *probeButton;
 @property(nonatomic,assign) NSUInteger subscriptionCount;
 @property(nonatomic,assign) BOOL running;
 @property(nonatomic,assign) BOOL restarting;
@@ -35,6 +37,12 @@
 
     UIScrollView *scroll = [UIScrollView new];
     scroll.translatesAutoresizingMaskIntoConstraints = NO;
+    scroll.alwaysBounceVertical = YES;
+    UIRefreshControl *rc = [UIRefreshControl new];
+    rc.tintColor = HostAccent();
+    [rc addTarget:self action:@selector(pullRefreshPluginStatus:) forControlEvents:UIControlEventValueChanged];
+    scroll.refreshControl = rc;
+    self.scrollView = scroll;
     [self.view addSubview:scroll];
     [NSLayoutConstraint activateConstraints:@[
         [scroll.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
@@ -88,8 +96,12 @@
     self.urlLabel.numberOfLines = 0;
     self.urlLabel.lineBreakMode = NSLineBreakByCharWrapping;
     [feedStack addArrangedSubview:self.urlLabel];
+    UIStackView *feedActions = [self rowStack];
     UIButton *copy = [self button:@"复制地址" action:@selector(copyURL)];
-    [feedStack addArrangedSubview:copy];
+    self.probeButton = [self button:@"检测接口" action:@selector(manualProbeHTTP)];
+    [feedActions addArrangedSubview:copy];
+    [feedActions addArrangedSubview:self.probeButton];
+    [feedStack addArrangedSubview:feedActions];
     [content addArrangedSubview:feedCard];
 
     UIView *serviceCard = [self card];
@@ -133,7 +145,18 @@
     self.statusLabel.textColor=HostText();
     self.urlLabel.textColor=HostText();
     self.countLabel.textColor=HostText();
+    self.scrollView.refreshControl.tintColor=HostAccent();
+    for(UIButton *b in @[self.startButton?:[UIButton new],self.stopButton?:[UIButton new],self.restartButton?:[UIButton new],self.probeButton?:[UIButton new]]){if(b.superview){[b setTitleColor:HostText() forState:UIControlStateNormal];b.backgroundColor=HostRaisedSurface();HostSetLayerBorderColor(b,HostBorder());}}
     HostRefreshAppearanceLayers(self.view);
+}
+- (void)pullRefreshPluginStatus:(UIRefreshControl *)sender {
+    [self refreshStatus];
+    [self probeHTTPIfNeeded];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,350*NSEC_PER_MSEC),dispatch_get_main_queue(),^{[sender endRefreshing];});
+}
+- (void)manualProbeHTTP {
+    if(!self.running){self.statusLabel.text=@"未运行 · 请先启动服务后再检测接口";return;}
+    [self probeHTTPIfNeeded];
 }
 
 - (UIView *)card {
@@ -164,6 +187,9 @@
     [b setTitleColor:HostText() forState:UIControlStateNormal];
     b.backgroundColor = HostRaisedSurface();
     b.layer.cornerRadius = 12;
+    b.layer.cornerCurve = kCACornerCurveContinuous;
+    b.layer.borderWidth = 0.6;
+    HostSetLayerBorderColor(b, HostBorder());
     b.contentEdgeInsets = UIEdgeInsetsMake(13, 12, 13, 12);
     [b addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
     return b;

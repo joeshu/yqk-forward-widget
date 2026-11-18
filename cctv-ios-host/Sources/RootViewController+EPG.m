@@ -237,7 +237,7 @@
             owner.playerTabs.selectedSegmentIndex=1;[owner selectPlayerPanel];
             double start=[program[@"start"] doubleValue];
             double end=[program[@"liveRestart"] boolValue]?0.0:[program[@"end"] doubleValue];
-            if(![owner.channelID isEqualToString:cid] || !owner.currentPlayer || owner.avPlayer || !owner.firstRender){
+            if(![owner.channelID isEqualToString:cid] || !owner.currentPlayer || owner.avPlayer || (!owner.firstRender && !owner.nativeTimeShiftActive && !owner.nativeTransitionKind.length)){
                 owner.pendingNativeReplayProgram=@{@"channelID":cid?:@"",@"start":@(start),@"end":@(end),@"title":([program[@"title"] isKindOfClass:NSString.class]?program[@"title"]:@"")};
                 if(channel&&(![owner.channelID isEqualToString:cid] || !owner.currentPlayer || owner.avPlayer))[owner selectChannel:channel];
                 return;
