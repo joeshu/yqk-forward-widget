@@ -632,6 +632,7 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 - (void)togglePiP;
 - (void)buildPlayer;
 - (UIButton *)barButton:(NSString *)title action:(SEL)action;
+- (void)syncPlayPauseButtonIcon;
 - (void)updatePlaybackControlAccessibility;
 - (void)setLiveOverlayHidden:(BOOL)hidden;
 - (PlaybackOverlayController *)liveOverlayPolicy;

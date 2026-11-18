@@ -35,6 +35,8 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
 @interface MediaEpisodeSelectionViewController ()
 @property(nonatomic) NSUInteger generation;
 @property(nonatomic) NSUInteger refreshGeneration;
+@property(nonatomic,copy) NSString *inFlightEpisodeSignature;
+@property(nonatomic) NSTimeInterval inFlightEpisodeStartedAt;
 @property(nonatomic,strong) MediaAPIClient *refreshClient;
 @property(nonatomic,strong) UIImageView *backdropImageView;
 @property(nonatomic,strong) UIVisualEffectView *backdropBlurView;
@@ -187,7 +189,7 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
 }
 - (void)viewDidDisappear:(BOOL)animated {
     [super viewDidDisappear:animated];
-    if(self.isMovingFromParentViewController){self.generation++;self.refreshGeneration++;[self.client cancel];[self.refreshClient cancel];}
+    if(self.isMovingFromParentViewController){self.generation++;self.refreshGeneration++;self.inFlightEpisodeSignature=nil;self.inFlightEpisodeStartedAt=0;[self.client cancel];[self.refreshClient cancel];}
 }
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
@@ -300,7 +302,7 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
     [self.refreshClient call:@"detail" arguments:args correlationID:self.correlationID completion:^(id result,NSError *error){
         MediaEpisodeSelectionViewController *owner=weakSelf;if(!owner||owner.refreshGeneration!=generation)return;[owner.refreshSpinner stopAnimating];owner.refreshButton.tintColor=UIColor.whiteColor;
         NSDictionary *sanitized=MediaEpisodeSelectionSanitizedDetail(result);if(error||!sanitized){owner.statusLabel.text=[NSString stringWithFormat:@"刷新失败，保留当前分集：%@",error.localizedDescription?:@"来源未返回详情"];owner.statusLabel.hidden=NO;return;}
-        owner.generation++;[owner.client cancel];[owner.playSpinner stopAnimating];owner.playSpinner.hidden=YES;owner.continueButton.enabled=YES;
+        owner.generation++;owner.inFlightEpisodeSignature=nil;owner.inFlightEpisodeStartedAt=0;[owner.client cancel];[owner.playSpinner stopAnimating];owner.playSpinner.hidden=YES;owner.continueButton.enabled=YES;
         NSDictionary *oldSeason=owner.currentSeason;NSString *seasonID=[oldSeason[@"id"] description]?:@"",*seasonName=[oldSeason[@"name"] description]?:@"";
         NSArray *oldLines=owner.lines;NSDictionary *oldLine=owner.selectedLineIndex<oldLines.count?oldLines[(NSUInteger)owner.selectedLineIndex]:@{};NSString *lineID=[oldLine[@"id"] description]?:@"",*lineName=[oldLine[@"name"] description]?:@"";
         NSArray *oldEpisodes=[owner episodesForLine:owner.selectedLineIndex];NSDictionary *oldEpisode=owner.selectedEpisodeIndex<oldEpisodes.count?oldEpisodes[(NSUInteger)owner.selectedEpisodeIndex]:@{};NSString *episodeID=[oldEpisode[@"id"] description]?:@"",*episodeName=[oldEpisode[@"name"] description]?:@"";NSInteger oldSeasonIndex=owner.selectedSeasonIndex,oldLineIndex=owner.selectedLineIndex,oldEpisodeIndex=owner.selectedEpisodeIndex;
@@ -381,13 +383,13 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
 }
 - (void)selectRoute:(UIButton *)sender {
     NSArray *oldEpisodes=[self episodesForLine:self.selectedLineIndex];NSDictionary *oldEpisode=self.selectedEpisodeIndex>=0&&self.selectedEpisodeIndex<oldEpisodes.count?oldEpisodes[(NSUInteger)self.selectedEpisodeIndex]:@{};NSString *episodeID=[oldEpisode[@"id"] description]?:@"",*episodeName=[oldEpisode[@"name"] description]?:@"";NSInteger oldIndex=self.selectedEpisodeIndex;
-    self.generation++;[self.client cancel];[self.playSpinner stopAnimating];self.playSpinner.hidden=YES;NSInteger line=MAX(0,sender.tag);if(self.lines.count)line=MIN(line,(NSInteger)self.lines.count-1);self.selectedLineIndex=line;NSArray *newEpisodes=[self episodesForLine:self.selectedLineIndex];NSInteger match=-1;
+    self.generation++;self.inFlightEpisodeSignature=nil;self.inFlightEpisodeStartedAt=0;[self.client cancel];[self.playSpinner stopAnimating];self.playSpinner.hidden=YES;NSInteger line=MAX(0,sender.tag);if(self.lines.count)line=MIN(line,(NSInteger)self.lines.count-1);self.selectedLineIndex=line;NSArray *newEpisodes=[self episodesForLine:self.selectedLineIndex];NSInteger match=-1;
     if(episodeID.length){for(NSUInteger index=0;index<newEpisodes.count;index++){NSDictionary *episode=newEpisodes[index];if([[episode[@"id"] description] isEqual:episodeID]){match=(NSInteger)index;break;}}}
     if(match<0&&episodeName.length){for(NSUInteger index=0;index<newEpisodes.count;index++){NSDictionary *episode=newEpisodes[index];if([[episode[@"name"] description] localizedCaseInsensitiveCompare:episodeName]==NSOrderedSame){match=(NSInteger)index;break;}}}
     self.selectedEpisodeIndex=newEpisodes.count?(match>=0?match:MIN(MAX(0,oldIndex),(NSInteger)newEpisodes.count-1)):0;self.page=CCTVEpisodeGroupForSourceIndex((NSUInteger)self.selectedEpisodeIndex,newEpisodes.count,self.episodeOrderReversed);self.statusLabel.text=@"";self.statusLabel.hidden=YES;[self rebuildSelection];
 }
 - (void)selectSeason:(UIButton *)sender {
-    self.generation++;[self.client cancel];[self.playSpinner stopAnimating];self.playSpinner.hidden=YES;self.selectedSeasonIndex=sender.tag;self.selectedEpisodeIndex=0;self.page=0;self.statusLabel.text=@"";self.statusLabel.hidden=YES;[self rebuildSelection];
+    self.generation++;self.inFlightEpisodeSignature=nil;self.inFlightEpisodeStartedAt=0;[self.client cancel];[self.playSpinner stopAnimating];self.playSpinner.hidden=YES;self.selectedSeasonIndex=sender.tag;self.selectedEpisodeIndex=0;self.page=0;self.statusLabel.text=@"";self.statusLabel.hidden=YES;[self rebuildSelection];
 }
 - (void)toggleEpisodeGrid {
     self.episodeExpanded=!self.episodeExpanded;[self rebuildSelection];if(!UIAccessibilityIsReduceMotionEnabled())[UIView animateWithDuration:.22 animations:^{[self.view layoutIfNeeded];}];
@@ -463,12 +465,17 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
     NSDictionary *episode=episodes[sender.tag];NSString *episodeID=[episode[@"id"] description]?:@"",*episodeName=[episode[@"name"] description]?:@"当前分集",*episodeLineID=[episode[@"lineId"] description]?:@"";NSInteger selectedIndex=sender.tag;
     if(episodeLineID.length){for(NSUInteger index=0;index<self.lines.count;index++){NSDictionary *routeLine=[self.lines[index] isKindOfClass:NSDictionary.class]?self.lines[index]:@{};NSString *lineID=[routeLine[@"id"] description]?:@"",*lineName=[routeLine[@"name"] description]?:@"";if([episodeLineID isEqual:lineID]||[episodeLineID isEqual:lineName]){NSArray *routeEpisodes=[self episodesForLine:(NSInteger)index];NSInteger match=-1;for(NSUInteger candidate=0;candidate<routeEpisodes.count;candidate++){NSDictionary *row=routeEpisodes[candidate];if((episodeID.length&&[[row[@"id"] description] isEqual:episodeID])||[[row[@"name"] description] isEqual:episodeName]){match=(NSInteger)candidate;break;}}if(match<0&&sender.tag<routeEpisodes.count)match=sender.tag;if(match>=0){self.selectedLineIndex=(NSInteger)index;selectedIndex=match;}break;}}}
     episodes=[self episodesForLine:self.selectedLineIndex];if(selectedIndex<0||selectedIndex>=episodes.count)return;episode=episodes[(NSUInteger)selectedIndex];NSDictionary *line=self.selectedLineIndex<self.lines.count?([self.lines[self.selectedLineIndex] isKindOfClass:NSDictionary.class]?self.lines[self.selectedLineIndex]:@{}):@{};
+    NSString *parserID=[self currentParserID];
+    NSString *episodeSignature=[NSString stringWithFormat:@"%ld|%ld|%@|%@",(long)self.selectedSeasonIndex,(long)self.selectedLineIndex,episode[@"id"]?:@(selectedIndex),parserID?:@""];
+    NSTimeInterval now=CACurrentMediaTime();
+    if(self.inFlightEpisodeSignature&&[self.inFlightEpisodeSignature isEqualToString:episodeSignature]&&(now-self.inFlightEpisodeStartedAt)<1.5)return;
+    self.inFlightEpisodeSignature=episodeSignature;self.inFlightEpisodeStartedAt=now;
     self.selectedEpisodeIndex=selectedIndex;NSInteger capturedLineIndex=self.selectedLineIndex,capturedEpisodeIndex=selectedIndex;NSInteger episodeGroup=CCTVEpisodeGroupForSourceIndex((NSUInteger)self.selectedEpisodeIndex,episodes.count,self.episodeOrderReversed);self.page=episodeGroup==NSNotFound?0:episodeGroup;self.episodeExpanded=YES;[self rebuildSelection];[self.client cancel];NSUInteger generation=++self.generation;episodeName=[episode[@"name"] description]?:@"当前分集";self.statusLabel.text=[NSString stringWithFormat:@"正在解析 %@…",episodeName];self.statusLabel.hidden=NO;self.continueButton.enabled=NO;self.playSpinner.hidden=NO;[self.playSpinner startAnimating];
     [RuntimeDiagnostics.shared recordEvent:@"episode_resolve_requested" category:@"media_api" fields:@{@"correlation_id":self.correlationID?:@"",@"request_generation":@(generation),@"line_index":@(capturedLineIndex),@"episode_index":@(capturedEpisodeIndex)}];
-    NSString *parserID=[self currentParserID];NSString *vodTitle=[self titleText];NSMutableDictionary *args=[@{@"id":episode[@"id"]?:@"",@"lineId":line[@"id"]?:@"",@"parserID":parserID,@"vodName":vodTitle,@"episodeName":episodeName?:@"",@"episodeIndex":@(capturedEpisodeIndex)} mutableCopy];if(self.provider.length)args[@"provider"]=self.provider;__weak typeof(self) weakSelf=self;
-    if(!self.client){[self.playSpinner stopAnimating];self.playSpinner.hidden=YES;self.continueButton.enabled=YES;self.statusLabel.text=@"无法解析 · 播放服务不可用，请返回重试";self.statusLabel.hidden=NO;return;}
+    NSString *vodTitle=[self titleText];NSMutableDictionary *args=[@{@"id":episode[@"id"]?:@"",@"lineId":line[@"id"]?:@"",@"parserID":parserID,@"vodName":vodTitle,@"episodeName":episodeName?:@"",@"episodeIndex":@(capturedEpisodeIndex)} mutableCopy];if(self.provider.length)args[@"provider"]=self.provider;__weak typeof(self) weakSelf=self;
+    if(!self.client){self.inFlightEpisodeSignature=nil;self.inFlightEpisodeStartedAt=0;[self.playSpinner stopAnimating];self.playSpinner.hidden=YES;self.continueButton.enabled=YES;self.statusLabel.text=@"无法解析 · 播放服务不可用，请返回重试";self.statusLabel.hidden=NO;return;}
     [self.client call:@"play" arguments:args correlationID:self.correlationID completion:^(id result,NSError *error){
-        MediaEpisodeSelectionViewController *owner=weakSelf;if(!owner||owner.generation!=generation)return;[owner.playSpinner stopAnimating];owner.playSpinner.hidden=YES;owner.continueButton.enabled=YES;owner.statusLabel.text=@"";owner.statusLabel.hidden=YES;
+        MediaEpisodeSelectionViewController *owner=weakSelf;if(!owner||owner.generation!=generation)return;owner.inFlightEpisodeSignature=nil;owner.inFlightEpisodeStartedAt=0;[owner.playSpinner stopAnimating];owner.playSpinner.hidden=YES;owner.continueButton.enabled=YES;owner.statusLabel.text=@"";owner.statusLabel.hidden=YES;
         if(error||![result isKindOfClass:NSDictionary.class]){[RuntimeDiagnostics.shared recordEvent:@"episode_resolve_failed" category:@"media_api" fields:@{@"correlation_id":owner.correlationID?:@"",@"request_generation":@(generation),@"error_domain":error.domain?:@"",@"error_code":@(error.code),@"error_message":error.localizedDescription?:@""}];owner.statusLabel.text=[NSString stringWithFormat:@"解析失败：%@",error.localizedDescription?:@"来源没有返回可播放结果"];owner.statusLabel.hidden=NO;return;}
         [RuntimeDiagnostics.shared recordEvent:@"episode_resolve_succeeded" category:@"media_api" fields:@{@"correlation_id":owner.correlationID?:@"",@"request_generation":@(generation)}];NSDictionary *context=@{@"source":owner.source?:@{},@"provider":owner.provider?:@"",@"item":owner.item?:@{},@"detail":owner.detail?:@{},@"seasonIndex":@(owner.selectedSeasonIndex),@"lineIndex":@(capturedLineIndex),@"episodeIndex":@(capturedEpisodeIndex),@"parserID":parserID,@"correlationID":owner.correlationID?:@""};
         if(owner.onSelectEpisode)owner.onSelectEpisode(result,context);

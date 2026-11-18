@@ -69,6 +69,7 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
 @property(nonatomic, copy, nullable) NSNumber *stopPortState; // 0 端口已释放，1 仍可访问，-1 未知
 @property(nonatomic, assign) NSUInteger stopVerifyGeneration;
 @property(nonatomic, assign) NSUInteger restartGeneration;
+@property(nonatomic, assign) NSUInteger changeServiceGeneration;
 @property(nonatomic, copy, nullable) NSString *currentRunStartedAt;
 - (void)reloadThemeAppearance;
 @end
@@ -304,14 +305,19 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
 }
 - (void)performServiceChange:(BOOL)enabled {
     if(!self.onChangeService){if(self.onToggle)self.onToggle(self.service,enabled);return;}
-    self.changingService=YES;self.changingServiceTarget=enabled;[self.tableView reloadData];__weak typeof(self) weakSelf=self;NSDictionary *service=self.service;
+    self.changingService=YES;self.changingServiceTarget=enabled;NSUInteger changeGen=++self.changeServiceGeneration;[self.tableView reloadData];__weak typeof(self) weakSelf=self;NSDictionary *service=self.service;
     self.onChangeService(service,enabled,^(NSError *error){dispatch_async(dispatch_get_main_queue(),^{
-        ServiceDetailViewController *owner=weakSelf;if(!owner)return;owner.changingService=NO;[owner.tableView reloadData];
+        ServiceDetailViewController *owner=weakSelf;if(!owner||changeGen!=owner.changeServiceGeneration)return;owner.changingService=NO;[owner.tableView reloadData];
         if(error){UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"服务操作失败" message:error.localizedDescription preferredStyle:UIAlertControllerStyleAlert];
             if(owner.onChangeService)[alert addAction:[UIAlertAction actionWithTitle:@"重试" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[owner performServiceChange:enabled];}]];
             if(owner.onLog)[alert addAction:[UIAlertAction actionWithTitle:@"查看日志" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){owner.onLog(service);}]];
             [alert addAction:[UIAlertAction actionWithTitle:@"完成" style:UIAlertActionStyleCancel handler:nil]];[owner presentViewController:alert animated:YES completion:nil];}
     });});
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,30*NSEC_PER_SEC),dispatch_get_main_queue(),^{
+        ServiceDetailViewController *owner=weakSelf;if(!owner||changeGen!=owner.changeServiceGeneration||!owner.changingService)return;
+        owner.changingService=NO;[owner.tableView reloadData];
+        UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"服务操作超时" message:@"服务启停响应超时，请查看此服务日志确认状态。" preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];[owner presentViewController:alert animated:YES completion:nil];
+    });
 }
 - (void)toggle:(UISwitch *)sender {
     if (self.onToggle)
@@ -401,7 +407,7 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
     if (ip.section == 1 && ip.row == 1) {
         UIPasteboard.generalPasteboard.string = [self baseURL];
         self.navigationItem.prompt = @"地址已复制";
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,2*NSEC_PER_SEC),dispatch_get_main_queue(),^{if([self.navigationItem.prompt isEqual:@"地址已复制"])self.navigationItem.prompt=nil;});
+        __weak typeof(self) weakSelf=self;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,2*NSEC_PER_SEC),dispatch_get_main_queue(),^{ServiceDetailViewController *owner=weakSelf;if(owner&&[owner.navigationItem.prompt isEqual:@"地址已复制"])owner.navigationItem.prompt=nil;});
         [tableView reloadData];
     } else if (ip.section == 1 && ip.row == 2)
         [self probe];
@@ -425,9 +431,29 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
                              actionWithTitle:@"查看代码"
                                        style:UIAlertActionStyleDefault
                                      handler:^(UIAlertAction *action) {
+                                       NSString *codePath = [ServiceStore codePath:self.service];
+                                       NSString *factoryPath = [ServiceStore bundledFactoryCodePathForService:self.service];
                                        ServiceCodeViewController *v = [ServiceCodeViewController new];
-                                       v.path = [ServiceStore codePath:self.service];
-                                       v.readOnly = YES;
+                                       v.path = codePath;
+                                       v.bundledResourcePath = factoryPath;
+                                       v.readOnly = [self.service[@"builtin"] boolValue];
+                                       __weak typeof(self) weakSelf = self;
+                                       v.onSaveCode = ^{
+                                           ServiceDetailViewController *owner = weakSelf;
+                                           if (!owner) return;
+                                           NSMutableDictionary *updated = [owner.service mutableCopy];
+                                           NSData *factoryData = factoryPath.length ? [NSData dataWithContentsOfFile:factoryPath] : nil;
+                                           NSData *currentData = codePath.length ? [NSData dataWithContentsOfFile:codePath] : nil;
+                                           if (factoryData.length && [currentData isEqualToData:factoryData]) {
+                                               [updated removeObjectForKey:@"userEditedCode"];
+                                           } else {
+                                               updated[@"userEditedCode"] = @YES;
+                                           }
+                                           updated[@"updated"] = @(NSDate.date.timeIntervalSince1970);
+                                           [ServiceStore save:updated];
+                                           owner.service = updated;
+                                           [owner.tableView reloadData];
+                                       };
                                        [self.navigationController pushViewController:v animated:YES];
                                      }]];
             [a addAction:[UIAlertAction
@@ -488,6 +514,7 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
 @interface ServicesViewController () <UITableViewDataSource, UITableViewDelegate, UISearchResultsUpdating>
 @property(nonatomic,strong) NSMutableSet<NSString *> *changingServiceIDs;
 @property(nonatomic,strong) NSMutableDictionary<NSString *,NSNumber *> *changingServiceTargets;
+@property(nonatomic,strong) NSMutableDictionary<NSString *,NSNumber *> *changingServiceGenerations;
 @property(nonatomic,strong) UISegmentedControl *statusFilter;
 @property(nonatomic,strong) UILabel *runtimeSummary;
 @property(nonatomic, strong) UITableView *table;
@@ -689,14 +716,19 @@ static NSString *ServiceHealthDisplay(NSDictionary *snapshot){
 - (void)performServiceChange:(NSDictionary *)service enabled:(BOOL)enabled {
     NSString *identifier=[service[@"id"] description];if(!identifier.length)return;
     if(!self.onChangeService){if(self.onToggleService)self.onToggleService(service,enabled);return;}
-    if(!self.changingServiceIDs)self.changingServiceIDs=[NSMutableSet set];if(!self.changingServiceTargets)self.changingServiceTargets=[NSMutableDictionary dictionary];if([self.changingServiceIDs containsObject:identifier])return;
+    if(!self.changingServiceIDs)self.changingServiceIDs=[NSMutableSet set];if(!self.changingServiceTargets)self.changingServiceTargets=[NSMutableDictionary dictionary];if(!self.changingServiceGenerations)self.changingServiceGenerations=[NSMutableDictionary dictionary];if([self.changingServiceIDs containsObject:identifier])return;
+    NSUInteger opGen=[self.changingServiceGenerations[identifier] unsignedIntegerValue]+1;self.changingServiceGenerations[identifier]=@(opGen);
     [self.changingServiceIDs addObject:identifier];self.changingServiceTargets[identifier]=@(enabled);[self.table reloadData];__weak typeof(self) weakSelf=self;
-    self.onChangeService(service,enabled,^(NSError *error){dispatch_async(dispatch_get_main_queue(),^{ServicesViewController *owner=weakSelf;if(!owner)return;[owner.changingServiceIDs removeObject:identifier];[owner.changingServiceTargets removeObjectForKey:identifier];owner.displayedRunningID=nil;[owner refresh];
+    self.onChangeService(service,enabled,^(NSError *error){dispatch_async(dispatch_get_main_queue(),^{ServicesViewController *owner=weakSelf;if(!owner||[owner.changingServiceGenerations[identifier] unsignedIntegerValue]!=opGen)return;[owner.changingServiceIDs removeObject:identifier];[owner.changingServiceTargets removeObjectForKey:identifier];owner.displayedRunningID=nil;[owner refresh];
         if(error){UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"服务操作失败" message:error.localizedDescription preferredStyle:UIAlertControllerStyleAlert];
             [alert addAction:[UIAlertAction actionWithTitle:@"重试" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[owner performServiceChange:service enabled:enabled];}]];
             if(owner.onOpenLog)[alert addAction:[UIAlertAction actionWithTitle:@"查看日志" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){owner.onOpenLog(service);}]];
             [alert addAction:[UIAlertAction actionWithTitle:@"完成" style:UIAlertActionStyleCancel handler:nil]];[owner presentViewController:alert animated:YES completion:nil];}
     });});
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,30*NSEC_PER_SEC),dispatch_get_main_queue(),^{
+        ServicesViewController *owner=weakSelf;if(!owner||[owner.changingServiceGenerations[identifier] unsignedIntegerValue]!=opGen||![owner.changingServiceIDs containsObject:identifier])return;
+        [owner.changingServiceIDs removeObject:identifier];[owner.changingServiceTargets removeObjectForKey:identifier];owner.displayedRunningID=nil;[owner refresh];
+    });
 }
 - (void)toggle:(UISwitch *)sender {
     for (NSDictionary *s in self.services)

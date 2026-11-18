@@ -36,4 +36,6 @@
 + (void)remove:(NSString *)identifier;
 + (NSString *)activeIdentifier;
 + (NSString *)dataDirectoryForService:(NSDictionary *)service error:(NSError **)error;
++ (nullable NSString *)bundledFactoryCodePathForService:(NSDictionary *)service;
++ (BOOL)clearRuntimeStorageForService:(NSDictionary *)service error:(NSError **)error;
 @end

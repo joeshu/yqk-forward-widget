@@ -472,6 +472,8 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
     if(!livePageRemainsVisible)[self suspendLivePlaybackForReason:@"app_background_outside_live_page"];
     [self.nativePreloader cancel];
     [[HostImageLoader shared] cancelPending];
+    [self.channelPreviewSnapshots removeAllObjects];
+    [CCTVSharedChannelLogoCache() removeAllObjects];
     [self stopPreview];
     [self.liveQualityBadgeTimer invalidate];self.liveQualityBadgeTimer=nil;
     for(AVAssetImageGenerator *gen in self.channelPreviewGenerators.allValues)[gen cancelAllCGImageGeneration];
@@ -602,8 +604,12 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
 }
 
 - (void)togglePiP {
-    if (!AVPictureInPictureController.isPictureInPictureSupported) { [self log:@"设备不支持画中画"]; return; }
-    if (!self.avLayer) { [self log:@"画中画仅支持订阅源（AVPlayer）"]; return; }
+    if (!AVPictureInPictureController.isPictureInPictureSupported) { [self log:@"设备不支持画中画"]; [self showServiceError:@"当前设备不支持系统画中画。"]; return; }
+    if (!self.avLayer) {
+        [self log:@"画中画仅支持订阅源（AVPlayer）"];
+        [self showServiceError:@"央视原生加密频道由专用内核（CNPlayerSDK）解密渲染，不支持系统画中画；仅「频道」页的普通 HLS 订阅源（AVPlayer）支持画中画。"];
+        return;
+    }
     if (self.pip && self.pip.isPictureInPictureActive) { [self.pip stopPictureInPicture]; return; }
     self.pip = [[AVPictureInPictureController alloc] initWithPlayerLayer:self.avLayer];
     if (@available(iOS 14.2, *)) { self.pip.canStartPictureInPictureAutomaticallyFromInline = CCTVBoolPreference(@"autoPiP", NO); }
@@ -706,7 +712,7 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
 - (UIButton *)barButton:(NSString *)title action:(SEL)action {
     UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
     [b setTitle:title forState:UIControlStateNormal];
-    NSDictionary<NSString *,NSString *> *symbols=@{@"暂停":@"pause.fill",@"播放":@"play.fill",@"继续播放":@"play.circle.fill",@"静音":@"speaker.wave.2.fill",@"线路":@"antenna.radiowaves.left.and.right",@"节目单":@"list.bullet.rectangle",@"投屏":@"airplayvideo",@"投屏中":@"tv.and.mediabox.fill",@"信息":@"info.circle",@"更多":@"ellipsis.circle",@"全屏":@"arrow.up.left.and.arrow.down.right",@"退出全屏":@"arrow.down.right.and.arrow.up.left"};
+    NSDictionary<NSString *,NSString *> *symbols=@{@"暂停":@"pause.fill",@"播放":@"play.fill",@"继续":@"play.fill",@"继续播放":@"play.circle.fill",@"重试":@"arrow.clockwise",@"重播":@"gobackward",@"重连中":@"arrow.triangle.2.circlepath",@"静音":@"speaker.wave.2.fill",@"线路":@"antenna.radiowaves.left.and.right",@"节目单":@"list.bullet.rectangle",@"投屏":@"airplayvideo",@"投屏中":@"tv.and.mediabox.fill",@"信息":@"info.circle",@"更多":@"ellipsis.circle",@"全屏":@"arrow.up.left.and.arrow.down.right",@"退出全屏":@"arrow.down.right.and.arrow.up.left"};
     NSString *symbol=symbols[title];
     if(symbol){UIImageSymbolConfiguration *sc=[UIImageSymbolConfiguration configurationWithPointSize:11 weight:UIImageSymbolWeightSemibold];[b setImage:[UIImage systemImageNamed:symbol withConfiguration:sc] forState:UIControlStateNormal];b.imageEdgeInsets=UIEdgeInsetsMake(0,-2,0,3);}
     b.accessibilityLabel=title;
@@ -730,6 +736,26 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
     HostInstallPressFeedback(b);
     [b addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
     return b;
+}
+
+- (void)syncPlayPauseButtonIcon {
+    if (!self.playPauseBtn) return;
+    NSString *title = [self.playPauseBtn titleForState:UIControlStateNormal] ?: @"";
+    NSDictionary<NSString *,NSString *> *symbols = @{
+        @"暂停":@"pause.fill",
+        @"播放":@"play.fill",
+        @"继续":@"play.fill",
+        @"继续播放":@"play.circle.fill",
+        @"重试":@"arrow.clockwise",
+        @"重播":@"gobackward",
+        @"重连中":@"arrow.triangle.2.circlepath"
+    };
+    NSString *symbol = symbols[title];
+    if (symbol.length) {
+        UIImageSymbolConfiguration *sc = [UIImageSymbolConfiguration configurationWithPointSize:11 weight:UIImageSymbolWeightSemibold];
+        [self.playPauseBtn setImage:[UIImage systemImageNamed:symbol withConfiguration:sc] forState:UIControlStateNormal];
+    }
+    if (title.length) self.playPauseBtn.accessibilityLabel = title;
 }
 
 - (void)updatePlaybackControlAccessibility {
@@ -981,7 +1007,7 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
     self.infoLabel.hidden=NO;
     self.infoLabel.text=@"直播与点播不会同时播放";
     self.playPauseBtn.enabled=YES;
-    [self.playPauseBtn setTitle:@"继续播放" forState:UIControlStateNormal];
+    [self.playPauseBtn setTitle:@"继续播放" forState:UIControlStateNormal];[self syncPlayPauseButtonIcon];
     self.liveMiniPlayerLabel.text=[NSString stringWithFormat:@"直播已挂起 · %@",self.channelName.length?self.channelName:@"当前频道"];
     self.liveMiniPlayerBar.hidden=NO;
 }
@@ -1174,7 +1200,8 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
         CGFloat tabHeight=58,tabWidth=MIN(w,560),tabY=MAX(0,height-safe.bottom-tabHeight),tabContentInset=MAX(8,height-tabY+8);self.bottomBar.frame=CGRectMake(MAX(0,(w-tabWidth)/2),tabY,tabWidth,tabHeight);self.bottomBarBackdrop.frame=CGRectMake(0,tabY,w,MAX(tabHeight,height-tabY));self.bottomDockFadeGradient.frame=self.bottomBarBackdrop.bounds;self.bottomDockGlass.frame=CGRectMake(MAX(10,(w-MIN(w-20,540))/2),2,MIN(w-20,540),tabHeight-4);self.bottomBar.hidden=NO;self.bottomBarBackdrop.hidden=NO;
         BOOL showMiniBar=self.livePlaybackSuspendedForNavigation&&self.channelID.length&&self.activeTab>=2;self.liveMiniPlayerBar.hidden=!showMiniBar;if(showMiniBar){CGFloat miniW=MIN(w-28,520),miniH=42;self.liveMiniPlayerBar.frame=CGRectMake((w-miniW)/2,MAX(top+8,tabY-miniH-8),miniW,miniH);self.liveMiniPlayerCloseButton.frame=CGRectMake(miniW-38,5,32,32);self.liveMiniPlayerResumeButton.frame=CGRectMake(miniW-130,5,88,32);self.liveMiniPlayerLabel.frame=CGRectMake(14,0,MAX(0,miniW-150),miniH);[self.view bringSubviewToFront:self.liveMiniPlayerBar];}
         CGFloat contentY=y+6+segmentHeight+4;CGFloat contentBottom=height;CGFloat catalogBottomInset=tabContentInset+62;
-        CGRect frame=CGRectMake(0,0,w,MAX(0,contentBottom));UIEdgeInsets catalogInsets=UIEdgeInsetsMake(contentY,0,catalogBottomInset,0);CCTVApplyImmersiveScrollGeometry(self.table,frame,catalogInsets);CCTVApplyImmersiveScrollGeometry(self.channelGrid,frame,catalogInsets);
+        CGFloat floatingPillExtra=catalog?18:0;
+        CGRect frame=CGRectMake(0,0,w,MAX(0,contentBottom));UIEdgeInsets catalogInsets=UIEdgeInsetsMake(contentY,0,catalogBottomInset+floatingPillExtra,0);CCTVApplyImmersiveScrollGeometry(self.table,frame,catalogInsets);CCTVApplyImmersiveScrollGeometry(self.channelGrid,frame,catalogInsets);
         self.table.hidden=!catalog||self.gridMode||self.playbackPanel!=nil;self.channelGrid.hidden=!catalog||!self.gridMode||self.playbackPanel!=nil;self.playbackPanel.view.frame=[self.playbackPanel isKindOfClass:CCTVPlaybackListPanelController.class]?frame:CGRectMake(0,contentY,w,MAX(0,contentBottom-contentY));self.playbackPanel.view.hidden=!catalog;if([self.playbackPanel isKindOfClass:CCTVPlaybackListPanelController.class]){UITableView *panelTable=((CCTVPlaybackListPanelController *)self.playbackPanel).tableView;CCTVApplyImmersiveScrollGeometry(panelTable,panelTable.frame,catalogInsets);}else if([self.playbackPanel isKindOfClass:EPGViewController.class]){UITableView *epgTable=[self.playbackPanel valueForKey:@"table"];if([epgTable isKindOfClass:UITableView.class])epgTable.contentInset=UIEdgeInsetsMake(0,0,catalogBottomInset,0);}
         // Every tab page owns the full root bounds. Child controls use their
         // safe-area guides, while their backgrounds and scroll views can pass
@@ -1394,7 +1421,7 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
     page.onIntegerPreferenceChanged=^(NSString *key, NSInteger value){
         if([key isEqualToString:@"cctv.channelGridColumns.v1"]){weakSelf.gridColumns=value==3?3:4;[weakSelf configureCatalogNavigation];[weakSelf.channelGrid.collectionViewLayout invalidateLayout];[weakSelf.channelGrid reloadData];[weakSelf.view setNeedsLayout];}
         if([key isEqualToString:@"cctv.channelSortMode.v1"]){weakSelf.channelSortMode=value==1?1:0;[weakSelf configureCatalogNavigation];[weakSelf applyFilter];}
-        if([key isEqualToString:@"cctv.mediaGridColumns.v1"]||[key isEqualToString:@"cctv.mediaEpisodeLayoutStyle.v1"]){MediaBrowserViewController *browser=(MediaBrowserViewController *)weakSelf.tabPages[@2];if(browser)[browser reloadMediaDisplayConfigurationIfLoaded];[NSNotificationCenter.defaultCenter postNotificationName:@"MediaDisplayConfigurationDidChangeNotification" object:nil];}
+        if([key isEqualToString:@"cctv.mediaGridColumns.v1"]||[key isEqualToString:@"cctv.mediaEpisodeLayoutStyle.v1"]){MediaBrowserViewController *browser=(MediaBrowserViewController *)weakSelf.tabPages[@2];if(browser)[browser reloadMediaDisplayConfigurationIfLoaded];[NSNotificationCenter.defaultCenter postNotificationName:@"MediaDisplayConfigurationDidChangeNotification" object:nil];[NSNotificationCenter.defaultCenter postNotificationName:CCTVMediaEpisodeLayoutStyleDidChangeNotification object:nil];}
         if([key isEqualToString:@"cctv.appFontSize.v1"]){[weakSelf applyFontSizeOverride];}
     };
     page.onPreferenceChanged=^(NSString *key, BOOL value){
@@ -1414,7 +1441,7 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
         if ([key isEqualToString:@"nativePlayerCornerLogoEnabled"]) { [weakSelf applyResourceChannelLogoToggleForSource:@"builtin:cctv" enabled:value cornerOnly:YES]; }
         if ([key isEqualToString:@"nativeChannelPreviewEnabled"]) { [weakSelf applyResourcePreviewOrTelemetryToggleForSource:@"builtin:cctv" enabled:value isPreview:YES]; }
         if ([key isEqualToString:@"nativeChannelTelemetryEnabled"]) { [weakSelf applyResourcePreviewOrTelemetryToggleForSource:@"builtin:cctv" enabled:value isPreview:NO]; }
-        if ([key isEqualToString:@"cctv.mediaEpisodeShowBadge.v1"] || [key isEqualToString:@"cctv.mediaEpisodeAutoExpand.v1"]) { [NSNotificationCenter.defaultCenter postNotificationName:@"MediaDisplayConfigurationDidChangeNotification" object:nil]; }
+        if ([key isEqualToString:@"cctv.mediaEpisodeShowBadge.v1"] || [key isEqualToString:@"cctv.mediaEpisodeAutoExpand.v1"]) { [NSNotificationCenter.defaultCenter postNotificationName:@"MediaDisplayConfigurationDidChangeNotification" object:nil]; [NSNotificationCenter.defaultCenter postNotificationName:CCTVMediaEpisodeLayoutStyleDidChangeNotification object:nil]; }
         if ([key isEqualToString:@"channelGridMode"]) { weakSelf.gridMode=value; [weakSelf configureCatalogNavigation]; }
         if ([key isEqualToString:@"channelGridMode"]) { [weakSelf.channelGrid.collectionViewLayout invalidateLayout]; [weakSelf.channelGrid reloadData]; [weakSelf.view setNeedsLayout]; }
         if ([key isEqualToString:@"cctv.mediaKeepScreenAwake"]) { [weakSelf updateLiveScreenAwakeState]; }
@@ -1436,6 +1463,9 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
             [weakSelf applyFilter];
             [weakSelf updateLiveScreenAwakeState];
             [weakSelf updateLiveResourceCapsule];
+            MediaBrowserViewController *browser=(MediaBrowserViewController *)weakSelf.tabPages[@2];
+            if(browser)[browser reloadMediaDisplayConfigurationIfLoaded];
+            [NSNotificationCenter.defaultCenter postNotificationName:CCTVMediaEpisodeLayoutStyleDidChangeNotification object:@0];
         }
     };
     return page;
@@ -1449,10 +1479,10 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
     NSError *error=nil;NSDictionary *backup=[HostBackup validatedBackup:data error:&error];if(!backup){[self showServiceError:error.localizedDescription];return;}
     UIAlertController *a=[UIAlertController alertControllerWithTitle:@"导入本机配置" message:@"将替换本机订阅、收藏和偏好。Python 服务代码单独导入，不受影响。" preferredStyle:UIAlertControllerStyleAlert];[a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[a addAction:[UIAlertAction actionWithTitle:@"导入" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
         for(NSString *source in self.subscriptionURLs.allObjects){self.subscriptionRequestVersions[source]=@([self.subscriptionRequestVersions[source] unsignedIntegerValue]+1);[self removeSubscriptionSource:source];}
-        [HostBackup restore:backup];self.subscriptionURLs=[NSMutableSet setWithArray:backup[@"subscriptions"]];self.favorites=[backup[@"favorites"] mutableCopy];self.recents=[[NSUserDefaults.standardUserDefaults arrayForKey:@"recents"] mutableCopy];self.activeSource=nil;self.gridMode=CCTVBoolPreference(@"channelGridMode",YES);for(NSString *source in self.subscriptionURLs)[self fetchSubscription:source silent:YES];[self activateAudioSession];[self applyFilter];[self selectBottomTab:(UIButton *)self.bottomBar.arrangedSubviews.firstObject];
+        [HostBackup restore:backup];self.subscriptionURLs=[NSMutableSet setWithArray:backup[@"subscriptions"]];self.favorites=[backup[@"favorites"] mutableCopy];self.recents=[[NSUserDefaults.standardUserDefaults arrayForKey:@"recents"] mutableCopy]?:[NSMutableArray array];self.activeSource=nil;self.gridMode=CCTVBoolPreference(@"channelGridMode",YES);NSInteger restoredCols=[NSUserDefaults.standardUserDefaults integerForKey:@"cctv.channelGridColumns.v1"];self.gridColumns=(restoredCols==3)?3:4;self.channelSortMode=[NSUserDefaults.standardUserDefaults integerForKey:@"cctv.channelSortMode.v1"]==1?1:0;[RuntimeDiagnostics.shared setEnabled:CCTVBoolPreference(@"runtimeDiagnosticsEnabled",NO)];MediaAdaptationMonitor.shared.monitoringEnabled=CCTVBoolPreference(@"cctv.adaptationMonitor.enabled",YES);[self configureSDKLogging];for(NSString *source in self.subscriptionURLs)[self fetchSubscription:source silent:YES];[self activateAudioSession];[self configureCatalogNavigation];[self applyFilter];[self selectBottomTab:(UIButton *)self.bottomBar.arrangedSubviews.firstObject];
         // 备份里的主题与字号刚恢复：立即应用到窗口并重刷可见页面，
         // 否则要等下次启动才生效。
-        UIWindow *window=self.view.window;if(window){HostApplyThemeToWindow(window);HostStyleNavigation(self.navigationController);HostRefreshAppearanceLayers(window);}[self applyFontSizeOverride];[self.table reloadData];[self.view setNeedsLayout];
+        UIWindow *window=self.view.window;if(window){HostApplyThemeToWindow(window);HostStyleNavigation(self.navigationController);HostRefreshAppearanceLayers(window);}[self reloadThemeAppearance];[self applyFontSizeOverride];MediaBrowserViewController *browser=(MediaBrowserViewController *)self.tabPages[@2];if(browser)[browser reloadMediaDisplayConfigurationIfLoaded];[NSNotificationCenter.defaultCenter postNotificationName:CCTVMediaEpisodeLayoutStyleDidChangeNotification object:nil];[self.table reloadData];[self.view setNeedsLayout];
     }]];[self presentViewController:a animated:YES completion:nil];
 }
 @end

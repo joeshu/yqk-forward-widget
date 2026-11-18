@@ -185,8 +185,9 @@ static NSCache<NSString *,NSDictionary *> *ServiceEntryAnalysisCache(void){
             dispatch_once(&onceToken, ^{ syncedTargets = [NSMutableSet set]; });
             NSString *syncKey = [NSString stringWithFormat:@"%@|%@", bundledID, target];
             BOOL alreadySynced = NO;
+            BOOL userEdited = [service[@"userEditedCode"] boolValue] && [NSFileManager.defaultManager fileExistsAtPath:target];
             @synchronized(syncedTargets) {
-                alreadySynced = [syncedTargets containsObject:syncKey] && [NSFileManager.defaultManager fileExistsAtPath:target];
+                alreadySynced = userEdited || ([syncedTargets containsObject:syncKey] && [NSFileManager.defaultManager fileExistsAtPath:target]);
             }
             if(!alreadySynced){
                 NSString *bundlePath=[NSBundle.mainBundle pathForResource:bundleSpec[0] ofType:bundleSpec[1] inDirectory:@"BuiltinMedia"];
@@ -593,6 +594,52 @@ static NSCache<NSString *,NSDictionary *> *ServiceEntryAnalysisCache(void){
         }
     }else if(![fm createDirectoryAtPath:target withIntermediateDirectories:YES attributes:nil error:error])return nil;
     return target;
+}
++ (nullable NSString *)bundledFactoryCodePathForService:(NSDictionary *)service {
+    if (![service isKindOfClass:NSDictionary.class]) return nil;
+    NSString *bundledID = [service[@"bundledResourceID"] isKindOfClass:NSString.class] ? service[@"bundledResourceID"] : @"";
+    NSDictionary *bundleMap = @{
+        @"builtin-dsx-python": @[@"dsx-python", @"py"],
+        @"builtin-dsx-drpy": @[@"dsx-drpy", @"js"],
+        @"builtin-hongguo-python": @[@"hongguo-python", @"py"],
+        @"builtin-hongguo-node": @[@"hongguo-node", @"js"],
+        @"builtin-webox-4kvm": @[@"webox-4kvm", @"js"],
+        @"builtin-webox-hstream": @[@"webox-hstream", @"js"],
+        @"builtin-webox-guazi": @[@"webox-guazi", @"js"],
+        @"builtin-webox-rou": @[@"webox-rou", @"js"],
+        @"builtin-webox-one": @[@"webox-one", @"js"]
+    };
+    NSArray *spec = bundleMap[bundledID];
+    if (spec.count == 2) {
+        return [NSBundle.mainBundle pathForResource:spec[0] ofType:spec[1] inDirectory:@"BuiltinMedia"];
+    }
+    return nil;
+}
++ (BOOL)clearRuntimeStorageForService:(NSDictionary *)service error:(NSError **)error {
+    @synchronized(self) {
+        NSString *identifier = [service isKindOfClass:NSDictionary.class] ? service[@"id"] : nil;
+        if (!ServiceRelativePath(identifier) || identifier.pathComponents.count != 1) {
+            if (error) *error = [NSError errorWithDomain:@"CCTVHostService" code:1 userInfo:@{NSLocalizedDescriptionKey: @"服务标识无效"}];
+            return NO;
+        }
+        [NSUserDefaults.standardUserDefaults removeObjectForKey:[@"CCTVJSStorage:" stringByAppendingString:identifier]];
+        NSDictionary *resolved = [self resolvedService:service];
+        NSString *dataDir = [self dataDirectoryForService:resolved error:error];
+        if (!dataDir.length) return NO;
+        NSFileManager *fm = NSFileManager.defaultManager;
+        NSString *pkgRoot = [resolved[@"packageRoot"] isKindOfClass:NSString.class] ? [resolved[@"packageRoot"] stringByStandardizingPath] : @"";
+        NSString *archivePath = [resolved[@"archivePath"] isKindOfClass:NSString.class] ? [resolved[@"archivePath"] stringByStandardizingPath] : @"";
+        NSString *codeFile = [[self codePath:resolved] stringByStandardizingPath] ?: @"";
+        NSString *versionsDir = [[dataDir stringByAppendingPathComponent:@"versions"] stringByStandardizingPath];
+        for (NSString *name in [fm contentsOfDirectoryAtPath:dataDir error:NULL]) {
+            NSString *fullPath = [[dataDir stringByAppendingPathComponent:name] stringByStandardizingPath];
+            if ([fullPath isEqualToString:pkgRoot] || [fullPath isEqualToString:archivePath] || [fullPath isEqualToString:codeFile] || [fullPath isEqualToString:versionsDir]) continue;
+            if (pkgRoot.length && [pkgRoot hasPrefix:[fullPath stringByAppendingString:@"/"]]) continue;
+            if (codeFile.length && [codeFile hasPrefix:[fullPath stringByAppendingString:@"/"]]) continue;
+            [fm removeItemAtPath:fullPath error:NULL];
+        }
+        return YES;
+    }
 }
 + (NSString *)activeIdentifier {
     return [NSUserDefaults.standardUserDefaults stringForKey:@"activePythonService"] ?: @"builtin-ysp";

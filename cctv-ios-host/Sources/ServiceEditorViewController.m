@@ -2,18 +2,127 @@
 #import "HostTheme.h"
 #import "PyHost.h"
 #import "ServiceStore.h"
+#import <JavaScriptCore/JavaScriptCore.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+
+@interface ServiceCodeViewController () <UITextViewDelegate>
+@property(nonatomic, strong) UILabel *codeStatusLabel;
+@property(nonatomic, copy) NSString *initialCodeText;
+@property(nonatomic, copy) NSString *lastSearchQuery;
+@property(nonatomic, copy) NSString *lastReplaceText;
+@property(nonatomic, assign) BOOL applyingSyntaxHighlight;
+@end
 
 @implementation ServiceCodeViewController {
     UITextView *_editor;
+}
+- (NSString *)detectedCodeLanguageLabel {
+    NSString *ext = self.path.pathExtension.lowercaseString ?: @"";
+    if ([ext isEqualToString:@"js"] || [ext isEqualToString:@"mjs"] || [ext isEqualToString:@"cjs"]) return @"JavaScript";
+    if ([ext isEqualToString:@"json"]) return @"JSON";
+    if ([ext isEqualToString:@"py"]) return @"Python";
+    NSString *sample = _editor.text ?: @"";
+    if ([sample hasPrefix:@"{"] || [sample hasPrefix:@"["]) return @"JSON";
+    if ([sample containsString:@"function("] || [sample containsString:@"module.exports"] || [sample containsString:@"var rule"]) return @"JavaScript";
+    return @"Python";
+}
+- (void)updateCodeStatusBar {
+    if (!self.codeStatusLabel) return;
+    NSString *text = _editor.text ?: @"";
+    NSUInteger length = text.length;
+    NSUInteger totalLines = 1;
+    for (NSUInteger i = 0; i < length; i++) {
+        if ([text characterAtIndex:i] == '\n') totalLines++;
+    }
+    NSRange sel = _editor.selectedRange;
+    NSUInteger cursorLoc = sel.location != NSNotFound ? MIN(sel.location, length) : 0;
+    NSUInteger cursorLine = 1, lineStart = 0;
+    for (NSUInteger i = 0; i < cursorLoc; i++) {
+        if ([text characterAtIndex:i] == '\n') { cursorLine++; lineStart = i + 1; }
+    }
+    NSUInteger cursorCol = cursorLoc - lineStart + 1;
+    NSString *mode = self.readOnly ? @"只读" : ([text isEqualToString:self.initialCodeText ?: @""] ? @"未修改" : @"已修改*");
+    self.codeStatusLabel.text = [NSString stringWithFormat:@"%@ · %lu 行 · %.1f KB · 行 %lu:%lu · %@",
+                                 [self detectedCodeLanguageLabel],
+                                 (unsigned long)totalLines,
+                                 (double)[text lengthOfBytesUsingEncoding:NSUTF8StringEncoding] / 1024.0,
+                                 (unsigned long)cursorLine,
+                                 (unsigned long)cursorCol,
+                                 mode];
+}
+- (void)applySyntaxHighlightingIfNeeded {
+    if (self.applyingSyntaxHighlight || !_editor) return;
+    NSString *text = _editor.text ?: @"";
+    if (!text.length || text.length > 128 * 1024) return;
+    self.applyingSyntaxHighlight = YES;
+    NSRange selectedRange = _editor.selectedRange;
+    UIFont *codeFont = _editor.font ?: [UIFont monospacedSystemFontOfSize:14 weight:UIFontWeightRegular];
+    NSTextStorage *storage = _editor.textStorage;
+    NSRange fullRange = NSMakeRange(0, text.length);
+    [storage beginEditing];
+    [storage addAttribute:NSForegroundColorAttributeName value:HostText() range:fullRange];
+    [storage addAttribute:NSFontAttributeName value:codeFont range:fullRange];
+    static NSRegularExpression *numberRe = nil;
+    static NSRegularExpression *keywordRe = nil;
+    static NSRegularExpression *stringRe = nil;
+    static NSRegularExpression *commentRe = nil;
+    static dispatch_once_t highlightOnce;
+    dispatch_once(&highlightOnce, ^{
+        numberRe = [NSRegularExpression regularExpressionWithPattern:@"\\b\\d+(?:\\.\\d+)?\\b" options:0 error:NULL];
+        keywordRe = [NSRegularExpression regularExpressionWithPattern:@"\\b(?:def|class|import|from|return|async|await|if|elif|else|for|while|try|except|finally|with|pass|break|continue|lambda|yield|function|const|let|var|module|exports|require|export|default|new|typeof|instanceof|true|false|null|None|True|False)\\b" options:0 error:NULL];
+        stringRe = [NSRegularExpression regularExpressionWithPattern:@"(?:\"(?:\\\\.|[^\"\\\\\\n])*\"|'(?:\\\\.|[^'\\\\\\n])*')" options:0 error:NULL];
+        commentRe = [NSRegularExpression regularExpressionWithPattern:@"(?m)(?:#.*$|//.*$|/\\*[\\s\\S]*?\\*/)" options:0 error:NULL];
+    });
+    UIColor *numColor = UIColor.systemTealColor;
+    UIColor *kwColor = HostAccent();
+    UIColor *strColor = UIColor.systemOrangeColor;
+    UIColor *cmtColor = HostSecondaryText();
+    for (NSTextCheckingResult *m in [numberRe matchesInString:text options:0 range:fullRange]) {
+        [storage addAttribute:NSForegroundColorAttributeName value:numColor range:m.range];
+    }
+    for (NSTextCheckingResult *m in [keywordRe matchesInString:text options:0 range:fullRange]) {
+        [storage addAttribute:NSForegroundColorAttributeName value:kwColor range:m.range];
+    }
+    for (NSTextCheckingResult *m in [stringRe matchesInString:text options:0 range:fullRange]) {
+        [storage addAttribute:NSForegroundColorAttributeName value:strColor range:m.range];
+    }
+    for (NSTextCheckingResult *m in [commentRe matchesInString:text options:0 range:fullRange]) {
+        [storage addAttribute:NSForegroundColorAttributeName value:cmtColor range:m.range];
+    }
+    [storage endEditing];
+    if (NSMaxRange(selectedRange) <= text.length) {
+        _editor.selectedRange = selectedRange;
+    }
+    self.applyingSyntaxHighlight = NO;
+}
+- (void)textViewDidChange:(UITextView *)textView {
+    [self applySyntaxHighlightingIfNeeded];
+    [self updateCodeStatusBar];
+}
+- (void)textViewDidChangeSelection:(UITextView *)textView {
+    [self updateCodeStatusBar];
 }
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.overrideUserInterfaceStyle = HostSelectedInterfaceStyle();
     self.title = self.readOnly ? @"查看代码" : @"编辑代码";
     self.view.backgroundColor = HostBackground();
+    if (!self.readOnly) {
+        self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"返回" style:UIBarButtonItemStylePlain target:self action:@selector(requestCloseCodeEditor)];
+    }
+    self.codeStatusLabel = [UILabel new];
+    self.codeStatusLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    self.codeStatusLabel.font = HostMonospacedDigitFont(12, UIFontWeightMedium, UIFontTextStyleCaption1);
+    self.codeStatusLabel.adjustsFontForContentSizeCategory = YES;
+    self.codeStatusLabel.textColor = HostSecondaryText();
+    self.codeStatusLabel.numberOfLines = 1;
+    self.codeStatusLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+    self.codeStatusLabel.accessibilityIdentifier = @"service.code.status";
+    [self.view addSubview:self.codeStatusLabel];
+
     _editor = [UITextView new];
     _editor.translatesAutoresizingMaskIntoConstraints = NO;
+    _editor.delegate = self;
     _editor.backgroundColor = HostCard();
     _editor.textColor = HostText();
     _editor.layer.cornerRadius = 14;
@@ -33,8 +142,16 @@
     _editor.smartDashesType = UITextSmartDashesTypeNo;
     _editor.spellCheckingType = UITextSpellCheckingTypeNo;
     _editor.layoutManager.allowsNonContiguousLayout = YES;
+    UIToolbar *kbToolbar = [[UIToolbar alloc] init]; [kbToolbar sizeToFit];
+    UIBarButtonItem *kbFind = [[UIBarButtonItem alloc] initWithTitle:@"搜索" style:UIBarButtonItemStylePlain target:self action:@selector(promptFindInCode)];
+    UIBarButtonItem *kbLine = [[UIBarButtonItem alloc] initWithTitle:@"跳行" style:UIBarButtonItemStylePlain target:self action:@selector(promptGoToLine)];
+    UIBarButtonItem *kbCheck = [[UIBarButtonItem alloc] initWithTitle:@"预检" style:UIBarButtonItemStylePlain target:self action:@selector(validateCodeSyntax)];
+    UIBarButtonItem *kbFlex = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil];
+    UIBarButtonItem *kbDone = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(dismissCodeKeyboard)];
+    kbToolbar.items = @[kbFind, kbLine, kbCheck, kbFlex, kbDone];
+    _editor.inputAccessoryView = kbToolbar;
     _editor.text=@"正在读取代码…";_editor.editable=NO;
-    NSString *path=self.path;NSUInteger limit=self.readOnly?64*1024:2*1024*1024;__weak typeof(self) weakSelf=self;
+    NSString *path=self.path;NSUInteger limit=self.readOnly?512*1024:2*1024*1024;__weak typeof(self) weakSelf=self;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{@autoreleasepool{
         NSError *error=nil;NSData *data=nil;NSFileHandle *file=path.length?[NSFileHandle fileHandleForReadingAtPath:path]:nil;
         @try{if(file)data=[file readDataUpToLength:limit+1 error:&error];}@catch(NSException *exception){error=[NSError errorWithDomain:@"CCTVHostCode" code:1 userInfo:nil];}@finally{[file closeAndReturnError:NULL];}
@@ -42,25 +159,46 @@
         NSString *text=data?[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]:nil;
         for(NSUInteger trim=1;!text && truncated && trim<=3;trim++)text=[[NSString alloc] initWithData:[data subdataWithRange:NSMakeRange(0,data.length-trim)] encoding:NSUTF8StringEncoding];
         dispatch_async(dispatch_get_main_queue(),^{ServiceCodeViewController *owner=weakSelf;if(!owner)return;
-            if(!text || error){owner->_editor.text=@"无法读取 UTF-8 代码文件";owner.navigationItem.rightBarButtonItem=nil;return;}
+            if(!text || error){owner->_editor.text=@"无法读取 UTF-8 代码文件";owner.navigationItem.rightBarButtonItem=nil;[owner updateCodeStatusBar];return;}
+            owner.initialCodeText=text;
             owner->_editor.text=text;if(truncated){owner.readOnly=YES;owner.navigationItem.rightBarButtonItem=nil;owner.navigationItem.prompt=@"只读预览已截断，导出包含完整文件";}
             owner->_editor.editable=!owner.readOnly;owner.navigationItem.rightBarButtonItem.enabled=YES;
+            [owner applySyntaxHighlightingIfNeeded];
+            [owner updateCodeStatusBar];
         });
     }});
     [self.view addSubview:_editor];
     [NSLayoutConstraint activateConstraints:@[
-        [_editor.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
+        [self.codeStatusLabel.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:4],
+        [self.codeStatusLabel.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
+        [self.codeStatusLabel.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
+        [self.codeStatusLabel.heightAnchor constraintGreaterThanOrEqualToConstant:20],
+        [_editor.topAnchor constraintEqualToAnchor:self.codeStatusLabel.bottomAnchor constant:4],
         [_editor.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:12],
         [_editor.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-12],
         [_editor.bottomAnchor constraintEqualToAnchor:self.view.keyboardLayoutGuide.topAnchor]
     ]];
     UIAction *findAction = [UIAction actionWithTitle:@"搜索代码关键字" image:[UIImage systemImageNamed:@"magnifyingglass"] identifier:nil handler:^(__unused UIAction *a){ [weakSelf promptFindInCode]; }];
+    UIAction *goToLineAction = [UIAction actionWithTitle:@"跳转到指定行号" image:[UIImage systemImageNamed:@"number"] identifier:nil handler:^(__unused UIAction *a){ [weakSelf promptGoToLine]; }];
+    UIAction *validateSyntaxAction = [UIAction actionWithTitle:@"语法与结构预检" image:[UIImage systemImageNamed:@"checkmark.shield"] identifier:nil handler:^(__unused UIAction *a){ [weakSelf validateCodeSyntax]; }];
     UIAction *formatJSONAction = [UIAction actionWithTitle:@"校验并美化 JSON" image:[UIImage systemImageNamed:@"curlybraces"] identifier:nil handler:^(__unused UIAction *a){ [weakSelf formatJSONIfApplicable]; }];
     UIAction *copyCodeAction = [UIAction actionWithTitle:@"复制全部代码" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){ [weakSelf copyAllCode]; }];
-    NSMutableArray<UIAction *> *toolActions = [NSMutableArray arrayWithObjects:findAction, formatJSONAction, copyCodeAction, nil];
+    NSMutableArray<UIMenuElement *> *toolActions = [NSMutableArray arrayWithObjects:findAction, goToLineAction, validateSyntaxAction, formatJSONAction, copyCodeAction, nil];
     if (!self.readOnly) {
+        UIAction *replaceAction = [UIAction actionWithTitle:@"查找并替换代码" image:[UIImage systemImageNamed:@"arrow.left.arrow.right"] identifier:nil handler:^(__unused UIAction *a){ [weakSelf promptReplaceInCode]; }];
+        [toolActions insertObject:replaceAction atIndex:1];
         UIAction *pasteCodeAction = [UIAction actionWithTitle:@"粘贴剪贴板替换代码" image:[UIImage systemImageNamed:@"doc.on.clipboard"] identifier:nil handler:^(__unused UIAction *a){ [weakSelf pasteReplaceCode]; }];
         [toolActions addObject:pasteCodeAction];
+        UIAction *pyHTTPTpl = [UIAction actionWithTitle:@"插入 Python HTTP 直播模板" image:[UIImage systemImageNamed:@"network"] identifier:nil handler:^(__unused UIAction *a){ [weakSelf insertCodeTemplate:@"python-http"]; }];
+        UIAction *pySpiderTpl = [UIAction actionWithTitle:@"插入 Python 影视 Spider 模板" image:[UIImage systemImageNamed:@"film"] identifier:nil handler:^(__unused UIAction *a){ [weakSelf insertCodeTemplate:@"python-spider"]; }];
+        UIAction *jsPluginTpl = [UIAction actionWithTitle:@"插入 JavaScript 影视插件模板" image:[UIImage systemImageNamed:@"sparkles"] identifier:nil handler:^(__unused UIAction *a){ [weakSelf insertCodeTemplate:@"js-media"]; }];
+        UIMenu *tplMenu = [UIMenu menuWithTitle:@"插入标准脚本模板" image:[UIImage systemImageNamed:@"doc.badge.plus"] identifier:nil options:0 children:@[pyHTTPTpl, pySpiderTpl, jsPluginTpl]];
+        [toolActions addObject:tplMenu];
+        if (self.bundledResourcePath.length) {
+            UIAction *resetBundled = [UIAction actionWithTitle:@"恢复内置初始代码" image:[UIImage systemImageNamed:@"arrow.counterclockwise"] identifier:nil handler:^(__unused UIAction *a){ [weakSelf resetBundledCodeIfApplicable]; }];
+            resetBundled.attributes = UIMenuElementAttributesDestructive;
+            [toolActions addObject:resetBundled];
+        }
     }
     UIBarButtonItem *toolsItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"wand.and.stars"] menu:[UIMenu menuWithTitle:@"代码工具" children:toolActions]];
     toolsItem.accessibilityIdentifier = @"service.code.tools";
@@ -72,25 +210,36 @@
     }
 }
 
+- (void)dismissCodeKeyboard {
+    [_editor resignFirstResponder];
+}
+
 - (void)reloadThemeAppearance {
     if(!self.isViewLoaded)return;
     self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
     self.view.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
     self.view.backgroundColor=HostBackground();
+    self.codeStatusLabel.textColor=HostSecondaryText();
     _editor.backgroundColor=HostCard();
     _editor.textColor=HostText();
     HostSetLayerBorderColor(_editor,HostBorder());
+    [self applySyntaxHighlightingIfNeeded];
+}
+
+- (void)showTemporaryPrompt:(NSString *)prompt {
+    if (!prompt.length) return;
+    self.navigationItem.prompt = prompt;
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        ServiceCodeViewController *owner = weakSelf;
+        if (owner && [owner.navigationItem.prompt isEqual:prompt]) owner.navigationItem.prompt = nil;
+    });
 }
 
 - (void)copyAllCode {
     if (!_editor.text.length) return;
     UIPasteboard.generalPasteboard.string = _editor.text;
-    self.navigationItem.prompt = @"代码已复制到剪贴板";
-    __weak typeof(self) weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-        ServiceCodeViewController *owner = weakSelf;
-        if (owner && [owner.navigationItem.prompt isEqual:@"代码已复制到剪贴板"]) owner.navigationItem.prompt = nil;
-    });
+    [self showTemporaryPrompt:@"代码已复制到剪贴板"];
 }
 
 - (void)pasteReplaceCode {
@@ -98,27 +247,300 @@
     NSString *clip = UIPasteboard.generalPasteboard.string;
     if (!clip.length) return;
     _editor.text = clip;
-    self.navigationItem.prompt = @"已从剪贴板替换代码";
-    __weak typeof(self) weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-        ServiceCodeViewController *owner = weakSelf;
-        if (owner && [owner.navigationItem.prompt isEqual:@"已从剪贴板替换代码"]) owner.navigationItem.prompt = nil;
-    });
+    [self updateCodeStatusBar];
+    [self showTemporaryPrompt:@"已从剪贴板替换代码"];
 }
 
 - (void)promptFindInCode {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"搜索代码" message:@"输入要定位的函数名、字段或配置键" preferredStyle:UIAlertControllerStyleAlert];
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *field){ field.placeholder = @"输入关键字"; }];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"搜索代码" message:@"输入要定位的函数名、字段或配置键（支持循环查找下一处）" preferredStyle:UIAlertControllerStyleAlert];
+    __weak typeof(self) weakSelf = self;
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *field){
+        field.placeholder = @"输入关键字";
+        field.text = weakSelf.lastSearchQuery ?: @"";
+        field.clearButtonMode = UITextFieldViewModeWhileEditing;
+    }];
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"定位" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){
+    [alert addAction:[UIAlertAction actionWithTitle:@"定位下一处" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){
+        ServiceCodeViewController *owner = weakSelf;
+        if (!owner) return;
         NSString *query = alert.textFields.firstObject.text ?: @"";
-        if (!query.length || !_editor.text.length) return;
-        NSRange range = [_editor.text rangeOfString:query options:NSCaseInsensitiveSearch];
-        if (range.location != NSNotFound) {
-            [_editor becomeFirstResponder];
-            _editor.selectedRange = range;
-            [_editor scrollRangeToVisible:range];
+        if (!query.length || !owner->_editor.text.length) return;
+        owner.lastSearchQuery = query;
+        NSString *fullText = owner->_editor.text;
+        NSMutableArray<NSValue *> *matches = [NSMutableArray array];
+        NSRange searchRange = NSMakeRange(0, fullText.length);
+        while (searchRange.location < fullText.length) {
+            NSRange found = [fullText rangeOfString:query options:NSCaseInsensitiveSearch range:searchRange];
+            if (found.location == NSNotFound) break;
+            [matches addObject:[NSValue valueWithRange:found]];
+            searchRange.location = NSMaxRange(found);
+            searchRange.length = fullText.length - searchRange.location;
         }
+        if (!matches.count) {
+            [owner showTemporaryPrompt:[NSString stringWithFormat:@"未找到「%@」", query]];
+            return;
+        }
+        NSUInteger currentEnd = NSMaxRange(owner->_editor.selectedRange);
+        NSUInteger matchIndex = 0;
+        for (NSUInteger i = 0; i < matches.count; i++) {
+            if (matches[i].rangeValue.location >= currentEnd) {
+                matchIndex = i;
+                break;
+            }
+        }
+        NSRange range = matches[matchIndex].rangeValue;
+        [owner->_editor becomeFirstResponder];
+        owner->_editor.selectedRange = range;
+        [owner->_editor scrollRangeToVisible:range];
+        [owner updateCodeStatusBar];
+        [owner showTemporaryPrompt:[NSString stringWithFormat:@"已定位「%@」（第 %lu/%lu 处）", query, (unsigned long)matchIndex + 1, (unsigned long)matches.count]];
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)promptReplaceInCode {
+    if (self.readOnly || !_editor.editable) return;
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"查找并替换代码" message:@"支持单步替换下一处或全文批量替换（如批量更换域名、请求头或参数名）" preferredStyle:UIAlertControllerStyleAlert];
+    __weak typeof(self) weakSelf = self;
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *field){
+        field.placeholder = @"要查找的内容";
+        field.text = weakSelf.lastSearchQuery ?: @"";
+        field.clearButtonMode = UITextFieldViewModeWhileEditing;
+    }];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *field){
+        field.placeholder = @"替换为（可留空表示删除）";
+        field.text = weakSelf.lastReplaceText ?: @"";
+        field.clearButtonMode = UITextFieldViewModeWhileEditing;
+    }];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"替换下一处" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){
+        ServiceCodeViewController *owner = weakSelf;
+        if (!owner || !owner->_editor.editable) return;
+        NSString *findStr = alert.textFields.firstObject.text ?: @"";
+        NSString *replaceStr = alert.textFields.count > 1 ? (alert.textFields[1].text ?: @"") : @"";
+        if (!findStr.length || !owner->_editor.text.length) return;
+        owner.lastSearchQuery = findStr;
+        owner.lastReplaceText = replaceStr;
+        NSString *fullText = owner->_editor.text;
+        NSUInteger startLoc = owner->_editor.selectedRange.location != NSNotFound ? owner->_editor.selectedRange.location : 0;
+        NSRange forwardRange = NSMakeRange(MIN(startLoc, fullText.length), fullText.length - MIN(startLoc, fullText.length));
+        NSRange found = [fullText rangeOfString:findStr options:0 range:forwardRange];
+        if (found.location == NSNotFound && startLoc > 0) {
+            found = [fullText rangeOfString:findStr options:0 range:NSMakeRange(0, startLoc)];
+        }
+        if (found.location == NSNotFound) {
+            [owner showTemporaryPrompt:[NSString stringWithFormat:@"未找到「%@」", findStr]];
+            return;
+        }
+        owner->_editor.text = [fullText stringByReplacingCharactersInRange:found withString:replaceStr];
+        NSRange newRange = NSMakeRange(found.location, replaceStr.length);
+        [owner applySyntaxHighlightingIfNeeded];
+        owner->_editor.selectedRange = newRange;
+        [owner->_editor scrollRangeToVisible:newRange];
+        [owner updateCodeStatusBar];
+        [owner showTemporaryPrompt:[NSString stringWithFormat:@"已替换 1 处「%@」", findStr]];
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"全部替换" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *a){
+        ServiceCodeViewController *owner = weakSelf;
+        if (!owner || !owner->_editor.editable) return;
+        NSString *findStr = alert.textFields.firstObject.text ?: @"";
+        NSString *replaceStr = alert.textFields.count > 1 ? (alert.textFields[1].text ?: @"") : @"";
+        if (!findStr.length || !owner->_editor.text.length) return;
+        owner.lastSearchQuery = findStr;
+        owner.lastReplaceText = replaceStr;
+        NSString *fullText = owner->_editor.text;
+        NSUInteger count = 0;
+        NSRange searchRange = NSMakeRange(0, fullText.length);
+        while (searchRange.location < fullText.length) {
+            NSRange found = [fullText rangeOfString:findStr options:0 range:searchRange];
+            if (found.location == NSNotFound) break;
+            count++;
+            searchRange.location = NSMaxRange(found);
+            searchRange.length = fullText.length - searchRange.location;
+        }
+        if (count == 0) {
+            [owner showTemporaryPrompt:[NSString stringWithFormat:@"未找到「%@」", findStr]];
+            return;
+        }
+        owner->_editor.text = [fullText stringByReplacingOccurrencesOfString:findStr withString:replaceStr];
+        [owner applySyntaxHighlightingIfNeeded];
+        [owner updateCodeStatusBar];
+        [owner showTemporaryPrompt:[NSString stringWithFormat:@"已全部替换 %lu 处", (unsigned long)count]];
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)promptGoToLine {
+    NSString *text = _editor.text ?: @"";
+    NSArray<NSString *> *lines = [text componentsSeparatedByString:@"\n"];
+    NSUInteger totalLines = MAX((NSUInteger)1, lines.count);
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"跳转到指定行号" message:[NSString stringWithFormat:@"当前代码共 %lu 行，请输入 1–%lu 之间的行号", (unsigned long)totalLines, (unsigned long)totalLines] preferredStyle:UIAlertControllerStyleAlert];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *field){
+        field.placeholder = [NSString stringWithFormat:@"1–%lu", (unsigned long)totalLines];
+        field.keyboardType = UIKeyboardTypeNumberPad;
+    }];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    __weak typeof(self) weakSelf = self;
+    [alert addAction:[UIAlertAction actionWithTitle:@"跳转" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){
+        ServiceCodeViewController *owner = weakSelf;
+        if (!owner) return;
+        NSInteger targetLine = [alert.textFields.firstObject.text integerValue];
+        if (targetLine < 1) return;
+        NSString *currentText = owner->_editor.text ?: @"";
+        NSArray<NSString *> *currentLines = [currentText componentsSeparatedByString:@"\n"];
+        NSUInteger clampedLine = MIN((NSUInteger)targetLine, MAX((NSUInteger)1, currentLines.count));
+        NSUInteger offset = 0;
+        for (NSUInteger i = 0; i + 1 < clampedLine && i < currentLines.count; i++) {
+            offset += currentLines[i].length + 1;
+        }
+        NSUInteger lineLen = (clampedLine - 1 < currentLines.count) ? currentLines[clampedLine - 1].length : 0;
+        NSRange lineRange = NSMakeRange(MIN(offset, currentText.length), MIN(lineLen, currentText.length - MIN(offset, currentText.length)));
+        [owner->_editor becomeFirstResponder];
+        owner->_editor.selectedRange = lineRange;
+        [owner->_editor scrollRangeToVisible:lineRange];
+        [owner updateCodeStatusBar];
+        [owner showTemporaryPrompt:[NSString stringWithFormat:@"已跳转到第 %lu 行", (unsigned long)clampedLine]];
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)validateCodeSyntax {
+    NSString *text = _editor.text ?: @"";
+    if (!text.length) {
+        [self showTemporaryPrompt:@"当前代码为空"];
+        return;
+    }
+    NSString *lang = [self detectedCodeLanguageLabel];
+    if ([lang isEqualToString:@"JSON"]) {
+        NSData *raw = [text dataUsingEncoding:NSUTF8StringEncoding];
+        NSError *err = nil;
+        id obj = raw.length ? [NSJSONSerialization JSONObjectWithData:raw options:NSJSONReadingFragmentsAllowed error:&err] : nil;
+        NSString *title = (obj && !err) ? @"JSON 语法校验通过" : @"JSON 语法校验未通过";
+        NSString *msg = (obj && !err) ? [NSString stringWithFormat:@"JSON 结构合法（顶层类型：%@）。", [obj isKindOfClass:NSDictionary.class] ? @"对象 Object" : ([obj isKindOfClass:NSArray.class] ? @"数组 Array" : @"基础值")] : (err.localizedDescription ?: @"存在非法 JSON 语法");
+        UIAlertController *a = [UIAlertController alertControllerWithTitle:title message:msg preferredStyle:UIAlertControllerStyleAlert];
+        [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:a animated:YES completion:nil];
+        return;
+    }
+    // 针对 Python / JavaScript 的字符串与注释感知括号平衡及宿主入口探测
+    NSMutableArray<NSDictionary *> *stack = [NSMutableArray array];
+    NSUInteger line = 1, col = 0;
+    unichar quoteChar = 0;
+    BOOL inLineComment = NO, inBlockComment = NO, escaped = NO;
+    NSString *mismatchDetail = nil;
+    NSUInteger len = text.length;
+    for (NSUInteger i = 0; i < len; i++) {
+        unichar c = [text characterAtIndex:i];
+        unichar next = (i + 1 < len) ? [text characterAtIndex:i + 1] : 0;
+        if (c == '\n') {
+            line++; col = 0; inLineComment = NO; escaped = NO; continue;
+        }
+        col++;
+        if (inLineComment) continue;
+        if (inBlockComment) {
+            if (c == '*' && next == '/') { inBlockComment = NO; i++; col++; }
+            continue;
+        }
+        if (quoteChar != 0) {
+            if (escaped) { escaped = NO; continue; }
+            if (c == '\\') { escaped = YES; continue; }
+            if (c == quoteChar) quoteChar = 0;
+            continue;
+        }
+        if ([lang isEqualToString:@"Python"] && c == '#') { inLineComment = YES; continue; }
+        if ([lang isEqualToString:@"JavaScript"] && c == '/' && next == '/') { inLineComment = YES; i++; col++; continue; }
+        if ([lang isEqualToString:@"JavaScript"] && c == '/' && next == '*') { inBlockComment = YES; i++; col++; continue; }
+        if (c == '\'' || c == '"' || ([lang isEqualToString:@"JavaScript"] && c == '`')) { quoteChar = c; continue; }
+        if (c == '(' || c == '[' || c == '{') {
+            [stack addObject:@{@"char": @(c), @"line": @(line), @"col": @(col)}];
+        } else if (c == ')' || c == ']' || c == '}') {
+            unichar expected = (c == ')') ? '(' : ((c == ']') ? '[' : '{');
+            NSDictionary *top = stack.lastObject;
+            if (!top || [top[@"char"] unsignedShortValue] != expected) {
+                mismatchDetail = [NSString stringWithFormat:@"第 %lu 行第 %lu 列发现多余或不匹配的闭合符号 '%C'", (unsigned long)line, (unsigned long)col, c];
+                break;
+            }
+            [stack removeLastObject];
+        }
+    }
+    if (!mismatchDetail && stack.count > 0) {
+        NSDictionary *unclosed = stack.lastObject;
+        mismatchDetail = [NSString stringWithFormat:@"第 %@ 行第 %@ 列开启的符号 '%C' 未闭合", unclosed[@"line"], unclosed[@"col"], [unclosed[@"char"] unsignedShortValue]];
+    }
+    NSString *jsEngineSyntaxError = nil;
+    if (!mismatchDetail && [lang isEqualToString:@"JavaScript"]) {
+        JSContext *syntaxCtx = [[JSContext alloc] init];
+        __block NSString *capturedJSException = nil;
+        syntaxCtx.exceptionHandler = ^(JSContext *ctx, JSValue *exception) {
+            NSNumber *errLine = [exception[@"line"] isNumber] ? [exception[@"line"] toNumber] : nil;
+            capturedJSException = errLine ? [NSString stringWithFormat:@"第 %@ 行：%@", errLine, exception.toString] : exception.toString;
+        };
+        // 将顶层 ESM import/export 转为等行注释后用 Function 构造器做只编译不执行的 AST 语法检查
+        static NSRegularExpression *esmRe = nil;
+        static dispatch_once_t esmOnce;
+        dispatch_once(&esmOnce, ^{
+            esmRe = [NSRegularExpression regularExpressionWithPattern:@"(?m)^\\s*(?:import\\s+.*|export\\s+(?:default\\s+)?)" options:0 error:NULL];
+        });
+        NSString *compileCandidate = esmRe ? [esmRe stringByReplacingMatchesInString:text options:0 range:NSMakeRange(0, text.length) withTemplate:@"// "] : text;
+        syntaxCtx[@"__candidateSource"] = compileCandidate;
+        [syntaxCtx evaluateScript:@"new Function(__candidateSource);"];
+        if (capturedJSException.length) {
+            jsEngineSyntaxError = capturedJSException;
+        }
+    }
+    NSMutableArray<NSString *> *detectedEntries = [NSMutableArray array];
+    for (NSString *fn in @[@"home", @"category", @"search", @"detail", @"play", @"init"]) {
+        if ([text containsString:fn]) [detectedEntries addObject:fn];
+    }
+    NSInteger inferredPort = [ServiceStore inferredPortInCode:text];
+    NSString *inferredPlaylist = [ServiceStore inferredPlaylistPathInCode:text];
+    NSMutableString *report = [NSMutableString string];
+    [report appendFormat:@"识别语言：%@\n", lang];
+    [report appendFormat:@"括号与代码块结构：%@\n", mismatchDetail ?: @"全部平衡通过（() / [] / {} 闭合正常）"];
+    if ([lang isEqualToString:@"JavaScript"]) {
+        [report appendFormat:@"JavaScriptCore 语法编译：%@\n", jsEngineSyntaxError ?: @"AST 编译通过（无 SyntaxError）"];
+    }
+    if (detectedEntries.count) [report appendFormat:@"检测到插件方法关键字：%@\n", [detectedEntries componentsJoinedByString:@"、"]];
+    if (inferredPort > 0) [report appendFormat:@"识别脚本默认端口：%ld\n", (long)inferredPort];
+    if (inferredPlaylist.length) [report appendFormat:@"识别直播列表路由：%@", inferredPlaylist];
+    BOOL hasIssue = (mismatchDetail != nil) || (jsEngineSyntaxError != nil);
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:hasIssue ? @"代码结构预检发现问题" : @"代码结构预检通过" message:[report stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] preferredStyle:UIAlertControllerStyleAlert];
+    [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+    [self presentViewController:a animated:YES completion:nil];
+}
+
+- (void)insertCodeTemplate:(NSString *)templateKind {
+    if (self.readOnly || !_editor.editable) return;
+    NSString *tpl = nil;
+    if ([templateKind isEqualToString:@"python-http"]) {
+        tpl = @"import os\nfrom http.server import BaseHTTPRequestHandler, HTTPServer\n\nPORT = int(os.environ.get('CCTVHOST_PORT', '18768'))\n\nclass Handler(BaseHTTPRequestHandler):\n    def do_GET(self):\n        if self.path == '/health':\n            body = b'{\"ok\":true}'\n            self.send_response(200)\n            self.send_header('Content-Type', 'application/json')\n            self.end_headers()\n            self.wfile.write(body)\n        elif self.path == '/all.m3u':\n            m3u = '#EXTM3U\\n#EXTINF:-1,示例频道\\nhttps://example.com/live.m3u8\\n'.encode('utf-8')\n            self.send_response(200)\n            self.send_header('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8')\n            self.end_headers()\n            self.wfile.write(m3u)\n        else:\n            self.send_response(404)\n            self.end_headers()\n\nif __name__ == '__main__':\n    HTTPServer(('127.0.0.1', PORT), Handler).serve_forever()\n";
+    } else if ([templateKind isEqualToString:@"python-spider"]) {
+        tpl = @"# CCTVHost Python 影视 Spider 模板\nclass Spider:\n    def init(self, extend=''):\n        pass\n\n    def homeContent(self, filter=False):\n        return {'class': [{'type_id': '1', 'type_name': '电影'}], 'list': []}\n\n    def categoryContent(self, tid, pg, filter=False, extend=None):\n        return {'list': [], 'page': pg, 'pagecount': 1}\n\n    def detailContent(self, ids):\n        return {'list': []}\n\n    def searchContent(self, key, quick=False):\n        return {'list': []}\n\n    def playerContent(self, flag, id, vipFlags=None):\n        return {'parse': 0, 'url': id, 'header': {}}\n";
+    } else if ([templateKind isEqualToString:@"js-media"]) {
+        tpl = @"// CCTVHost JavaScript 影视插件模板 (cctvhost.media/1)\nmodule.exports = {\n  async capabilities() {\n    return ['home', 'category', 'search', 'detail', 'play'];\n  },\n  async home() {\n    return { categories: [{ id: 'movie', name: '精选' }], items: [] };\n  },\n  async category({ id, page = 1 }) {\n    return { items: [], page, hasMore: false };\n  },\n  async search({ wd, page = 1 }) {\n    return { items: [] };\n  },\n  async detail({ id }) {\n    return { id, name: '', lines: [] };\n  },\n  async play({ id }) {\n    return { url: id, headers: {}, parse: 0 };\n  }\n};\n";
+    }
+    if (!tpl.length) return;
+    _editor.text = tpl;
+    [self updateCodeStatusBar];
+    [self showTemporaryPrompt:@"已插入标准脚本模板"];
+}
+
+- (void)resetBundledCodeIfApplicable {
+    if (self.readOnly || !self.bundledResourcePath.length) return;
+    NSString *factoryCode = [NSString stringWithContentsOfFile:self.bundledResourcePath encoding:NSUTF8StringEncoding error:NULL];
+    if (!factoryCode.length) {
+        [self showTemporaryPrompt:@"未找到内置初始代码文件"];
+        return;
+    }
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"恢复内置初始代码？" message:@"当前编辑器中的修改将被还原为随应用提供的初始脚本内容，点击右上角保存后生效。" preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    __weak typeof(self) weakSelf = self;
+    [alert addAction:[UIAlertAction actionWithTitle:@"恢复初始代码" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *a){
+        ServiceCodeViewController *owner = weakSelf;
+        if (!owner) return;
+        owner->_editor.text = factoryCode;
+        [owner updateCodeStatusBar];
+        [owner showTemporaryPrompt:@"已恢复为内置初始代码"];
     }]];
     [self presentViewController:alert animated:YES completion:nil];
 }
@@ -137,15 +559,35 @@
     NSData *pretty = [NSJSONSerialization dataWithJSONObject:obj options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys error:NULL];
     if (pretty.length && !self.readOnly) {
         _editor.text = [[NSString alloc] initWithData:pretty encoding:NSUTF8StringEncoding];
+        [self updateCodeStatusBar];
+        [self showTemporaryPrompt:@"JSON 校验通过并已格式化"];
+    } else {
+        [self showTemporaryPrompt:@"JSON 校验通过"];
     }
 }
+
+- (void)requestCloseCodeEditor {
+    if (self.readOnly || !_editor.editable || [_editor.text isEqualToString:self.initialCodeText ?: @""]) {
+        [self.navigationController popViewControllerAnimated:YES];
+        return;
+    }
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"代码有尚未保存的修改" message:@"是否保存对当前代码文件的更改？" preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"继续编辑" style:UIAlertActionStyleCancel handler:nil]];
+    __weak typeof(self) weakSelf = self;
+    [alert addAction:[UIAlertAction actionWithTitle:@"保存并返回" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){ [weakSelf save]; }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"放弃修改" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *a){ [weakSelf.navigationController popViewControllerAnimated:YES]; }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
 - (void)save {
     if(!_editor.editable)return;
     NSError *error = nil;
     BOOL ok = [_editor.text writeToFile:self.path atomically:YES encoding:NSUTF8StringEncoding error:&error];
-    if (ok)
+    if (ok) {
+        self.initialCodeText = [_editor.text copy];
+        if (self.onSaveCode) self.onSaveCode();
         [self.navigationController popViewControllerAnimated:YES];
-    else {
+    } else {
         UIAlertController *a = [UIAlertController alertControllerWithTitle:@"保存失败"
                                                                    message:error.localizedDescription
                                                             preferredStyle:UIAlertControllerStyleAlert];
@@ -186,6 +628,7 @@
 - (void)requestClose;
 @property(nonatomic, assign) BOOL downloading;
 @property(nonatomic, copy) NSString *optionsText;
+@property(nonatomic, assign) BOOL entryCodeEdited;
 @property(nonatomic, assign) BOOL applyingPortChange;
 @property(nonatomic) NSUInteger applyPortGeneration;
 @property(nonatomic, copy) NSString *cachedSection0Footer;
@@ -193,6 +636,10 @@
 @end
 @implementation ServiceEditorViewController
 - (BOOL)managedCode {return [self.service[@"builtin"] boolValue] || [self.service[@"manifest"] isKindOfClass:NSDictionary.class];}
+- (BOOL)isReadOnlyCode {return [self.service[@"builtin"] boolValue];}
+- (nullable NSString *)bundledFactoryCodePath {
+    return [ServiceStore bundledFactoryCodePathForService:self.service];
+}
 - (instancetype)init {
     return [super initWithStyle:UITableViewStyleInsetGrouped];
 }
@@ -245,6 +692,8 @@
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 76;
     self.identifier = self.service[@"id"] ?: NSUUID.UUID.UUIDString;
+    [NSFileManager.defaultManager removeItemAtPath:[self draftPath] error:NULL];
+    [NSFileManager.defaultManager removeItemAtPath:[self optionsDraftPath] error:NULL];
     self.nameField = [self field:@"服务名称" value:self.service[@"name"]];
     self.portField = [self field:@"端口 1024–65535" value:[self.service[@"port"] description] ?: @"18768"];
     self.portField.keyboardType = UIKeyboardTypeNumberPad;
@@ -333,7 +782,7 @@
     if(previousTraitCollection&&![previousTraitCollection.preferredContentSizeCategory isEqualToString:self.traitCollection.preferredContentSizeCategory])[self updateSourceControlFont];
 }
 - (void)urlChanged {
-    self.downloadGeneration++;[self.downloadTask cancel];self.downloadTask=nil;[self.downloadSession invalidateAndCancel];self.downloadSession=nil;self.downloading=NO;
+    self.downloadGeneration++;[self.downloadTask cancel];self.downloadTask=nil;[self.downloadSession invalidateAndCancel];self.downloadSession=nil;self.downloadData=nil;self.downloadFailureMessage=nil;self.downloading=NO;
     if (![self managedCode]) {
         self.code = nil;
         [self refreshSection0FooterCache];
@@ -361,7 +810,7 @@
 }
 - (void)refreshSection0FooterCache {
     NSString *sourceCode = self.code;
-    if (!sourceCode.length && self.service && ![self managedCode]) {
+    if (!sourceCode.length && self.service) {
         NSString *entry = [ServiceStore codePath:self.service];
         NSDictionary *attrs = entry.length ? [NSFileManager.defaultManager attributesOfItemAtPath:entry error:NULL] : nil;
         if (entry.length && [attrs[NSFileSize] unsignedLongLongValue] <= 256 * 1024) {
@@ -375,7 +824,19 @@
     if (playlist.length) [parts addObject:[NSString stringWithFormat:@"直播路由 %@",playlist]];
     NSString *epg = (sourceCode.length ? [ServiceStore inferredEPGPathInCode:sourceCode] : nil) ?: [ServiceStore epgPathForService:self.service];
     if (epg.length) [parts addObject:[NSString stringWithFormat:@"节目单路由 %@",epg]];
-    self.cachedSection0Footer = parts.count ? [NSString stringWithFormat:@"已识别：%@ · 宿主会自动将服务与本机节目单端口对齐至上方设置的端口。",[parts componentsJoinedByString:@" · "]] : nil;
+    NSInteger currentPort = self.portField.text.integerValue;
+    NSString *conflictWarning = nil;
+    if (currentPort >= 1024 && currentPort <= 65535) {
+        for (NSDictionary *other in [ServiceStore services]) {
+            if (![other[@"id"] isEqual:self.identifier] && [other[@"port"] integerValue] == currentPort) {
+                conflictWarning = [NSString stringWithFormat:@"⚠ 端口 %ld 已被「%@」占用，建议点右侧“自动分配”更换端口。", (long)currentPort, other[@"name"] ?: other[@"id"]];
+                break;
+            }
+        }
+    }
+    NSString *recognized = parts.count ? [NSString stringWithFormat:@"已识别：%@ · 宿主会自动将服务与本机节目单端口对齐至上方设置的端口。",[parts componentsJoinedByString:@" · "]] : nil;
+    if (conflictWarning && recognized) self.cachedSection0Footer = [NSString stringWithFormat:@"%@\n%@", conflictWarning, recognized];
+    else self.cachedSection0Footer = conflictWarning ?: recognized;
 }
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section == 0) {
@@ -409,8 +870,10 @@
         input = ip.row == 0 ? self.nameField : self.portField;
     } else if (ip.section == 1) {
         if ([self managedCode]) {
-            c.textLabel.text = [self.service[@"manifest"] isKindOfClass:NSDictionary.class]?@"查看资源入口代码":@"查看内置代码";
+            c.textLabel.text = [self.service[@"manifest"] isKindOfClass:NSDictionary.class]?([self isReadOnlyCode]?@"查看资源入口代码":@"查看 / 编辑资源入口代码"):@"查看内置代码";
+            c.detailTextLabel.text = self.entryCodeEdited ? @"已修改" : ([ServiceStore codePath:self.service].lastPathComponent ?: @"");
             c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+            c.selectionStyle = UITableViewCellSelectionStyleDefault;
         } else if (ip.row == 0)
             input = self.sourceControl;
         else if (ip.row == 1) {
@@ -498,9 +961,18 @@
     }
     if(ip.section==2 && ip.row==1 && [self.service[@"manifest"] isKindOfClass:NSDictionary.class]){
         NSString *path=[self optionsDraftPath];id options=self.service[@"manifest"][@"options"]?:@{};
-        NSData *data=[NSJSONSerialization dataWithJSONObject:options options:NSJSONWritingPrettyPrinted|NSJSONWritingFragmentsAllowed error:NULL];
-        if(![NSFileManager.defaultManager fileExistsAtPath:path])[data writeToFile:path atomically:YES];
-        ServiceCodeViewController *editor=[ServiceCodeViewController new];editor.path=path;[self.navigationController pushViewController:editor animated:YES];return;
+        if(![NSFileManager.defaultManager fileExistsAtPath:path]){
+            if([options isKindOfClass:NSString.class]){
+                [(NSString *)options writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+            }else{
+                NSData *data=[NSJSONSerialization dataWithJSONObject:options options:NSJSONWritingPrettyPrinted|NSJSONWritingFragmentsAllowed error:NULL];
+                if(data.length)[data writeToFile:path atomically:YES];
+            }
+        }
+        __weak typeof(self) weakSelf=self;
+        ServiceCodeViewController *editor=[ServiceCodeViewController new];editor.path=path;
+        editor.onSaveCode=^{ServiceEditorViewController *owner=weakSelf;if(!owner)return;owner.optionsText=[NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:NULL];[owner draftChanged];[owner.tableView reloadData];};
+        [self.navigationController pushViewController:editor animated:YES];return;
     }
     if (ip.section != 1)
         return;
@@ -509,19 +981,24 @@
         return;
     }
     if (ip.row == 1 && self.sourceControl.selectedSegmentIndex == 0) {
-        UIDocumentPickerViewController *p = [[UIDocumentPickerViewController alloc]
-            initForOpeningContentTypes:@[ UTTypePythonScript, UTTypePlainText ]
-                                asCopy:YES];
-        p.delegate = self;
-        [self presentViewController:p animated:YES completion:nil];
+        [self presentCodeDocumentPicker];
     } else if (ip.row == 1 && self.sourceControl.selectedSegmentIndex == 2) {
         [self editManual];
     } else if (ip.row == 2) {
         if (self.sourceControl.selectedSegmentIndex == 1 && !self.code.length)
             [self loadRemote];
+        else if (self.sourceControl.selectedSegmentIndex == 0 && !self.code.length)
+            [self presentCodeDocumentPicker];
         else
             [self editManual];
     }
+}
+- (void)presentCodeDocumentPicker {
+    UIDocumentPickerViewController *p = [[UIDocumentPickerViewController alloc]
+        initForOpeningContentTypes:@[ UTTypePythonScript, UTTypeJavaScript, UTTypeJSON, UTTypePlainText, UTTypeSourceCode ]
+                            asCopy:YES];
+    p.delegate = self;
+    [self presentViewController:p animated:YES completion:nil];
 }
 - (void)message:(NSString *)message {
     UIAlertController *a = [UIAlertController alertControllerWithTitle:@"资源配置"
@@ -569,7 +1046,7 @@
     NSMutableURLRequest *r = [NSMutableURLRequest requestWithURL:url];
     r.timeoutInterval = 20;
     NSURLSessionConfiguration *config=NSURLSessionConfiguration.ephemeralSessionConfiguration;config.URLCache=nil;config.requestCachePolicy=NSURLRequestReloadIgnoringLocalCacheData;
-    self.downloadSession=[NSURLSession sessionWithConfiguration:config delegate:self delegateQueue:nil];
+    self.downloadSession=[NSURLSession sessionWithConfiguration:config delegate:self delegateQueue:NSOperationQueue.mainQueue];
     self.downloadData=[NSMutableData data];
     self.downloadTask=[self.downloadSession dataTaskWithRequest:r];
     [self.downloadTask resume];
@@ -594,7 +1071,7 @@
     __weak typeof(self) weakSelf=self;
     dispatch_async(dispatch_get_main_queue(),^{
         ServiceEditorViewController *owner=weakSelf;if(!owner||generation!=owner.downloadGeneration||![owner.urlField.text isEqualToString:owner.downloadRequestedURL]){[session finishTasksAndInvalidate];return;}
-        owner.downloading=NO;owner.downloadTask=nil;[owner.downloadSession finishTasksAndInvalidate];owner.downloadSession=nil;
+        owner.downloading=NO;owner.downloadTask=nil;owner.downloadData=nil;owner.downloadFailureMessage=nil;[owner.downloadSession finishTasksAndInvalidate];owner.downloadSession=nil;
         if(tooLarge||failure.length)[owner message:tooLarge?@"文件超过 2 MB，请选择较小的 Python 脚本。":failure];
         else if(error)[owner message:error.localizedDescription?:@"下载失败，请检查代码链接。"];
         else [owner acceptCode:data];
@@ -622,7 +1099,16 @@
 }
 - (NSString *)optionsDraftPath {return [[ServiceStore directory] stringByAppendingPathComponent:[self.identifier stringByAppendingString:@"-options.json"]];}
 - (void)editManual {
-    if([self managedCode]){ServiceCodeViewController *view=[ServiceCodeViewController new];view.path=[ServiceStore codePath:self.service];view.readOnly=YES;[self.navigationController pushViewController:view animated:YES];return;}
+    if([self managedCode]){
+        ServiceCodeViewController *view=[ServiceCodeViewController new];
+        view.path=[ServiceStore codePath:self.service];
+        view.bundledResourcePath=[self bundledFactoryCodePath];
+        view.readOnly=[self isReadOnlyCode];
+        __weak typeof(self) weakSelf=self;
+        view.onSaveCode=^{ServiceEditorViewController *owner=weakSelf;if(!owner)return;owner.entryCodeEdited=YES;[owner refreshSection0FooterCache];[owner draftChanged];[owner.tableView reloadData];};
+        [self.navigationController pushViewController:view animated:YES];
+        return;
+    }
     NSString *path = [self draftPath];
     NSError *writeError=nil;
     // 写草稿失败（如空间不足）此前被 error:NULL 吞掉，仍会 push 编辑器打开空文件；
@@ -670,7 +1156,7 @@
     if(gesture.delegate==self)gesture.delegate=self.previousPopDelegate;
 }
 - (NSDictionary *)draftSnapshot {
-    return @{@"name":self.nameField.text?:@"",@"port":self.portField.text?:@"",@"url":self.urlField.text?:@"",@"arguments":self.argsField.text?:@"",@"playlist":self.playlistPathField.text?:@"",@"lan":@(self.lanSwitch.on),@"code":self.code?:@"",@"options":self.optionsText?:@""};
+    return @{@"name":self.nameField.text?:@"",@"port":self.portField.text?:@"",@"url":self.urlField.text?:@"",@"arguments":self.argsField.text?:@"",@"playlist":self.playlistPathField.text?:@"",@"lan":@(self.lanSwitch.on),@"code":self.code?:@"",@"options":self.optionsText?:@"",@"entryCodeEdited":@(self.entryCodeEdited)};
 }
 - (void)draftChanged {
     BOOL changed=!self.service||![[self draftSnapshot] isEqual:self.initialDraft];NSInteger port=self.portField.text.integerValue;
@@ -723,13 +1209,28 @@
     NSString *playlistPath=[self.playlistPathField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     if(playlistPath.length){if(![playlistPath hasPrefix:@"/"]||[playlistPath hasPrefix:@"//"]||playlistPath.length>=128||[playlistPath containsString:@".."]||[playlistPath containsString:@"?"]||[playlistPath containsString:@"#"]||[playlistPath containsString:@"\\"]||[playlistPath containsString:@":"]||[playlistPath rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location!=NSNotFound){[self message:@"直播列表路径须以单个 / 开头，且不能包含 ..、查询参数、片段或控制字符。例：/all.m3u"];return;}service[@"playlistPath"]=playlistPath;service[@"playlistPathSource"]=@"manual";}else if(![service[@"playlistPathSource"] isEqual:@"detected"]){[service removeObjectForKey:@"playlistPath"];[service removeObjectForKey:@"playlistPathSource"];} // Keep a verified path when users save unrelated settings.
     service[@"updated"] = @(NSDate.date.timeIntervalSince1970);
+    if (self.entryCodeEdited) {
+        NSString *factoryPath = [self bundledFactoryCodePath];
+        NSData *factoryData = factoryPath.length ? [NSData dataWithContentsOfFile:factoryPath] : nil;
+        NSData *currentData = [ServiceStore codePath:self.service].length ? [NSData dataWithContentsOfFile:[ServiceStore codePath:self.service]] : nil;
+        if (factoryData.length && [currentData isEqualToData:factoryData]) {
+            [service removeObjectForKey:@"userEditedCode"];
+        } else {
+            service[@"userEditedCode"] = @YES;
+        }
+    }
     if([service[@"manifest"] isKindOfClass:NSDictionary.class] && self.optionsText){
+        NSString *trimmedOpts = [self.optionsText stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
         NSError *jsonError=nil;id options=[NSJSONSerialization JSONObjectWithData:[self.optionsText dataUsingEncoding:NSUTF8StringEncoding] options:NSJSONReadingFragmentsAllowed error:&jsonError];
+        if(jsonError && [self.service[@"manifest"][@"options"] isKindOfClass:NSString.class] && ![trimmedOpts hasPrefix:@"{"] && ![trimmedOpts hasPrefix:@"["]){
+            options = trimmedOpts;
+            jsonError = nil;
+        }
         if(![options isKindOfClass:NSDictionary.class] && ![options isKindOfClass:NSString.class]){[self message:jsonError.localizedDescription?:@"插件参数须为 JSON 对象或字符串"];return;}
         NSMutableDictionary *manifest=[service[@"manifest"] mutableCopy];manifest[@"options"]=options;service[@"manifest"]=manifest;
     }
     if(self.service){
-        BOOL runtimeUnchanged=[self customCodeMatchesSavedVersion];
+        BOOL runtimeUnchanged=[self customCodeMatchesSavedVersion]&&!self.entryCodeEdited;
         for(NSString *key in @[@"arguments",@"url",@"playlistPath"]){if(![(self.service[key]?:@"") isEqual:(service[key]?:@"")])runtimeUnchanged=NO;}if([self.service[@"port"] integerValue]!=port||[self.service[@"lan"] boolValue]!=self.lanSwitch.on||![(self.service[@"manifest"]?:@{}) isEqual:(service[@"manifest"]?:@{})])runtimeUnchanged=NO;
         if(runtimeUnchanged){[ServiceStore save:service];[self finishSavingService:service];return;}
     }
@@ -755,15 +1256,22 @@
         NSInteger oldPort=[self.service[@"port"] integerValue];
         if(oldPort==port){
             // 只改了名称：不需要重启，直接保存名称并返回；代码无未保存
-            // 修改时才允许，改了代码仍须先停服务。
+            // 修改时才允许，改了代码或配置时可一键停止并重启应用。
             NSMutableDictionary *candidate=[service mutableCopy];[candidate removeObjectForKey:@"name"];[candidate removeObjectForKey:@"updated"];
             NSMutableDictionary *current=[self.service mutableCopy];[current removeObjectForKey:@"name"];[current removeObjectForKey:@"updated"];
             for(NSString *key in @[@"url",@"arguments",@"playlistPath",@"playlistPathSource"]){if([candidate[key] isKindOfClass:NSString.class]&&![candidate[key] length])[candidate removeObjectForKey:key];if([current[key] isKindOfClass:NSString.class]&&![current[key] length])[current removeObjectForKey:key];}
-            if([candidate isEqualToDictionary:current]&&[self customCodeMatchesSavedVersion]){[self persistService:service];return;}
-            [self message:@"此服务仍在运行。停止服务后才能保存其他配置。"];return;
+            if([candidate isEqualToDictionary:current]&&[self customCodeMatchesSavedVersion]&&!self.entryCodeEdited){[self persistService:service];return;}
+            if(!self.onApplyService){[self message:@"此服务仍在运行。停止服务后才能保存其他配置。"];return;}
+            UIAlertController *restartAlert=[UIAlertController alertControllerWithTitle:@"应用配置并重启服务？"
+                                                                                message:[NSString stringWithFormat:@"%@ 正在运行。将先停止该服务、保存更新后的配置或代码，并在端口 %ld 上重新启动。",self.service[@"name"]?:@"此服务",(long)port]
+                                                                         preferredStyle:UIAlertControllerStyleAlert];
+            [restartAlert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+            __weak typeof(self) weakSelf=self;
+            [restartAlert addAction:[UIAlertAction actionWithTitle:@"停止并重启" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[weakSelf applyPortChange:service];}]];
+            [self presentViewController:restartAlert animated:YES completion:nil];
+            return;
         }
         if(!self.onApplyService){[self message:@"端口尚未保存。请先停止服务，再保存新端口并重新启动。"] ;return;}
-        if(![self customCodeMatchesSavedVersion]){[self message:@"当前脚本也有未保存修改。运行中的服务不能同时改代码和端口；请先停止服务后再保存。"];return;}
         UIAlertController *confirmation=[UIAlertController alertControllerWithTitle:@"应用新端口？"
                                                                               message:[NSString stringWithFormat:@"将停止 %@，把 HTTP 监听端口从 %ld 改为 %ld，再重新启动。重启失败时新端口仍会保存，并显示失败原因。",self.service[@"name"]?:@"此服务",(long)oldPort,(long)port]
                                                                        preferredStyle:UIAlertControllerStyleAlert];

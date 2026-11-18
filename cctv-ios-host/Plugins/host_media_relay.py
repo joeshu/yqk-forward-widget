@@ -353,6 +353,88 @@ _DEFAULT_OPENER = _ORIG_BUILD_OPENER(
     KeepAliveHTTPHandler(),
     KeepAliveHTTPSHandler(context=_DEFAULT_SSL_CONTEXT),
 )
+_AIA_OPENER_CACHE = collections.OrderedDict()
+_AIA_CACHE_LOCK = threading.Lock()
+
+
+def _is_missing_intermediate_ca_error(error):
+    if isinstance(error, urllib.error.HTTPError):
+        return False
+    reason = error.reason if isinstance(error, urllib.error.URLError) else error
+    if not isinstance(reason, ssl.SSLError):
+        return False
+    verify_code = getattr(reason, 'verify_code', None)
+    if verify_code == 20:
+        return True
+    msg = str(reason).lower()
+    return 'unable to get local issuer certificate' in msg or 'unable to verify the first certificate' in msg
+
+
+def _resolve_aia_opener_for_host(hostname, port=443):
+    host_key = (hostname or '').strip().lower()
+    if not host_key:
+        return None
+    try:
+        port_num = int(port or 443)
+    except (TypeError, ValueError):
+        port_num = 443
+    cache_key = (host_key, port_num)
+    with _AIA_CACHE_LOCK:
+        cached = _AIA_OPENER_CACHE.get(cache_key)
+        if cached is not None:
+            _AIA_OPENER_CACHE.move_to_end(cache_key)
+            return cached
+    der_cert = None
+    try:
+        probe_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        probe_ctx.check_hostname = False
+        probe_ctx.verify_mode = ssl.CERT_NONE
+        _configure_tolerant_ssl_context(probe_ctx)
+        with socket.create_connection((host_key, port_num), timeout=2.5) as raw_sock:
+            with probe_ctx.wrap_socket(raw_sock, server_hostname=host_key) as ssock:
+                der_cert = ssock.getpeercert(binary_form=True)
+    except Exception:
+        der_cert = None
+    if not der_cert:
+        return None
+    pem_blocks = []
+    for raw_aia in re.findall(rb'http://[A-Za-z0-9._:/-]+\.(?:crt|cer|der)', der_cert)[:3]:
+        try:
+            aia_url = raw_aia.decode('ascii', errors='ignore')
+            req = urllib.request.Request(aia_url, headers={'User-Agent': 'CCTVHostMediaRelay/1.0'})
+            with _ORIG_BUILD_OPENER().open(req, timeout=2.5) as resp:
+                issuer_bytes = resp.read(65536)
+            if issuer_bytes:
+                if b'-----BEGIN CERTIFICATE-----' in issuer_bytes:
+                    pem_blocks.append(issuer_bytes.decode('ascii', errors='ignore'))
+                else:
+                    pem_blocks.append(ssl.DER_cert_to_PEM_cert(issuer_bytes))
+        except Exception:
+            continue
+    try:
+        pem_blocks.append(ssl.DER_cert_to_PEM_cert(der_cert))
+        ctx = _configure_tolerant_ssl_context(ssl.create_default_context())
+        ctx.verify_mode = ssl.CERT_REQUIRED
+        ctx.check_hostname = True
+        partial_flag = getattr(ssl, 'VERIFY_X509_PARTIAL_CHAIN', 0x80000)
+        try:
+            ctx.verify_flags |= partial_flag
+        except Exception:
+            pass
+        ctx.load_verify_locations(cadata='\n'.join(pem_blocks))
+        opener = _ORIG_BUILD_OPENER(
+            ScopedRedirect(),
+            KeepAliveHTTPHandler(),
+            KeepAliveHTTPSHandler(context=ctx),
+        )
+    except Exception:
+        return None
+    with _AIA_CACHE_LOCK:
+        _AIA_OPENER_CACHE[cache_key] = opener
+        _AIA_OPENER_CACHE.move_to_end(cache_key)
+        while len(_AIA_OPENER_CACHE) > 64:
+            _AIA_OPENER_CACHE.popitem(last=False)
+    return opener
 
 
 def _tune_response_socket(resp):
@@ -371,14 +453,32 @@ def _open_with_timeout_retry(request, diagnostic_id=''):
     """Retry a transient GET/HEAD timeout once, preserving TLS verification."""
     method = request.get_method().upper()
     use_cached_opener = urllib.request.build_opener is _ORIG_BUILD_OPENER
+    parsed = urllib.parse.urlsplit(request.full_url)
     opener = _DEFAULT_OPENER if use_cached_opener else urllib.request.build_opener(
         ScopedRedirect(), urllib.request.HTTPSHandler(context=_DEFAULT_SSL_CONTEXT))
+    if use_cached_opener and parsed.scheme.lower() == 'https' and parsed.hostname:
+        with _AIA_CACHE_LOCK:
+            cached_aia = _AIA_OPENER_CACHE.get((parsed.hostname.lower(), int(parsed.port or 443)))
+        if cached_aia is not None:
+            opener = cached_aia
     try:
         return _tune_response_socket(opener.open(request, timeout=8))
     except (TimeoutError, socket.timeout, urllib.error.URLError) as error:
+        if use_cached_opener and method in ('GET', 'HEAD') and _is_missing_intermediate_ca_error(error):
+            aia_opener = _resolve_aia_opener_for_host(parsed.hostname, parsed.port or 443)
+            if aia_opener is not None:
+                print('[CCTVHostMediaRelay] ' + json.dumps({
+                    'event': 'media_relay_retry',
+                    'request_id': diagnostic_id or uuid.uuid4().hex,
+                    'stage': 'upstream_tls_aia_chain',
+                    'attempt': 2,
+                    'retry_timeout_ms': 6000,
+                    'method': method,
+                    'upstream_host': parsed.hostname or '',
+                }, separators=(',', ':')))
+                return _tune_response_socket(aia_opener.open(_retry_request(request), timeout=6))
         if method not in ('GET', 'HEAD') or not _transient_open_timeout(error):
             raise
-        parsed = urllib.parse.urlsplit(request.full_url)
         print('[CCTVHostMediaRelay] ' + json.dumps({
             'event': 'media_relay_retry',
             'request_id': diagnostic_id or uuid.uuid4().hex,

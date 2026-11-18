@@ -48,7 +48,7 @@ static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
     for(NSString *session in sessions){NSDictionary *payload=@{@"session":session,@"serviceID":identifier?:@""};NSData *data=[NSJSONSerialization dataWithJSONObject:payload options:0 error:NULL];NSString *reply=[self callOperation:@"stop" json:[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] timeout:10 error:error];id value=reply?[NSJSONSerialization JSONObjectWithData:[reply dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL]:nil;if(![value isKindOfClass:NSDictionary.class]||![value[@"ok"] boolValue])return NO;}
     return YES;
 }
-- (void)log:(NSString *)text { @autoreleasepool { if(text.length>4096)text=[text substringToIndex:4096];if(self.logHandler)self.logHandler(text); } }
+- (void)log:(NSString *)text { @autoreleasepool { if(!text.length||[text isEqualToString:@"init_test_start"]||[text isEqualToString:@"init_test_end"]||([text hasPrefix:@"{"]&&([text containsString:@"\"_codec\""]||[text containsString:@"\"_cache\""])))return; if(text.length>4096)text=[text substringToIndex:4096];if(self.logHandler)self.logHandler(text); } }
 - (BOOL)allowedURL:(NSURL *)url {
     if(self.genericMode)return [@[@"http",@"https"] containsObject:url.scheme.lowercaseString] && url.host.length && !url.user.length && !url.password.length;
     if(![url.scheme.lowercaseString isEqualToString:@"https"] || url.user.length || url.password.length)return NO;
@@ -181,12 +181,17 @@ static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
     self.context[@"__hostReadPackageFile"]=^NSString *(NSString *name){
         NSString *path=[weak packageFile:name];NSString *text=path?[NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:NULL]:nil;
         if(!text){JSContext.currentContext.exception=[JSValue valueWithNewErrorFromMessage:@"JS 包文件不存在、越界或不是 UTF-8 文本" inContext:JSContext.currentContext];return @"";}
-        NSDictionary *weboxBuiltinMap=@{@"user.4kvm":@"webox-4kvm",@"moe.hstream.webox":@"webox-hstream",@"dev.webox.native.guazi":@"webox-guazi",@"video.rou.webox":@"webox-rou"};
-        for(NSString *marker in weboxBuiltinMap){
-            if([text containsString:marker]){
-                NSString *bPath=[NSBundle.mainBundle pathForResource:weboxBuiltinMap[marker] ofType:@"js" inDirectory:@"BuiltinMedia"];
-                NSString *bText=bPath?[NSString stringWithContentsOfFile:bPath encoding:NSUTF8StringEncoding error:NULL]:nil;
-                if(bText.length){text=bText;break;}
+        // 仅当脚本是未适配 PureJS 的旧版 WASM 存根且未被用户手工编辑时才回退内置包，
+        // 避免用户在代码编辑器中修改并保存的 WeBox 脚本在运行时被 BuiltinMedia 静默覆盖。
+        BOOL legacyUnadaptedWasm = [text containsString:@"KVM_WASM_BASE64"] && ![text containsString:@"generatePlayUrlPureJS"];
+        if (legacyUnadaptedWasm) {
+            NSDictionary *weboxBuiltinMap=@{@"user.4kvm":@"webox-4kvm",@"moe.hstream.webox":@"webox-hstream",@"dev.webox.native.guazi":@"webox-guazi",@"video.rou.webox":@"webox-rou"};
+            for(NSString *marker in weboxBuiltinMap){
+                if([text containsString:marker]){
+                    NSString *bPath=[NSBundle.mainBundle pathForResource:weboxBuiltinMap[marker] ofType:@"js" inDirectory:@"BuiltinMedia"];
+                    NSString *bText=bPath?[NSString stringWithContentsOfFile:bPath encoding:NSUTF8StringEncoding error:NULL]:nil;
+                    if(bText.length){text=bText;break;}
+                }
             }
         }
         if([text containsString:@"joeshu.yqk"]){

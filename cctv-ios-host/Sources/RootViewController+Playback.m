@@ -209,7 +209,7 @@
     [self rebuildTimeshiftController];
     @try{[player setValue:@YES forKey:@"autoPlay"];}@catch(NSException *exception){}
     self.nativeStartupTuner=CCTVBoolPreference(@"fastNativeStartup",YES)?[NativeStartupTuner new]:nil;
-    NSMutableDictionary *options=[@{kOptTitle:title?:cid,kOptURLChannelIDForStats:cid} mutableCopy];
+    NSMutableDictionary *options=[@{kOptTitle:title?:cid,kOptURLChannelIDForStats:cid,CCTVTimeshiftConfigKeyLivePublicCheck:@NO,CCTVTimeshiftConfigKeyTimeshiftingChannelID:cid} mutableCopy];
     id dataManager=[self call:player sel:@"dataManager"];
     id userID=[self call:dataManager sel:@"userID"];
     if([userID isKindOfClass:NSString.class]&&[userID length])options[kOptUserID]=userID;
@@ -223,7 +223,7 @@
         [self displayNativePlaybackFailure:@"SDK 拒绝所选地址" error:nil];return;
     }
     if(![CNPlayerCrashGuard install])[self log:@"未能安装播放器缩略图异常保护"];
-    [self attachVideoView];[self call:player sel:@"prepareToPlay"];[self recordStartupStage:@"prepareCall"];[self startWatchdog];
+    [self attachVideoView];[self call:player sel:@"prepareToPlay"];[self recordStartupStage:@"prepareCall"];if(!self.nativePlaybackFailed)[self startWatchdog];
     [self updateLiveScreenAwakeState];
 }
 
@@ -769,7 +769,7 @@
 - (void)tick:(NSTimer *)timer {
     if(timer!=self.watchdog)return;
     self.watchdogTicks += 1;
-    if (!self.currentPlayer) { [timer invalidate]; self.watchdog=nil; return; }
+    if (!self.currentPlayer || self.nativePlaybackFailed) { [timer invalidate]; self.watchdog=nil; return; }
     [self attachVideoView];
     if (self.firstRender) { [timer invalidate]; self.watchdog=nil; return; }
     NSTimeInterval now=CACurrentMediaTime();
@@ -845,7 +845,22 @@
     [self attachVideoView];
     if (state == 4) {                     // PrepareDone
         [self recordStartupStage:@"prepared"];
-        if(!self.firstRender){[self log:@"PrepareDone → play"];[self call:self.currentPlayer sel:@"play"];}else [self log:@"PrepareDone：已自动出画面，不重复 play"];
+        if(!self.firstRender){
+            if(self.nativeTransitionKind.length || self.nativeTimeShiftActive){
+                [self log:@"PrepareDone（%@）：由时移/回看会话驱动，不重复调用 play", self.nativeTransitionKind ?: @"时移"];
+                if(self.timeshiftController.state == CCTVTimeshiftStatePlayingReplay || self.timeshiftController.seekLatency > 0){
+                    [self completeNativeFirstRenderIfNeededForTrigger:@"timeshift_prepared"];
+                }
+            } else {
+                [self log:@"PrepareDone → play"];
+                [self call:self.currentPlayer sel:@"play"];
+            }
+        } else [self log:@"PrepareDone：已自动出画面，不重复 play"];
+    } else if (state == 5) {              // SeekSucceed
+        [self recordStartupStage:@"seekSucceed"];
+        if(!self.firstRender && (self.nativeTransitionKind.length || self.nativeTimeShiftActive)){
+            [self completeNativeFirstRenderIfNeededForTrigger:@"seek_succeed"];
+        }
     } else if (state == 13) {
         [self log:@"加载取消"];
     }
@@ -864,6 +879,9 @@
 - (void)playerPeriodicTimeEvent:(id)player {
     if (player != self.currentPlayer) return;
     [self.timeshiftController notePeriodicTick];
+    if (!self.firstRender && (self.nativeTransitionKind.length || self.nativeTimeShiftActive)) {
+        [self completeNativeFirstRenderIfNeededForTrigger:@"periodic_tick"];
+    }
 }
 
 - (void)player:(id)player vdnRequestStateDidChanged:(NSUInteger)state {
@@ -889,13 +907,15 @@
             [self log:@"%@",tuner.summary];if(applied)[self recordStartupStage:@"bufferTuned"];
         });
     }
-    if (event == 3 && !self.firstRender) {
+    if ((event == 3 || ((self.nativeTransitionKind.length || self.nativeTimeShiftActive) && (event == 6 || event == 7 || event == 8 || event == 19))) && !self.firstRender) {
         self.firstFrameSeconds = CACurrentMediaTime() - self.playStartedAt;
         self.firstRender = YES;self.nativePlaybackFailed=NO;self.nativeSafeStartupActive=NO;
+        [self.watchdog invalidate];self.watchdog=nil;
         if(!self.nativeTimeShiftActive)[self.timeshiftController noteReturnedToLive];
         if([self.nativeStartupTuner restore])[self log:@"首帧后已恢复 SDK 稳态缓冲"];
         [self endPlaybackPriority];
         [self.spinner stopAnimating];
+        self.playPauseBtn.enabled=YES;[self.playPauseBtn setTitle:@"暂停" forState:UIControlStateNormal];[self syncPlayPauseButtonIcon];
         self.titleLabel.text = self.channelName;
         if(!self.nativeTimeShiftActive){self.titleLabel.hidden=YES;self.infoLabel.hidden=YES;}if(!self.nativeTimeShiftActive){self.playerTopScrim.hidden=YES;}
         [self loadPlayerChannelLogoAfterFirstFrame];
@@ -924,6 +944,12 @@
     }
 }
 
+- (void)completeNativeFirstRenderIfNeededForTrigger:(NSString *)trigger {
+    if (self.firstRender || !self.currentPlayer) return;
+    [self log:@"原生过渡首帧确认（%@）", trigger ?: @"timeshift"];
+    [self player:self.currentPlayer statEvent:3 value:nil];
+}
+
 - (void)prepareNextNativeChannelForGeneration:(NSUInteger)generation {
     if(generation!=self.playbackGeneration || !self.firstRender || self.nativeTimeShiftActive || !self.currentPlayer || self.avPlayer || self.directNativeRouteActive || !CCTVBoolPreference(@"preloadNativeChannel",YES) || UIApplication.sharedApplication.applicationState!=UIApplicationStateActive)return;
     NSMutableArray *native=[NSMutableArray array];
@@ -936,8 +962,8 @@
 - (void)player:(id)player playBackStateDidChanged:(NSUInteger)state {
     if (![NSThread isMainThread]) { NSUInteger generation=self.playbackGeneration; dispatch_async(dispatch_get_main_queue(), ^{ if(generation!=self.playbackGeneration)return; [self player:player playBackStateDidChanged:state]; }); return; }
     if (player != self.currentPlayer || self.nativePlaybackFailed) return;
-    if (state == 1) [self.playPauseBtn setTitle:@"暂停" forState:UIControlStateNormal];
-    if (state == 2) [self.playPauseBtn setTitle:@"继续" forState:UIControlStateNormal];
+    if (state == 1) { [self.playPauseBtn setTitle:@"暂停" forState:UIControlStateNormal]; [self syncPlayPauseButtonIcon]; }
+    if (state == 2) { [self.playPauseBtn setTitle:@"继续" forState:UIControlStateNormal]; [self syncPlayPauseButtonIcon]; }
 }
 
 - (void)player:(id)player playbackFailed:(NSError *)error {
@@ -957,7 +983,7 @@
         self.nativeRetryPending=YES;
         double delay = self.retryCount == 1 ? 1.0 : 3.0;
         [self log:@"断流重连 第 %ld 次（%.0fs 后）", (long)self.retryCount, delay];
-        self.titleLabel.text=[NSString stringWithFormat:@"%@ · 正在重连",self.channelName?:@"频道"];self.titleLabel.hidden=NO;self.infoLabel.text=[NSString stringWithFormat:@"第 %ld / 2 次自动恢复",(long)self.retryCount];self.infoLabel.hidden=NO;[self.spinner startAnimating];[self.playPauseBtn setTitle:@"重连中" forState:UIControlStateNormal];self.playPauseBtn.enabled=NO;
+        self.titleLabel.text=[NSString stringWithFormat:@"%@ · 正在重连",self.channelName?:@"频道"];self.titleLabel.hidden=NO;self.infoLabel.text=[NSString stringWithFormat:@"第 %ld / 2 次自动恢复",(long)self.retryCount];self.infoLabel.hidden=NO;[self.spinner startAnimating];[self.playPauseBtn setTitle:@"重连中" forState:UIControlStateNormal];[self syncPlayPauseButtonIcon];self.playPauseBtn.enabled=NO;
         NSUInteger generation = self.playbackGeneration;
         NSString *cid = self.channelID;
         NSString *name = self.channelName;
@@ -1007,7 +1033,7 @@
     NSString *channel=self.channelName.length?self.channelName:@"频道";
     self.titleLabel.text=error.code?[NSString stringWithFormat:@"%@ · %@ (%ld)",channel,stage,(long)error.code]:[NSString stringWithFormat:@"%@ · %@",channel,stage];
     self.titleLabel.hidden=NO;NSString *failureDetail=error.localizedDescription.length?[HostLogRedactor redactText:error.localizedDescription]:nil;self.infoLabel.text=failureDetail?[NSString stringWithFormat:@"%@ · 点按“重试”再次播放，或点“线路”换源后重试",failureDetail]:@"点按“重试”再次播放，或点“线路”换源后重试";self.infoLabel.hidden=NO;self.controlBar.hidden=NO;
-    [self.playPauseBtn setTitle:@"重试" forState:UIControlStateNormal];self.playPauseBtn.enabled=YES;
+    [self.playPauseBtn setTitle:@"重试" forState:UIControlStateNormal];[self syncPlayPauseButtonIcon];self.playPauseBtn.enabled=YES;
     [self.channelGrid reloadData];[self.table reloadData];
 }
 
@@ -1028,6 +1054,12 @@
 - (void)player:(id)player publicRequestFailed:(NSError *)error {
     if (![NSThread isMainThread]) { NSUInteger generation=self.playbackGeneration; dispatch_async(dispatch_get_main_queue(), ^{ if(generation!=self.playbackGeneration)return; [self player:player publicRequestFailed:error]; }); return; }
     if (player != self.currentPlayer) return;
+    if (self.directNativeRouteActive && self.channelID.length && !self.nativeStartupRecoveryUsed) {
+        self.nativeStartupRecoveryUsed = YES;
+        [self log:@"自选线路版权请求失败 %ld，自动回退频道 ID 调度", (long)error.code];
+        [self playViaSDK:self.channelID title:self.channelName ?: self.channelID];
+        return;
+    }
     self.nativePlaybackFailed=YES;[self.nativeStartupTuner restore];[self endPlaybackPriority];
     [self log:@"版权请求失败 %ld", (long)error.code];[self displayNativePlaybackFailure:@"版权请求失败" error:error];
 }
@@ -1132,6 +1164,9 @@
                 : @"频道未允许该时间的时移/回看，请返回直播或重新选台。"];
         } else {
             [weakSelf log:@"原生时移请求已完成，等待/确认首帧"];
+            if (weakSelf.startupTrace.stages[@"prepared"] != nil || weakSelf.timeshiftController.state == CCTVTimeshiftStatePlayingReplay) {
+                [weakSelf completeNativeFirstRenderIfNeededForTrigger:@"timeshift_seek_completed"];
+            }
         }
     }];
 }
@@ -1317,7 +1352,9 @@
         if([self isCatchupOrTimeshiftActive])[sheet addAction:[UIAlertAction actionWithTitle:@"返回直播" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[self returnToLivePlayback];}]];
     }
     [sheet addAction:[UIAlertAction actionWithTitle:@"播放信息" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){ [self showPlaybackInfo]; }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"画中画" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){ [self togglePiP]; }]];
+    if(self.avLayer && AVPictureInPictureController.isPictureInPictureSupported){
+        [sheet addAction:[UIAlertAction actionWithTitle:@"画中画" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){ [self togglePiP]; }]];
+    }
     NSString *sleepTitle=self.liveSleepMinutes>0?[NSString stringWithFormat:@"睡眠定时（当前 %ld 分钟）",(long)self.liveSleepMinutes]:@"睡眠定时关闭";
     [sheet addAction:[UIAlertAction actionWithTitle:sleepTitle style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){
         UIAlertController *sleepSheet=[UIAlertController alertControllerWithTitle:@"直播睡眠定时" message:@"到点后自动暂停直播并释放解码器" preferredStyle:UIAlertControllerStyleActionSheet];

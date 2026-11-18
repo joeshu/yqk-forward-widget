@@ -269,7 +269,8 @@
             if(updated>0){
                 static NSDateFormatter *fmt;static dispatch_once_t once;
                 dispatch_once(&once,^{fmt=[NSDateFormatter new];fmt.locale=[NSLocale localeWithLocaleIdentifier:@"zh_CN"];fmt.dateFormat=@"yyyy-MM-dd HH:mm";});
-                cell.detailTextLabel.text=[NSString stringWithFormat:@"最近成功刷新：%@",[fmt stringFromDate:[NSDate dateWithTimeIntervalSince1970:updated]]];
+                NSString *timeStr=nil;@synchronized(fmt){timeStr=[fmt stringFromDate:[NSDate dateWithTimeIntervalSince1970:updated]];}
+                cell.detailTextLabel.text=[NSString stringWithFormat:@"最近成功刷新：%@",timeStr?:@""];
             }else{
                 cell.detailTextLabel.text=self.source.length?@"尚无成功刷新时间记录":@"内置官方频道 · 实时同步";
             }

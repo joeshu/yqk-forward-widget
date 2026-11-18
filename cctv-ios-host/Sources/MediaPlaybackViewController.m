@@ -4,6 +4,7 @@
 #import "MediaKeyRequest.h"
 #import "PlaybackCoordinator.h"
 #import "MediaPlaybackViewController.h"
+#import <CommonCrypto/CommonCryptor.h>
 #import "HostPlaybackProgress.h"
 #import "MediaAPIClient.h"
 #import "MediaWebViewController.h"
@@ -1543,12 +1544,47 @@ static NSString *MediaPlaybackExtractNativeStreamFromHTML(NSString *body) {
         }
     }
     static NSRegularExpression *directStreamRe;
+    static NSRegularExpression *czzyCipherRe;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         directStreamRe=[NSRegularExpression regularExpressionWithPattern:@"['\"](https?://[^'\"\\s<>]+\\.(?:m3u8|mp4|flv|mpd)(?:\\?[^'\"\\s<>]*)?)['\"]" options:NSRegularExpressionCaseInsensitive error:NULL];
+        czzyCipherRe=[NSRegularExpression regularExpressionWithPattern:@"['\"]([A-Za-z0-9+/=]{64,4096})['\"][\\s\\S]{0,480}?CryptoJS\\.enc\\.Utf8\\.parse\\(['\"]([^'\"]{16})['\"]\\)[\\s\\S]{0,240}?CryptoJS\\.enc\\.(?:Utf8|Hex)\\.parse\\(['\"]([^'\"]{16,32})['\"]\\)" options:0 error:NULL];
     });
     NSTextCheckingResult *dm=[directStreamRe firstMatchInString:unescaped options:0 range:NSMakeRange(0,unescaped.length)];
     if(dm&&dm.numberOfRanges>1)return [unescaped substringWithRange:[dm rangeAtIndex:1]];
+    if([unescaped containsString:@"CryptoJS"]&&czzyCipherRe){
+        NSTextCheckingResult *cm=[czzyCipherRe firstMatchInString:unescaped options:0 range:NSMakeRange(0,unescaped.length)];
+        if(cm&&cm.numberOfRanges>3){
+            NSString *b64=[unescaped substringWithRange:[cm rangeAtIndex:1]];
+            NSString *keyStr=[unescaped substringWithRange:[cm rangeAtIndex:2]];
+            NSString *ivStr=[unescaped substringWithRange:[cm rangeAtIndex:3]];
+            NSData *cipherData=[[NSData alloc] initWithBase64EncodedString:b64 options:NSDataBase64DecodingIgnoreUnknownCharacters];
+            NSData *keyData=[keyStr dataUsingEncoding:NSUTF8StringEncoding];
+            NSMutableData *ivData=nil;
+            if(ivStr.length==16)ivData=[[ivStr dataUsingEncoding:NSUTF8StringEncoding] mutableCopy];
+            else if(ivStr.length==32){
+                ivData=[NSMutableData dataWithCapacity:16];
+                for(NSUInteger i=0;i<32;i+=2){
+                    unsigned int byteVal=0;
+                    [[NSScanner scannerWithString:[ivStr substringWithRange:NSMakeRange(i,2)]] scanHexInt:&byteVal];
+                    uint8_t b=(uint8_t)byteVal;[ivData appendBytes:&b length:1];
+                }
+            }
+            if(cipherData.length&&keyData.length==16&&ivData.length==16){
+                NSMutableData *outData=[NSMutableData dataWithLength:cipherData.length+kCCBlockSizeAES128];
+                size_t moved=0;
+                if(CCCrypt(kCCDecrypt,kCCAlgorithmAES128,kCCOptionPKCS7Padding,keyData.bytes,16,ivData.bytes,cipherData.bytes,cipherData.length,outData.mutableBytes,outData.length,&moved)==kCCSuccess&&moved>0){
+                    outData.length=moved;
+                    NSString *plain=[[NSString alloc] initWithData:outData encoding:NSUTF8StringEncoding];
+                    if(plain.length){
+                        plain=[plain stringByReplacingOccurrencesOfString:@"\\/" withString:@"/"];
+                        NSTextCheckingResult *pm=[directStreamRe firstMatchInString:plain options:0 range:NSMakeRange(0,plain.length)];
+                        if(pm&&pm.numberOfRanges>1)return [plain substringWithRange:[pm rangeAtIndex:1]];
+                    }
+                }
+            }
+        }
+    }
     return @"";
 }
 static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vodTitle, NSInteger episodeIndex, NSString *episodeName, void (^completion)(NSString *streamURL)) {
@@ -1653,7 +1689,8 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
     if(platformRef.length&&!headers[@"Referer"])headers[@"Referer"]=platformRef;
     __weak typeof(self) weakSelf=self;
     __block BOOL vipResolutionPending=NO;
-    if(MediaPlaybackIsCommercialVIPURL(raw)){
+    BOOL shouldAttemptNativeStreamResolver=MediaPlaybackIsCommercialVIPURL(raw)||[result[@"parse"] integerValue]>0||[result[@"requiresWebPlayback"] boolValue];
+    if(shouldAttemptNativeStreamResolver){
         NSString *vodTitle=[self.context[@"detail"][@"name"] isKindOfClass:NSString.class]&&[self.context[@"detail"][@"name"] length]?self.context[@"detail"][@"name"]:([self.context[@"item"][@"name"] isKindOfClass:NSString.class]?self.context[@"item"][@"name"]:@"");
         NSArray *eps=self.episodes;NSDictionary *curEp=(self.episodeIndex>=0&&self.episodeIndex<(NSInteger)eps.count)?eps[(NSUInteger)self.episodeIndex]:nil;
         NSString *epName=[curEp[@"name"] isKindOfClass:NSString.class]?curEp[@"name"]:@"";

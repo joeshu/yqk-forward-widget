@@ -33,8 +33,13 @@ typedef NS_ENUM(NSUInteger, CCTVTimeshiftLoadState) {
 };
 typedef NS_ENUM(NSUInteger, CCTVTimeshiftStatEvent) {
     CCTVTimeshiftStatEventFirstRenderDidStart = 3,
+    CCTVTimeshiftStatEventSwitchTimeshift = 6,
+    CCTVTimeshiftStatEventSwitchLookback = 7,
+    CCTVTimeshiftStatEventBackToLive = 8,
     CCTVTimeshiftStatEventVODSeekStart = 11,
     CCTVTimeshiftStatEventVODSeekCompletion = 12,
+    CCTVTimeshiftStatEventBinaryVODSeekStart = 18,
+    CCTVTimeshiftStatEventBinaryVODSeekCompletion = 19,
 };
 
 // —— 版权校验配置键（与 App 既有 kOptTitle 等字符串字面量约定一致）——

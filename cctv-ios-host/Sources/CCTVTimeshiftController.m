@@ -41,6 +41,7 @@ static NSString *const CCTVTimeshiftErrorDomain = @"CCTVHostTimeshift";
 @property(nonatomic) NSTimeInterval seekIssuedAt;
 @property(nonatomic) NSTimeInterval seekCheckAt;
 @property(nonatomic) BOOL seekFirstFrameRecorded;
+@property(nonatomic) BOOL prepareDoneDuringSeek;
 @property(nonatomic) NSUInteger seekAttempts;
 @property(nonatomic) BOOL seekPreCheckPassed;   // 预检通过（或跳过预检时为 YES）
 @property(nonatomic, strong) NSMutableDictionary<NSString *, NSDictionary *> *copyrightCache;
@@ -62,7 +63,7 @@ static NSString *const CCTVTimeshiftErrorDomain = @"CCTVHostTimeshift";
     _session = player ? [[NativeTimeshiftSession alloc] initWithPlayer:player] : nil;
     _state = CCTVTimeshiftStateIdle;
     _seekStart = 0; _seekEnd = 0; _seekLatency = 0; _seekFirstFrameLatency = 0;
-    _behindLiveSeconds = 0; _stallCount = 0; _stalled = NO;
+    _behindLiveSeconds = 0; _stallCount = 0; _stalled = NO; _prepareDoneDuringSeek = NO;
 }
 
 #pragma mark - 状态
@@ -124,6 +125,7 @@ static NSString *const CCTVTimeshiftErrorDomain = @"CCTVHostTimeshift";
     self.seekAttempts = 0;
     self.seekPreCheckPassed = NO;
     self.seekFirstFrameRecorded = NO;
+    self.prepareDoneDuringSeek = NO;
     self.seekLatency = 0; self.seekFirstFrameLatency = 0;
     self.seekStart = start; self.seekEnd = end;
     [self setState:CCTVTimeshiftStateCheckingCopyright];
@@ -224,6 +226,9 @@ static NSString *const CCTVTimeshiftErrorDomain = @"CCTVHostTimeshift";
 - (void)handleSeekCompletionAllowed:(BOOL)allowed error:(NSError *)error start:(NSTimeInterval)start end:(NSTimeInterval)end channelID:(NSString *)channelID completion:(void (^)(BOOL, NSError *))completion {
     if (allowed && !error) {
         self.seekLatency = NSProcessInfo.processInfo.systemUptime - self.seekIssuedAt;
+        if (self.prepareDoneDuringSeek && self.state == CCTVTimeshiftStateSeeking) {
+            [self recordSeekFirstFrame];
+        }
         // 首帧可能已先于本回调到达（已转 PlayingReplay），接受仍要回调宿主；
         // 首帧尚未确认时留待 SeekSucceed / FirstRender 回调再转态。
         if (completion) completion(YES, nil);
@@ -266,6 +271,13 @@ static NSString *const CCTVTimeshiftErrorDomain = @"CCTVHostTimeshift";
 #pragma mark - SDK 回调转发
 
 - (void)noteLoadState:(NSUInteger)state {
+    if (state == CCTVTimeshiftLoadStatePrepareDone) {
+        if (self.state == CCTVTimeshiftStateSeeking) {
+            self.prepareDoneDuringSeek = YES;
+            if (self.seekLatency > 0) [self recordSeekFirstFrame];
+        }
+        return;
+    }
     if (state == CCTVTimeshiftLoadStateSeekSucceed) {
         if (self.state == CCTVTimeshiftStateSeeking) [self recordSeekFirstFrame];
         return;
@@ -291,11 +303,15 @@ static NSString *const CCTVTimeshiftErrorDomain = @"CCTVHostTimeshift";
 }
 
 - (void)noteStatEvent:(NSUInteger)event {
-    if (event == CCTVTimeshiftStatEventVODSeekStart) {
+    if (event == CCTVTimeshiftStatEventVODSeekStart || event == CCTVTimeshiftStatEventBinaryVODSeekStart) {
         if (self.state == CCTVTimeshiftStateSeeking) self.seekCheckAt = NSProcessInfo.processInfo.systemUptime;
         return;
     }
-    if (event == CCTVTimeshiftStatEventVODSeekCompletion) {
+    if (event == CCTVTimeshiftStatEventVODSeekCompletion ||
+        event == CCTVTimeshiftStatEventBinaryVODSeekCompletion ||
+        event == CCTVTimeshiftStatEventSwitchTimeshift ||
+        event == CCTVTimeshiftStatEventSwitchLookback ||
+        event == CCTVTimeshiftStatEventBackToLive) {
         if (self.state == CCTVTimeshiftStateSeeking) [self recordSeekFirstFrame];
         return;
     }

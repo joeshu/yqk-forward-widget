@@ -1503,7 +1503,7 @@ static id MediaJARBridgeNormalize(NSString *operation,NSDictionary *arguments,NS
             // Only explicit playback headers returned by the spider go to its media CDN.
             delegate[@"header"]=@{};
             id result=failure?nil:MediaTVBoxNormalize(operation,arguments?:@{},delegate,raw);
-            if(!failure&&[result isKindOfClass:NSDictionary.class]&&[result[@"error"] isKindOfClass:NSString.class])failure=[NSError errorWithDomain:@"CCTVHostJARRuntime" code:11 userInfo:@{NSLocalizedDescriptionKey:@"JAR 爬虫返回的数据无法用于此操作"}];
+            if(!failure&&[result isKindOfClass:NSDictionary.class]&&[result[@"error"] isKindOfClass:NSString.class]){NSString *spiderErr=[result[@"error"] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];NSString *errDesc=spiderErr.length?[NSString stringWithFormat:@"JAR 爬虫返回的数据无法用于此操作（%@）",spiderErr]:@"JAR 爬虫返回的数据无法用于此操作";failure=[NSError errorWithDomain:@"CCTVHostJARRuntime" code:11 userInfo:@{NSLocalizedDescriptionKey:errDesc}];}
             if(diagnosticsEnabled){NSMutableDictionary *fields=[@{@"request_id":requestID,@"operation":operation?:@"unknown",@"port":@0,@"elapsed_ms":@((NSInteger)((CACurrentMediaTime()-startedAt)*1000)),@"protocol":@"jar-runtime",@"failure_stage":failure?@"jar_execution":@"none",@"error_domain":failure.domain?:@"",@"error_code":@(failure.code)} mutableCopy];if(correlationID.length)fields[@"correlation_id"]=correlationID;[RuntimeDiagnostics.shared recordEvent:failure?@"media_api_failed":@"media_api_succeeded" category:@"media_api" fields:fields];}
             NSInteger normalizeMS=(NSInteger)(MAX(0,CACurrentMediaTime()-normalizeStartedAt)*1000);
             dispatch_async(dispatch_get_main_queue(),^{

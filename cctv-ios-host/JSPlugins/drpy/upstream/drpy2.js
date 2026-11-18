@@ -16,7 +16,7 @@ function init_test(){
     // print(typeof(模板.getMubans));
     console.log("当前版本号:"+VERSION);
     console.log(RKEY);
-    console.log(JSON.stringify(rule));
+    console.log("rule_loaded:" + (rule && (rule.title || rule.host) || ""));
     console.log("init_test_end");
 
 

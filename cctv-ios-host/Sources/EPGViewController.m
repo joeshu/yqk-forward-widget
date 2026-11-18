@@ -98,6 +98,7 @@
 
     self.dates=[[UISegmentedControl alloc] initWithItems:@[]];self.dates.selectedSegmentTintColor=HostAccent();self.dates.apportionsSegmentWidthsByContent=YES;self.dates.accessibilityLabel=@"选择节目单日期";[self.dates setTitleTextAttributes:@{NSForegroundColorAttributeName:HostText(),NSFontAttributeName:[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:12]]} forState:UIControlStateNormal];[self.dates setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent(),NSFontAttributeName:[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold]]} forState:UIControlStateSelected];[self.dates addTarget:self action:@selector(filterDate) forControlEvents:UIControlEventValueChanged];[self.view addSubview:self.dates];
     self.reminders=[[NSUserDefaults.standardUserDefaults dictionaryForKey:@"cctv.epgReminders.v1"] mutableCopy]?:[NSMutableDictionary dictionary];
+    [self pruneExpiredReminders];
     self.dateMenuButton=[UIButton buttonWithType:UIButtonTypeSystem];self.dateMenuButton.hidden=YES;self.dateMenuButton.accessibilityLabel=@"选择节目单日期";HostStylePillButton(self.dateMenuButton,NO);HostInstallPressFeedback(self.dateMenuButton);self.dateMenuButton.titleLabel.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleSubheadline] scaledFontForFont:[UIFont systemFontOfSize:15]];self.dateMenuButton.titleLabel.adjustsFontForContentSizeCategory=YES;self.dateMenuButton.showsMenuAsPrimaryAction=YES;[self.view addSubview:self.dateMenuButton];
     self.programSearch=[[UISearchController alloc] initWithSearchResultsController:nil];self.programSearch.searchResultsUpdater=self;self.programSearch.obscuresBackgroundDuringPresentation=NO;self.programSearch.searchBar.placeholder=@"搜索本页节目";self.navigationItem.searchController=self.programSearch;self.definesPresentationContext=YES;
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(applicationDidEnterBackground) name:UIApplicationDidEnterBackgroundNotification object:nil];
@@ -158,7 +159,7 @@
 
 - (void)fetch {
     if(self.xmlSource.length){NSUInteger request=++self.requestGeneration;BOOL force=self.table.refreshControl.refreshing;__weak typeof(self) w=self;
-        [[XMLTVStore shared] loadSource:self.xmlSource channel:[ProfileStore epgIDForChannel:self.channel] force:force completion:^(NSArray *rows,NSError *error){if(request!=w.requestGeneration)return;[w.spinner stopAnimating];[w.table.refreshControl endRefreshing];
+        [[XMLTVStore shared] loadSource:self.xmlSource channel:[ProfileStore epgIDForChannel:self.channel] force:force completion:^(NSArray *rows,NSError *error){if(!w||request!=w.requestGeneration)return;[w.spinner stopAnimating];[w.table.refreshControl endRefreshing];
             if(rows.count){w.allRows=rows;w.sourceName=w.xmlSource;[w rebuildDates];w.hint.text=error?@"使用上次缓存，刷新暂不可用":[NSString stringWithFormat:@"XMLTV · %lu 个节目",(unsigned long)rows.count];}
             else if(error.code==NSURLErrorCancelled){w.hint.text=@"正在优先加载视频，稍后下拉刷新节目单";[w updateEmptyState];}
             else if(w.channelID.length){[w fetchOfficial];}
@@ -188,7 +189,7 @@
             }
         }
         dispatch_async(dispatch_get_main_queue(), ^{
-            if(generation!=weakSelf.requestGeneration)return;weakSelf.sourceName=@"央视官方 EPG";
+            if(!weakSelf||generation!=weakSelf.requestGeneration)return;weakSelf.sourceName=@"央视官方 EPG";
             [weakSelf.spinner stopAnimating];
             [weakSelf.table.refreshControl endRefreshing];
             if (rows.count) {
@@ -295,6 +296,12 @@
     return [NSString stringWithFormat:@"%@|%lld",[self effectiveChannelIdentifier],(long long)[program[@"start"] doubleValue]];
 }
 - (BOOL)isProgramReminded:(NSDictionary *)program {return self.reminders[[self reminderKeyForProgram:program]]!=nil;}
+- (void)pruneExpiredReminders {
+    NSTimeInterval cutoff=NSDate.date.timeIntervalSince1970-86400;
+    NSMutableArray<NSString *> *expired=[NSMutableArray array];
+    for(NSString *key in self.reminders.allKeys){NSDictionary *entry=self.reminders[key];NSTimeInterval start=[entry isKindOfClass:NSDictionary.class]?[entry[@"start"] doubleValue]:0;if(start<=cutoff)[expired addObject:key];}
+    if(expired.count){[self.reminders removeObjectsForKeys:expired];[self saveReminders];}
+}
 - (void)saveReminders {[NSUserDefaults.standardUserDefaults setObject:self.reminders forKey:@"cctv.epgReminders.v1"];}
 - (void)toggleReminderForProgram:(NSDictionary *)program {
     NSString *key=[self reminderKeyForProgram:program];NSString *title=[program[@"title"] isKindOfClass:NSString.class]?program[@"title"]:@"节目";

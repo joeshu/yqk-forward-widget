@@ -357,19 +357,50 @@
     for(NSUInteger i=0;i<utf8.length;i++){hash^=bytes[i];hash*=1099511628211ULL;}
     return [[self channelPreviewCacheDirectory] stringByAppendingPathComponent:[NSString stringWithFormat:@"snap_%016llx.jpg",hash]];
 }
+static BOOL CCTVPreviewImageHasValidVideoContent(UIImage *image) {
+    CGImageRef cg = image.CGImage;
+    if (!cg) return NO;
+    size_t w = 16, h = 16;
+    uint8_t pixels[16 * 16 * 4] = {0};
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    CGContextRef ctx = CGBitmapContextCreate(pixels, w, h, 8, w * 4, cs, kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+    CGColorSpaceRelease(cs);
+    if (!ctx) return YES;
+    CGContextDrawImage(ctx, CGRectMake(0, 0, w, h), cg);
+    CGContextRelease(ctx);
+    NSUInteger nonDarkCount = 0;
+    double sumLuma = 0.0, sumSqLuma = 0.0;
+    NSUInteger sampleCount = w * 12; // Upper 75% (excluding bottom control-bar region)
+    for (NSUInteger i = 0; i < sampleCount; i++) {
+        uint8_t r = pixels[i * 4], g = pixels[i * 4 + 1], b = pixels[i * 4 + 2];
+        double luma = 0.299 * r + 0.587 * g + 0.114 * b;
+        sumLuma += luma;
+        sumSqLuma += luma * luma;
+        if (luma > 28.0 && (abs((int)r - (int)g) > 6 || abs((int)g - (int)b) > 6 || luma > 68.0)) {
+            nonDarkCount++;
+        }
+    }
+    double mean = sumLuma / (double)sampleCount;
+    double variance = (sumSqLuma / (double)sampleCount) - (mean * mean);
+    return nonDarkCount >= 8 || variance > 140.0;
+}
 - (UIImage *)cachedRealPreviewImageForChannelID:(NSString *)cid {
     if(!cid.length)return nil;
     if(!self.channelPreviewSnapshots)self.channelPreviewSnapshots=[NSMutableDictionary dictionary];
     UIImage *mem=self.channelPreviewSnapshots[cid];
-    if(mem)return mem;
+    if(mem){
+        if(CCTVPreviewImageHasValidVideoContent(mem))return mem;
+        [self.channelPreviewSnapshots removeObjectForKey:cid];
+    }
     NSString *path=[self channelPreviewDiskPathForChannelID:cid];
     if(path.length&&[NSFileManager.defaultManager fileExistsAtPath:path]){
         UIImage *diskImg=[UIImage imageWithContentsOfFile:path];
-        if(diskImg){
+        if(diskImg&&CCTVPreviewImageHasValidVideoContent(diskImg)){
             if(self.channelPreviewSnapshots.count>=128)[self.channelPreviewSnapshots removeAllObjects];
             self.channelPreviewSnapshots[cid]=diskImg;
             return diskImg;
         }
+        [NSFileManager.defaultManager removeItemAtPath:path error:NULL];
     }
     return nil;
 }
@@ -506,14 +537,15 @@
         }];
         return;
     }
-    if(!self.playerBox||CGRectIsEmpty(self.playerBox.bounds))return;
+    UIView *videoSurface=[self playerViewFrom:self.currentPlayer];
+    if(!videoSurface||CGRectIsEmpty(videoSurface.bounds))return;
     UIGraphicsImageRendererFormat *fmt=[UIGraphicsImageRendererFormat defaultFormat];
     fmt.scale=1.0;fmt.opaque=YES;
     UIGraphicsImageRenderer *renderer=[[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(160,90) format:fmt];
     UIImage *snap=[renderer imageWithActions:^(__unused UIGraphicsImageRendererContext *ctx){
-        [self.playerBox drawViewHierarchyInRect:CGRectMake(0,0,160,90) afterScreenUpdates:NO];
+        [videoSurface drawViewHierarchyInRect:CGRectMake(0,0,160,90) afterScreenUpdates:NO];
     }];
-    if(snap)[self storeRealPreviewImage:snap forChannelID:cid];
+    if(snap&&CCTVPreviewImageHasValidVideoContent(snap))[self storeRealPreviewImage:snap forChannelID:cid];
 }
 - (NSString *)primaryProbeURLForChannel:(NSDictionary *)channel {
     if(![channel isKindOfClass:NSDictionary.class])return @"";

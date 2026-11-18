@@ -142,18 +142,24 @@
     __weak typeof(self) weakSelf = self;
     if (self.sessionID.length) {
         [[RuntimeDiagnostics shared] loadEventsForSessionID:self.sessionID completion:^(NSArray<NSDictionary *> *events, NSError *error) {
-            RuntimeDiagnosticsViewController *owner = weakSelf; if (!owner||owner.reloadGeneration!=generation) return;
-            owner.allEvents = events ?: @[];
-            [owner applyEventCategoryFilter];
-            if (!owner.allEvents.count) owner.table.backgroundView = [owner emptyViewWithText:error.localizedDescription ?: @"这次运行没有诊断记录。"];
+            dispatch_block_t applyBlock = ^{
+                RuntimeDiagnosticsViewController *owner = weakSelf; if (!owner||owner.reloadGeneration!=generation) return;
+                owner.allEvents = events ?: @[];
+                [owner applyEventCategoryFilter];
+                if (!owner.allEvents.count) owner.table.backgroundView = [owner emptyViewWithText:error.localizedDescription ?: @"这次运行没有诊断记录。"];
+            };
+            if (NSThread.isMainThread) applyBlock(); else dispatch_async(dispatch_get_main_queue(), applyBlock);
         }];
     } else {
         [[RuntimeDiagnostics shared] loadSessionsWithCompletion:^(NSArray<NSDictionary *> *sessions, NSError *error) {
-            RuntimeDiagnosticsViewController *owner = weakSelf; if (!owner||owner.reloadGeneration!=generation) return;
-            owner.sessions = sessions ?: @[];
-            owner.clearButton.enabled = owner.sessions.count > 0;
-            owner.table.backgroundView = owner.sessions.count ? nil : [owner emptyViewWithText:error.localizedDescription ?: @"暂无运行记录。开启运行诊断并复现问题后，每次 App 运行会单独出现在这里。"];
-            [owner.table reloadData];
+            dispatch_block_t applyBlock = ^{
+                RuntimeDiagnosticsViewController *owner = weakSelf; if (!owner||owner.reloadGeneration!=generation) return;
+                owner.sessions = sessions ?: @[];
+                owner.clearButton.enabled = owner.sessions.count > 0;
+                owner.table.backgroundView = owner.sessions.count ? nil : [owner emptyViewWithText:error.localizedDescription ?: @"暂无运行记录。开启运行诊断并复现问题后，每次 App 运行会单独出现在这里。"];
+                [owner.table reloadData];
+            };
+            if (NSThread.isMainThread) applyBlock(); else dispatch_async(dispatch_get_main_queue(), applyBlock);
         }];
     }
 }
@@ -355,8 +361,9 @@
 }
 
 - (void)showMessage:(NSString *)message {
-    // 页面已不在窗口层级时弹 alert 只会打一条层级警告、用户也看不到，直接跳过。
+    // 页面已不在窗口层级或已有模态弹窗时跳过，避免触发 UIKit 层级冲突警告。
     if(!self.view.window)return;
+    if(self.presentedViewController)return;
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"运行诊断" message:message preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
     [self presentViewController:alert animated:YES completion:nil];
