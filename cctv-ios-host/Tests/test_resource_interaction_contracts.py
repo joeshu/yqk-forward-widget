@@ -1533,6 +1533,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('installBundledMediaResourcesIfNeeded', self.root)
         self.assertIn('builtin-lytvs-ios', self.root)
         self.assertIn('builtin-for-adm', self.root)
+        self.assertIn('https://raw.githubusercontent.com/joeshu/For-ADM/data/CCTVHost/For-ADM.json', self.root)
         self.assertIn('cctv.bundledMediaResources.v5', self.root)
         self.assertIn('builtin-hongguo-python', self.root)
         self.assertIn('builtin-hongguo-node', self.root)

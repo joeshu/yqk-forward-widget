@@ -229,11 +229,13 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
     self.bundledMediaSeedInProgress=YES;
     NSArray *catalogSpecs=@[
         @{@"file":@"lytvs-ios",@"id":@"builtin-lytvs-ios",@"name":@"Hawk iOS 内部影视与 PY 聚合",@"kind":@"tvbox",@"url":@"https://sub.lytvs.top/get?token=__LYTVS_SUBSCRIPTION_TOKEN__&client=ios"},
-        @{@"file":@"for-adm",@"id":@"builtin-for-adm",@"name":@"For-ADM CCTVHost 影视资源合集",@"kind":@"tvbox",@"url":@"https://raw.githubusercontent.com/joeshu/For-ADM/master/CCTVHost/For-ADM.json"}
+        @{@"file":@"for-adm",@"id":@"builtin-for-adm",@"name":@"For-ADM CCTVHost 影视资源合集",@"kind":@"tvbox",@"url":@"https://raw.githubusercontent.com/joeshu/For-ADM/data/CCTVHost/For-ADM.json"}
     ];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
         BOOL complete=YES,changed=NO;
         for(NSDictionary *service in [ServiceStore services]){if([service[@"bundledResourceID"] isEqual:@"zen.keke.rex.stream"]){[ServiceStore remove:service[@"id"]];changed=YES;}}
+        NSDictionary *storedForADM=[TVBoxCatalogStore catalogForID:@"builtin-for-adm"];NSString *storedForADMURL=[storedForADM[@"url"] isKindOfClass:NSString.class]?storedForADM[@"url"]:@"";
+        if([storedForADMURL isEqual:@"https://raw.githubusercontent.com/joeshu/For-ADM/master/CCTVHost/For-ADM.json"]){NSMutableDictionary *migrated=[storedForADM mutableCopy];migrated[@"url"]=@"https://raw.githubusercontent.com/joeshu/For-ADM/data/CCTVHost/For-ADM.json";[TVBoxCatalogStore saveCatalog:migrated];changed=YES;}
         if(!alreadySeeded){
             for(NSString *retiredID in @[@"builtin-haoliang-live",@"builtin-haoliang-py",@"builtin-haoliang-tvbox"]){if([TVBoxCatalogStore catalogForID:retiredID]){[TVBoxCatalogStore removeCatalog:retiredID];changed=YES;}}
             for(NSDictionary *spec in catalogSpecs){
