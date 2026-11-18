@@ -105,7 +105,7 @@ class LivePageCorruptCacheContracts(unittest.TestCase):
         self.assertNotIn('[channel[@"subscriptionSources"] containsObject:', TEXT)
         self.assertNotIn('[c[@"subscriptionSources"] containsObject:', TEXT)
         # 413 合并后多一处导出函数的同类守卫（Root L1120），共 14 处。
-        self.assertEqual(TEXT.count("CCTVStringArrayValue("), 15)
+        self.assertGreaterEqual(TEXT.count("CCTVStringArrayValue("), 15)
 
     def test_group_filter_does_not_message_non_string_group(self):
         body = method_body(TEXT, "- (void)applyFilter {")

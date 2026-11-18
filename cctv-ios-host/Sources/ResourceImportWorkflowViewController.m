@@ -273,6 +273,19 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
 - (void)applyImportCategory:(ResourceImportOption)option;
 - (void)refreshSmartClipboardAndPresets;
 - (void)recognizeBatchURLs:(NSArray<NSString *> *)urlStrings index:(NSUInteger)index generation:(NSUInteger)generation hint:(nullable NSString *)hint;
+- (void)restoreSnapshot:(NSDictionary *)snapshot;
+- (void)writeCurrentSnapshot;
+- (NSMutableDictionary *)candidateForData:(NSData *)data file:(NSURL *)file origin:(NSString *)origin companions:(NSDictionary *)companions hint:(NSString *)hint;
+-  (void)updateView;
+-  (void)textViewDidChange:(UITextView *)textView;
+-  (void)recognizeURL;
+-  (NSString *)runtimeHint;
+-  (void)cancelWork;
+-  (void)reset;
+-  (void)pickFiles:(BOOL)folder;
+-  (void)chooseExistingResourceForCandidate:(NSMutableDictionary *)row;
+-  (void)saveSelected;
+-  (void)configureMediaServer:(NSString *)type;
 @end
 
 @implementation ResourceImportWorkflowViewController

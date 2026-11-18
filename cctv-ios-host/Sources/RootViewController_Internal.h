@@ -723,6 +723,7 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 - (UITableViewCell *)tableView:(UITableView *)t cellForRowAtIndexPath:(NSIndexPath *)ip;
 - (void)tableView:(UITableView *)t didSelectRowAtIndexPath:(NSIndexPath *)ip;
 - (void)loadEPGForVisibleGridItems;
+- (void)loadDeferredMetadataForVisibleTableRows;
 - (void)scrollViewDidEndDecelerating:(UIScrollView *)scrollView;
 - (void)scrollViewDidEndDragging:(UIScrollView *)scrollView willDecelerate:(BOOL)decelerate;
 - (void)reloadVisibleCatalogItemForChannelID:(NSString *)cid;

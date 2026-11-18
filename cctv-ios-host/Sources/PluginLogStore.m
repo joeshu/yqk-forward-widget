@@ -16,6 +16,7 @@ static const NSUInteger PluginRunMaximumCount = 20;
 @property(nonatomic,strong) NSMutableDictionary<NSString *,NSString *> *activeRunIDs;
 @property(nonatomic,strong) NSLock *lock;
 - (void)flushPath:(NSString *)path generation:(NSUInteger)generation;
+-  (void)pruneRunsForIdentifier:(NSString *)identifier;
 @end
 
 @implementation PluginLogStore

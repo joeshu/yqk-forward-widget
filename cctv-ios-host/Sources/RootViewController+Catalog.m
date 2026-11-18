@@ -630,10 +630,15 @@
         if (ip.row < 0 || ip.row >= (NSInteger)rows.count) return;
         ch = rows[(NSUInteger)ip.row];
         source = [self.table cellForRowAtIndexPath:ip] ?: self.table;
+    } else if (g.view == self.channelGrid) {
+        CGPoint point = [g locationInView:self.channelGrid];
+        NSIndexPath *gridIP = [self.channelGrid indexPathForItemAtPoint:point];
+        if (!gridIP || gridIP.item < 0 || gridIP.item >= (NSInteger)self.shownChannels.count) return;
+        ch = self.shownChannels[(NSUInteger)gridIP.item];
+        ip = [NSIndexPath indexPathForRow:gridIP.item inSection:0];
+        source = [self.channelGrid cellForItemAtIndexPath:gridIP] ?: self.channelGrid;
     } else {
-        ch = objc_getAssociatedObject(g.view, @selector(onChannelCardTap:));
-        if (!ch) return;
-        ip = [self indexPathForChannelID:ch[@"id"]];
+        return;
     }
     if ([ch[@"remoteURL"] length]) { [self presentSubscriptionActions:ch sourceView:source]; return; }
     [self presentRouteSheetForChannel:ch fromIndexPath:ip];
@@ -760,7 +765,33 @@
 - (void)presentSubscriptionActions:(NSDictionary *)channel sourceView:(UIView *)source {
     UIAlertController *a=[UIAlertController alertControllerWithTitle:channel[@"name"]?:@"订阅频道" message:channel[@"remoteURL"] preferredStyle:UIAlertControllerStyleActionSheet];
     [a addAction:[UIAlertAction actionWithTitle:@"节目单与回看" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){ [self openEPGforChannel:channel[@"id"] name:channel[@"name"]]; }]];
-    [a addAction:[UIAlertAction actionWithTitle:@"从列表移除" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *x){ NSMutableArray *m=[self.allChannels mutableCopy]; [m removeObject:channel]; self.allChannels=m; [self applyFilter]; }]];
+    [a addAction:[UIAlertAction actionWithTitle:@"从列表移除" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *x){
+        NSMutableArray *m=[self.allChannels mutableCopy];
+        [m removeObject:channel];
+        self.allChannels=m;
+        NSString *groupKey=CCTVRouteGroupKey(channel);
+        NSString *remURL=[channel[@"remoteURL"] isKindOfClass:NSString.class]?channel[@"remoteURL"]:@"";
+        if(groupKey.length&&remURL.length&&self.altSources[groupKey]){
+            NSMutableArray *alts=[self.altSources[groupKey] mutableCopy];
+            [alts removeObject:remURL];
+            if(alts.count)self.altSources[groupKey]=alts;
+            else[self.altSources removeObjectForKey:groupKey];
+        }
+        NSString *cid=[channel[@"id"] isKindOfClass:NSString.class]?channel[@"id"]:@"";
+        for(NSString *subSource in CCTVStringArrayValue(channel[@"subscriptionSources"])){
+            NSDictionary *meta=[ProfileStore metadata:subSource];
+            NSArray *cached=[meta[@"cachedChannels"] isKindOfClass:NSArray.class]?meta[@"cachedChannels"]:nil;
+            if(!cached.count)continue;
+            NSMutableArray *updated=[NSMutableArray arrayWithCapacity:cached.count];
+            for(NSDictionary *row in cached){
+                if(![row isKindOfClass:NSDictionary.class])continue;
+                if((cid.length&&[row[@"id"] isEqual:cid])||(remURL.length&&[row[@"remoteURL"] isEqual:remURL]))continue;
+                [updated addObject:row];
+            }
+            if(updated.count!=cached.count)[ProfileStore update:subSource values:@{@"cachedChannels":updated,@"count":@(updated.count)}];
+        }
+        [self applyFilter];
+    }]];
     [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     a.popoverPresentationController.sourceView=source; a.popoverPresentationController.sourceRect=source.bounds; [self presentViewController:a animated:YES completion:nil];
 }

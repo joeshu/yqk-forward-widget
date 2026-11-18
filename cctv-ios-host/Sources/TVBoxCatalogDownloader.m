@@ -31,6 +31,7 @@ static NSData *TVBoxBundledWeBoxIndexForURL(NSString *sourceURL) {
 @property(nonatomic,copy) void (^completion)(NSDictionary *,NSError *);
 @property(nonatomic) BOOL finished;
 @property(nonatomic) NSUInteger redirectCount;
+-  (void)finish:(NSDictionary *)catalog error:(NSError *)error;
 @end
 @implementation TVBoxCatalogDownloader
 - (NSError *)failure:(NSString *)message {return [NSError errorWithDomain:@"CCTVHostTVBox" code:1 userInfo:@{NSLocalizedDescriptionKey:message}];}

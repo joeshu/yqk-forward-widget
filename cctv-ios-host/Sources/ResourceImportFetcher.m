@@ -10,6 +10,7 @@
 @property(nonatomic) BOOL started;
 @property(nonatomic) BOOL completed;
 @property(nonatomic) NSUInteger redirects;
+-  (void)deliver:(NSData *)data response:(NSURLResponse *)response error:(NSError *)error;
 @end
 @implementation ResourceImportFetcher
 - (void)load:(NSURL *)url {

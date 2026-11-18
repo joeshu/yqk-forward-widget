@@ -45,6 +45,12 @@ static NSString *const CCTVTimeshiftErrorDomain = @"CCTVHostTimeshift";
 @property(nonatomic) NSUInteger seekAttempts;
 @property(nonatomic) BOOL seekPreCheckPassed;   // 预检通过（或跳过预检时为 YES）
 @property(nonatomic, strong) NSMutableDictionary<NSString *, NSDictionary *> *copyrightCache;
+- (void)executePendingSeek;
+- (void)issueSeekToStart:(NSTimeInterval)start end:(NSTimeInterval)end channelID:(NSString *)channelID completion:(void (^)(BOOL, NSError *))completion;
+- (void)handleSeekCompletionAllowed:(BOOL)allowed error:(NSError *)error start:(NSTimeInterval)start end:(NSTimeInterval)end channelID:(NSString *)channelID completion:(void (^)(BOOL, NSError *))completion;
+- (void)recordSeekFirstFrame;
+-  (void)checkCopyrightForStart:(NSTimeInterval)start channelID:(NSString *)channelID completion:(void (^)(BOOL allowed, NSError *error))completion;
+-  (void)updateBehindLive;
 @end
 
 @implementation CCTVTimeshiftController

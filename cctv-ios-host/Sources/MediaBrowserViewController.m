@@ -87,6 +87,8 @@ static BOOL MediaBrowserIdentityNameMatches(id value, NSString *savedName) {
 @property(nonatomic,copy) NSString *screenTitle;
 - (void)configureScopes;
 - (void)selectScope:(UIButton *)sender;
+-  (void)addScopeButton:(NSString *)key title:(NSString *)title;
+-  (void)updateSearchResultsForSearchController:(UISearchController *)controller;
 @end
 @implementation MediaSourcePicker
 - (BOOL)shouldAutorotate {return YES;}
@@ -240,6 +242,18 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
     }
     return iName.length ? iName : dName;
 }
+@interface MediaDetailViewController ()
+- (void)openAdaptationMonitor;
+- (void)updateRouteAndEpisodeViews;
+- (void)resolveAndPlaySelectedEpisode;
+- (void)restoreResumeEntrySelection;
+- (void)refreshDetailHeader;
+-  (void)buildDetailLayout;
+-  (void)teardownInlinePlayback;
+-  (NSString *)metadataSummary;
+-  (void)updateFavoriteButton;
+@end
+
 @implementation MediaDetailViewController
 - (BOOL)shouldAutorotate {return YES;}
 - (UIInterfaceOrientationMask)supportedInterfaceOrientations {return UIInterfaceOrientationMaskPortrait;}
@@ -933,6 +947,7 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
 @interface MediaFavoritesViewController : UITableViewController
 @property(nonatomic,copy) NSArray<NSDictionary *> *entries;
 @property(nonatomic,copy) void (^onSelect)(NSDictionary *entry);
+-  (void)reloadFavoriteEntries;
 @end
 @implementation MediaFavoritesViewController
 - (instancetype)init {return [super initWithStyle:UITableViewStyleInsetGrouped];}
@@ -1003,6 +1018,7 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
 @interface MediaWatchHistoryViewController : UITableViewController
 @property(nonatomic,copy) NSArray<NSDictionary *> *entries;
 @property(nonatomic,copy) void (^onSelect)(NSDictionary *entry);
+-  (void)updateClearHistoryButton;
 @end
 @implementation MediaWatchHistoryViewController
 - (instancetype)init { return [super initWithStyle:UITableViewStyleInsetGrouped]; }
@@ -1095,6 +1111,10 @@ static NSSet<NSString *> *MediaHomePinnedSources(void) {
 @property(nonatomic,strong) NSMutableSet<NSString *> *modules;
 @property(nonatomic,strong) NSMutableSet<NSString *> *pinnedSources;
 @end
+@interface MediaHomeConfigurationViewController ()
+- (void)updateEpisodeStyleBarItem;
+@end
+
 @implementation MediaHomeConfigurationViewController
 - (instancetype)init {return [super initWithStyle:UITableViewStyleInsetGrouped];}
 - (UIMenu *)episodeStyleConfigurationMenu {
@@ -1307,6 +1327,21 @@ typedef NS_ENUM(NSInteger, MediaContentMode) { MediaContentModeFeatured, MediaCo
 - (void)selectMediaCategory:(NSString *)identifier;
 - (NSString *)stateKeyForSource:(NSDictionary *)source provider:(NSString *)provider;
 - (void)loadHome;
+- (void)loadMore;
+- (void)scrollViewDidScroll:(UIScrollView *)scrollView;
+- (void)showMessage:(NSString *)message loading:(BOOL)loading;
+- (void)loadCapabilities;
+- (void)loadListing:(BOOL)append;
+-  (NSDictionary *)cachedHomeResultForSelectedProvider:(NSString **)providerOut;
+-  (CGFloat)stableTopSafeAreaInset;
+-  (NSDictionary *)arguments:(NSDictionary *)args;
+-  (void)chooseFilters;
+-  (void)saveHomeScrollOffset;
+-  (void)loadSources;
+-  (void)restorePendingBrowseState;
+-  (void)openResources;
+-  (void)chooseWidgetEpisode;
+-  (void)chooseProvider;
 @end
 @implementation MediaBrowserViewController
 - (NSArray<NSDictionary *> *)scopeFeedSections:(NSArray<NSDictionary *> *)sections {

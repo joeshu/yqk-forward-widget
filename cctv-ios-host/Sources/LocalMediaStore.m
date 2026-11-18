@@ -14,6 +14,8 @@ NSNotificationName const LocalMediaStoreDidChangeNotification = @"LocalMediaStor
 @property(nonatomic,copy) NSString *currentFileName;
 @property(nonatomic,copy) NSArray<NSURL *> *cachedFiles;
 @property(nonatomic,copy) NSDictionary<NSString *,id> *cachedState;
+-  (NSArray<NSURL *> *)readFilesFromDisk;
+-  (void)refreshCachedFiles;
 @end
 
 @implementation LocalMediaStore

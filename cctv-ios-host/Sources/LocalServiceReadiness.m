@@ -22,6 +22,7 @@
 @property(nonatomic, strong) NSURLSessionDataTask *task;
 @property(nonatomic, copy) void (^completion)(NSError *, NSTimeInterval);
 - (void)recordProbe:(NSString *)event reason:(NSString *)reason;
+-  (void)poll:(NSUInteger)generation;
 @end
 @implementation LocalServiceReadiness
 - (instancetype)initWithURL:(NSURL *)url timeout:(NSTimeInterval)timeout requiresHealthJSON:(BOOL)health {

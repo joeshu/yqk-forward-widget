@@ -7,6 +7,8 @@
 @property(nonatomic,strong) UILabel *emptyLabel;
 @property(nonatomic,assign) BOOL refreshScheduled;
 @property(nonatomic) BOOL refreshingRuns;
+- (void)confirmClearAll;
+- (void)  refreshRuns;
 @end
 
 @implementation PluginRunHistoryViewController

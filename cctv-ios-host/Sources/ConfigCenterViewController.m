@@ -43,6 +43,10 @@ static NSString *CCTVResourceUnifiedKeyForProfile(NSDictionary *profile) {
 @property(nonatomic,copy) void (^onTapLatency)(NSString *source);
 @end
 
+@interface CCTVResourceProfileCell ()
+- (void)handleLatencyBadgeTap;
+@end
+
 @implementation CCTVResourceProfileCell
 - (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)reuseIdentifier {
     if((self=[super initWithStyle:UITableViewCellStyleDefault reuseIdentifier:reuseIdentifier])) {
@@ -193,6 +197,8 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
 - (UIView *)switchAccessoryForSwitch:(UISwitch *)toggle width:(CGFloat)width;
 - (void)moveProfileFromIndexPath:(NSIndexPath *)sourceIndexPath toIndexPath:(NSIndexPath *)destinationIndexPath updateTableView:(BOOL)updateTableView;
 - (void)persistUnifiedOrderWithProfiles:(NSArray<NSDictionary *> *)orderedProfiles;
+- (void)openServices;
+- (void)openAdaptationMonitor;
 @end
 @implementation ConfigCenterViewController
 - (instancetype)init {

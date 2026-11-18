@@ -773,6 +773,13 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
         [self.playPauseBtn setImage:[UIImage systemImageNamed:symbol withConfiguration:sc] forState:UIControlStateNormal];
     }
     if (title.length) self.playPauseBtn.accessibilityLabel = title;
+    if (self.muteBtn) {
+        NSString *muteTitle = [self.muteBtn titleForState:UIControlStateNormal] ?: @"";
+        NSString *muteSymbol = [muteTitle isEqualToString:@"发声"] ? @"speaker.slash.fill" : @"speaker.wave.2.fill";
+        UIImageSymbolConfiguration *sc = [UIImageSymbolConfiguration configurationWithPointSize:11 weight:UIImageSymbolWeightSemibold];
+        [self.muteBtn setImage:[UIImage systemImageNamed:muteSymbol withConfiguration:sc] forState:UIControlStateNormal];
+        if (muteTitle.length) self.muteBtn.accessibilityLabel = muteTitle;
+    }
 }
 
 - (void)updatePlaybackControlAccessibility {

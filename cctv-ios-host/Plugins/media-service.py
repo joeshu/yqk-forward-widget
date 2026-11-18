@@ -39,7 +39,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from host_media_runtime import MediaRuntime, MediaError, NativeJS, PythonSpider, playback, report_runtime_stage
-from host_media_relay import MediaRelay, safe_error_summary
+from host_media_relay import MediaRelay, safe_error_summary, _is_missing_intermediate_ca_error, _resolve_aia_opener_for_host
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -509,65 +509,65 @@ class Handler(BaseHTTPRequestHandler):
             except urllib.error.HTTPError as error:
                 response = error
             except Exception as primary_err:
-                import ssl
-                unverified_ctx = ssl._create_unverified_context()
-                try:
-                    unverified_ctx.set_ciphers('DEFAULT:@SECLEVEL=1')
-                except Exception:
-                    pass
-                handlers = [urllib.request.HTTPSHandler(context=unverified_ctx)]
-                if not follow_redirects:
-                    handlers.append(NoRedirect())
-                alt_opener = urllib.request.build_opener(*handlers)
-                try:
-                    response = alt_opener.open(request, timeout=timeout)
-                except urllib.error.HTTPError as error:
-                    response = error
-                except Exception:
-                    host_low = (parts.hostname or '').lower()
-                    if method == 'GET' and not any(t in host_low for t in ('.test', '.example', 'localhost', '127.0.0.1')):
-                        encoded_u = urllib.parse.quote(url, safe='')
-                        proxy_urls = (
-                            f'https://api.codetabs.com/v1/proxy?quest={encoded_u}',
-                            f'https://api.allorigins.win/raw?url={encoded_u}',
-                        )
-                        for p_url in proxy_urls:
-                            try:
-                                p_req = urllib.request.Request(
-                                    p_url,
-                                    headers={'User-Agent': headers.get('User-Agent') or 'Mozilla/5.0', 'Accept': headers.get('Accept') or '*/*'},
-                                    method='GET',
-                                )
-                                p_opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=unverified_ctx))
-                                p_resp = p_opener.open(p_req, timeout=min(timeout, 10.0))
-                                if 200 <= int(p_resp.getcode() or 0) < 300:
-                                    response = p_resp
-                                    break
-                                p_resp.close()
-                            except Exception:
-                                continue
-                    if response is None:
-                        raise primary_err
+                if _is_missing_intermediate_ca_error(primary_err):
+                    aia_opener = _resolve_aia_opener_for_host(parts.hostname, parts.port or 443)
+                    if aia_opener is not None:
+                        aia_ctx = getattr(aia_opener, 'aia_ssl_context', None)
+                        aia_no_redir = urllib.request.build_opener(NoRedirect(), urllib.request.HTTPSHandler(context=aia_ctx)) if aia_ctx is not None else aia_opener
+                        try:
+                            response = aia_no_redir.open(request, timeout=timeout)
+                        except urllib.error.HTTPError as error:
+                            response = error
+                if response is None:
+                    raise primary_err
             try:
                 if follow_redirects:
                     redirect_hops = 0
+                    current_headers = dict(headers)
                     while int(response.getcode() or 0) in (301, 302, 303, 307, 308) and redirect_hops < 8:
                         loc = response.headers.get('Location') if hasattr(response, 'headers') else None
                         if not loc:
                             break
+                        prev_parts = urllib.parse.urlsplit(url)
                         next_u = urllib.parse.urljoin(getattr(response, 'url', '') or url, loc)
                         next_parts = urllib.parse.urlsplit(next_u)
-                        if next_parts.scheme.lower() not in ('http', 'https') or not next_parts.hostname:
+                        try:
+                            prev_port = prev_parts.port or 443
+                            next_port = next_parts.port or 443
+                        except ValueError:
                             break
+                        if next_parts.scheme.lower() != 'https' or not next_parts.hostname or next_parts.username or next_parts.password:
+                            break
+                        prev_origin = (prev_parts.scheme.lower(), (prev_parts.hostname or '').lower(), prev_port)
+                        next_origin = (next_parts.scheme.lower(), (next_parts.hostname or '').lower(), next_port)
+                        if next_origin != prev_origin:
+                            current_headers = {
+                                k: v for k, v in current_headers.items()
+                                if k.lower() not in ('authorization', 'proxy-authorization', 'cookie')
+                            }
+                        redirect_code = int(response.getcode() or 0)
                         response.close()
                         redirect_hops += 1
-                        next_method = 'GET' if (int(response.getcode() or 0) == 303 or (int(response.getcode() or 0) in (301, 302) and method == 'POST')) else method
-                        next_body = None if next_method == 'GET' else body
-                        next_req = urllib.request.Request(next_u, data=next_body, headers=headers, method=next_method)
+                        method = 'GET' if (redirect_code == 303 or (redirect_code in (301, 302) and method == 'POST')) else method
+                        body = None if method == 'GET' else body
+                        next_req = urllib.request.Request(next_u, data=body, headers=current_headers, method=method)
+                        response = None
                         try:
                             response = opener.open(next_req, timeout=timeout)
                         except urllib.error.HTTPError as error:
                             response = error
+                        except Exception as redir_err:
+                            if _is_missing_intermediate_ca_error(redir_err):
+                                aia_opener = _resolve_aia_opener_for_host(next_parts.hostname, next_port)
+                                if aia_opener is not None:
+                                    aia_ctx = getattr(aia_opener, 'aia_ssl_context', None)
+                                    aia_no_redir = urllib.request.build_opener(NoRedirect(), urllib.request.HTTPSHandler(context=aia_ctx)) if aia_ctx is not None else aia_opener
+                                    try:
+                                        response = aia_no_redir.open(next_req, timeout=timeout)
+                                    except urllib.error.HTTPError as error:
+                                        response = error
+                            if response is None:
+                                raise redir_err
                         url = next_u
                 status = int(response.getcode() or 502)
                 raw_response_headers = response.headers

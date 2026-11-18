@@ -12,4 +12,5 @@ typedef void (^HostImageLoadCompletion)(BOOL succeeded, NSTimeInterval retryAfte
 - (void)prefetchPosterURLs:(NSArray<NSString *> *)urls;
 - (void)cancelPending;
 - (void)clearCache;
+- (void)clearDiskCache;
 @end

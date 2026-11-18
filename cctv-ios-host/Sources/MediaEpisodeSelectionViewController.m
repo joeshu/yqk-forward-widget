@@ -87,6 +87,11 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
 - (void)selectRoute:(UIButton *)sender;
 - (void)selectSeason:(UIButton *)sender;
 - (void)selectEpisode:(UIButton *)sender;
+- (void)rebuildSelection;
+-  (void)buildLayout;
+-  (void)refreshBackdrop;
+-  (UIMenu *)buildEpisodeStyleMenu API_AVAILABLE(ios(14.0));
+-  (void)updateDescription;
 @end
 
 @implementation MediaEpisodeSelectionViewController

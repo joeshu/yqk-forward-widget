@@ -19,6 +19,8 @@
 @property(nonatomic) BOOL cancelled;
 @property(nonatomic) BOOL finished;
 @property(nonatomic,readwrite) BOOL downloadLimitReached;
+-  (void)finish;
+-  (void)pump;
 @end
 
 @implementation TVBoxCatalogBulkImporter

@@ -108,6 +108,20 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
 - (void)rememberSearchKeyword:(NSString *)keyword;
 - (void)changeSearchScope:(UISegmentedControl *)sender;
 - (void)updateSearchScopePresentation;
+- (BOOL)isCurrentJob:(MediaGlobalSearchJob *)job;
+- (void)loadCapabilitiesForJob:(MediaGlobalSearchJob *)job;
+- (void)enqueueStartedSection:(NSUInteger)section;
+- (void)finishJob:(MediaGlobalSearchJob *)job error:(NSError *)error;
+- (void)searchNextProviderForJob:(MediaGlobalSearchJob *)job;
+- (void)reloadSection:(NSUInteger)section;
+- (void)updateProgress;
+- (void)stopAtResultLimit;
+-  (void)submitSearch;
+-  (void)cancelJobsAndAdvanceGeneration;
+-  (void)cancelSearch;
+-  (void)scheduleSources;
+-  (void)startSourceAtSection:(NSUInteger)section;
+-  (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView;
 @end
 
 @implementation MediaGlobalSearchViewController

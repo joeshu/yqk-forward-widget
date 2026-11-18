@@ -60,6 +60,12 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
 @property(nonatomic) BOOL hasLoadedSnapshot;
 - (void)applyFilterFollowingTail:(BOOL)followsTail;
 - (void)filterChanged;
+- (void)scrollToBottomLog;
+- (void)copyVisibleLog;
+- (void)copyErrorLog;
+- (void)confirmClearLog;
+- (void)refreshLog;
+-  (DiagnosticLogCategory)categoryForLine:(NSString *)line;
 @end
 
 @implementation LogCenterViewController

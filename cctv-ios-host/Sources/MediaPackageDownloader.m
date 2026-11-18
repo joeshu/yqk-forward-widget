@@ -220,6 +220,9 @@ static BOOL PackageSameCredentialScope(NSURL *origin,NSURL *target) {
 @property(nonatomic) int64_t expectedBytes;
 @property(nonatomic) NSTimeInterval lastProgressTime;
 @property(nonatomic,copy) NSString *lastProgressStage;
+-  (void)finish:(NSDictionary *)service error:(NSError *)error;
+-  (void)begin:(NSURL *)url;
+-  (void)install:(NSDictionary<NSString *,NSData *> *)companions;
 @end
 @implementation MediaPackageDownloader
 - (NSError *)error:(NSString *)message {return [NSError errorWithDomain:@"CCTVHostImport" code:1 userInfo:@{NSLocalizedDescriptionKey:message}];}

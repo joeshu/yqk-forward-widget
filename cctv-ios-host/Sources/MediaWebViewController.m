@@ -25,6 +25,8 @@ static BOOL MediaWebIsOfficialWatchPageURL(NSURL *url) {
 - (void)loadInitialPageAtURL:(NSURL *)url cookie:(NSString *)cookie;
 - (void)showStatusMessage:(NSString *)message;
 - (void)removeWebKVOIfNeeded;
+- (void)refresh;
+-  (void)failed:(NSError *)error;
 @end
 @implementation MediaWebViewController
 - (instancetype)initWithResult:(NSDictionary *)result title:(NSString *)title {if((self=[super init])){_result=result;self.title=title;}return self;}

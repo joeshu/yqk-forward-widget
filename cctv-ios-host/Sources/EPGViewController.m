@@ -33,6 +33,22 @@
 @property(nonatomic,strong) UIView *hintCard;
 @property(nonatomic,strong) NSMutableSet<NSString *> *loadedOfficialDates;
 - (void)fetchOfficialSevenDayLookback;
+- (void)rebuildDates;
+- (void)updateEmptyState;
+- (void)fetchOfficial;
+- (NSArray<NSDictionary *> *)normalize:(NSArray *)rows;
+- (void)clearChannelReminders;
+- (void)fetch;
+- (void)filterDate;
+-  (NSString *)effectiveChannelIdentifier;
+-  (UIMenu *)buildProgramFilterMenu;
+-  (void)pruneExpiredReminders;
+-  (void)scheduleRefreshTimer;
+-  (void)cancelPageRequest;
+-  (void)saveReminders;
+-  (BOOL)isProgramReminded:(NSDictionary *)program;
+-  (void)scrollToCurrentProgramAnimated:(BOOL)animated;
+-  (void)updateDateMenuButton;
 @end
 
 @implementation EPGViewController

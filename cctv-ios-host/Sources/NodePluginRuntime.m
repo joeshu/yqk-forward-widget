@@ -14,6 +14,7 @@
 @property(atomic) NSInteger controlPort;
 @property(nonatomic, strong) NSURLSession *session;
 @property(nonatomic, strong) NSMutableDictionary<NSString *, void (^)(NSString *)> *sessionLogHandlers;
+-  (NSError *)error:(NSString *)message;
 @end
 @implementation NodePluginRuntime
 + (instancetype)shared {static NodePluginRuntime *runtime;static dispatch_once_t once;dispatch_once(&once,^{runtime=[self new];});return runtime;}

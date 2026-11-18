@@ -12,6 +12,9 @@
 @property(nonatomic,strong) UIButton *stopButton;
 @property(nonatomic,strong) UILabel *emptyLabel;
 - (void)tableView:(UITableView *)t commitEditingStyle:(UITableViewCellEditingStyle)s forRowAtIndexPath:(NSIndexPath *)ip;
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)path;
+-  (void)updateFromStore;
+-  (void)updateProgressHeaderSize;
 @end
 
 @implementation LocalMediaViewController

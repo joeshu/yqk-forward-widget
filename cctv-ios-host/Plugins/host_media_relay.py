@@ -411,22 +411,22 @@ def _resolve_aia_opener_for_host(hostname, port=443):
                     pem_blocks.append(ssl.DER_cert_to_PEM_cert(issuer_bytes))
         except Exception:
             continue
+    if not pem_blocks:
+        return None
     try:
-        pem_blocks.append(ssl.DER_cert_to_PEM_cert(der_cert))
+        # Never append the unverified peer leaf certificate or enable partial-chain
+        # trust anchors; only load fetched AIA intermediate CA
+        # certificates so OpenSSL still verifies a full chain to a trusted Root CA.
         ctx = _configure_tolerant_ssl_context(ssl.create_default_context())
         ctx.verify_mode = ssl.CERT_REQUIRED
         ctx.check_hostname = True
-        partial_flag = getattr(ssl, 'VERIFY_X509_PARTIAL_CHAIN', 0x80000)
-        try:
-            ctx.verify_flags |= partial_flag
-        except Exception:
-            pass
         ctx.load_verify_locations(cadata='\n'.join(pem_blocks))
         opener = _ORIG_BUILD_OPENER(
             ScopedRedirect(),
             KeepAliveHTTPHandler(),
             KeepAliveHTTPSHandler(context=ctx),
         )
+        opener.aia_ssl_context = ctx
     except Exception:
         return None
     with _AIA_CACHE_LOCK:

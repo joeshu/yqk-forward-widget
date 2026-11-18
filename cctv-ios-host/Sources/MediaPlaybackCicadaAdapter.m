@@ -229,6 +229,13 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
 @property(nonatomic) BOOL pendingMuted;
 @property(nonatomic) NSTimeInterval firstFrameRemaining;
 @property(nonatomic) CFTimeInterval firstFrameBudgetStarted;
+- (void)handleCompletion;
+- (void)reportErrorWithCode:(NSInteger)code message:(NSString *)message;
+- (void)finishPendingSeekWithFinished:(BOOL)finished;
+-  (void)updateBufferConfiguration;
+-  (void)startPollTimer;
+-  (void)applyPendingRate;
+-  (BOOL)acceptsCallbacksFromPlayer:(id)player;
 @end
 
 @implementation MediaPlaybackCicadaAdapter

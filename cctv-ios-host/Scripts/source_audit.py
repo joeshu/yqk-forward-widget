@@ -17,7 +17,7 @@ import tokenize
 ROOT=Path(__file__).resolve().parents[1]
 REPO=ROOT.parent
 CODE={'.py','.m','.h','.c','.cpp','.java','.js','.mjs','.cjs','.sh'}
-RISK=re.compile(r'dispatch_sync\s*\(|dispatch_semaphore_wait\s*\(|NSAssert\s*\(|dataWithContentsOfURL\s*:|CERT_NONE|credentialForTrust\s*:')
+RISK=re.compile(r'dispatch_sync\s*\(|dispatch_semaphore_wait\s*\(|NSAssert\s*\(|dataWithContentsOfURL\s*:|CERT_NONE|_create_unverified_context|credentialForTrust\s*:')
 
 def inspect(path):
     file=REPO/path;raw=file.read_bytes();extension=file.suffix.lower()
@@ -70,7 +70,7 @@ def inspect(path):
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--output',default='build/source-audit.json');args=parser.parse_args()
     try:
-        listed=subprocess.check_output(['git','ls-files','--cached','--others','--exclude-standard','--','cctv-ios-host'],cwd=REPO,text=True,stderr=subprocess.DEVNULL).splitlines()
+        listed=subprocess.check_output(['git','ls-files','--cached','--others','--exclude-standard','--','cctv-ios-host','cctv-app-udrm'],cwd=REPO,text=True,stderr=subprocess.DEVNULL).splitlines()
     except Exception:
         skip_dirs={'build','__pycache__','.git','node_modules','.tmp_exec'}
         listed=[str(f.relative_to(REPO)) for f in ROOT.rglob('*') if f.is_file() and not (set(f.relative_to(ROOT).parts)&skip_dirs)]
@@ -78,7 +78,7 @@ def main():
     with ThreadPoolExecutor(max_workers=4) as workers:records=list(workers.map(inspect,paths))
     errors=[{'path':r['path'],'error':r['error']} for r in records if 'error' in r]
     checks=Counter(check for r in records for check in r['checks'])
-    report={'scope':'All tracked cctv-ios-host files, plus nonignored in-progress sources','files':records,'summary':{'files':len(records),'code_files':sum(r['code'] for r in records),'code_lines':sum(r.get('lines',0) for r in records if r['code']),'checks':dict(checks),'errors':errors,'native_analysis':'Separate Apple SDK static analysis; syntax checks alone do not verify behavior','binary_dependencies':'Inventoried by SHA-256; no source-level audit claim for proprietary frameworks'}}
+    report={'scope':'All tracked cctv-ios-host and cctv-app-udrm files, plus nonignored in-progress sources','files':records,'summary':{'files':len(records),'code_files':sum(r['code'] for r in records),'code_lines':sum(r.get('lines',0) for r in records if r['code']),'checks':dict(checks),'errors':errors,'native_analysis':'Separate Apple SDK static analysis; syntax checks alone do not verify behavior','binary_dependencies':'Inventoried by SHA-256; no source-level audit claim for proprietary frameworks'}}
     out=Path(args.output);out.parent.mkdir(parents=True,exist_ok=True);out.write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')
     print(json.dumps(report['summary'],ensure_ascii=False,indent=2));return bool(errors)
 if __name__=='__main__':raise SystemExit(main())

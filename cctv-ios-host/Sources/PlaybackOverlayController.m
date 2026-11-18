@@ -2,6 +2,7 @@
 @interface PlaybackOverlayController ()
 @property(nonatomic,readwrite) BOOL visible;
 @property(nonatomic,strong) NSTimer *timer;
+-  (void)scheduleAutoHideAfter:(NSTimeInterval)interval;
 @end
 @implementation PlaybackOverlayController
 - (BOOL)isVoiceOverRunning {return self.voiceOverRunningProvider?self.voiceOverRunningProvider():UIAccessibilityIsVoiceOverRunning();}

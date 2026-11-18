@@ -1153,6 +1153,8 @@ static const NSUInteger MediaAdaptationProbeByteLimit = 4096;
 @property(nonatomic, copy) NSArray<NSDictionary *> *displayedRecords;
 @property(nonatomic, copy) NSArray<NSDictionary *> *displayedSites;
 @property(nonatomic, copy) NSDictionary *adaptationSummary;
+- (void)reloadMonitorData;
+-  (void)buildProbePanel;
 @end
 
 @implementation MediaAdaptationMonitorViewController

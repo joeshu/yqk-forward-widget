@@ -136,6 +136,10 @@ static NSURL *M3UNormalizedLoopbackURL(NSURL *url, NSURL *baseURL) {
 }
 @end
 
+@interface M3UParser ()
++  (NSString *)attribute:(NSString *)key in:(NSString *)line;
+@end
+
 @implementation M3UParser
 + (NSDictionary *)reportForText:(NSString *)text baseURL:(NSURL *)baseURL {
     NSError *error=nil;NSArray *channels=[self parse:text baseURL:baseURL error:&error]?:@[];NSMutableDictionary *unsupported=[NSMutableDictionary dictionary];

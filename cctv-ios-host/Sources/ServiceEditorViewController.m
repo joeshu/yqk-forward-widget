@@ -11,6 +11,16 @@
 @property(nonatomic, copy) NSString *lastSearchQuery;
 @property(nonatomic, copy) NSString *lastReplaceText;
 @property(nonatomic, assign) BOOL applyingSyntaxHighlight;
+- (void)promptFindInCode;
+- (void)promptGoToLine;
+- (void)validateCodeSyntax;
+- (void)formatJSONIfApplicable;
+- (void)copyAllCode;
+- (void)promptReplaceInCode;
+- (void)pasteReplaceCode;
+- (void)insertCodeTemplate:(NSString *)templateKind;
+- (void)resetBundledCodeIfApplicable;
+- (void)save;
 @end
 
 @implementation ServiceCodeViewController {
@@ -633,6 +643,13 @@
 @property(nonatomic) NSUInteger applyPortGeneration;
 @property(nonatomic, copy) NSString *cachedSection0Footer;
 - (void)refreshSection0FooterCache;
+-  (void)urlChanged;
+-  (NSString *)draftPath;
+-  (NSString *)optionsDraftPath;
+-  (void)save;
+-  (void)editManual;
+-  (void)presentCodeDocumentPicker;
+-  (void)loadRemote;
 @end
 @implementation ServiceEditorViewController
 - (BOOL)managedCode {return [self.service[@"builtin"] boolValue] || [self.service[@"manifest"] isKindOfClass:NSDictionary.class];}

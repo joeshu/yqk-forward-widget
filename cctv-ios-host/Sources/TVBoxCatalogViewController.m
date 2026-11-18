@@ -16,6 +16,7 @@
 - (void)updateCatalogSummary;
 - (void)presentCatalogAlert:(UIAlertController *)alert sourceView:(nullable UIView *)sourceView sourceRect:(CGRect)sourceRect;
 - (void)attemptPresentCatalogAlert:(UIAlertController *)alert sourceView:(nullable UIView *)sourceView sourceRect:(CGRect)sourceRect retryCount:(NSUInteger)retryCount generation:(NSUInteger)generation;
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)ip;
 @end
 
 @implementation TVBoxCatalogViewController

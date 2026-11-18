@@ -748,12 +748,11 @@ class HttpResponse :
     def text (self )->str :
         return self .body .decode ('utf-8',errors ='replace')
 class HttpClient :
-    def __init__ (self ,timeout :float ,insecure_tls :bool ):
+    def __init__ (self ,timeout :float ,insecure_tls :bool =False ):
         self ._timeout =max (timeout ,0.1 )
-        if insecure_tls :
-            self ._ctx =ssl ._create_unverified_context ()
-        else :
-            self ._ctx =ssl .create_default_context ()
+        self ._ctx =ssl .create_default_context ()
+        self ._ctx .verify_mode =ssl .CERT_REQUIRED
+        self ._ctx .check_hostname =True
         jar =http .cookiejar .CookieJar ()
         https_handler =urllib .request .HTTPSHandler (context =self ._ctx )
         self ._opener =urllib .request .build_opener (urllib .request .ProxyHandler ({}),urllib .request .HTTPCookieProcessor (jar ),https_handler )

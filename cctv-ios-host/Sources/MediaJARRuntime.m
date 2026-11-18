@@ -43,7 +43,9 @@ static void JARThread(void (^work)(void)) {
 }
 @interface MediaJARRequest () <NSURLSessionDataDelegate>
 @property(atomic) BOOL cancelled;
+@property(atomic) BOOL completed;
 @property(atomic) BOOL executing;
+- (BOOL)claimCompletion;
 @property(atomic,strong) NSURLSessionDataTask *download;
 @property(atomic,strong) dispatch_source_t watchdog;
 @property(nonatomic,strong) NSMutableData *bytes;
@@ -52,6 +54,13 @@ static void JARThread(void (^work)(void)) {
 @property(nonatomic,copy) NSString *requestID;
 @end
 @implementation MediaJARRequest
+- (BOOL)claimCompletion {
+    @synchronized(self){
+        if(self.completed||self.cancelled)return NO;
+        self.completed=YES;
+        return YES;
+    }
+}
 - (void)cancel {
     self.cancelled=YES;if(self.watchdog){dispatch_source_cancel(self.watchdog);self.watchdog=nil;}[self.download cancel];
     dispatch_semaphore_t dlSema=self.downloaded;if(dlSema)dispatch_semaphore_signal(dlSema);
@@ -79,6 +88,10 @@ static void JARThread(void (^work)(void)) {
     completion(safe);
 }
 @end
+@interface MediaJARRuntime ()
++ (id)perform:(NSDictionary *)source operation:(NSString *)operation arguments:(NSDictionary *)arguments ticket:(MediaJARRequest *)ticket error:(NSError **)error;
+@end
+
 @implementation MediaJARRuntime
 + (BOOL)available {
 #if CCTV_JAR_ENABLED
@@ -96,7 +109,7 @@ static void JARThread(void (^work)(void)) {
     ticket.watchdog=watchdog;
     dispatch_source_set_timer(watchdog,dispatch_time(DISPATCH_TIME_NOW,900*NSEC_PER_SEC),DISPATCH_TIME_FOREVER,NSEC_PER_SEC);
     __weak MediaJARRequest *weakTicket=ticket;
-    dispatch_source_set_event_handler(watchdog,^{MediaJARRequest *active=weakTicket;if(!active||active.cancelled)return;[active cancel];if(completion)completion(nil,JARError(13,@"JAR 首次准备超过 15 分钟，已取消请求；已完成的转换缓存会保留"));});
+    dispatch_source_set_event_handler(watchdog,^{MediaJARRequest *active=weakTicket;if(!active||![active claimCompletion])return;[active cancel];if(completion)completion(nil,JARError(13,@"JAR 首次准备超过 15 分钟，已取消请求；已完成的转换缓存会保留"));});
     dispatch_resume(watchdog);
     // Cancelled queued requests perform no download, initialization or plugin work.
     [queue addOperationWithBlock:^{
@@ -107,12 +120,14 @@ static void JARThread(void (^work)(void)) {
             @try {result=[self perform:source operation:operation arguments:arguments ticket:ticket error:&error];}
             @catch(NSException *exception){error=JARError(3,@"JAR 运行时请求失败，请查看诊断日志");}
             @finally {
-                dispatch_async(dispatch_get_main_queue(),^{if(ticket.watchdog){dispatch_source_cancel(ticket.watchdog);ticket.watchdog=nil;}if(!ticket.cancelled&&completion)completion(result,error);});
+                dispatch_async(dispatch_get_main_queue(),^{if(ticket.watchdog){dispatch_source_cancel(ticket.watchdog);ticket.watchdog=nil;}if(!ticket.cancelled&&[ticket claimCompletion]&&completion)completion(result,error);});
                 dispatch_semaphore_signal(finished);
             }
         }});
         if(dispatch_semaphore_wait(finished,dispatch_time(DISPATCH_TIME_NOW,(int64_t)(180*NSEC_PER_SEC)))!=0){
+            BOOL shouldNotifyTimeout=[ticket claimCompletion];
             [ticket cancel];
+            if(shouldNotifyTimeout&&completion)dispatch_async(dispatch_get_main_queue(),^{completion(nil,JARError(14,@"JAR 请求执行超过 3 分钟，已超时取消"));});
         }
     }];
     return ticket;

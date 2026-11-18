@@ -12,6 +12,10 @@
 @property (nonatomic, strong) UILabel *summaryEngineBadge;
 @property (nonatomic, strong) NSArray<UILabel *> *summaryMetricValueLabels;
 @property (nonatomic, strong) NSArray<UILabel *> *summaryMetricTitleLabels;
+- (void)refreshSnapshot;
+-  (void)stopAutoRefreshTimer;
+-  (void)buildSummaryHeaderView;
+-  (void)startAutoRefreshTimer;
 @end
 
 @implementation PlaybackInfoViewController

@@ -196,7 +196,7 @@
     if(!url.length||!cid.length){[self displayNativePlaybackFailure:@"所选线路参数缺失" error:nil];return;}
     NSMutableDictionary *traceFields=[@{@"route_type":@"user_selected", @"playback_generation":@(self.playbackGeneration), @"correlation_id":self.currentPlaybackTraceID?:@""} mutableCopy];[traceFields addEntriesFromDictionary:CCTVDiagnosticURLFields([NSURL URLWithString:url])];[RuntimeDiagnostics.shared recordEvent:@"native_playback_start_requested" category:@"playback" fields:traceFields];
     [self beginPlaybackPriority];
-    self.nativeRetryPending=NO;self.nativePlaybackFailed=NO;[self.remoteAttemptedURLs removeAllObjects];self.remoteRetryCount=0;self.playPauseBtn.enabled=YES;[self.playPauseBtn setTitle:@"暂停" forState:UIControlStateNormal];
+    self.nativeRetryPending=NO;self.nativePlaybackFailed=NO;[self.remoteAttemptedURLs removeAllObjects];self.remoteRetryCount=0;self.playPauseBtn.enabled=YES;[self.playPauseBtn setTitle:@"暂停" forState:UIControlStateNormal];[self syncPlayPauseButtonIcon];
     self.titleLabel.text=[NSString stringWithFormat:@"%@ · 连接中",title?:cid];self.titleLabel.hidden=NO;self.infoLabel.hidden=NO;self.infoLabel.text=@"所选地址交给央视 SDK 播放";[self.spinner startAnimating];
     if(self.currentPlayer){[self stopPlayback];[self recordStartupStage:@"teardown"];}
     [self.nativePreloader cancel];self.sdkPlayer=nil;self.sdkPlayerUsed=NO;
@@ -236,7 +236,7 @@
     [RuntimeDiagnostics.shared recordEvent:@"native_playback_start_requested" category:@"playback" fields:startFields];
     if([ProfileStore isHTTP:cid]){[self playRemote:@{@"id":cid,@"name":title?:cid,@"remoteURL":cid}];return;}
     [self beginPlaybackPriority];
-    self.nativeRetryPending=NO;self.nativePlaybackFailed=NO;[self.remoteAttemptedURLs removeAllObjects];self.remoteRetryCount=0;self.playPauseBtn.enabled=YES;[self.playPauseBtn setTitle:@"暂停" forState:UIControlStateNormal];self.titleLabel.text=[NSString stringWithFormat:@"%@ · 连接中",title?:cid];self.titleLabel.hidden=NO;self.infoLabel.hidden=NO;self.infoLabel.text=@"";[self.spinner startAnimating];
+    self.nativeRetryPending=NO;self.nativePlaybackFailed=NO;[self.remoteAttemptedURLs removeAllObjects];self.remoteRetryCount=0;self.playPauseBtn.enabled=YES;[self.playPauseBtn setTitle:@"暂停" forState:UIControlStateNormal];[self syncPlayPauseButtonIcon];self.titleLabel.text=[NSString stringWithFormat:@"%@ · 连接中",title?:cid];self.titleLabel.hidden=NO;self.infoLabel.hidden=NO;self.infoLabel.text=@"";[self.spinner startAnimating];
     // Default matches v0.12: stop the old playback, reset the retained wrapper,
     // then playLIVEWithChannelID + prepareToPlay. Fresh wrappers remain an A/B option.
     if(self.currentPlayer){[self stopPlayback];[self recordStartupStage:@"teardown"];}
@@ -271,7 +271,7 @@
         [self call:previous sel:@"stop"];
         [self log:@"SDK 实例未确认起播，使用全新实例重试一次"];
         @try{inst=[[cls alloc] init];}@catch(NSException *e){inst=nil;}
-        if(inst){self.currentPlayer=inst;self.sdkPlayer=legacy?inst:nil;self.sdkPlayerUsed=YES;self.nativePlaybackFailed=NO;self.nativeRetryPending=NO;[self rebuildTimeshiftController];@try{[inst setValue:@YES forKey:@"autoPlay"];}@catch(NSException *e){}accepted=[self invokeTarget:inst selector:playSel args:@[cid,session,options]];}
+        if(inst){self.currentPlayer=inst;self.sdkPlayer=legacy?inst:nil;self.sdkPlayerUsed=YES;self.nativePlaybackFailed=NO;self.nativeRetryPending=NO;[self rebuildTimeshiftController];session=[self beginNativeSession];@try{[inst setValue:@YES forKey:@"autoPlay"];}@catch(NSException *e){}accepted=[self invokeTarget:inst selector:playSel args:@[cid,session,options]];}
     }
     [self recordStartupStage:@"configure"];
     if(!inst||![accepted isKindOfClass:NSNumber.class]||![accepted boolValue]){
@@ -344,6 +344,7 @@
     [self.liveControlsOverlay invalidate];
     self.liveMuted = NO;
     [self.muteBtn setTitle:@"静音" forState:UIControlStateNormal];
+    [self syncPlayPauseButtonIcon];
     [self.watchdog invalidate];
     self.watchdog = nil;
     [self.liveQualityBadgeTimer invalidate];
@@ -395,6 +396,7 @@
         self.remotePlaybackWanted=!playing;
         if (playing) [self.avPlayer pause]; else [self.avPlayer play];
         [self.playPauseBtn setTitle:(playing ? @"继续" : @"暂停") forState:UIControlStateNormal];
+        [self syncPlayPauseButtonIcon];
         return;
     }
     if (!self.currentPlayer) return;
@@ -402,19 +404,22 @@
     @try { playing = [[self.currentPlayer valueForKey:@"isPlaying"] boolValue]; } @catch (NSException *e) {}
     [self call:self.currentPlayer sel:(playing ? @"pause" : @"play")];
     [self.playPauseBtn setTitle:(playing ? @"继续" : @"暂停") forState:UIControlStateNormal];
+    [self syncPlayPauseButtonIcon];
 }
 
 - (void)toggleMute {
-    if(self.remoteAdapter){self.liveMuted=!self.liveMuted;[self.remoteAdapter setMuted:self.liveMuted];[self.muteBtn setTitle:self.liveMuted?@"发声":@"静音" forState:UIControlStateNormal];return;}
+    if(self.remoteAdapter){self.liveMuted=!self.liveMuted;[self.remoteAdapter setMuted:self.liveMuted];[self.muteBtn setTitle:self.liveMuted?@"发声":@"静音" forState:UIControlStateNormal];[self syncPlayPauseButtonIcon];return;}
     if (self.avPlayer) {
         self.liveMuted = !self.liveMuted;
         self.avPlayer.muted = self.liveMuted;
         [self.muteBtn setTitle:(self.liveMuted ? @"发声" : @"静音") forState:UIControlStateNormal];
+        [self syncPlayPauseButtonIcon];
         return;
     }
     self.liveMuted = !self.liveMuted;
     @try { [self.currentPlayer setValue:@(self.liveMuted) forKey:@"muted"]; } @catch (NSException *e) {}
     [self.muteBtn setTitle:(self.liveMuted ? @"发声" : @"静音") forState:UIControlStateNormal];
+    [self syncPlayPauseButtonIcon];
 }
 
 #pragma mark - 手势 / 锁屏
@@ -497,7 +502,7 @@
     self.currentRemoteHeaders=MediaPlaybackHeadersFromResult(@{@"headers":([ch[@"headers"] isKindOfClass:NSDictionary.class]?ch[@"headers"]:@{})});
     self.currentRemotePlaybackAttemptID=NSUUID.UUID.UUIDString.lowercaseString;
     NSInteger playbackTab=self.nativePlainRouteActive?0:1;if(self.activeTab!=playbackTab)[self selectBottomTab:(id)self.bottomBar.arrangedSubviews[playbackTab]];
-    self.playbackGeneration += 1;self.selectionVersion++;NSUInteger generation=self.playbackGeneration;self.remotePlaybackFailed=NO;self.nativePlaybackFailed=NO;self.playPauseBtn.enabled=YES;[self.playPauseBtn setTitle:@"暂停" forState:UIControlStateNormal];
+    self.playbackGeneration += 1;self.selectionVersion++;NSUInteger generation=self.playbackGeneration;self.remotePlaybackFailed=NO;self.nativePlaybackFailed=NO;self.playPauseBtn.enabled=YES;[self.playPauseBtn setTitle:@"暂停" forState:UIControlStateNormal];[self syncPlayPauseButtonIcon];
     NSMutableDictionary *traceFields=[@{@"route_type":self.nativePlainRouteActive?@"user_selected":@"subscription", @"playback_generation":@(generation), @"playback_attempt_id":self.currentRemotePlaybackAttemptID?:@"", @"correlation_id":self.currentPlaybackTraceID?:@""} mutableCopy];[traceFields addEntriesFromDictionary:MediaPlaybackDiagnosticHeaderFields(self.currentRemoteHeaders)];[traceFields addEntriesFromDictionary:CCTVDiagnosticURLFields([NSURL URLWithString:u])];[RuntimeDiagnostics.shared recordEvent:@"remote_playback_start_requested" category:@"playback" fields:traceFields];
     NSTimeInterval requestedAt=self.selectionRequestedAt?:CACurrentMediaTime();self.selectionRequestedAt=0;
     [self stopPlayback];self.remoteFailureRecoveryPending=NO;self.playerExpanded=YES;[self.view setNeedsLayout];
@@ -1079,6 +1084,7 @@
 
 - (void)authFailed:(NSError *)error {
     if (![NSThread isMainThread]) { NSUInteger generation=self.playbackGeneration;dispatch_async(dispatch_get_main_queue(), ^{if(generation!=self.playbackGeneration)return;[self authFailed:error];}); return; }
+    if (!self.currentPlayer || self.avPlayer) return;
     self.nativePlaybackFailed=YES;[self.nativeStartupTuner restore];[self endPlaybackPriority];[self log:@"鉴权失败 %ld", (long)error.code];[self displayNativePlaybackFailure:@"鉴权失败" error:error];
 }
 

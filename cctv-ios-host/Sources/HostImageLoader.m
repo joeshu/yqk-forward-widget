@@ -52,6 +52,7 @@ static NSUInteger const ImageQueueLimit = 160;
 @property(nonatomic, copy) NSString *diskCacheDirectory;
 @property(atomic) NSUInteger generation;
 - (void)loadURL:(NSString *)url intoImageView:(UIImageView *)imageView maximumPixelSize:(NSUInteger)maximumPixelSize completion:(nullable HostImageLoadCompletion)completion;
+-  (void)startPending;
 @end
 
 @implementation HostImageLoader
@@ -358,4 +359,12 @@ static NSUInteger const ImageQueueLimit = 160;
     });
 }
 - (void)clearCache { [self.cache removeAllObjects];[self.failures removeAllObjects];[self.domainFailures removeAllObjects]; }
+- (void)clearDiskCache {
+    [self clearCache];
+    NSString *dir = self.diskCacheDirectory;
+    if (!dir.length) return;
+    NSFileManager *fm = NSFileManager.defaultManager;
+    [fm removeItemAtPath:dir error:NULL];
+    [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:NULL];
+}
 @end

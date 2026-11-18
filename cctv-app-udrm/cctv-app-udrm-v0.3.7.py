@@ -2801,7 +2801,8 @@ PYTHON_SOURCES = {
         '                        group=ch.group\n'
         "                        if path=='/lines.m3u' or provider_match:group+=' · '+PROVIDER_LABELS.get(ch.provider,ch.provider)\n"
         '                        clean=lambda value:str(value).replace(\'"\',"\'").replace(\'\\n\',\' \').replace(\'\\r\',\' \')\n'
-        '                        lines.extend([f\'#EXTINF:-1 tvg-id="{clean(logical)}" tvg-name="{clean(CHANNEL_ROUTES.get(logical,{}).get(\'name\',ch.name))}" tvg-logo="{clean(ch.logo)}" group-title="{clean(group)}",{clean(ch.name)}\',\n'
+                        "                        station_name=CHANNEL_ROUTES.get(logical,{}).get('name',ch.name)\n"
+        '                        lines.extend([f\'#EXTINF:-1 tvg-id="{clean(logical)}" tvg-name="{clean(station_name)}" tvg-logo="{clean(ch.logo)}" group-title="{clean(group)}",{clean(ch.name)}\',\n'
         '                            f\'http://{host}/{"auto" if not parent and not provider_match and path!="/lines.m3u" else "live"}/{ch.ident}.m3u8\'])\n'
         "                    return self.respond(200,('\\n'.join(lines)+'\\n').encode(),'audio/x-mpegurl',head)\n"
         "                if path in ('/epg.xml','/epg.xml.gz'):\n"

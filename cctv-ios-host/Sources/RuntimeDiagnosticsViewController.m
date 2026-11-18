@@ -19,6 +19,10 @@
 // 异步加载的代次：viewWillAppear 与删除/清空后的 reload 可能重叠，
 // 先发出的旧加载后完成时会把已删会话写回列表；代次不符直接丢弃。
 @property(nonatomic) NSUInteger reloadGeneration;
+- (void)applyEventCategoryFilter;
+- (void)showMessage:(NSString *)message;
+- (UIView *)emptyViewWithText:(NSString *)text;
+-  (void)reloadRecords;
 @end
 
 @implementation RuntimeDiagnosticsViewController

@@ -15,6 +15,11 @@
 @property(nonatomic) BOOL suppressMetadataReload;
 @property(nonatomic,copy) NSString *notice;
 @property(nonatomic,weak) id<UIGestureRecognizerDelegate> previousPopDelegate;
+-  (void)changed;
+-  (void)loadFields;
+-  (void)updateAction;
+-  (void)metadataChanged;
+-  (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section;
 @end
 
 @implementation SubscriptionResourceViewController

@@ -105,6 +105,8 @@ static id MediaMetadataPersistentSafeValue(id value, NSString *key, NSUInteger d
 @property(nonatomic, strong) NSMutableDictionary<NSString *, NSDictionary *> *persistentRecords;
 @property(nonatomic, copy) NSString *persistentPath;
 @property(nonatomic) BOOL persistenceWriteScheduled;
+-  (void)loadPersistentRecords;
+-  (void)schedulePersistentWrite;
 @end
 
 @implementation MediaMetadataCache

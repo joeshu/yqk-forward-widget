@@ -116,6 +116,7 @@
 @property(nonatomic,strong) UILabel *titleLabel;
 @property(nonatomic,strong) UIButton *closeButton;
 @property(nonatomic,assign) BOOL didSelectOption;
+-  (NSArray<NSDictionary *> *)optionsForSection:(NSInteger)section;
 @end
 
 @implementation ResourceImportSheetViewController

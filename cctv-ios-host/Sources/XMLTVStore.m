@@ -41,6 +41,7 @@
 @property(nonatomic,assign) BOOL paused;
 @property(nonatomic,assign) NSUInteger generation;
 @property(nonatomic,strong) dispatch_queue_t diskQueue;
+- (void)complete:(NSString *)source cache:(NSDictionary *)cache error:(NSError *)error;
 @end
 @implementation XMLTVStore
 + (instancetype)shared {static XMLTVStore *s;static dispatch_once_t once;dispatch_once(&once,^{s=[self new];s.cache=[NSMutableDictionary dictionary];s.tasks=[NSMutableDictionary dictionary];s.callbacks=[NSMutableDictionary dictionary];s.diskQueue=dispatch_queue_create("com.cctvhost.xmltv",DISPATCH_QUEUE_SERIAL);
@@ -71,23 +72,34 @@ invalid:
 }
 - (NSArray *)cachedRowsForSource:(NSString *)source channel:(NSString *)identifier {if(!source.length||!identifier.length)return @[];@synchronized(self){return self.cache[source][@"rows"][identifier.lowercaseString]?:@[];}}
 - (void)setPaused:(BOOL)paused {
-    _paused=paused;if(!paused)return;self.generation++;
-    for(NSURLSessionDataTask *task in self.tasks.allValues)[task cancel];[self.tasks removeAllObjects];
-    NSDictionary *pending=[self.callbacks copy];[self.callbacks removeAllObjects];for(NSArray *blocks in pending.allValues)for(void (^block)(NSDictionary *,NSError *) in blocks)block(nil,[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil]);
+    NSArray *tasksToCancel=nil;NSDictionary *pending=nil;
+    @synchronized(self){
+        _paused=paused;if(!paused)return;self.generation++;
+        tasksToCancel=[self.tasks.allValues copy];[self.tasks removeAllObjects];
+        pending=[self.callbacks copy];[self.callbacks removeAllObjects];
+    }
+    for(NSURLSessionDataTask *task in tasksToCancel)[task cancel];
+    for(NSArray *blocks in pending.allValues)for(void (^block)(NSDictionary *,NSError *) in blocks)block(nil,[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil]);
 }
 - (void)loadSource:(NSString *)source channel:(NSString *)identifier force:(BOOL)force completion:(void (^)(NSArray<NSDictionary *> *,NSError *))completion {
     if(![ProfileStore isHTTP:source]){completion(@[],[NSError errorWithDomain:@"XMLTV" code:2 userInfo:@{NSLocalizedDescriptionKey:@"请先配置有效的 XMLTV 地址。"}]);return;}
     if(self.paused){NSArray *rows=[self cachedRowsForSource:source channel:identifier];completion(rows,rows.count?nil:[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil]);return;}
     void (^finish)(NSDictionary *,NSError *)=^(NSDictionary *cache,NSError *error){completion(cache[@"rows"][identifier.lowercaseString]?:@[],error);};
-    if(self.callbacks[source]){[self.callbacks[source] addObject:[finish copy]];return;}
-    self.callbacks[source]=[NSMutableArray arrayWithObject:[finish copy]];NSUInteger generation=self.generation;NSString *path=[self pathForSource:source];
-    NSDictionary *memory=nil;@synchronized(self){memory=self.cache[source];}
+    NSUInteger generation=0;NSDictionary *memory=nil;BOOL joinedExisting=NO;
+    @synchronized(self){
+        if(self.callbacks[source]){[self.callbacks[source] addObject:[finish copy]];joinedExisting=YES;}
+        else{self.callbacks[source]=[NSMutableArray arrayWithObject:[finish copy]];generation=self.generation;memory=self.cache[source];}
+    }
+    if(joinedExisting)return;
+    NSString *path=[self pathForSource:source];
     dispatch_async(self.diskQueue,^{NSDictionary *cached=memory?:[NSDictionary dictionaryWithContentsOfFile:path];dispatch_async(dispatch_get_main_queue(),^{
         if(generation!=self.generation)return;
         if(cached){@synchronized(self){self.cache[source]=cached;}}
         NSTimeInterval age=NSDate.date.timeIntervalSince1970-[cached[@"ts"] doubleValue];
         if(!force&&cached&&age>=0&&age<6*3600){[self complete:source cache:cached error:nil];return;}
-        NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:source]];request.timeoutInterval=20;
+        NSURL *requestURL=[NSURL URLWithString:source];
+        if(!requestURL){[self complete:source cache:cached error:[NSError errorWithDomain:@"XMLTV" code:2 userInfo:@{NSLocalizedDescriptionKey:@"请先配置有效的 XMLTV 地址。"}]];return;}
+        NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:requestURL];request.timeoutInterval=20;
         NSURLSessionDataTask *task=[NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){
             dispatch_async(self.diskQueue,^{NSError *parseError=error;NSDictionary *rows=nil;
                 NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]?[(NSHTTPURLResponse *)response statusCode]:0;
@@ -96,10 +108,10 @@ invalid:
                 NSDictionary *entry=rows?@{@"rows":rows,@"ts":@(NSDate.date.timeIntervalSince1970)}:cached;
                 dispatch_async(dispatch_get_main_queue(),^{if(generation!=self.generation)return;if(entry){@synchronized(self){self.cache[source]=entry;}}[self complete:source cache:entry error:parseError];if(rows)dispatch_async(self.diskQueue,^{[entry writeToFile:path atomically:YES];});});
             });
-        }];self.tasks[source]=task;[task resume];
+        }];@synchronized(self){self.tasks[source]=task;}[task resume];
     });});
 }
-- (void)complete:(NSString *)source cache:(NSDictionary *)cache error:(NSError *)error {NSArray *blocks=[self.callbacks[source] copy];[self.callbacks removeObjectForKey:source];[self.tasks removeObjectForKey:source];for(void (^block)(NSDictionary *,NSError *) in blocks)block(cache,error);}
+- (void)complete:(NSString *)source cache:(NSDictionary *)cache error:(NSError *)error {NSArray *blocks=nil;@synchronized(self){blocks=[self.callbacks[source] copy];[self.callbacks removeObjectForKey:source];[self.tasks removeObjectForKey:source];}for(void (^block)(NSDictionary *,NSError *) in blocks)block(cache,error);}
 - (void)evictMemoryCache {if(NSThread.isMainThread){@synchronized(self){[self.cache removeAllObjects];}}else dispatch_async(dispatch_get_main_queue(),^{@synchronized(self){[self.cache removeAllObjects];}});}
 - (void)clear {[self setPaused:YES];@synchronized(self){[self.cache removeAllObjects];}NSString *dir=[[self pathForSource:@"clear"] stringByDeletingLastPathComponent];dispatch_async(self.diskQueue,^{@synchronized(self){[NSFileManager.defaultManager removeItemAtPath:dir error:NULL];[NSFileManager.defaultManager createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:NULL];}});[self setPaused:NO];}
 @end

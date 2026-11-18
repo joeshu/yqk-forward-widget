@@ -107,6 +107,13 @@ static NSString *ServiceResolvedVersionText(NSDictionary *service){
 - (void)reloadThemeAppearance;
 - (void)openCodeViewer;
 - (void)runtimeStateDidChange;
+-  (NSString *)currentRuntimeStatus;
+-  (BOOL)running;
+-  (void)probe;
+-  (void)performServiceChange:(BOOL)enabled;
+-  (void)refreshCurrentRunStart;
+-  (void)probeIfStale;
+-  (void)verifyPortReleasedAfterStop;
 @end
 @implementation ServiceDetailViewController
 - (BOOL)opensMedia {return [ServiceStore isVODMediaService:self.service];}
@@ -789,6 +796,9 @@ static NSString *ServiceResolvedVersionText(NSDictionary *service){
 @property(nonatomic, copy) NSString *displayedRunningID;
 @property(nonatomic, copy) NSString *displayedRuntimeStatus;
 @property(nonatomic, strong) UILabel *emptyLabel;
+- (void)add;
+- (void)performServiceChange:(NSDictionary *)service enabled:(BOOL)enabled;
+-  (void)refresh;
 @end
 @implementation ServicesViewController
 - (void)viewDidLoad {

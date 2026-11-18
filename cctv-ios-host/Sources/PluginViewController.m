@@ -25,6 +25,18 @@
 @property(nonatomic, assign) NSUInteger restartGeneration;
 @property(nonatomic, assign) NSUInteger startStopGeneration;
 @property(nonatomic, assign) BOOL startStopPending;
+- (void)updateStatusLabelWithPort:(NSInteger)port;
+- (void)showRestartError:(NSError *)error;
+-  (UILabel *)label:(NSString *)text size:(CGFloat)size weight:(UIFontWeight)weight color:(UIColor *)color;
+-  (UIView *)card;
+-  (UIStackView *)rowStack;
+-  (UIStackView *)verticalStack;
+-  (NSString *)subscriptionURL;
+-  (void)armStartStopWatchdog;
+-  (UIButton *)button:(NSString *)title action:(SEL)action;
+-  (void)refreshStatus;
+-  (void)probeHTTPIfNeeded;
+-  (void)verifyPortReleasedAfterStop;
 @end
 
 @implementation PluginViewController

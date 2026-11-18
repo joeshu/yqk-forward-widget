@@ -32,6 +32,8 @@ static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
 @property(nonatomic, copy) NSString *activeModuleType;
 @property(nonatomic, copy) NSString *activeProtocol;
 @property(nonatomic, strong) id activeOptions;
+- (NSString *)packageFile:(NSString *)name;
+-  (NSString *)encodedError:(NSString *)message;
 @end
 @implementation JSPluginRuntime
 + (instancetype)shared { static JSPluginRuntime *r; static dispatch_once_t once; dispatch_once(&once, ^{ r=[self routerWithScriptURL:nil configuration:nil]; }); return r; }

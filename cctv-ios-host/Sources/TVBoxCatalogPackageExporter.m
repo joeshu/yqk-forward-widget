@@ -39,6 +39,10 @@ static NSString *TVBoxPackageSafeName(NSString *value) {
 @property(nonatomic) NSUInteger failedCount;
 @property(nonatomic) BOOL cancelled;
 @property(nonatomic) BOOL finished;
+- (void)pump;
+-  (void)finish:(NSURL *)url error:(NSError *)error;
+-  (void)finishArchive;
+-  (NSMutableDictionary *)recordForTask:(NSNumber *)identifier;
 @end
 
 @implementation TVBoxCatalogPackageExporter

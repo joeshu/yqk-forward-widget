@@ -489,6 +489,32 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 - (void)endBackgroundAutoAdvanceTaskIfNeeded;
 - (void)applicationWillEnterForeground:(NSNotification *)notification;
 - (void)updateNowPlayingInfoCenter;
+- (void)updateForwardBufferForItem:(AVPlayerItem *)item;
+- (void)markAutoSkipFlagsForCurrentPosition;
+- (void)setPlaybackRate:(double)rate;
+- (void)setVideoGravity:(NSString *)gravity;
+- (void)rememberIntroEnd;
+- (void)rememberOutroSkip;
+- (void)setKeepScreenAwake:(BOOL)enabled;
+- (void)copyCurrentStreamDiagnostics;
+- (void)openAdaptationMonitor;
+- (void)playNextEpisodeManually;
+- (void)playPreviousEpisodeManually;
+- (UIMenu *)playbackOptionsMenu;
+- (void)playResult:(NSDictionary *)result;
+- (void)finishNativeStreamSniffFailureForGeneration:(NSUInteger)playerGeneration;
+- (void)resolveAndPlay;
+-  (void)updateEpisodeTitle;
+-  (void)buildLines;
+-  (void)teardownHiddenStreamSniffer;
+-  (void)clearCurrentPlayerItem;
+-  (void)applyPendingPlaybackSeekForItem:(AVPlayerItem *)item;
+-  (void)performSkipAction;
+-  (void)clearCurrentPlayerItemPreservingPrefetch:(BOOL)preservePrefetch;
+-  (void)openWebPlaybackFallback;
+-  (AVURLAsset *)consumePrefetchedAssetForURL:(NSURL *)url headers:(NSDictionary *)headers;
+-  (AVURLAsset *)assetForPlaybackURL:(NSURL *)url headers:(NSDictionary *)headers;
+-  (NSString *)prefetchIdentityForEpisode:(NSDictionary *)episode;
 @end
 
 @implementation MediaPlaybackViewController

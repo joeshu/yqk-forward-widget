@@ -70,22 +70,42 @@ static NSString *SettingsEPGCacheSizeText(void) {
     return [NSString stringWithFormat:@"%@ · 下次打开频道时重新获取",size];
 }
 
+static NSString *SettingsImageThumbnailCacheDirectoryPath(void) {
+    NSArray *dirs=NSSearchPathForDirectoriesInDomains(NSCachesDirectory,NSUserDomainMask,YES);
+    return [[dirs firstObject] stringByAppendingPathComponent:@"CCTVHostImageThumbnails"];
+}
+
+static unsigned long long SettingsImageThumbnailCacheBytes(void) {
+    NSFileManager *fm=NSFileManager.defaultManager;
+    NSString *thumbDir=SettingsImageThumbnailCacheDirectoryPath();
+    NSArray<NSString *> *files=[fm contentsOfDirectoryAtPath:thumbDir error:NULL];
+    unsigned long long total=0;
+    for(NSString *file in files){
+        if(![file.pathExtension.lowercaseString isEqualToString:@"jpg"])continue;
+        NSDictionary *attrs=[fm attributesOfItemAtPath:[thumbDir stringByAppendingPathComponent:file] error:NULL];
+        total+=[attrs fileSize];
+    }
+    return total;
+}
+
 static NSString *SettingsCompactCacheSizeText(void) {
     unsigned long long epgBytes=SettingsEPGCacheBytes();
+    unsigned long long imageBytes=SettingsImageThumbnailCacheBytes();
     NSDictionary *mediaSummary=MediaMetadataCache.shared.summary;
     unsigned long long mediaBytes=[mediaSummary[@"bytes"] unsignedLongLongValue];
     NSUInteger mediaEntries=[mediaSummary[@"entries"] unsignedIntegerValue];
-    unsigned long long total=epgBytes+mediaBytes;
+    unsigned long long total=epgBytes+imageBytes+mediaBytes;
     if(total==0&&mediaEntries==0)return @"无缓存";
     return [NSByteCountFormatter stringFromByteCount:(long long)total countStyle:NSByteCountFormatterCountStyleMemory];
 }
 
 static NSString *SettingsAllCachesSummaryText(void) {
     unsigned long long epgBytes=SettingsEPGCacheBytes();
+    unsigned long long imageBytes=SettingsImageThumbnailCacheBytes();
     NSDictionary *mediaSummary=MediaMetadataCache.shared.summary;
     unsigned long long mediaBytes=[mediaSummary[@"bytes"] unsignedLongLongValue];
     NSUInteger mediaEntries=[mediaSummary[@"entries"] unsignedIntegerValue];
-    unsigned long long total=epgBytes+mediaBytes;
+    unsigned long long total=epgBytes+imageBytes+mediaBytes;
     if(total==0&&mediaEntries==0)return @"节目单、台标与影视元数据缓存 · 当前无磁盘缓存";
     NSString *totalText=[NSByteCountFormatter stringFromByteCount:(long long)total countStyle:NSByteCountFormatterCountStyleMemory];
     NSString *epgText=epgBytes?[NSByteCountFormatter stringFromByteCount:(long long)epgBytes countStyle:NSByteCountFormatterCountStyleMemory]:@"0 KB";
@@ -299,6 +319,26 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
 @property(nonatomic,assign) BOOL clearedImagesState;
 - (NSIndexPath *)indexPathForRowAction:(NSString *)action;
 - (void)resetSingleRowToDefault:(NSDictionary *)row atIndexPath:(NSIndexPath *)ip;
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)ip;
+-  (void)applyCategoryFilter;
+-  (void)setupHeroHeaderView;
+-  (void)updateImmersiveTableInsets;
+-  (void)refreshHeroSummaryChips;
+-  (void)presentThemePicker:(NSIndexPath *)ip;
+-  (void)presentPreferredQualityPicker:(NSIndexPath *)ip;
+-  (void)showPrivacyStatement;
+-  (void)confirmClearAllCaches;
+-  (void)copyVersionDiagnosticsFromIndexPath:(NSIndexPath *)ip;
+-  (void)confirmResetDefaultPreferences;
+-  (void)confirmClearEPG;
+-  (void)confirmClearMediaMetadata:(NSIndexPath *)indexPath;
+-  (void)confirmClearWatchHistory;
+-  (void)confirmClearFavorites;
+-  (void)confirmClearProgramReminders;
+-  (void)confirmClearSearchHistory;
+-  (void)presentPlaybackRatePicker:(NSIndexPath *)ip;
+-  (void)presentVideoGravityPicker:(NSIndexPath *)ip;
+-  (void)checkForUpdateFromIndexPath:(NSIndexPath *)ip;
 @end
 
 @implementation SettingsViewController
@@ -1726,7 +1766,9 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
     if([row[@"action"] isEqualToString:@"clearEPG"]) [self confirmClearEPG];
     else if([row[@"action"] isEqualToString:@"clearImages"]){
         [HostImageLoader.shared clearCache];
+        [HostImageLoader.shared clearDiskCache];
         self.clearedImagesState=YES;
+        [self refreshHeroSummaryChips];
         UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,@"台标缓存已清理");
         [self.table reloadRowsAtIndexPaths:@[ip] withRowAnimation:UITableViewRowAnimationNone];
     }
@@ -2001,6 +2043,7 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
         SettingsRemoveEPGCacheFile();
         if(self.onClearEPG)self.onClearEPG();
         [HostImageLoader.shared clearCache];
+        [HostImageLoader.shared clearDiskCache];
         self.clearedImagesState=YES;
         [MediaMetadataCache.shared clear];
         [self refreshHeroSummaryChips];

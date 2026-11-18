@@ -27,6 +27,9 @@ static NSMutableDictionary<NSString *, NSDictionary *> *HLSRouteProbeCacheStore(
 @property(nonatomic,copy) NSString *initialURLKey;
 @property(nonatomic) NSUInteger depth;
 @property(atomic) BOOL cancelled;
+-  (BOOL)validURL:(NSURL *)url;
+-  (void)finish:(BOOL)plain;
+-  (void)fetch:(NSURL *)url;
 @end
 
 @implementation HLSRouteProbe

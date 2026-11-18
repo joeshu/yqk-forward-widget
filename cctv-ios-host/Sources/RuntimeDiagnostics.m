@@ -95,6 +95,7 @@ static void RuntimeDiagnosticsHandleUncaughtException(NSException *exception) {
 - (NSString * _Nullable)pathForSessionID:(nullable NSString *)sessionID;
 - (void)pruneOldSessions;
 - (void)recordEvent:(NSString *)event category:(NSString *)category fields:(nullable NSDictionary<NSString *, id> *)fields synchronously:(BOOL)synchronously;
+-  (void)trimLogToTail;
 @end
 
 static NSString *RuntimeDiagnosticsISO8601String(NSDate *date) {

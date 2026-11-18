@@ -4,6 +4,7 @@
 @property(nonatomic,weak,readwrite) id<PlaybackSession> currentSession;
 @property(nonatomic,weak) id<PlaybackSession> interruptedSession;
 @property(nonatomic) BOOL resumeAfterInterruption;
+-  (MPRemoteCommandHandlerStatus)onMain:(MPRemoteCommandHandlerStatus(^)(void))action;
 @end
 @implementation PlaybackCoordinator
 + (instancetype)shared {static PlaybackCoordinator *value;static dispatch_once_t once;dispatch_once(&once,^{value=[self new];});return value;}

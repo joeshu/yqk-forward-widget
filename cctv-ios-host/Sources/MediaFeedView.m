@@ -135,6 +135,10 @@ static void MediaFeedLoadPosterWithRetry(NSString *url, UIImageView *imageView, 
 - (void)updateTimer;
 - (BOOL)canAnimate;
 @end
+@interface MediaFeedHeroCell ()
+- (void)displayCurrent:(BOOL)animated;
+@end
+
 @implementation MediaFeedHeroCell
 - (instancetype)initWithFrame:(CGRect)frame {if((self=[super initWithFrame:frame])){
     self.clipsToBounds=YES;self.contentView.backgroundColor=HostBackground();self.poster=[UIImageView new];self.poster.clipsToBounds=YES;self.poster.contentMode=UIViewContentModeScaleAspectFill;[self.contentView addSubview:self.poster];
@@ -198,6 +202,9 @@ static void MediaFeedLoadPosterWithRetry(NSString *url, UIImageView *imageView, 
 @property(nonatomic) NSUInteger visibleRenderSerial;
 - (NSDictionary *)diagnosticFieldsForIndexPath:(NSIndexPath *)indexPath;
 - (UICollectionViewCell *)configuredCellAtIndexPath:(NSIndexPath *)indexPath;
+- (NSCollectionLayoutSection *)layoutForSection:(NSInteger)index environment:(id<NSCollectionLayoutEnvironment>)environment;
+-  (instancetype)initWithFrame:(CGRect)frame collectionViewLayout:(UICollectionViewLayout *)layout;
+-  (void)notifyVisibleCategories;
 @end
 @implementation MediaFeedView
 - (instancetype)initWithFrame:(CGRect)frame {return [self initWithFrame:frame collectionViewLayout:[UICollectionViewFlowLayout new]];}
