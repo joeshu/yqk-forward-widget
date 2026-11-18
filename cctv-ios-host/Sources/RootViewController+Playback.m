@@ -945,6 +945,7 @@
         else [self log:@"首帧渲染 %.2fs · %@", self.firstFrameSeconds,self.startupTrace.summary];
         [self log:@"SDK 报告节点 %@ · 请求线路 %@",[NativeCDNPreference observedCDNDescriptionForPlayer:self.currentPlayer],self.routeName?:@"自动"];
         [self updateNowPlaying];
+        [self.channelGrid reloadData];[self.table reloadData];
         [self refreshNowNext];
         [self restartEPGTimer];
         if([self.pendingNativeReplayProgram[@"channelID"] isEqualToString:self.channelID]){
