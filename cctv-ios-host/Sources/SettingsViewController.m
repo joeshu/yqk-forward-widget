@@ -981,9 +981,9 @@ static NSString *SettingsEPGRemindersSummaryText(void) {
 
 - (void)copyVersionDiagnosticsFromIndexPath:(NSIndexPath *)ip {
     if (ip) [self.table deselectRowAtIndexPath:ip animated:YES];
-    NSString *version = ([NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"开发版").description;
-    NSString *build = ([NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleVersion"] ?: @"?").description;
-    NSString *variant = ([NSBundle.mainBundle objectForInfoDictionaryKey:@"CCTVHostBuildVariant"] ?: @"full").description;
+    NSString *version = [([NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"开发版") description];
+    NSString *build = [([NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleVersion"] ?: @"?") description];
+    NSString *variant = [([NSBundle.mainBundle objectForInfoDictionaryKey:@"CCTVHostBuildVariant"] ?: @"full") description];
     NSString *variantName = [variant isEqualToString:@"no-python"] ? @"无 Python 诊断版" : @"完整版";
     NSString *themeName = [HostThemePalette currentPalette].displayName ?: @"午夜影院";
     NSInteger fontStep = [NSUserDefaults.standardUserDefaults integerForKey:@"cctv.appFontSize.v1"];

@@ -1,5 +1,7 @@
 #import "HostTheme.h"
 #import "RootViewController_Internal.h"
+#import "MediaEpisodeLayout.h"
+#import "MediaAdaptationMonitor.h"
 
 void *const kAVItemStatusContext = (void *)&kAVItemStatusContext;
 void *const kAVLayerFrameContext = (void *)&kAVLayerFrameContext;

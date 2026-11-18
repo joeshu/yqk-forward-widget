@@ -28,10 +28,12 @@ static NSArray<NSString *> *stringPreferenceKeys(void){return @[@"cctv.mediaVide
     return snap.copy;
 }
 + (NSDictionary *)validatedBackup:(NSData *)data error:(NSError **)error {
+    id root=nil;
+    NSInteger version=0;
     if(!data.length)goto invalid;
-    id root=[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
+    root=[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
     if(![root isKindOfClass:NSDictionary.class])goto invalid;
-    NSInteger version=[root[@"version"] integerValue];
+    version=[root[@"version"] integerValue];
     if(![root[@"format"] isEqual:@"CCTVHost"]||(version!=1&&version!=2))goto invalid;
     if(![root[@"subscriptions"] isKindOfClass:NSArray.class]||![root[@"favorites"] isKindOfClass:NSArray.class]||![root[@"preferences"] isKindOfClass:NSDictionary.class])goto invalid;
     for(id u in root[@"subscriptions"])if(![ProfileStore isSource:u])goto invalid;

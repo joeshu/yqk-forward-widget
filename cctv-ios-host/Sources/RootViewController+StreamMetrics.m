@@ -537,7 +537,7 @@ static BOOL CCTVPreviewImageHasValidVideoContent(UIImage *image) {
         }];
         return;
     }
-    UIView *videoSurface=[self playerViewFrom:self.currentPlayer];
+    UIView *videoSurface=self.playerBox;
     if(!videoSurface||CGRectIsEmpty(videoSurface.bounds))return;
     UIGraphicsImageRendererFormat *fmt=[UIGraphicsImageRendererFormat defaultFormat];
     fmt.scale=1.0;fmt.opaque=YES;
