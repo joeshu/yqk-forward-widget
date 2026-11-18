@@ -17,8 +17,6 @@ on:
       - 'migu/**'
       - 'tests/migu/**'
       - '.github/workflows/migu.yml'
-  schedule:
-    - cron: '17,47 * * * *'
   workflow_dispatch:
 
 permissions:
