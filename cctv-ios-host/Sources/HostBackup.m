@@ -53,7 +53,7 @@ static NSArray<NSString *> *stringPreferenceKeys(void){return @[@"cctv.mediaVide
         for(id k in root[@"preferences"]){
             id value=root[@"preferences"][k];
             if([boolKeys containsObject:k]){
-                if(![value isKindOfClass:NSNumber.class]||strcmp([value objCType],@encode(BOOL))!=0)goto invalid;
+                if(![value isKindOfClass:NSNumber.class])goto invalid;
             }else if([numKeys containsObject:k]){
                 if(![value isKindOfClass:NSNumber.class]||strcmp([value objCType],@encode(BOOL))==0)goto invalid;
                 if([k isEqual:@"cctv.mediaPlaybackRate"]&&([value doubleValue]<0.5||[value doubleValue]>2.0))goto invalid;
