@@ -18,7 +18,7 @@ class Round22ScrollThrottlePowerAndLatencySortTests(unittest.TestCase):
             "if (UIApplication.sharedApplication.applicationState != UIApplicationStateActive || self.activeTab >= 2) return;",
             sm,
         )
-        self.assertIn("if(realFrame && CCTVPreviewImageHasValidVideoContent(realFrame))", sm)
+        self.assertIn("if(snap&&CCTVPreviewImageHasValidVideoContent(snap))", sm)
 
     def test_03_single_active_catalog_reload_and_weak_idle_dispatch(self):
         cat = (SOURCES / "RootViewController+Catalog.m").read_text(encoding="utf-8")

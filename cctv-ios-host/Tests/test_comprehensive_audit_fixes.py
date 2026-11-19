@@ -201,7 +201,7 @@ class ComprehensiveAuditRegressionTests(unittest.TestCase):
         self.assertIn("MediaPlaybackIsCommercialVIPURL", self.media_playback_m)
         self.assertIn("MediaPlaybackPlatformRefererForURL", self.media_playback_m)
         self.assertIn("MediaPlaybackResolveVIPNativeStream", self.media_playback_m)
-        self.assertIn("if(!vipResolutionPending)[owner finishNativeStreamSniffFailureForGeneration:playerGeneration];", self.media_playback_m)
+        self.assertIn("if(!vipResolutionPending)[inner finishNativeStreamSniffFailureForGeneration:playerGeneration];", self.media_playback_m)
         sp360_h = (ROOT / "Sources/MediaSP360Adapter.h").read_text(encoding="utf-8")
         self.assertIn("MediaSP360PlatformName", sp360_h)
         self.assertIn("MediaSP360PlatformReferer", sp360_h)

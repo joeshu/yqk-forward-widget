@@ -412,7 +412,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('scrollView.topAnchor constraintEqualToAnchor:self.view.topAnchor', detail)
         self.assertIn('heroSpacer.heightAnchor constraintEqualToAnchor:self.view.heightAnchor multiplier:0.36', detail)
         self.assertIn('NSUInteger rowCount=(visibleCount+columnCount-1)/columnCount', detail)
-        self.assertIn('UIView *spacer=[UIView new]', detail)
+        self.assertIn('self.heroSpacer=[UIView new]', detail)
         self.assertIn('media-detail-page-status', detail)
 
     def test_media_browser_cancels_parent_requests_and_resumes_after_child_navigation(self):
@@ -1278,7 +1278,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('retryProviders', search)
         self.assertIn('sourceAvailableForSearch', search)
         self.assertIn('不会自动启动其他插件', search)
-        self.assertIn('MediaGlobalSearchMaximumConcurrentSources = 3', search)
+        self.assertIn('MediaGlobalSearchMaximumConcurrentSources = 6', search)
         self.assertIn('MediaGlobalSearchJob', search)
         self.assertIn('searchNextProviderForJob', search)
         self.assertIn('cancelJobsAndAdvanceGeneration', search)

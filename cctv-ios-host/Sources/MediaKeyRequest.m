@@ -41,10 +41,10 @@ static NSOperationQueue *MediaKeyRequestDelegateQueue(void) {
     [[self.session dataTaskWithRequest:request] resume];
 }
 - (void)cancel {
+    // Do not nil self.completion here: URLSession still calls didCompleteWithError for the cancelled task, and that is the only path that delivers the cancellation error to the caller. Nil-ing it leaves the caller waiting past its deadline.
     [MediaKeyRequestDelegateQueue() addOperationWithBlock:^{
         [self.session invalidateAndCancel];
         self.session=nil;
-        self.completion=nil;
     }];
 }
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task didReceiveResponse:(NSURLResponse *)response completionHandler:(void (^)(NSURLSessionResponseDisposition))completion {

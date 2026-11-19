@@ -157,6 +157,7 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
 }
 
 @interface ConfigCenterViewController () <UITextFieldDelegate, UITableViewDragDelegate, UITableViewDropDelegate>
+- (void)promptUdpxyConfiguration;
 @property(nonatomic, strong) NSArray<NSDictionary *> *profiles;
 @property(nonatomic, strong) NSArray<NSDictionary *> *allProfiles;
 @property(nonatomic, strong) UIScrollView *kindScroll;

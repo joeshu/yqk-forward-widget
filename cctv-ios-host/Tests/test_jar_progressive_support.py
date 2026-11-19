@@ -780,7 +780,7 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
         self.assertIn('[self.prefetchedAsset loadValuesAsynchronouslyForKeys:@[@"playable"]', mp_m)
         self.assertIn('[owner prepareAssetForPrefetchedResult:result identity:targetIdentity]', mp_m)
         self.assertNotIn('[warmReq setValue:@"bytes=0-1023"', mp_m)
-        self.assertIn('@[@0.2,@0.45,@1.1,@2.0,@3.0]', mp_m)
+        self.assertIn('@[@0.45,@1.2,@2.4]', mp_m)
 
         api_m = (SOURCES / 'MediaAPIClient.m').read_text(encoding='utf-8')
         self.assertIn('MediaParserSuccessScoreCache', api_m)

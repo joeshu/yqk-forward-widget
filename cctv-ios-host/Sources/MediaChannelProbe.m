@@ -22,6 +22,7 @@ static const NSUInteger MediaChannelProbeSegmentByteLimit = 65536;
 @property(nonatomic) BOOL probingSegment;
 @property(nonatomic) double manifestRequestMs;
 @property(nonatomic) BOOL finished;
+- (void)startRequestForURL:(NSURL *)url rangeLimit:(NSUInteger)limit;
 @end
 
 static NSURL *MediaChannelProbeExtractFirstHLSSegment(NSString *playlist, NSURL *baseURL) {
