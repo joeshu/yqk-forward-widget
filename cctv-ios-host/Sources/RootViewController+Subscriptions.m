@@ -172,8 +172,7 @@
         NSString *title = count ? [NSString stringWithFormat:@"%@%@ · %lu 台", active ? @"✓ " : @"", baseTitle, (unsigned long)count] : [NSString stringWithFormat:@"%@%@", active ? @"✓ " : @"", baseTitle];
         [sheet addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
             NSString *statusLine = [profile[@"status"] isKindOfClass:NSString.class] ? profile[@"status"] : @"";
-            NSString *opMsg = statusLine.length ? [NSString stringWithFormat:@"%@
-%@", statusLine, CCTVServiceLogAddress(u)] : CCTVServiceLogAddress(u);
+            NSString *opMsg = statusLine.length ? [NSString stringWithFormat:@"%@\n%@", statusLine, CCTVServiceLogAddress(u)] : CCTVServiceLogAddress(u);
             UIAlertController *op = [UIAlertController alertControllerWithTitle:baseTitle message:opMsg preferredStyle:UIAlertControllerStyleActionSheet];
             [op addAction:[UIAlertAction actionWithTitle:@"仅查看此订阅频道" style:UIAlertActionStyleDefault handler:^(UIAlertAction *y) {
                 [self selectLiveResourceSource:u];
@@ -671,9 +670,7 @@
     NSString *currentID = [ProfileStore epgIDForChannel:ch] ?: @"";
     NSString *nowProg = [self.epgCache[ch[@"id"] ?: @""][@"now"] isKindOfClass:NSString.class] ? self.epgCache[ch[@"id"] ?: @""][@"now"] : @"";
     NSString *msg = [NSString stringWithFormat:@"输入 XMLTV channel ID 或央视官方频道 ID；留空恢复自动匹配。%@",
-                     (nowProg.length ? [NSString stringWithFormat:@"
-当前在播：%@", nowProg] : (currentID.length ? [NSString stringWithFormat:@"
-当前映射：%@", currentID] : @""))];
+                     (nowProg.length ? [NSString stringWithFormat:@"\n当前在播：%@", nowProg] : (currentID.length ? [NSString stringWithFormat:@"\n当前映射：%@", currentID] : @""))];
     UIAlertController *a=[UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"EPG 手动匹配 · %@", chName] message:msg preferredStyle:UIAlertControllerStyleAlert];
     [a addTextFieldWithConfigurationHandler:^(UITextField *t){
         t.text=currentID;
