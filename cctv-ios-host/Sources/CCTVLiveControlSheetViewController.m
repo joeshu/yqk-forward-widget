@@ -250,7 +250,7 @@
     btn.titleLabel.adjustsFontForContentSizeCategory = YES;
     [btn.heightAnchor constraintGreaterThanOrEqualToConstant:44].active = YES;
     btn.tag = (NSInteger)self.rowHandlers.count;
-    [self.rowHandlers addObject:handler ? [handler copy] : ^{}];
+    [self.rowHandlers addObject:handler ? [handler copy] : (id)^{}];
     HostInstallPressFeedback(btn);
     [btn addTarget:self action:@selector(runRowAction:) forControlEvents:UIControlEventTouchUpInside];
     return btn;
@@ -311,7 +311,7 @@
     ]];
 
     tile.tag = (NSInteger)self.rowHandlers.count;
-    [self.rowHandlers addObject:handler ? [handler copy] : ^{}];
+    [self.rowHandlers addObject:handler ? [handler copy] : (id)^{}];
     HostInstallPressFeedback(tile);
     [tile addTarget:self action:@selector(runRowAction:) forControlEvents:UIControlEventTouchUpInside];
     return tile;
@@ -454,7 +454,7 @@
     ]];
 
     row.tag = (NSInteger)self.rowHandlers.count;
-    [self.rowHandlers addObject:handler ? [handler copy] : ^{}];
+    [self.rowHandlers addObject:handler ? [handler copy] : (id)^{}];
     HostInstallPressFeedback(row);
     [row addTarget:self action:@selector(runRowAction:) forControlEvents:UIControlEventTouchUpInside];
     return row;

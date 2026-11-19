@@ -293,7 +293,7 @@
         HostSetLayerBorderColor(btn, action.selected ? tint : HostBorder());
         [btn.heightAnchor constraintGreaterThanOrEqualToConstant:40].active = YES;
         btn.tag = (NSInteger)self.actionHandlers.count;
-        [self.actionHandlers addObject:action.handler ? [action.handler copy] : ^{}];
+        [self.actionHandlers addObject:action.handler ? [action.handler copy] : (id)^{}];
         HostInstallPressFeedback(btn);
         [btn addTarget:self action:@selector(runActionControl:) forControlEvents:UIControlEventTouchUpInside];
         [row addArrangedSubview:btn];
@@ -442,7 +442,7 @@
     ]];
 
     row.tag = (NSInteger)self.actionHandlers.count;
-    [self.actionHandlers addObject:action.handler ? [action.handler copy] : ^{}];
+    [self.actionHandlers addObject:action.handler ? [action.handler copy] : (id)^{}];
     HostInstallPressFeedback(row);
     [row addTarget:self action:@selector(runActionControl:) forControlEvents:UIControlEventTouchUpInside];
     return row;
