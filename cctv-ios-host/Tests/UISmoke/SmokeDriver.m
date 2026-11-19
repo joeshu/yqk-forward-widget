@@ -30,6 +30,7 @@
 #import "TVBoxCatalogStore.h"
 #import "M3UParser.h"
 #import "TVBoxCatalogViewController.h"
+#import "HostGlassActionSheetViewController.h"
 #import "CNPlayerCrashGuard.h"
 #import "LogCenterViewController.h"
 #import "PluginRunHistoryViewController.h"
@@ -250,6 +251,17 @@ static NSArray<UIAction *> *SmokeFlattenMenuActions(UIMenu *menu) {
         else if ([child isKindOfClass:UIMenu.class]) [flat addObjectsFromArray:SmokeFlattenMenuActions((UIMenu *)child)];
     }
     return flat;
+}
+static NSArray<NSString *> *SmokeActionSheetTitles(UIViewController *presented) {
+    if ([presented isKindOfClass:UIAlertController.class]) return [(UIAlertController *)presented.actions valueForKey:@"title"] ?: @[];
+    if ([presented isKindOfClass:HostGlassActionSheetViewController.class]) {
+        NSMutableArray<NSString *> *titles=[NSMutableArray array];
+        for (HostGlassSheetSection *section in ((HostGlassActionSheetViewController *)presented).sections)
+            for (HostGlassSheetAction *action in section.actions)
+                if (action.title.length) [titles addObject:action.title];
+        return titles;
+    }
+    return @[];
 }
 static void SmokePlaybackPrefetchReuse(void) {
     NSString *decodeKey=@"cctv.mediaDecodeMode.v1";id previousDecode=[NSUserDefaults.standardUserDefaults objectForKey:decodeKey];[NSUserDefaults.standardUserDefaults setObject:@"auto" forKey:decodeKey];
@@ -1295,20 +1307,20 @@ static void next(NSArray *steps, NSUInteger index) {
             if(catalog)[TVBoxCatalogStore saveCatalog:catalog];
             TVBoxCatalogViewController *catalogPage=[TVBoxCatalogViewController new];catalogSmokePage=catalogPage;catalogPage.catalog=[TVBoxCatalogStore catalogForID:catalog[@"id"]]?:catalog;[nav pushViewController:catalogPage animated:NO];
             check([catalogPage.tableView numberOfSections]==2&&[catalogPage.tableView numberOfRowsInSection:0]==2,@"resource collection separates script sites from live lists");
-            UIMenu *collectionActions=catalogPage.navigationItem.rightBarButtonItem.menu;UIMenu *exports=(id)collectionActions.children.firstObject;NSString *jsonAction=exports.children.count>0?((UIAction *)exports.children[0]).title:@"",*zipAction=exports.children.count>1?((UIAction *)exports.children[1]).title:@"";UIContextMenuConfiguration *singleResourceMenu=[catalogPage tableView:catalogPage.tableView contextMenuConfigurationForRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0] point:CGPointZero];check([jsonAction isEqual:@"导出完整合集 JSON"]&&[zipAction isEqual:@"导出资源 ZIP（含可获取的 PY / JS）"]&&singleResourceMenu!=nil,@"resource collection offers complete JSON, report-aware PY/JS ZIP and per-item export");
+            UIMenu *collectionActions=catalogPage.navigationItem.rightBarButtonItem.menu;UIMenu *exports=(id)collectionActions.children.firstObject;NSString *jsonAction=exports.children.count>0?((UIAction *)exports.children[0]).title:@"",*zipAction=exports.children.count>1?((UIAction *)exports.children[1]).title:@"";UIContextMenuConfiguration *singleResourceMenu=[catalogPage tableView:catalogPage.tableView contextMenuConfigurationForRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0] point:CGPointZero];check([jsonAction isEqual:@"导出合集 JSON"]&&[zipAction isEqual:@"导出资源 ZIP"]&&singleResourceMenu!=nil,@"resource collection offers complete JSON, report-aware PY/JS ZIP and per-item export");
             UISearchController *catalogSearch=[catalogPage valueForKey:@"searchController"];catalogSearch.searchBar.text=@"index.js";[catalogSearch.searchResultsUpdater updateSearchResultsForSearchController:catalogSearch];check([catalogPage.tableView numberOfRowsInSection:0]==1,@"large resource collections can find one script by URL");catalogSearch.searchBar.text=@"";[catalogSearch.searchResultsUpdater updateSearchResultsForSearchController:catalogSearch];
             catalogPage.serviceForSite=^NSDictionary *(NSDictionary *site){return [site[@"key"] isEqual:@"js-site"]?@{@"id":@"fixture-js",@"name":@"Fixture JS",@"enabled":@YES}:nil;};
             NSIndexPath *siteIndex=[NSIndexPath indexPathForRow:0 inSection:0];UITableViewCell *siteCell=[catalogPage tableView:catalogPage.tableView cellForRowAtIndexPath:siteIndex];check([siteCell.detailTextLabel.text containsString:@"服务已导入"]&&[siteCell.detailTextLabel.text containsString:@"点按启动并打开资源"],@"an enabled saved configuration is not presented as a running process");check(![siteCell.detailTextLabel.text containsString:@"token=kept"]&&[catalogPage.catalog[@"sites"][0][@"api"] containsString:@"token=kept"],@"collection masks credentials in display while preserving the original URL");
             [catalogPage.tableView.delegate tableView:catalogPage.tableView didSelectRowAtIndexPath:siteIndex];capture(self.window,@"21-tvbox-catalog");
           }},
-          @{ @"timeout":@8, @"until":^BOOL{UIAlertController *alert=(id)SmokePresentedController(@[catalogSmokePage,nav,root]);return [alert isKindOfClass:UIAlertController.class]&&[[alert.actions valueForKey:@"title"] containsObject:@"启动并打开资源"];}, @"run":^{
-            UIAlertController *alert=(id)SmokePresentedController(@[catalogSmokePage,nav,root]);NSArray *titles=[alert.actions valueForKey:@"title"]?:@[];check([titles containsObject:@"启动并打开资源"],[NSString stringWithFormat:@"an imported collection script offers direct browse (presented=%@ actions=%@)",alert?NSStringFromClass(alert.class):@"none",titles]);[catalogSmokePage dismissViewControllerAnimated:NO completion:nil];
+          @{ @"timeout":@8, @"until":^BOOL{return [SmokeActionSheetTitles(SmokePresentedController(@[catalogSmokePage,nav,root])) containsObject:@"启动并打开资源"];}, @"run":^{
+            UIViewController *alert=SmokePresentedController(@[catalogSmokePage,nav,root]);NSArray *titles=SmokeActionSheetTitles(alert);check([titles containsObject:@"启动并打开资源"],[NSString stringWithFormat:@"an imported collection script offers direct browse (presented=%@ actions=%@)",alert?NSStringFromClass(alert.class):@"none",titles]);[catalogSmokePage dismissViewControllerAnimated:NO completion:nil];
           }},
           @{ @"until":^BOOL{return SmokePresentedController(@[(UIViewController *)nav.topViewController,nav,root])==nil;}, @"run":^{
             TVBoxCatalogViewController *catalogPage=(id)nav.topViewController;catalogPage.serviceForSite=nil;NSIndexPath *siteIndex=[NSIndexPath indexPathForRow:0 inSection:0];[catalogPage.tableView.delegate tableView:catalogPage.tableView didSelectRowAtIndexPath:siteIndex];
           }},
-          @{ @"timeout":@8, @"until":^BOOL{UIAlertController *alert=(id)SmokePresentedController(@[(UIViewController *)nav.topViewController,nav,root]);NSArray *titles=[alert.actions valueForKey:@"title"]?:@[];return [titles containsObject:@"导入并打开资源"]&&[titles containsObject:@"仅导入到资源页"];}, @"run":^{
-            TVBoxCatalogViewController *catalogPage=(id)nav.topViewController;UIAlertController *newActions=(id)SmokePresentedController(@[catalogPage,nav,root]);NSArray *newTitles=[newActions.actions valueForKey:@"title"];check([newTitles containsObject:@"导入并打开资源"]&&[newTitles containsObject:@"仅导入到资源页"],@"an unimported script offers explicit import-and-browse or import-only flow");[catalogPage dismissViewControllerAnimated:NO completion:nil];[TVBoxCatalogStore removeCatalog:catalogPage.catalog[@"id"]];[nav popViewControllerAnimated:NO];
+          @{ @"timeout":@8, @"until":^BOOL{NSArray *titles=SmokeActionSheetTitles(SmokePresentedController(@[(UIViewController *)nav.topViewController,nav,root]));return [titles containsObject:@"导入并打开资源"]&&[titles containsObject:@"仅导入到资源页"];}, @"run":^{
+            TVBoxCatalogViewController *catalogPage=(id)nav.topViewController;NSArray *newTitles=SmokeActionSheetTitles(SmokePresentedController(@[catalogPage,nav,root]));check([newTitles containsObject:@"导入并打开资源"]&&[newTitles containsObject:@"仅导入到资源页"],@"an unimported script offers explicit import-and-browse or import-only flow");[catalogPage dismissViewControllerAnimated:NO completion:nil];[TVBoxCatalogStore removeCatalog:catalogPage.catalog[@"id"]];[nav popViewControllerAnimated:NO];
           }},
           ^{
             MediaGlobalSearchViewController *scopeProbe=[MediaGlobalSearchViewController new];scopeProbe.sources=@[@{@"id":@"scope-current",@"name":@"当前资源"},@{@"id":@"scope-other",@"name":@"其他资源"}];scopeProbe.currentSourceID=@"scope-current";scopeProbe.currentProviderID=@"station-a";scopeProbe.currentCatalogID=@"scope-catalog";[scopeProbe loadViewIfNeeded];
