@@ -307,7 +307,7 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('频道分组 · %@', TEXT)
         self.assertIn('播放信息', TEXT)
         self.assertIn("self.groupControl.numberOfSegments", group_menu)
-        self.assertIn("✓", group_menu)
+        self.assertIn("selected:isSel", group_menu)
 
     def test_player_failures_stop_loading_and_offer_manual_retry(self):
         failure = TEXT[TEXT.rindex("- (void)displayNativePlaybackFailure:"):]
@@ -617,8 +617,8 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('selectChannel:self.shownChannels[next]', body)
         self.assertIn('self.shownChannels.count', body)
         more = method_body('- (void)showMorePlaybackActions')
-        self.assertIn('上一个频道', more)
-        self.assertIn('下一个频道', more)
+        self.assertIn('onPrevChannel', more)
+        self.assertIn('onNextChannel', more)
         self.assertIn('playAdjacentChannel:-1', more)
         self.assertIn('playAdjacentChannel:1', more)
 
@@ -640,7 +640,7 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('playChannel:channel route:next', body)
         self.assertIn('routes.firstObject', body)
         more = method_body('- (void)showMorePlaybackActions')
-        self.assertIn('换线路 / 换源重试', more)
+        self.assertIn('onRetryAlternate', more)
         self.assertIn('retryPlaybackWithAlternateSource', more)
         self.assertIn('self.nativePlaybackFailed||self.remotePlaybackFailed', more)
         failure = method_body('- (void)displayNativePlaybackFailure:(NSString *)stage error:(NSError *)error {')

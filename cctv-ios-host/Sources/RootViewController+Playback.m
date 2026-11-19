@@ -1,4 +1,7 @@
+#import "CCTVLiveControlSheetViewController.h"
+#import "HostGlassActionSheetViewController.h"
 #import "RootViewController_Internal.h"
+
 
 @implementation RootViewController (Playback)
 
@@ -1195,26 +1198,35 @@
     NSString *msg = (self.currentPlayer && !self.avPlayer)
         ? @"支持连续回退、快进微调或从节目单点选 7 天回看；若原生线路受限将自动尝试同台回看源。"
         : (isRemoteCatchupCapable ? @"支持按时间快速回退或打开节目单点选已播节目回看。" : @"可切换至官方 SDK 线路或打开节目单按时段回看。");
-    NSString *tsTitle = [self isCatchupOrTimeshiftActive]
-        ? (self.activeCatchupProgramTitle.length ? [NSString stringWithFormat:@"时移 / 回看 · %@", self.activeCatchupProgramTitle] : @"时移 / 回看 · 回看中")
-        : @"时移 / 回看 · 实时直播";
-    UIAlertController *sheet=[UIAlertController alertControllerWithTitle:tsTitle message:msg preferredStyle:UIAlertControllerStyleActionSheet];
-    for(NSNumber *minutes in @[@1,@5,@15,@30,@60]){
-        [sheet addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"回退 %@ 分钟",minutes] style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-            [self seekCurrentChannelByOffsetMinutes:minutes.doubleValue];
+    BOOL inCatchup = [self isCatchupOrTimeshiftActive];
+    NSString *tsTitle = inCatchup
+        ? (self.activeCatchupProgramTitle.length ? self.activeCatchupProgramTitle : @"时移 / 回看")
+        : @"时移 / 回看";
+    __weak typeof(self) weakSelf = self;
+    NSMutableArray<HostGlassSheetAction *> *rewindChips = [NSMutableArray array];
+    for (NSNumber *minutes in @[@1,@5,@15,@30,@60]) {
+        double mins = minutes.doubleValue;
+        [rewindChips addObject:[HostGlassSheetAction actionWithTitle:[NSString stringWithFormat:@"−%@m", minutes] subtitle:nil value:nil icon:nil tint:HostAccent() destructive:NO selected:NO handler:^{
+            [weakSelf seekCurrentChannelByOffsetMinutes:mins];
         }]];
     }
-    if([self isCatchupOrTimeshiftActive]){
-        for(NSNumber *forwardMinutes in @[@1,@5]){
-            [sheet addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"快进 %@ 分钟",forwardMinutes] style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-                [self seekCurrentChannelByOffsetMinutes:-forwardMinutes.doubleValue];
+    NSMutableArray<HostGlassSheetSection *> *sections = [NSMutableArray arrayWithObject:[HostGlassSheetSection chipSectionWithTitle:@"快速回退" actions:rewindChips]];
+    if (inCatchup) {
+        NSMutableArray<HostGlassSheetAction *> *fwdChips = [NSMutableArray array];
+        for (NSNumber *forwardMinutes in @[@1, @5, @15]) {
+            double fmins = forwardMinutes.doubleValue;
+            [fwdChips addObject:[HostGlassSheetAction actionWithTitle:[NSString stringWithFormat:@"+%@m", forwardMinutes] subtitle:nil value:nil icon:nil tint:UIColor.systemBlueColor destructive:NO selected:NO handler:^{
+                [weakSelf seekCurrentChannelByOffsetMinutes:-fmins];
             }]];
         }
+        [sections addObject:[HostGlassSheetSection chipSectionWithTitle:@"快进微调" actions:fwdChips]];
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"打开节目单选时段回看" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self openEPG];}]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"返回直播" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self returnToLivePlayback];}]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    sheet.popoverPresentationController.sourceView=self.moreBtn;sheet.popoverPresentationController.sourceRect=self.moreBtn.bounds;[self presentViewController:sheet animated:YES completion:nil];
+    NSArray<HostGlassSheetAction *> *navActions = @[
+        [HostGlassSheetAction actionWithTitle:@"打开节目单选时段回看" subtitle:@"浏览近 7 天已播节目并一键点播" value:nil icon:@"calendar.badge.clock" tint:UIColor.systemBlueColor destructive:NO selected:NO handler:^{ [weakSelf openEPG]; }],
+        [HostGlassSheetAction actionWithTitle:@"返回实时直播" subtitle:@"同步至最新直播画面" value:nil icon:@"dot.radiowaves.left.and.right" tint:UIColor.systemGreenColor destructive:NO selected:NO handler:^{ [weakSelf returnToLivePlayback]; }]
+    ];
+    [sections addObject:[HostGlassSheetSection sectionWithTitle:@"节目与直播" actions:navActions]];
+    [HostGlassActionSheetViewController presentOn:self title:tsTitle subtitle:msg badgeText:(inCatchup ? @"↺ 回看中" : @"● 实时直播") badgeColor:(inCatchup ? UIColor.systemOrangeColor : UIColor.systemGreenColor) sections:sections sourceView:(self.moreBtn ?: self.view)];
 }
 - (void)beginNativeTransition:(NSString *)kind {
     [self.nativePreloader cancel];[self beginPlaybackPriority];self.playbackGeneration++;
@@ -1389,87 +1401,97 @@
     NSString *statusSummary = airPlayDevice.length
         ? [NSString stringWithFormat:@"当前已连接：%@\n支持 AirPlay 无线投屏及智能电视局域网拉流。", airPlayDevice]
         : @"支持 AirPlay 无线音视频投屏、智能切换明文投屏线路及局域网电视地址复制。";
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:self.channelName.length ? [NSString stringWithFormat:@"%@ · 投屏中心", self.channelName] : @"投屏中心"
-                                                                   message:statusSummary
-                                                            preferredStyle:UIAlertControllerStyleActionSheet];
     __weak typeof(self) weakSelf = self;
-    [sheet addAction:[UIAlertAction actionWithTitle:airPlayDevice.length ? [NSString stringWithFormat:@"切换 / 断开 AirPlay 设备（%@）", airPlayDevice] : @"选择 AirPlay 投屏设备"
-                                              style:UIAlertActionStyleDefault
-                                            handler:^(__unused UIAlertAction *a) {
+    NSMutableArray<HostGlassSheetAction *> *wirelessActions = [NSMutableArray array];
+    [wirelessActions addObject:[HostGlassSheetAction actionWithTitle:(airPlayDevice.length ? @"切换 / 断开 AirPlay 设备" : @"选择 AirPlay 投屏设备") subtitle:@"无线投屏至 Apple TV 或支持隔空播放的电视" value:(airPlayDevice.length ? airPlayDevice : nil) icon:@"airplayvideo" tint:UIColor.systemBlueColor destructive:NO selected:(airPlayDevice.length > 0) handler:^{
         [weakSelf triggerSystemAirPlayPicker];
     }]];
     if (self.channelID.length && self.currentPlayer && !self.avPlayer) {
-        [sheet addAction:[UIAlertAction actionWithTitle:@"切换 AirPlay 高清兼容线路（解决有声无画）"
-                                                  style:UIAlertActionStyleDefault
-                                                handler:^(__unused UIAlertAction *a) {
+        [wirelessActions addObject:[HostGlassSheetAction actionWithTitle:@"切换 AirPlay 高清兼容线路" subtitle:@"自动切至明文 HLS 解决加密源有声无画" value:nil icon:@"tv.and.mediabox" tint:UIColor.systemOrangeColor destructive:NO selected:NO handler:^{
             if (![weakSelf switchToAirPlayCompatibleRouteIfPossible]) {
                 [weakSelf showServiceError:@"该央视加密频道暂无明文 HLS 线路，请从 iOS 控制中心打开「屏幕镜像」进行整屏投射，或在「频道」页导入订阅源。"];
             }
         }]];
     }
+    NSMutableArray<HostGlassSheetSection *> *sections = [NSMutableArray arrayWithObject:[HostGlassSheetSection sectionWithTitle:@"无线投屏" actions:wirelessActions]];
     if (castURL.length) {
-        [sheet addAction:[UIAlertAction actionWithTitle:@"复制局域网 / 电视端投屏流地址"
-                                                  style:UIAlertActionStyleDefault
-                                                handler:^(__unused UIAlertAction *a) {
-            [UIPasteboard generalPasteboard].string = castURL;
-            weakSelf.infoLabel.hidden = NO;
-            weakSelf.infoLabel.text = @"已复制投屏流地址 · 可粘贴至电视端 VLC / Kodi / 播放器";
-            [weakSelf log:@"已复制投屏流地址"];
-        }]];
-        [sheet addAction:[UIAlertAction actionWithTitle:@"分享直播流地址到其他设备"
-                                                  style:UIAlertActionStyleDefault
-                                                handler:^(__unused UIAlertAction *a) {
-            NSURL *shareURL = [NSURL URLWithString:castURL];
-            NSArray *items = shareURL ? @[shareURL] : @[castURL];
-            UIActivityViewController *activity = [[UIActivityViewController alloc] initWithActivityItems:items applicationActivities:nil];
-            activity.popoverPresentationController.sourceView = weakSelf.castBtn ?: weakSelf.view;
-            activity.popoverPresentationController.sourceRect = (weakSelf.castBtn ?: weakSelf.view).bounds;
-            [weakSelf presentViewController:activity animated:YES completion:nil];
-        }]];
+        NSArray<HostGlassSheetAction *> *lanActions = @[
+            [HostGlassSheetAction actionWithTitle:@"复制局域网 / 电视端投屏地址" subtitle:@"可粘贴至电视端 VLC / Kodi / 第三方播放器" value:nil icon:@"doc.on.doc" tint:UIColor.systemTealColor destructive:NO selected:NO handler:^{
+                [UIPasteboard generalPasteboard].string = castURL;
+                weakSelf.infoLabel.hidden = NO;
+                weakSelf.infoLabel.text = @"已复制投屏流地址 · 可粘贴至电视端 VLC / Kodi / 播放器";
+                [weakSelf log:@"已复制投屏流地址"];
+            }],
+            [HostGlassSheetAction actionWithTitle:@"分享直播流地址到其他设备" subtitle:@"通过隔空投送或系统分享面板发送" value:nil icon:@"square.and.arrow.up" tint:UIColor.systemIndigoColor destructive:NO selected:NO handler:^{
+                NSURL *shareURL = [NSURL URLWithString:castURL];
+                NSArray *items = shareURL ? @[shareURL] : @[castURL];
+                UIActivityViewController *activity = [[UIActivityViewController alloc] initWithActivityItems:items applicationActivities:nil];
+                activity.popoverPresentationController.sourceView = weakSelf.castBtn ?: weakSelf.view;
+                activity.popoverPresentationController.sourceRect = (weakSelf.castBtn ?: weakSelf.view).bounds;
+                [weakSelf presentViewController:activity animated:YES completion:nil];
+            }]
+        ];
+        [sections addObject:[HostGlassSheetSection sectionWithTitle:@"局域网拉流与分享" actions:lanActions]];
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     UIView *anchor = self.castBtn && !self.castBtn.hidden ? self.castBtn : (self.catalogMoreButton ?: self.view);
-    sheet.popoverPresentationController.sourceView = anchor;
-    sheet.popoverPresentationController.sourceRect = anchor.bounds;
-    [self presentViewController:sheet animated:YES completion:nil];
+    [HostGlassActionSheetViewController presentOn:self title:(self.channelName.length ? [NSString stringWithFormat:@"%@ · 投屏中心", self.channelName] : @"投屏中心") subtitle:statusSummary badgeText:(airPlayDevice.length ? [NSString stringWithFormat:@"已连接 · %@", airPlayDevice] : @"AirPlay / 局域网电视") badgeColor:(airPlayDevice.length ? UIColor.systemGreenColor : UIColor.systemBlueColor) sections:sections sourceView:anchor];
 }
 
 - (void)showMorePlaybackActions {
     NSString *modeSummary = [self isCatchupOrTimeshiftActive] ? (self.activeCatchupProgramTitle.length ? [NSString stringWithFormat:@"回看中 · %@", self.activeCatchupProgramTitle] : @"时移 / 回看中") : @"实时直播";
-    NSString *sleepPart = self.liveSleepMinutes > 0 ? [NSString stringWithFormat:@" · 定时 %ldm", (long)self.liveSleepMinutes] : @"";
-    NSString *sheetMessage = [NSString stringWithFormat:@"线路：%@ · %@%@", self.routeName.length ? self.routeName : @"自动", modeSummary, sleepPart];
-    UIAlertController *sheet=[UIAlertController alertControllerWithTitle:self.channelName ?: @"播放操作" message:sheetMessage preferredStyle:UIAlertControllerStyleActionSheet];
-    __weak typeof(self) weakSelf=self;
-    [sheet addAction:[UIAlertAction actionWithTitle:@"线路" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[weakSelf showRoutes];}]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"节目单" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[weakSelf openEPG];}]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"投屏中心（AirPlay / 局域网电视）" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){ [weakSelf showCastingCenter]; }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:self.fullscreen?@"退出全屏":@"全屏" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){ [weakSelf toggleFullscreen]; }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"上一个频道" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[weakSelf playAdjacentChannel:-1];}]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"下一个频道" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[weakSelf playAdjacentChannel:1];}]];
-    if(self.nativePlaybackFailed||self.remotePlaybackFailed)[sheet addAction:[UIAlertAction actionWithTitle:@"换线路 / 换源重试" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[weakSelf retryPlaybackWithAlternateSource];}]];
     NSDictionary *activeChannel = self.activeCatchupLiveChannel ?: [self channelWithID:self.channelID];
     BOOL canTimeshiftOrCatchup = (self.currentPlayer && !self.avPlayer) || [self channelSupportsCatchup:activeChannel] || ([self nativeFallbackChannelForChannel:activeChannel] != nil) || [self isCatchupOrTimeshiftActive];
-    if(canTimeshiftOrCatchup){
-        [sheet addAction:[UIAlertAction actionWithTitle:@"时移 / 回看" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[weakSelf showNativeTimeshiftActions];}]];
-        if([self isCatchupOrTimeshiftActive])[sheet addAction:[UIAlertAction actionWithTitle:@"返回直播" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[weakSelf returnToLivePlayback];}]];
+    BOOL pipAvailable = (self.avLayer && AVPictureInPictureController.isPictureInPictureSupported);
+
+    CCTVLiveControlSheetViewController *sheet = [CCTVLiveControlSheetViewController new];
+    sheet.channelTitle = self.channelName ?: @"播放控制";
+    sheet.routeLabel = self.routeName.length ? self.routeName : @"自动";
+    sheet.modeLabel = modeSummary;
+    sheet.catchupActive = [self isCatchupOrTimeshiftActive];
+    sheet.playbackFailed = (self.nativePlaybackFailed || self.remotePlaybackFailed);
+    sheet.canTimeshiftOrCatchup = canTimeshiftOrCatchup;
+    sheet.fullscreenActive = self.fullscreen;
+    sheet.pipSupported = pipAvailable;
+    sheet.sleepMinutes = self.liveSleepMinutes;
+
+    __weak typeof(self) weakSelf = self;
+    sheet.onRoutes = ^{ [weakSelf showRoutes]; };
+    sheet.onEPG = ^{ [weakSelf openEPG]; };
+    sheet.onCast = ^{ [weakSelf showCastingCenter]; };
+    sheet.onToggleFullscreen = ^{ [weakSelf toggleFullscreen]; };
+    sheet.onPrevChannel = ^{ [weakSelf playAdjacentChannel:-1]; };
+    sheet.onNextChannel = ^{ [weakSelf playAdjacentChannel:1]; };
+    if (self.nativePlaybackFailed||self.remotePlaybackFailed) {
+        sheet.onRetryAlternate = ^{ [weakSelf retryPlaybackWithAlternateSource]; };
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"播放信息" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){ [weakSelf showPlaybackInfo]; }]];
-    if(self.avLayer && AVPictureInPictureController.isPictureInPictureSupported){
-        [sheet addAction:[UIAlertAction actionWithTitle:@"画中画" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){ [weakSelf togglePiP]; }]];
+    if (canTimeshiftOrCatchup) {
+        sheet.onTimeshift = ^{ [weakSelf showNativeTimeshiftActions]; };
+        if ([self isCatchupOrTimeshiftActive]) {
+            sheet.onReturnLive = ^{ [weakSelf returnToLivePlayback]; };
+        }
     }
-    NSString *sleepTitle=self.liveSleepMinutes>0?[NSString stringWithFormat:@"睡眠定时（当前 %ld 分钟）",(long)self.liveSleepMinutes]:@"睡眠定时关闭";
-    [sheet addAction:[UIAlertAction actionWithTitle:sleepTitle style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){
-        RootViewController *owner=weakSelf;if(!owner)return;
-        UIAlertController *sleepSheet=[UIAlertController alertControllerWithTitle:@"直播睡眠定时" message:@"到点后自动暂停直播并释放解码器" preferredStyle:UIAlertControllerStyleActionSheet];
-        for(NSNumber *mins in @[@0,@15,@30,@60]){NSInteger m=mins.integerValue;NSString *label=m==0?@"关闭定时":[NSString stringWithFormat:@"%ld 分钟后暂停",(long)m];[sleepSheet addAction:[UIAlertAction actionWithTitle:label style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act){[weakSelf configureLiveSleepTimerMinutes:m];}]];}
-        [sleepSheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-        UIView *sleepAnchor=owner.moreBtn?:owner.view;
-        sleepSheet.popoverPresentationController.sourceView=sleepAnchor;sleepSheet.popoverPresentationController.sourceRect=sleepAnchor.bounds;
-        [owner presentViewController:sleepSheet animated:YES completion:nil];
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"诊断日志" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){ [weakSelf openDiagnosticLog]; }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    if (sheet.popoverPresentationController) { UIView *anchor=self.moreBtn?:self.view; sheet.popoverPresentationController.sourceView=anchor; sheet.popoverPresentationController.sourceRect=anchor.bounds; }
+    sheet.onPlaybackInfo = ^{ [weakSelf showPlaybackInfo]; };
+    if (pipAvailable) {
+        sheet.onPiP = ^{ [weakSelf togglePiP]; };
+    }
+    sheet.onSelectSleepMinutes = ^(NSInteger minutes) { [weakSelf configureLiveSleepTimerMinutes:minutes]; };
+    sheet.onDiagnosticLog = ^{ [weakSelf openDiagnosticLog]; };
+
+    sheet.modalPresentationStyle = UIModalPresentationPageSheet;
+    if (@available(iOS 15.0, *)) {
+        UISheetPresentationController *sp = sheet.sheetPresentationController;
+        if (sp) {
+            sp.detents = @[UISheetPresentationControllerDetent.mediumDetent, UISheetPresentationControllerDetent.largeDetent];
+            sp.prefersGrabberVisible = YES;
+            sp.preferredCornerRadius = 28.0;
+            sp.prefersScrollingExpandsWhenScrolledToEdge = YES;
+        }
+    }
+    if (sheet.popoverPresentationController) {
+        UIView *anchor = self.moreBtn ?: self.view;
+        sheet.popoverPresentationController.sourceView = anchor;
+        sheet.popoverPresentationController.sourceRect = anchor.bounds;
+    }
     [self presentViewController:sheet animated:YES completion:nil];
 }
 

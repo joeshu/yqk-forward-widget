@@ -4,6 +4,7 @@
 #import "MediaAPIClient.h"
 #import "HostImageLoader.h"
 #import "HostTheme.h"
+#import "HostGlassActionSheetViewController.h"
 #import "MediaEpisodeLayout.h"
 #import "HostToolbar.h"
 #import "LocalServiceReadiness.h"
@@ -763,22 +764,26 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
     NSArray *episodes=self.selectedLineIndex<self.lines.count&&[self.lines[self.selectedLineIndex][@"episodes"] isKindOfClass:NSArray.class]?self.lines[self.selectedLineIndex][@"episodes"]:@[];
     if(!episodes.count)return;
     NSUInteger pageCount=MAX(1,(episodes.count+CCTVEpisodesPerGroup-1)/CCTVEpisodesPerGroup);
-    UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"选集分组与样式" message:[NSString stringWithFormat:@"共 %lu 集 · 当前样式：%@",(unsigned long)episodes.count,CCTVEpisodeLayoutStyleName(CCTVEpisodeCurrentLayoutStyle())] preferredStyle:UIAlertControllerStyleActionSheet];
     __weak typeof(self) weakSelf=self;
+    NSMutableArray<HostGlassSheetAction *> *rows=[NSMutableArray array];
     for(NSUInteger p=0;p<pageCount;p++){
         NSUInteger s=p*CCTVEpisodesPerGroup,e=MIN(s+CCTVEpisodesPerGroup,episodes.count);
         NSUInteger fIdx=e>s?CCTVEpisodeSourceIndex(s,episodes.count,self.episodeOrderReversed):0;
         NSUInteger lIdx=e>s?CCTVEpisodeSourceIndex(e-1,episodes.count,self.episodeOrderReversed):0;
-        NSString *gTitle=[NSString stringWithFormat:@"第 %lu 组（第 %lu–%lu 集）%@", (unsigned long)p+1, (unsigned long)fIdx+1, (unsigned long)lIdx+1, (NSInteger)p==self.episodePage?@" ✓":@""];
-        [sheet addAction:[UIAlertAction actionWithTitle:gTitle style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){
+        BOOL selected=((NSInteger)p==self.episodePage);
+        NSString *gTitle=[NSString stringWithFormat:@"第 %lu 组（第 %lu–%lu 集）", (unsigned long)p+1, (unsigned long)fIdx+1, (unsigned long)lIdx+1];
+        [rows addObject:[HostGlassSheetAction actionWithTitle:gTitle subtitle:nil value:[NSString stringWithFormat:@"%lu 集",(unsigned long)(e-s)] icon:@"rectangle.grid.2x2" tint:(selected?HostAccent():UIColor.systemBlueColor) destructive:NO selected:selected handler:^{
             MediaDetailViewController *owner=weakSelf;if(!owner)return;
             owner.episodePage=(NSInteger)p;[owner updateRouteAndEpisodeViews];
         }]];
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    sheet.popoverPresentationController.sourceView=self.episodeStyleButton?:self.view;
-    sheet.popoverPresentationController.sourceRect=(self.episodeStyleButton?:self.view).bounds;
-    [self presentViewController:sheet animated:YES completion:nil];
+    [HostGlassActionSheetViewController presentOn:self
+                                            title:@"选集分组与样式"
+                                         subtitle:[NSString stringWithFormat:@"共 %lu 集 · 当前样式：%@",(unsigned long)episodes.count,CCTVEpisodeLayoutStyleName(CCTVEpisodeCurrentLayoutStyle())]
+                                        badgeText:[NSString stringWithFormat:@"共 %lu 组",(unsigned long)pageCount]
+                                       badgeColor:HostAccent()
+                                         sections:@[[HostGlassSheetSection sectionWithTitle:@"快速跳转分组" actions:rows]]
+                                       sourceView:(self.episodeStyleButton?:self.view)];
 }
 - (UIMenu *)buildEpisodeStyleMenu {
     __weak typeof(self) weakSelf=self;
@@ -795,16 +800,18 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
         if(st==curStyle)act.state=UIMenuElementStateOn;
         [items addObject:act];
     }
-    UIAction *toggleBadge=[UIAction actionWithTitle:badgeOn?@"显示分集角标与状态：已开启":@"显示分集角标与状态：已关闭" image:[UIImage systemImageNamed:@"tag"] identifier:nil handler:^(__unused UIAction *a){
+    UIAction *toggleBadge=[UIAction actionWithTitle:@"显示分集角标与状态" image:[UIImage systemImageNamed:@"tag"] identifier:nil handler:^(__unused UIAction *a){
         CCTVEpisodeSetShowRemarksBadgeEnabled(!badgeOn);
         [weakSelf updateRouteAndEpisodeViews];
     }];
-    if(badgeOn)toggleBadge.state=UIMenuElementStateOn;
-    UIAction *toggleExpand=[UIAction actionWithTitle:autoExpandOn?@"选集弹窗默认展开：已开启":@"选集弹窗默认展开：已关闭" image:[UIImage systemImageNamed:@"rectangle.expand.vertical"] identifier:nil handler:^(__unused UIAction *a){
+    toggleBadge.subtitle=badgeOn?@"已开启":@"已关闭";
+    toggleBadge.state=badgeOn?UIMenuElementStateOn:UIMenuElementStateOff;
+    UIAction *toggleExpand=[UIAction actionWithTitle:@"选集弹窗默认展开" image:[UIImage systemImageNamed:@"rectangle.expand.vertical"] identifier:nil handler:^(__unused UIAction *a){
         CCTVEpisodeSetAutoExpandEnabled(!autoExpandOn);
         [weakSelf updateRouteAndEpisodeViews];
     }];
-    if(autoExpandOn)toggleExpand.state=UIMenuElementStateOn;
+    toggleExpand.subtitle=autoExpandOn?@"已开启":@"已关闭";
+    toggleExpand.state=autoExpandOn?UIMenuElementStateOn:UIMenuElementStateOff;
     UIAction *jumpAct=[UIAction actionWithTitle:@"快速跳转分集分组…" image:[UIImage systemImageNamed:@"arrow.up.and.down.text.horizontal"] identifier:nil handler:^(__unused UIAction *a){
         [weakSelf presentEpisodeGroupJumpSheet];
     }];

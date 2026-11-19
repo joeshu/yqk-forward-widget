@@ -34,9 +34,8 @@ class TestRound31FullCodebaseTwoPassAudit(unittest.TestCase):
         idx = pb.index("- (void)showMorePlaybackActions {")
         end = pb.index("- (void)beginPlaybackPriority {", idx)
         body = pb[idx:end]
-        self.assertIn("__weak typeof(self) weakSelf=self;", body)
-        self.assertIn("UIView *sleepAnchor=owner.moreBtn?:owner.view;", body)
-        self.assertIn("UIView *anchor=self.moreBtn?:self.view;", body)
+        self.assertIn("__weak typeof(self) weakSelf = self;", body)
+        self.assertIn("UIView *anchor = self.moreBtn ?: self.view;", body)
 
 
 if __name__ == "__main__":

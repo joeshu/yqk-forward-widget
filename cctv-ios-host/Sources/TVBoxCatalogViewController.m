@@ -1,6 +1,7 @@
 #import "TVBoxCatalogViewController.h"
 #import "TVBoxCatalogStore.h"
 #import "HostTheme.h"
+#import "HostGlassActionSheetViewController.h"
 #import "HostLogRedactor.h"
 #import "HostToolbar.h"
 #import "PyHost.h"
@@ -137,7 +138,7 @@
     [presenter presentViewController:alert animated:YES completion:nil];
 }
 - (void)viewDidLoad {
-    [super viewDidLoad];self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();NSString *catalogName=[self.catalog[@"name"] isKindOfClass:NSString.class]?self.catalog[@"name"]:@"";self.title=(!catalogName.length||[catalogName isEqual:@"TVBox 资源目录"]||[catalogName isEqual:@"TVBox资源目录"])?@"资源合集":catalogName;self.navigationItem.prompt=@"点按需要的站点按需加载 · 不必全量导入";self.tableView.backgroundColor=HostBackground();self.tableView.rowHeight=UITableViewAutomaticDimension;self.tableView.estimatedRowHeight=88;
+    [super viewDidLoad];self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();NSString *catalogName=[self.catalog[@"name"] isKindOfClass:NSString.class]?self.catalog[@"name"]:@"";self.title=(!catalogName.length||[catalogName isEqual:@"TVBox 资源目录"]||[catalogName isEqual:@"TVBox资源目录"])?@"资源合集":catalogName;self.navigationItem.prompt=@"点按需要的站点按需加载 · 不必全量导入";self.tableView.backgroundColor=HostBackground();self.tableView.keyboardDismissMode=UIScrollViewKeyboardDismissModeOnDrag;self.tableView.rowHeight=UITableViewAutomaticDimension;self.tableView.estimatedRowHeight=88;
     self.searchController=[[UISearchController alloc] initWithSearchResultsController:nil];self.searchController.searchResultsUpdater=self;self.searchController.obscuresBackgroundDuringPresentation=NO;self.searchController.searchBar.placeholder=@"搜索合集中的站点、协议或 URL";self.searchController.searchBar.autocapitalizationType=UITextAutocapitalizationTypeNone;self.searchController.searchBar.autocorrectionType=UITextAutocorrectionTypeNo;self.navigationItem.searchController=self.searchController;self.navigationItem.hidesSearchBarWhenScrolling=NO;self.definesPresentationContext=YES;
     __weak typeof(self) weakSelf=self;
     NSArray *resourceActions=@[
@@ -157,15 +158,21 @@
         @{@"icon":@"trash",@"title":@"移除资源合集",@"action":[UIAction actionWithHandler:^(UIAction *a){UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"移除资源合集？" message:@"仅移除这份集合索引；已导入的脚本和直播订阅会保留。" preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[alert addAction:[UIAlertAction actionWithTitle:@"移除合集" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *x){if(weakSelf.onRemove)weakSelf.onRemove();}]];[weakSelf presentCatalogAlert:alert sourceView:nil sourceRect:CGRectZero];}]}
     ];
     UIAction *json=resourceActions[1][@"action"],*zip=resourceActions[2][@"action"],*bulk=resourceActions[0][@"action"],*remove=resourceActions[3][@"action"];
-    json.title=@"导出完整合集 JSON";zip.title=@"导出资源 ZIP（含可获取的 PY / JS）";bulk.title=@"全量导入影视脚本";remove.title=@"移除资源合集";remove.attributes=UIMenuElementAttributesDestructive;
+    json.title=@"导出合集 JSON";json.image=[UIImage systemImageNamed:@"square.and.arrow.up"];
+    zip.title=@"导出资源 ZIP";zip.subtitle=@"含可获取的 PY / JS 脚本";zip.image=[UIImage systemImageNamed:@"archivebox"];
+    bulk.title=@"全量导入影视脚本";bulk.subtitle=@"推荐按需加载，全量耗时较长";bulk.image=[UIImage systemImageNamed:@"square.and.arrow.down"];
+    remove.title=@"移除资源合集";remove.image=[UIImage systemImageNamed:@"trash"];remove.attributes=UIMenuElementAttributesDestructive;
     NSMutableArray<UIMenuElement *> *exportChildren=[NSMutableArray arrayWithObjects:json,zip,nil];
     NSString *catalogURL=[self.catalog[@"url"] isKindOfClass:NSString.class]?self.catalog[@"url"]:@"";
     if(catalogURL.length){
         UIAction *copyCatalogURL=[UIAction actionWithTitle:@"复制合集源地址" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){UIPasteboard.generalPasteboard.string=[HostLogRedactor redactText:catalogURL];[weakSelf showTransientPrompt:@"合集源地址已复制"];}];
         [exportChildren addObject:copyCatalogURL];
     }
+    UIMenu *exportGroup=[UIMenu menuWithTitle:@"导出与复制" image:nil identifier:@"tvbox.catalog.menu.export" options:UIMenuOptionsDisplayInline children:exportChildren];
+    UIMenu *advGroup=[UIMenu menuWithTitle:@"高级操作" image:nil identifier:@"tvbox.catalog.menu.advanced" options:UIMenuOptionsDisplayInline children:@[bulk]];
+    UIMenu *dangerGroup=[UIMenu menuWithTitle:@"" image:nil identifier:@"tvbox.catalog.menu.danger" options:UIMenuOptionsDisplayInline children:@[remove]];
     UIBarButtonItem *more=[[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"] style:UIBarButtonItemStylePlain target:nil action:nil];
-    more.accessibilityLabel=@"合集操作";more.menu=[UIMenu menuWithChildren:@[[UIMenu menuWithTitle:@"导出与复制" children:exportChildren],[UIMenu menuWithTitle:@"高级操作" children:@[bulk]],remove]];self.navigationItem.rightBarButtonItem=more;
+    more.accessibilityLabel=@"合集操作";more.menu=[UIMenu menuWithChildren:@[exportGroup,advGroup,dangerGroup]];self.navigationItem.rightBarButtonItem=more;
     self.contentFilter=[[UISegmentedControl alloc] initWithItems:@[@"全部",@"影视",@"直播",@"不支持"]];self.contentFilter.selectedSegmentIndex=0;self.contentFilter.selectedSegmentTintColor=HostAccent();[self.contentFilter setTitleTextAttributes:@{NSForegroundColorAttributeName:HostText(),NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1]} forState:UIControlStateNormal];[self.contentFilter setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent(),NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1]} forState:UIControlStateSelected];[self.contentFilter addTarget:self action:@selector(filterChanged) forControlEvents:UIControlEventValueChanged];
     UIView *header=[[UIView alloc] initWithFrame:CGRectMake(0,0,MAX(320,self.tableView.bounds.size.width),96)];
     UIView *headerCard=[UIView new];
@@ -259,20 +266,23 @@
 - (void)tableView:(UITableView *)tableView willDisplayFooterView:(UIView *)view forSection:(NSInteger)section { HostStyleSectionFooterView(view); }
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {if(section==0)return @"推荐按需加载：在首页顶部选择本合集，再从右侧胶囊点选站点；仅所选脚本会下载，type 1/4 JSON API 会直接读取。不兼容项会保留并标注。";return @"点按需要的直播清单即可加载；同一直播合集只保留当前选择的一个清单，其他清单仍留在合集内。刷新播放列表时会应用合集提供的 UA。";}
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {
-    UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:@"tvbox.catalog.row"];if(!cell)cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"tvbox.catalog.row"];cell.backgroundColor=HostCard();cell.layer.cornerRadius=13;cell.layer.cornerCurve=kCACornerCurveContinuous;cell.clipsToBounds=YES;cell.layer.borderWidth=0.6;HostSetLayerBorderColor(cell,HostBorder());cell.textLabel.numberOfLines=0;cell.detailTextLabel.numberOfLines=0;cell.textLabel.textColor=HostText();cell.detailTextLabel.textColor=HostSecondaryText();
+    UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:@"tvbox.catalog.row"];if(!cell)cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"tvbox.catalog.row"];cell.transform=CGAffineTransformIdentity;cell.backgroundColor=HostCard();cell.layer.cornerRadius=13;cell.layer.cornerCurve=kCACornerCurveContinuous;cell.clipsToBounds=YES;cell.layer.borderWidth=0.6;HostSetLayerBorderColor(cell,HostBorder());cell.textLabel.numberOfLines=0;cell.detailTextLabel.numberOfLines=0;cell.textLabel.textColor=HostText();cell.detailTextLabel.textColor=HostSecondaryText();
     NSArray *rows=[self filteredRowsForSection:ip.section];if(ip.row<0||ip.row>=rows.count)return cell;
     NSDictionary *row=rows[ip.row];if(![row isKindOfClass:NSDictionary.class])return cell;
     cell.textLabel.text=[row[@"name"] description]?:@"未命名";
     cell.textLabel.font=HostRoundedFont(16,UIFontWeightSemibold,UIFontTextStyleHeadline);
+    cell.textLabel.adjustsFontForContentSizeCategory=YES;
     cell.detailTextLabel.font=HostMonospacedDigitFont(12,UIFontWeightRegular,UIFontTextStyleCaption1);
+    cell.detailTextLabel.adjustsFontForContentSizeCategory=YES;
     BOOL supported=[row[@"supported"] boolValue];NSDictionary *service=ip.section==0&&self.serviceForSite?self.serviceForSite(row):nil;BOOL serviceRunning=service&&[PyHost isRunningServiceIdentifier:service[@"id"]];NSString *status=[row[@"status"] description]?:@"";if(service)status=serviceRunning?@"服务运行中 · 点按打开资源":@"服务已导入 · 点按启动并打开资源";cell.detailTextLabel.text=ip.section==0?[NSString stringWithFormat:@"%@\n%@",status,[HostLogRedactor redactText:[row[@"api"] description]?:@""]]:[NSString stringWithFormat:@"%@\n%@",status,[HostLogRedactor redactText:[row[@"url"] description]?:@""]];
-    if(cell.detailTextLabel.text.length){NSMutableParagraphStyle *pStyle=[NSMutableParagraphStyle new];pStyle.lineSpacing=3.0;pStyle.paragraphSpacing=1.5;cell.detailTextLabel.attributedText=[[NSAttributedString alloc] initWithString:cell.detailTextLabel.text attributes:@{NSFontAttributeName:cell.detailTextLabel.font,NSForegroundColorAttributeName:HostSecondaryText(),NSParagraphStyleAttributeName:pStyle}];}else{cell.detailTextLabel.attributedText=nil;}
+    if(cell.detailTextLabel.text.length){NSMutableParagraphStyle *pStyle=[NSMutableParagraphStyle new];pStyle.lineSpacing=3.0;pStyle.paragraphSpacing=1.5;pStyle.lineBreakMode=NSLineBreakByCharWrapping;cell.detailTextLabel.attributedText=[[NSAttributedString alloc] initWithString:cell.detailTextLabel.text attributes:@{NSFontAttributeName:cell.detailTextLabel.font,NSForegroundColorAttributeName:HostSecondaryText(),NSParagraphStyleAttributeName:pStyle}];}else{cell.detailTextLabel.attributedText=nil;}
     NSString *iconName=ip.section==0?([row[@"apiKind"] isEqual:@"script"]?@"terminal":@"bolt.horizontal.circle"):@"dot.radiowaves.left.and.right";
     cell.imageView.image=[UIImage systemImageNamed:iconName];
     cell.imageView.tintColor=supported?(serviceRunning?UIColor.systemGreenColor:HostAccent()):HostMutedText();
     if(serviceRunning){cell.layer.borderWidth=1.05;HostSetLayerBorderColor(cell,HostAccent());}
     UIView *accentBar=[cell.contentView viewWithTag:9201];
-    if(!accentBar){accentBar=[UIView new];accentBar.tag=9201;accentBar.translatesAutoresizingMaskIntoConstraints=NO;accentBar.layer.cornerRadius=1.5;accentBar.userInteractionEnabled=NO;[cell.contentView addSubview:accentBar];[NSLayoutConstraint activateConstraints:@[[accentBar.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:2],[accentBar.topAnchor constraintEqualToAnchor:cell.contentView.topAnchor constant:10],[accentBar.bottomAnchor constraintEqualToAnchor:cell.contentView.bottomAnchor constant:-10],[accentBar.widthAnchor constraintEqualToConstant:3]]];}
+    if(!accentBar){accentBar=[[UIView alloc] initWithFrame:CGRectMake(2,10,3,MAX(0,CGRectGetHeight(cell.contentView.bounds)-20))];accentBar.tag=9201;accentBar.autoresizingMask=UIViewAutoresizingFlexibleHeight|UIViewAutoresizingFlexibleRightMargin;accentBar.layer.cornerRadius=1.5;accentBar.userInteractionEnabled=NO;[cell.contentView addSubview:accentBar];}
+    accentBar.frame=CGRectMake(2,10,3,MAX(0,CGRectGetHeight(cell.contentView.bounds)-20));
     accentBar.backgroundColor=serviceRunning?UIColor.systemGreenColor:(supported?HostAccent():[HostMutedText() colorWithAlphaComponent:0.35]);
     cell.accessoryType=supported?UITableViewCellAccessoryDisclosureIndicator:UITableViewCellAccessoryNone;cell.selectionStyle=supported?UITableViewCellSelectionStyleDefault:UITableViewCellSelectionStyleNone;cell.textLabel.textColor=supported?HostText():HostMutedText();return cell;
 }
@@ -300,12 +310,24 @@
     if(ip.section==1){if([row[@"supported"] boolValue]&&self.onSubscribeLive)self.onSubscribeLive(row);return;}
     if(![row[@"supported"] boolValue])return;
     BOOL nativeAPI=[row[@"apiKind"] isEqual:@"tvbox-api"]||[row[@"apiKind"] isEqual:@"maccms-api"]||[row[@"apiKind"] isEqual:@"douban-index"]||[row[@"apiKind"] isEqual:@"jar-bridge"];if(nativeAPI){if(self.onUseNativeSite)self.onUseNativeSite(row);return;}
-    NSDictionary *existing=self.serviceForSite?self.serviceForSite(row):nil;UIAlertController *alert=[UIAlertController alertControllerWithTitle:[row[@"name"] description]?:@"未命名" message:existing?@"此脚本已在资源中。打开后会启动该资源并进入影视库。":@"仅对当前选择的站点执行脚本导入。可直接导入并浏览，也可先保存到资源页。ext 会作为 Spider 初始化配置传递。" preferredStyle:UIAlertControllerStyleActionSheet];
+    NSDictionary *existing=self.serviceForSite?self.serviceForSite(row):nil;
     __weak typeof(self) weakSelf=self;
-    if(existing){[alert addAction:[UIAlertAction actionWithTitle:@"启动并打开资源" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){if(weakSelf.onUseImportedService)weakSelf.onUseImportedService(existing);}]];[alert addAction:[UIAlertAction actionWithTitle:@"查看能力与设置" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){if(weakSelf.onOpenImportedService)weakSelf.onOpenImportedService(existing);}]];}
-    else {[alert addAction:[UIAlertAction actionWithTitle:@"导入并打开资源" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){if(weakSelf.onImportSite)weakSelf.onImportSite(row,YES);}]];[alert addAction:[UIAlertAction actionWithTitle:@"仅导入到资源页" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){if(weakSelf.onImportSite)weakSelf.onImportSite(row,NO);}]];}
-    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    UITableViewCell *cell=[tableView cellForRowAtIndexPath:ip];[self presentCatalogAlert:alert sourceView:cell sourceRect:cell.bounds];
+    NSMutableArray<HostGlassSheetAction *> *actions=[NSMutableArray array];
+    if(existing){
+        [actions addObject:[HostGlassSheetAction actionWithTitle:@"启动并打开资源" subtitle:@"立即拉起脚本服务并进入影视库" value:nil icon:@"play.circle.fill" tint:HostAccent() destructive:NO selected:NO handler:^{if(weakSelf.onUseImportedService)weakSelf.onUseImportedService(existing);}]];
+        [actions addObject:[HostGlassSheetAction actionWithTitle:@"查看能力与设置" subtitle:@"检查接口、端口与运行日志" value:nil icon:@"slider.horizontal.3" tint:UIColor.systemBlueColor destructive:NO selected:NO handler:^{if(weakSelf.onOpenImportedService)weakSelf.onOpenImportedService(existing);}]];
+    }else{
+        [actions addObject:[HostGlassSheetAction actionWithTitle:@"导入并打开资源" subtitle:@"按需导入当前站点脚本并直接浏览" value:nil icon:@"square.and.arrow.down.fill" tint:HostAccent() destructive:NO selected:NO handler:^{if(weakSelf.onImportSite)weakSelf.onImportSite(row,YES);}]];
+        [actions addObject:[HostGlassSheetAction actionWithTitle:@"仅导入到资源页" subtitle:@"保存脚本配置稍后手动启动" value:nil icon:@"tray.and.arrow.down" tint:UIColor.systemBlueColor destructive:NO selected:NO handler:^{if(weakSelf.onImportSite)weakSelf.onImportSite(row,NO);}]];
+    }
+    UITableViewCell *cell=[tableView cellForRowAtIndexPath:ip];
+    [HostGlassActionSheetViewController presentOn:self
+                                            title:[row[@"name"] description]?:@"未命名"
+                                         subtitle:existing?@"此脚本已在资源中。打开后会启动该资源并进入影视库。":@"仅对当前选择的站点执行脚本导入。ext 会作为 Spider 初始化配置传递。"
+                                        badgeText:existing?@"已导入脚本":@"脚本站点"
+                                       badgeColor:existing?UIColor.systemGreenColor:HostAccent()
+                                         sections:@[[HostGlassSheetSection sectionWithTitle:@"站点操作" actions:actions]]
+                                       sourceView:cell?:self.view];
 }
 - (void)tableView:(UITableView *)tableView didHighlightRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell=[tableView cellForRowAtIndexPath:indexPath];

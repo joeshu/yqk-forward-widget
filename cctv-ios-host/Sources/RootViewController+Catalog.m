@@ -1,4 +1,5 @@
 #import "RootViewController_Internal.h"
+#import "HostGlassActionSheetViewController.h"
 
 @implementation RootViewController (Catalog)
 
@@ -233,7 +234,7 @@
     UIAction *playing=[UIAction actionWithTitle:@"返回正在播放" image:[UIImage systemImageNamed:@"play.circle"] identifier:nil handler:^(UIAction *a){if(!w.channelID.length)return;[w selectBottomTab:(id)w.bottomBar.arrangedSubviews[w.currentRemoteURL.length?1:0]];w.playerExpanded=YES;[w configureCatalogNavigation];[w.view setNeedsLayout];dispatch_async(dispatch_get_main_queue(),^{[w scrollCatalogToPlayingChannel];});}];
     UIAction *manage=[UIAction actionWithTitle:@"整理收藏" image:[UIImage systemImageNamed:@"heart"] identifier:nil handler:^(UIAction *a){[w showFavoriteManager];}];
     UIAction *favorites=[UIAction actionWithTitle:self.favoritesOnly?@"显示全部频道":@"查看收藏频道" image:[UIImage systemImageNamed:@"heart.fill"] identifier:nil handler:^(UIAction *a){w.recentsOnly=NO;w.favoritesOnly=!w.favoritesOnly;NSUInteger favIdx=[[w currentCatalogGroupTitles] indexOfObject:@"收藏"];w.groupControl.selectedSegmentIndex=(w.favoritesOnly&&favIdx!=NSNotFound)?(NSInteger)favIdx:0;[w configureCatalogNavigation];[w applyFilter];}];
-    UIAction *castCenter=[UIAction actionWithTitle:@"投屏中心 · AirPlay / 电视投屏" image:[UIImage systemImageNamed:@"airplayvideo"] identifier:@"channel.catalog.cast.center" handler:^(UIAction *a){[w showCastingCenter];}];
+    UIAction *castCenter=[UIAction actionWithTitle:@"投屏中心" image:[UIImage systemImageNamed:@"airplayvideo"] identifier:@"channel.catalog.cast.center" handler:^(UIAction *a){[w showCastingCenter];}];castCenter.subtitle=@"AirPlay / 局域网电视";
     NSString *sortTitle = self.channelSortMode==1 ? @"按延迟最快排序" : (self.channelSortMode==2 ? @"按默认顺序排列" : @"按名称排序");
     UIAction *sort=[UIAction actionWithTitle:sortTitle image:[UIImage systemImageNamed:@"arrow.up.arrow.down"] identifier:@"channel.catalog.sort" handler:^(UIAction *a){w.channelSortMode=(w.channelSortMode+1)%3;[NSUserDefaults.standardUserDefaults setInteger:w.channelSortMode forKey:@"cctv.channelSortMode.v1"];[w configureCatalogNavigation];[w applyFilter];}];
     NSMutableArray<UIMenuElement *> *sections=[NSMutableArray array];
@@ -247,7 +248,7 @@
     }else{
         [sections addObject:[UIMenu menuWithTitle:@"" image:nil identifier:@"channel.catalog.section.player" options:UIMenuOptionsDisplayInline children:@[hide]]];
     }
-    UIAction *catchupFilter=[UIAction actionWithTitle:self.catchupOnlyFilter?@"✓ 仅看支持回看（点按关闭）":@"仅看支持回看" image:[UIImage systemImageNamed:self.catchupOnlyFilter?@"clock.arrow.circlepath":@"clock"] identifier:@"channel.catalog.catchup-only" handler:^(UIAction *a){w.catchupOnlyFilter=!w.catchupOnlyFilter;[w configureCatalogNavigation];[w applyFilter];}];
+    UIAction *catchupFilter=[UIAction actionWithTitle:@"仅看支持回看" image:[UIImage systemImageNamed:@"clock.arrow.circlepath"] identifier:@"channel.catalog.catchup-only" handler:^(UIAction *a){w.catchupOnlyFilter=!w.catchupOnlyFilter;[w configureCatalogNavigation];[w applyFilter];}];catchupFilter.state=self.catchupOnlyFilter?UIMenuElementStateOn:UIMenuElementStateOff;
     NSMutableArray<UIAction *> *browseActions=[NSMutableArray arrayWithObjects:search,group,catchupFilter,columns,sort,nil];
     if(self.subscriptionCatalog){
         UIAction *manageSubs=[UIAction actionWithTitle:@"管理订阅源" image:[UIImage systemImageNamed:@"dot.radiowaves.left.and.right"] identifier:@"channel.catalog.manage-subscriptions" handler:^(UIAction *a){[w manageSubscriptions];}];
@@ -275,14 +276,30 @@
 }
 - (void)showGroupMenu {
     NSArray<NSDictionary *> *categoryRows=[self playerCategoryRows];
-    UIAlertController *a=[UIAlertController alertControllerWithTitle:@"频道分组" message:[NSString stringWithFormat:@"共 %lu 个分组 · 按频道类型快速筛选",(unsigned long)self.groupControl.numberOfSegments] preferredStyle:UIAlertControllerStyleActionSheet];NSInteger selected=self.groupControl.selectedSegmentIndex;
+    NSInteger selected=self.groupControl.selectedSegmentIndex;
+    __weak typeof(self) weakSelf=self;
+    NSMutableArray<HostGlassSheetAction *> *rows=[NSMutableArray array];
     for(NSUInteger i=0;i<self.groupControl.numberOfSegments;i++){
         NSString *group=[self.groupControl titleForSegmentAtIndex:i]?:@"全部";
-        NSString *countHint=(i<categoryRows.count && [categoryRows[i][@"detail"] length])?[NSString stringWithFormat:@" · %@",categoryRows[i][@"detail"]]:@"";
-        NSString *title=(NSInteger)i==selected?[NSString stringWithFormat:@"✓  %@%@",group,countHint]:[NSString stringWithFormat:@"%@%@",group,countHint];
-        [a addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){self.groupControl.selectedSegmentIndex=i;[self onGroupChanged];}]];
+        NSString *detail=(i<categoryRows.count && [categoryRows[i][@"detail"] length])?categoryRows[i][@"detail"]:nil;
+        NSString *icon=@"square.grid.2x2";
+        if([group containsString:@"收藏"])icon=@"star.fill";
+        else if([group containsString:@"最近"])icon=@"clock.arrow.circlepath";
+        else if([group containsString:@"央视"])icon=@"tv";
+        else if([group containsString:@"卫视"])icon=@"antenna.radiowaves.left.and.right";
+        BOOL isSel=((NSInteger)i==selected);
+        [rows addObject:[HostGlassSheetAction actionWithTitle:group subtitle:nil value:detail icon:icon tint:(isSel?HostAccent():UIColor.systemBlueColor) destructive:NO selected:isSel handler:^{
+            RootViewController *owner=weakSelf;if(!owner)return;
+            owner.groupControl.selectedSegmentIndex=(NSInteger)i;[owner onGroupChanged];
+        }]];
     }
-    [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];UIPopoverPresentationController *popover=a.popoverPresentationController;if(popover){if(self.catalogMoreButton){popover.sourceView=self.catalogMoreButton;popover.sourceRect=self.catalogMoreButton.bounds;}else{popover.sourceView=self.view;popover.sourceRect=CGRectMake(CGRectGetMidX(self.view.bounds),CGRectGetMidY(self.view.bounds),1,1);}}[self presentViewController:a animated:YES completion:nil];
+    [HostGlassActionSheetViewController presentOn:self
+                                            title:@"频道分组"
+                                         subtitle:[NSString stringWithFormat:@"共 %lu 个分组 · 按频道类型快速筛选",(unsigned long)self.groupControl.numberOfSegments]
+                                        badgeText:[NSString stringWithFormat:@"%lu 个分组",(unsigned long)self.groupControl.numberOfSegments]
+                                       badgeColor:HostAccent()
+                                         sections:@[[HostGlassSheetSection sectionWithTitle:@"选择分组" actions:rows]]
+                                       sourceView:(self.catalogMoreButton?:self.view)];
 }
 - (NSInteger)collectionView:(UICollectionView *)collectionView numberOfItemsInSection:(NSInteger)section {return self.shownChannels.count;}
 - (CGFloat)catalogTextHeight:(NSString *)text font:(UIFont *)font width:(CGFloat)width maximumLines:(NSUInteger)maximumLines {
@@ -784,44 +801,38 @@
 - (void)presentRouteSheetForChannel:(NSDictionary *)ch fromIndexPath:(NSIndexPath *)ip {
     if([ch[@"remoteURL"] length]){[self showRemoteTools:ch];return;}
     NSArray *routes = [ch[@"routes"] isKindOfClass:NSArray.class] ? ch[@"routes"] : @[];
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:ch[@"name"]
-                                                                  message:[NSString stringWithFormat:@"当前线路：%@ · %lu 个地址\n自选地址交给央视 SDK 播放；许可及版权仍由 SDK 处理。",
-                                                                           [ch[@"id"] isEqual:self.channelID]?(self.routeName?:@"自动"):@"未选择", (unsigned long)routes.count]
-                                                           preferredStyle:UIAlertControllerStyleActionSheet];
     BOOL isActiveChannel = [ch[@"id"] isEqual:self.channelID];
     BOOL autoSelected = isActiveChannel && (self.requestedNativeRoute == nil);
-    [sheet addAction:[UIAlertAction actionWithTitle:autoSelected ? @"✓ SDK 自动选线（推荐 · 智能调度）" : @"SDK 自动选线（推荐 · 智能调度）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-        [self playChannel:ch route:nil];
-    }]];
+    __weak typeof(self) weakSelf = self;
+    NSMutableArray<HostGlassSheetAction *> *routeRows = [NSMutableArray array];
+    [routeRows addObject:[HostGlassSheetAction actionWithTitle:@"SDK 自动选线（推荐）" subtitle:@"智能调度最优清晰度与节点" value:@"自动" icon:@"sparkles" tint:HostAccent() destructive:NO selected:autoSelected handler:^{[weakSelf playChannel:ch route:nil];}]];
     for (NSDictionary *r in routes) {
         NSString *res = [r[@"w"] intValue] > 0 ? [NSString stringWithFormat:@"%dx%d", [r[@"w"] intValue], [r[@"h"] intValue]] : @"";
         BOOL routeSelected = isActiveChannel && self.requestedNativeRoute && [[r[@"provider"] description] caseInsensitiveCompare:[self.requestedNativeRoute[@"provider"] description] ?: @""] == NSOrderedSame;
         NSString *modeTag = CCTVRouteRequiresSDK(r) ? @"UDRM" : @"HLS";
-        NSString *title = [NSString stringWithFormat:@"%@自选地址 %@ · %@ · 源标注 %@", routeSelected ? @"✓ " : @"", [r[@"provider"] uppercaseString], modeTag, res.length?res:@"未知"];
-        [sheet addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-            [self playChannel:ch route:r];
-        }]];
+        NSString *title = [NSString stringWithFormat:@"自选地址 %@ · %@", [r[@"provider"] uppercaseString], modeTag];
+        [routeRows addObject:[HostGlassSheetAction actionWithTitle:title subtitle:(res.length ? [NSString stringWithFormat:@"源标注分辨率 %@", res] : @"自选播放地址") value:modeTag icon:@"antenna.radiowaves.left.and.right" tint:(routeSelected ? HostAccent() : UIColor.systemBlueColor) destructive:NO selected:routeSelected handler:^{[weakSelf playChannel:ch route:r];}]];
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"节目单与回看" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-        [self openEPGforChannel:ch[@"id"] name:ch[@"name"]];
-    }]];
+    NSMutableArray<HostGlassSheetAction *> *extraRows = [NSMutableArray array];
+    [extraRows addObject:[HostGlassSheetAction actionWithTitle:@"节目单与回看" subtitle:@"浏览频道今日预告与 7 天回看" value:nil icon:@"calendar.badge.clock" tint:UIColor.systemBlueColor destructive:NO selected:NO handler:^{[weakSelf openEPGforChannel:ch[@"id"] name:ch[@"name"]];}]];
     if ([ch[@"id"] isEqual:self.channelID] && self.currentPlayer && !self.avPlayer) {
-        [sheet addAction:[UIAlertAction actionWithTitle:@"时移 / 回看" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-            [self showNativeTimeshiftActions];
-        }]];
+        [extraRows addObject:[HostGlassSheetAction actionWithTitle:@"时移 / 回看" subtitle:@"快速回退 5/15/30/60 分钟" value:nil icon:@"clock.arrow.circlepath" tint:UIColor.systemOrangeColor destructive:NO selected:NO handler:^{[weakSelf showNativeTimeshiftActions];}]];
         if (self.nativeTimeShiftActive) {
-            [sheet addAction:[UIAlertAction actionWithTitle:@"返回直播" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-                [self returnToLivePlayback];
-            }]];
+            [extraRows addObject:[HostGlassSheetAction actionWithTitle:@"返回直播" subtitle:@"结束时移并回到最新直播流" value:nil icon:@"dot.radiowaves.left.and.right" tint:UIColor.systemGreenColor destructive:NO selected:NO handler:^{[weakSelf returnToLivePlayback];}]];
         }
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    if (ip && self.table && !self.table.hidden) {
-        sheet.popoverPresentationController.sourceView = self.table;
-        sheet.popoverPresentationController.sourceRect = [self.table rectForRowAtIndexPath:ip];
-    }
-    if(!sheet.popoverPresentationController.sourceView&&!sheet.popoverPresentationController.barButtonItem){sheet.popoverPresentationController.sourceView=self.view;sheet.popoverPresentationController.sourceRect=CGRectMake(self.view.bounds.size.width/2,self.view.bounds.size.height/2,1,1);}
-    [self presentViewController:sheet animated:YES completion:nil];
+    NSString *currentRoute = isActiveChannel ? (self.routeName ?: @"自动") : @"未选择";
+    UITableViewCell *anchorCell = (ip && self.table && !self.table.hidden) ? [self.table cellForRowAtIndexPath:ip] : nil;
+    [HostGlassActionSheetViewController presentOn:self
+                                            title:(ch[@"name"] ?: @"切换线路")
+                                         subtitle:[NSString stringWithFormat:@"当前线路：%@ · %lu 个地址 · 自选地址交给央视 SDK 播放", currentRoute, (unsigned long)routes.count]
+                                        badgeText:[NSString stringWithFormat:@"线路 · %@", currentRoute]
+                                       badgeColor:HostAccent()
+                                         sections:@[
+                                             [HostGlassSheetSection sectionWithTitle:@"信号线路" actions:routeRows],
+                                             [HostGlassSheetSection sectionWithTitle:@"节目单与时移" actions:extraRows]
+                                         ]
+                                       sourceView:(anchorCell ?: self.view)];
 }
 - (NSArray<NSDictionary *> *)playerCategoryRows {
     NSArray *groups=[self currentCatalogGroupTitles];
@@ -880,37 +891,50 @@
 }
 
 - (void)presentSubscriptionActions:(NSDictionary *)channel sourceView:(UIView *)source {
-    UIAlertController *a=[UIAlertController alertControllerWithTitle:channel[@"name"]?:@"订阅频道" message:channel[@"remoteURL"] preferredStyle:UIAlertControllerStyleActionSheet];
-    [a addAction:[UIAlertAction actionWithTitle:@"节目单与回看" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){ [self openEPGforChannel:channel[@"id"] name:channel[@"name"]]; }]];
-    [a addAction:[UIAlertAction actionWithTitle:@"从列表移除" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *x){
-        NSMutableArray *m=[self.allChannels mutableCopy];
-        [m removeObject:channel];
-        self.allChannels=m;
-        NSString *groupKey=CCTVRouteGroupKey(channel);
-        NSString *remURL=[channel[@"remoteURL"] isKindOfClass:NSString.class]?channel[@"remoteURL"]:@"";
-        if(groupKey.length&&remURL.length&&self.altSources[groupKey]){
-            NSMutableArray *alts=[self.altSources[groupKey] mutableCopy];
-            [alts removeObject:remURL];
-            if(alts.count)self.altSources[groupKey]=alts;
-            else[self.altSources removeObjectForKey:groupKey];
-        }
-        NSString *cid=[channel[@"id"] isKindOfClass:NSString.class]?channel[@"id"]:@"";
-        for(NSString *subSource in CCTVStringArrayValue(channel[@"subscriptionSources"])){
-            NSDictionary *meta=[ProfileStore metadata:subSource];
-            NSArray *cached=[meta[@"cachedChannels"] isKindOfClass:NSArray.class]?meta[@"cachedChannels"]:nil;
-            if(!cached.count)continue;
-            NSMutableArray *updated=[NSMutableArray arrayWithCapacity:cached.count];
-            for(NSDictionary *row in cached){
-                if(![row isKindOfClass:NSDictionary.class])continue;
-                if((cid.length&&[row[@"id"] isEqual:cid])||(remURL.length&&[row[@"remoteURL"] isEqual:remURL]))continue;
-                [updated addObject:row];
+    __weak typeof(self) weakSelf=self;
+    NSArray<HostGlassSheetAction *> *acts=@[
+        [HostGlassSheetAction actionWithTitle:@"节目单与回看" subtitle:@"浏览频道预告并支持回看" value:nil icon:@"calendar.badge.clock" tint:UIColor.systemBlueColor destructive:NO selected:NO handler:^{[weakSelf openEPGforChannel:channel[@"id"] name:channel[@"name"]];}]
+    ];
+    NSArray<HostGlassSheetAction *> *danger=@[
+        [HostGlassSheetAction actionWithTitle:@"从列表移除" subtitle:@"从当前频道列表及缓存中删除此条目" value:nil icon:@"trash" tint:UIColor.systemRedColor destructive:YES selected:NO handler:^{
+            RootViewController *owner=weakSelf;if(!owner)return;
+            NSMutableArray *m=[owner.allChannels mutableCopy];
+            [m removeObject:channel];
+            owner.allChannels=m;
+            NSString *groupKey=CCTVRouteGroupKey(channel);
+            NSString *remURL=[channel[@"remoteURL"] isKindOfClass:NSString.class]?channel[@"remoteURL"]:@"";
+            if(groupKey.length&&remURL.length&&owner.altSources[groupKey]){
+                NSMutableArray *alts=[owner.altSources[groupKey] mutableCopy];
+                [alts removeObject:remURL];
+                if(alts.count)owner.altSources[groupKey]=alts;
+                else[owner.altSources removeObjectForKey:groupKey];
             }
-            if(updated.count!=cached.count)[ProfileStore update:subSource values:@{@"cachedChannels":updated,@"count":@(updated.count)}];
-        }
-        [self applyFilter];
-    }]];
-    [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    a.popoverPresentationController.sourceView=source; a.popoverPresentationController.sourceRect=source.bounds; [self presentViewController:a animated:YES completion:nil];
+            NSString *cid=[channel[@"id"] isKindOfClass:NSString.class]?channel[@"id"]:@"";
+            for(NSString *subSource in CCTVStringArrayValue(channel[@"subscriptionSources"])){
+                NSDictionary *meta=[ProfileStore metadata:subSource];
+                NSArray *cached=[meta[@"cachedChannels"] isKindOfClass:NSArray.class]?meta[@"cachedChannels"]:nil;
+                if(!cached.count)continue;
+                NSMutableArray *updated=[NSMutableArray arrayWithCapacity:cached.count];
+                for(NSDictionary *row in cached){
+                    if(![row isKindOfClass:NSDictionary.class])continue;
+                    if((cid.length&&[row[@"id"] isEqual:cid])||(remURL.length&&[row[@"remoteURL"] isEqual:remURL]))continue;
+                    [updated addObject:row];
+                }
+                if(updated.count!=cached.count)[ProfileStore update:subSource values:@{@"cachedChannels":updated,@"count":@(updated.count)}];
+            }
+            [owner applyFilter];
+        }]
+    ];
+    [HostGlassActionSheetViewController presentOn:self
+                                            title:(channel[@"name"]?:@"订阅频道")
+                                         subtitle:channel[@"remoteURL"]
+                                        badgeText:@"订阅频道"
+                                       badgeColor:HostAccent()
+                                         sections:@[
+                                             [HostGlassSheetSection sectionWithTitle:@"频道功能" actions:acts],
+                                             [HostGlassSheetSection sectionWithTitle:@"管理" actions:danger]
+                                         ]
+                                       sourceView:(source?:self.view)];
 }
 
 - (NSIndexPath *)indexPathForChannelID:(NSString *)cid {

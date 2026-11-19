@@ -55,8 +55,8 @@
     BOOL dark=traits.userInterfaceStyle==UIUserInterfaceStyleDark;
     UIColor *accent=[HostAccent() resolvedColorWithTraitCollection:traits];
     UIColor *selected=[HostSelectedSurface() resolvedColorWithTraitCollection:traits];
-    UIColor *roseTint=[accent colorWithAlphaComponent:dark?0.16:0.14];
-    UIColor *blueTint=[selected colorWithAlphaComponent:dark?0.22:0.18];
+    UIColor *roseTint=[accent colorWithAlphaComponent:dark?0.16:0.06];
+    UIColor *blueTint=[selected colorWithAlphaComponent:dark?0.22:0.08];
     self.roseGradient.colors=@[(id)resolved(roseTint).CGColor,(id)UIColor.clearColor.CGColor];
     self.blueGradient.colors=@[(id)resolved(blueTint).CGColor,(id)UIColor.clearColor.CGColor];
     [self setNeedsLayout];

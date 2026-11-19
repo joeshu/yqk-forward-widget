@@ -16,7 +16,7 @@ static inline NSString *HostThemeMode(void) {
     if([@[@"system",@"light",@"dark"] containsObject:mode?:@""])return mode;
     if([NSUserDefaults.standardUserDefaults objectForKey:HostDarkThemePreferenceKey])
         return [NSUserDefaults.standardUserDefaults boolForKey:HostDarkThemePreferenceKey]?@"dark":@"light";
-    return @"dark"; // Preserve the app's established first-launch appearance.
+    return @"light"; // Default to clean daylight white theme on first launch.
 }
 
 static inline UIUserInterfaceStyle HostSystemInterfaceStyle(void) {
@@ -148,11 +148,13 @@ static inline void HostStyleGlassCard(UIView *view, CGFloat radius) {
         specularRim=[CAGradientLayer layer];
         specularRim.startPoint=CGPointMake(0,0);
         specularRim.endPoint=CGPointMake(1,1);
-        specularRim.colors=@[(id)[UIColor colorWithWhite:1 alpha:0.22].CGColor,(id)[UIColor colorWithWhite:1 alpha:0.05].CGColor,(id)[UIColor colorWithWhite:1 alpha:0.12].CGColor];
         specularRim.locations=@[@0.0,@0.52,@1.0];
         [glass.contentView.layer addSublayer:specularRim];
         objc_setAssociatedObject(view,&HostSpecularRimAssociationKey,specularRim,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
+    specularRim.colors=!HostIsDarkThemeSelected()
+        ? @[(id)[UIColor colorWithWhite:1 alpha:0.62].CGColor,(id)[UIColor colorWithWhite:1 alpha:0.12].CGColor,(id)[UIColor colorWithWhite:1 alpha:0.32].CGColor]
+        : @[(id)[UIColor colorWithWhite:1 alpha:0.22].CGColor,(id)[UIColor colorWithWhite:1 alpha:0.05].CGColor,(id)[UIColor colorWithWhite:1 alpha:0.12].CGColor];
     specularRim.frame=CGRectMake(0,0,CGRectGetWidth(view.bounds),MIN(1.2,CGRectGetHeight(view.bounds)));
     view.backgroundColor=UIColor.clearColor;
     view.layer.cornerRadius=radius;
@@ -209,27 +211,32 @@ static inline void HostRefreshAppearanceLayers(UIView *view) {
     HostGlassBackdropView *backdrop=objc_getAssociatedObject(view,&HostAppearanceRefreshAssociationKey);if(backdrop)[backdrop refreshAppearance];
     CAGradientLayer *specularRim=objc_getAssociatedObject(view,&HostSpecularRimAssociationKey);
     if(specularRim)specularRim.frame=CGRectMake(0,0,CGRectGetWidth(view.bounds),MIN(1.2,CGRectGetHeight(view.bounds)));
+    if(specularRim)specularRim.colors=!HostIsDarkThemeSelected()
+        ? @[(id)[UIColor colorWithWhite:1 alpha:0.62].CGColor,(id)[UIColor colorWithWhite:1 alpha:0.12].CGColor,(id)[UIColor colorWithWhite:1 alpha:0.32].CGColor]
+        : @[(id)[UIColor colorWithWhite:1 alpha:0.22].CGColor,(id)[UIColor colorWithWhite:1 alpha:0.05].CGColor,(id)[UIColor colorWithWhite:1 alpha:0.12].CGColor];
     UIColor *border=objc_getAssociatedObject(view,&HostLayerBorderColorAssociationKey);
     if(border)view.layer.borderColor=[[border resolvedColorWithTraitCollection:view.traitCollection] CGColor];
     for(UIView *child in view.subviews)HostRefreshAppearanceLayers(child);
 }
 
 static inline UIFont *HostRoundedFont(CGFloat size, UIFontWeight weight, UIFontTextStyle textStyle) {
-    UIFont *base = [UIFont systemFontOfSize:size weight:weight];
+    CGFloat refinedSize = MAX(9.5, size - 1.0);
+    UIFont *base = [UIFont systemFontOfSize:refinedSize weight:weight];
     UIFontDescriptor *roundedDesc = [base.fontDescriptor fontDescriptorWithDesign:UIFontDescriptorSystemDesignRounded];
-    UIFont *rounded = roundedDesc ? [UIFont fontWithDescriptor:roundedDesc size:size] : base;
+    UIFont *rounded = roundedDesc ? [UIFont fontWithDescriptor:roundedDesc size:refinedSize] : base;
     return textStyle ? [[UIFontMetrics metricsForTextStyle:textStyle] scaledFontForFont:rounded] : rounded;
 }
 
 static inline UIFont *HostMonospacedDigitFont(CGFloat size, UIFontWeight weight, UIFontTextStyle textStyle) {
-    UIFont *mono = [UIFont monospacedDigitSystemFontOfSize:size weight:weight];
+    CGFloat refinedSize = MAX(9.5, size - 0.75);
+    UIFont *mono = [UIFont monospacedDigitSystemFontOfSize:refinedSize weight:weight];
     return textStyle ? [[UIFontMetrics metricsForTextStyle:textStyle] scaledFontForFont:mono] : mono;
 }
 
 static inline void HostStyleSectionHeaderView(UIView *view) {
     if (![view isKindOfClass:UITableViewHeaderFooterView.class]) return;
     UITableViewHeaderFooterView *header = (UITableViewHeaderFooterView *)view;
-    header.textLabel.font = HostRoundedFont(13.0, UIFontWeightSemibold, UIFontTextStyleSubheadline);
+    header.textLabel.font = HostRoundedFont(12.5, UIFontWeightSemibold, UIFontTextStyleSubheadline);
     header.textLabel.textColor = HostSecondaryText();
     header.textLabel.adjustsFontForContentSizeCategory = YES;
 }
@@ -237,7 +244,7 @@ static inline void HostStyleSectionHeaderView(UIView *view) {
 static inline void HostStyleSectionFooterView(UIView *view) {
     if (![view isKindOfClass:UITableViewHeaderFooterView.class]) return;
     UITableViewHeaderFooterView *footer = (UITableViewHeaderFooterView *)view;
-    footer.textLabel.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:12.0 weight:UIFontWeightRegular]];
+    footer.textLabel.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:11.0 weight:UIFontWeightRegular]];
     footer.textLabel.textColor = HostMutedText();
     footer.textLabel.adjustsFontForContentSizeCategory = YES;
 }
@@ -267,10 +274,10 @@ static inline void HostStyleNavigation(UINavigationController *nav) {
     a.backgroundEffect = HostGlassBlur();
     a.backgroundColor = HostGlassTint();
     a.titleTextAttributes = @{NSForegroundColorAttributeName : HostText(),
-                              NSFontAttributeName : HostRoundedFont(17, UIFontWeightSemibold, nil),
+                              NSFontAttributeName : HostRoundedFont(16.5, UIFontWeightSemibold, nil),
                               NSKernAttributeName : @(-0.15)};
     a.largeTitleTextAttributes = @{NSForegroundColorAttributeName : HostText(),
-                                   NSFontAttributeName : HostRoundedFont(32, UIFontWeightBold, nil),
+                                   NSFontAttributeName : HostRoundedFont(29, UIFontWeightBold, nil),
                                    NSKernAttributeName : @(-0.35)};
     a.shadowColor = UIColor.clearColor;
     UINavigationBarAppearance *edge = [UINavigationBarAppearance new];

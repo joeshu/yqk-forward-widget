@@ -1,4 +1,5 @@
 #import "HostTheme.h"
+#import "HostGlassActionSheetViewController.h"
 #import "RootViewController_Internal.h"
 #import "MediaEpisodeLayout.h"
 #import "MediaAdaptationMonitor.h"
@@ -59,6 +60,7 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
         cell.textLabel.textColor=HostText();
         cell.detailTextLabel.textColor=HostSecondaryText();
     }
+    cell.transform=CGAffineTransformIdentity;
     NSDictionary *item=self.items[indexPath.row];BOOL selected=[item[@"selected"] boolValue];
     cell.backgroundColor=selected?HostSelectedSurface():HostCard();
     cell.layer.cornerRadius=14;cell.layer.cornerCurve=kCACornerCurveContinuous;cell.clipsToBounds=YES;
@@ -66,28 +68,18 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
 
     UIView *specular=[cell.contentView viewWithTag:8901];
     if(!specular){
-        specular=[UIView new];specular.tag=8901;specular.translatesAutoresizingMaskIntoConstraints=NO;specular.userInteractionEnabled=NO;
+        specular=[[UIView alloc] initWithFrame:CGRectMake(12,0,MAX(0,CGRectGetWidth(cell.contentView.bounds)-24),0.5)];specular.tag=8901;specular.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleBottomMargin;specular.userInteractionEnabled=NO;
         [cell.contentView addSubview:specular];
-        [NSLayoutConstraint activateConstraints:@[
-            [specular.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:12],
-            [specular.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-12],
-            [specular.topAnchor constraintEqualToAnchor:cell.contentView.topAnchor],
-            [specular.heightAnchor constraintEqualToConstant:0.5]
-        ]];
     }
-    specular.backgroundColor=[UIColor colorWithWhite:1.0 alpha:selected?0.16:0.07];
+    specular.frame=CGRectMake(12,0,MAX(0,CGRectGetWidth(cell.contentView.bounds)-24),0.5);
+    specular.backgroundColor=HostIsDarkThemeSelected()?[UIColor colorWithWhite:1.0 alpha:selected?0.16:0.07]:[selected?HostAccent():HostBorder() colorWithAlphaComponent:selected?0.28:0.65];
 
     UIView *accentBar=[cell.contentView viewWithTag:8902];
     if(!accentBar){
-        accentBar=[UIView new];accentBar.tag=8902;accentBar.translatesAutoresizingMaskIntoConstraints=NO;accentBar.layer.cornerRadius=1.75;accentBar.layer.cornerCurve=kCACornerCurveContinuous;accentBar.userInteractionEnabled=NO;
+        accentBar=[[UIView alloc] initWithFrame:CGRectMake(4,floor((CGRectGetHeight(cell.contentView.bounds)-24.0)*0.5),3.5,24.0)];accentBar.tag=8902;accentBar.autoresizingMask=UIViewAutoresizingFlexibleTopMargin|UIViewAutoresizingFlexibleBottomMargin|UIViewAutoresizingFlexibleRightMargin;accentBar.layer.cornerRadius=1.75;accentBar.layer.cornerCurve=kCACornerCurveContinuous;accentBar.userInteractionEnabled=NO;
         [cell.contentView addSubview:accentBar];
-        [NSLayoutConstraint activateConstraints:@[
-            [accentBar.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:4],
-            [accentBar.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
-            [accentBar.widthAnchor constraintEqualToConstant:3.5],
-            [accentBar.heightAnchor constraintEqualToConstant:24]
-        ]];
     }
+    accentBar.frame=CGRectMake(4,floor((CGRectGetHeight(cell.contentView.bounds)-24.0)*0.5),3.5,24.0);
     accentBar.backgroundColor=selected?HostAccent():UIColor.clearColor;
 
     cell.textLabel.text=item[@"title"]?:@"";
@@ -908,6 +900,7 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
     self.table = [[UITableView alloc] initWithFrame:CGRectMake(0, ty, self.view.bounds.size.width, self.view.bounds.size.height - ty) style:UITableViewStylePlain];self.table.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever;
     self.table.dataSource = self;
     self.table.delegate = self;
+    self.table.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
     self.table.rowHeight = UITableViewAutomaticDimension;
     self.table.estimatedRowHeight = 66;
     self.table.estimatedSectionHeaderHeight = 0;
@@ -921,7 +914,7 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
     UILongPressGestureRecognizer *routePress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(onLongPress:)];
     [self.table addGestureRecognizer:routePress];
     UICollectionViewFlowLayout *flow=[UICollectionViewFlowLayout new]; flow.minimumInteritemSpacing=6; flow.minimumLineSpacing=8; flow.sectionInset=UIEdgeInsetsMake(8,10,16,10);
-    self.channelGrid=[[UICollectionView alloc] initWithFrame:CGRectZero collectionViewLayout:flow]; self.channelGrid.backgroundColor=HostBackground(); self.channelGrid.dataSource=self; self.channelGrid.delegate=self; self.channelGrid.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever;self.channelGrid.accessibilityIdentifier=@"channel.grid";
+    self.channelGrid=[[UICollectionView alloc] initWithFrame:CGRectZero collectionViewLayout:flow]; self.channelGrid.backgroundColor=HostBackground(); self.channelGrid.keyboardDismissMode=UIScrollViewKeyboardDismissModeOnDrag; self.channelGrid.dataSource=self; self.channelGrid.delegate=self; self.channelGrid.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever;self.channelGrid.accessibilityIdentifier=@"channel.grid";
     [self.channelGrid registerClass:UICollectionViewCell.class forCellWithReuseIdentifier:@"channel.card"]; self.channelCatalogController=[[HostChannelCatalogController alloc] initWithTable:self.table grid:self.channelGrid];[self addChildViewController:self.channelCatalogController];self.channelCatalogController.view.frame=self.view.bounds;self.channelCatalogController.view.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;[self.view addSubview:self.channelCatalogController.view];[self.channelCatalogController didMoveToParentViewController:self];
     UIRefreshControl *gridRefresh=[UIRefreshControl new];[gridRefresh addTarget:self action:@selector(onPullRefresh) forControlEvents:UIControlEventValueChanged];self.channelGrid.refreshControl=gridRefresh;
     [self buildBottomBar];
@@ -1251,7 +1244,7 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
         page.onToggleChannelTelemetry=^(NSString *source,BOOL enabled){[w applyResourcePreviewOrTelemetryToggleForSource:source enabled:enabled isPreview:NO];};
         page.onMatchStationLogos=^(NSString *source){[w matchOfficialStationLogosAndEPGForSource:source];};
         page.onOpenResource=^(NSString *source){[w openPluginResource:source];};page.onOpenSubscription=^(NSString *source){[w openSubscriptionProfile:source editing:NO];};
-        page.onUseResource=^(NSString *source,NSString *kind){NSDictionary *service=[w resourceServiceForSource:source];if(!service)return;if([kind isEqual:@"choose"]){UIAlertController *choice=[UIAlertController alertControllerWithTitle:service[@"name"]?:@"选择资源用途" message:@"这个资源同时提供影视与直播能力。" preferredStyle:UIAlertControllerStyleActionSheet];[choice addAction:[UIAlertAction actionWithTitle:@"进入影视" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[w usePluginService:service kind:@"vod"];}]];[choice addAction:[UIAlertAction actionWithTitle:@"添加直播频道" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[w usePluginService:service kind:@"live"];}]];[choice addAction:[UIAlertAction actionWithTitle:@"资源详情与设置" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[w openPluginResource:source];}]];[choice addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];choice.popoverPresentationController.sourceView=w.view;choice.popoverPresentationController.sourceRect=CGRectMake(CGRectGetMidX(w.view.bounds),CGRectGetMidY(w.view.bounds),1,1);[w presentViewController:choice animated:YES completion:nil];return;}[w usePluginService:service kind:kind];};
+        page.onUseResource=^(NSString *source,NSString *kind){NSDictionary *service=[w resourceServiceForSource:source];if(!service)return;if([kind isEqual:@"choose"]){NSArray<HostGlassSheetAction *> *acts=@[[HostGlassSheetAction actionWithTitle:@"进入影视" subtitle:@"启动脚本服务并进入点播影视库" value:nil icon:@"film.stack" tint:HostAccent() destructive:NO selected:NO handler:^{[w usePluginService:service kind:@"vod"];}],[HostGlassSheetAction actionWithTitle:@"添加直播频道" subtitle:@"拉取该资源提供的直播频道列表" value:nil icon:@"tv" tint:UIColor.systemBlueColor destructive:NO selected:NO handler:^{[w usePluginService:service kind:@"live"];}],[HostGlassSheetAction actionWithTitle:@"资源详情与设置" subtitle:@"查看接口、端口、健康状态与日志" value:nil icon:@"slider.horizontal.3" tint:HostSecondaryText() destructive:NO selected:NO handler:^{[w openPluginResource:source];}]];[HostGlassActionSheetViewController presentOn:w title:(service[@"name"]?:@"选择资源用途") subtitle:@"这个资源同时提供影视与直播能力。" badgeText:@"复合资源" badgeColor:HostAccent() sections:@[[HostGlassSheetSection sectionWithTitle:@"打开方式" actions:acts]] sourceView:w.view];return;}[w usePluginService:service kind:kind];};
         page.onOpenTVBoxCatalog=^(NSString *identifier){[w openTVBoxCatalog:identifier];};
         page.onExportResource=^(NSString *source,NSString *format){[w exportResource:source format:format];};
         page.onSelectProfile=^(NSString *source){UIButton *b=(UIButton *)w.bottomBar.arrangedSubviews[source.length?1:0];[w selectBottomTab:b];w.activeSource=source;w.title=source.length?@"订阅直播":@"央视直播";[w applyFilter];[w updateLiveResourceCapsule];};
@@ -1428,16 +1421,16 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
 // “大”和“特大”都会顶到最大档。超出范围时按最大档截断。
 - (UITraitCollection *)fontSizeOverrideTraitCollection {
     NSInteger offset=[[NSUserDefaults standardUserDefaults] objectForKey:@"cctv.appFontSize.v1"]?[[NSUserDefaults standardUserDefaults] integerForKey:@"cctv.appFontSize.v1"]:0;
-    if(offset<=0)return nil;
     NSArray<NSString *> *ordered=@[UIContentSizeCategoryExtraSmall,UIContentSizeCategorySmall,UIContentSizeCategoryMedium,UIContentSizeCategoryLarge,UIContentSizeCategoryExtraLarge,UIContentSizeCategoryExtraExtraLarge,UIContentSizeCategoryExtraExtraExtraLarge];
     // 基准取 iOS 系统字号（屏幕 trait，不受本控制器覆盖影响，且 view 未进
     // window 时也能取到）；不能取 self.traitCollection（已被覆盖）或
-    // self.view.window（view 未进 window 时为 nil）。
+    // self.view.window（view 未进 window 时为 nil）。默认标准档（0）比系统基准精致收紧一档；
+    // 无障碍大字号（index == NSNotFound）保持系统原样不干预。
     NSString *baseCategory=[UIScreen mainScreen].traitCollection.preferredContentSizeCategory;
     if(!baseCategory.length)return nil;
     NSInteger index=[ordered indexOfObject:baseCategory];
     if(index==NSNotFound)return nil;
-    NSInteger stepped=MIN((NSInteger)ordered.count-1,index+offset);
+    NSInteger stepped=(offset<=0)?MAX(0,index-1):MIN((NSInteger)ordered.count-1,index+offset);
     return [UITraitCollection traitCollectionWithPreferredContentSizeCategory:ordered[stepped]];
 }
 - (void)applyFontSizeOverride {

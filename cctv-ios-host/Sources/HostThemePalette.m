@@ -35,15 +35,15 @@ static NSArray<NSDictionary *> *HostThemePaletteDefinitions(void) {
           @"glass":@"#1C150B", @"glassAlpha":@0.62, @"borderAlpha":@0.14, @"separatorAlpha":@0.11,
           @"neutral":@"#2E2618", @"selectedAlpha":@0.20, @"highlightedAlpha":@0.16, @"success":@"#1E2E1A"},
         @{@"id":@"daylight", @"name":@"晨光白", @"tagline":@"明亮柔和", @"dark":@NO,
-          @"background":@"#F2F3F8", @"card":@"#FDFDFE", @"raised":@"#EAECF2",
+          @"background":@"#F3F4F8", @"card":@"#FFFFFF", @"raised":@"#ECEEF4",
           @"text":@"#131313", @"secondary":@"#4F5466", @"accent":@"#CC0929", @"onAccent":@"#FFFFFF", @"muted":@"#595D6E",
-          @"glass":@"#FFFFFF", @"glassAlpha":@0.64, @"borderAlpha":@0.14, @"separatorAlpha":@0.10,
-          @"neutral":@"#E8EAF0", @"selectedAlpha":@0.12, @"highlightedAlpha":@0.06, @"success":@"#E0F5E8"},
+          @"glass":@"#FFFFFF", @"glassAlpha":@0.78, @"borderAlpha":@0.09, @"separatorAlpha":@0.08,
+          @"neutral":@"#E8EAF0", @"selectedAlpha":@0.11, @"highlightedAlpha":@0.05, @"success":@"#E0F5E8"},
         @{@"id":@"snow", @"name":@"雪原白", @"tagline":@"纯白通透", @"dark":@NO,
-          @"background":@"#FFFFFF", @"card":@"#F6F6F8", @"raised":@"#EDEDF0",
+          @"background":@"#FFFFFF", @"card":@"#F6F7FA", @"raised":@"#ECEEF2",
           @"text":@"#111318", @"secondary":@"#565B66", @"accent":@"#2E5BFF", @"onAccent":@"#FFFFFF", @"muted":@"#5A5E68",
-          @"glass":@"#FFFFFF", @"glassAlpha":@0.68, @"borderAlpha":@0.15, @"separatorAlpha":@0.11,
-          @"neutral":@"#ECECF0", @"selectedAlpha":@0.12, @"highlightedAlpha":@0.05, @"success":@"#E2F3E9"},
+          @"glass":@"#FFFFFF", @"glassAlpha":@0.82, @"borderAlpha":@0.10, @"separatorAlpha":@0.08,
+          @"neutral":@"#ECECF0", @"selectedAlpha":@0.11, @"highlightedAlpha":@0.04, @"success":@"#E2F3E9"},
     ];
 }
 
@@ -101,7 +101,7 @@ static NSArray<NSDictionary *> *HostThemePaletteDefinitions(void) {
     return nil;
 }
 
-+ (HostThemePalette *)defaultDarkPalette { return [self paletteForIdentifier:HostThemePaletteDefaultIdentifier]; }
++ (HostThemePalette *)defaultDarkPalette { return [self paletteForIdentifier:@"midnight"]; }
 + (HostThemePalette *)defaultLightPalette { return [self paletteForIdentifier:@"daylight"]; }
 
 + (NSString *)currentPaletteIdentifier {
@@ -116,7 +116,7 @@ static NSArray<NSDictionary *> *HostThemePaletteDefinitions(void) {
 }
 
 + (HostThemePalette *)currentPalette {
-    return [self paletteForIdentifier:self.currentPaletteIdentifier] ?: self.defaultDarkPalette;
+    return [self paletteForIdentifier:self.currentPaletteIdentifier] ?: self.defaultLightPalette;
 }
 
 + (HostThemePalette *)effectivePaletteForDark:(BOOL)dark {

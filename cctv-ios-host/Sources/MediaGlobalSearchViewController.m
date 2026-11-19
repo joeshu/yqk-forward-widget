@@ -2,6 +2,7 @@
 #import "MediaAPIClient.h"
 #import "LocalServiceReadiness.h"
 #import "HostTheme.h"
+#import "HostGlassActionSheetViewController.h"
 #import "PyHost.h"
 #import "MediaSourceHealthStore.h"
 #import "HostImageLoader.h"
@@ -417,14 +418,49 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
 }
 - (void)showSearchHistory {
     BOOL enabled=[NSUserDefaults.standardUserDefaults boolForKey:@"media.globalSearchHistoryEnabled.v1"];
-    UIAlertController *menu=[UIAlertController alertControllerWithTitle:@"搜索历史" message:enabled?(self.searchHistory.count?@"选择关键词重新搜索。历史只保存在本机，可随时清除。":@"还没有保存搜索词。"):@"搜索历史默认关闭；开启后最多保留 20 条关键词，仅保存在本机。" preferredStyle:UIAlertControllerStyleActionSheet];
     __weak typeof(self) weakSelf=self;
-    for(NSString *term in self.searchHistory){if(![term isKindOfClass:NSString.class]||!term.length)continue;[menu addAction:[UIAlertAction actionWithTitle:term style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){MediaGlobalSearchViewController *owner=weakSelf;if(!owner)return;owner.searchBar.text=term;[owner submitSearch];}]];}
-    if(enabled&&self.searchHistory.count)[menu addAction:[UIAlertAction actionWithTitle:@"清空搜索历史" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action){MediaGlobalSearchViewController *owner=weakSelf;if(!owner)return;owner.searchHistory=@[];[NSUserDefaults.standardUserDefaults removeObjectForKey:@"media.globalSearchHistory.v1"];[owner showSearchHistory];}]];
-    [menu addAction:[UIAlertAction actionWithTitle:enabled?@"关闭搜索历史":@"开启搜索历史" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){MediaGlobalSearchViewController *owner=weakSelf;if(!owner)return;[NSUserDefaults.standardUserDefaults setBool:!enabled forKey:@"media.globalSearchHistoryEnabled.v1"];if(enabled){owner.searchHistory=@[];[NSUserDefaults.standardUserDefaults removeObjectForKey:@"media.globalSearchHistory.v1"];id rawBrowse=[NSUserDefaults.standardUserDefaults dictionaryForKey:@"media.browseStates.v1"];NSMutableDictionary *browse=[rawBrowse isKindOfClass:NSDictionary.class]?[rawBrowse mutableCopy]:[NSMutableDictionary dictionary];[browse enumerateKeysAndObjectsUsingBlock:^(NSString *key,NSDictionary *state,BOOL *stop){if(![state isKindOfClass:NSDictionary.class])return;NSMutableDictionary *clean=[state mutableCopy];clean[@"keyword"]=@"";browse[key]=clean.copy;}];[NSUserDefaults.standardUserDefaults setObject:browse forKey:@"media.browseStates.v1"];}[NSNotificationCenter.defaultCenter postNotificationName:@"MediaGlobalSearchHistoryDidChange" object:nil userInfo:@{@"enabled":@(!enabled)}];[owner showSearchHistory];}]];
-    [menu addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    if(menu.popoverPresentationController){menu.popoverPresentationController.sourceView=self.historyButton;menu.popoverPresentationController.sourceRect=self.historyButton.bounds;}
-    [self presentViewController:menu animated:YES completion:nil];
+    NSMutableArray<HostGlassSheetSection *> *sections=[NSMutableArray array];
+    NSMutableArray<HostGlassSheetAction *> *termRows=[NSMutableArray array];
+    for(NSString *term in self.searchHistory){
+        if(![term isKindOfClass:NSString.class]||!term.length)continue;
+        [termRows addObject:[HostGlassSheetAction actionWithTitle:term subtitle:nil value:nil icon:@"magnifyingglass" tint:HostAccent() destructive:NO selected:NO handler:^{
+            MediaGlobalSearchViewController *owner=weakSelf;if(!owner)return;
+            owner.searchBar.text=term;[owner submitSearch];
+        }]];
+    }
+    if(termRows.count)[sections addObject:[HostGlassSheetSection sectionWithTitle:@"最近搜索" actions:termRows]];
+    NSMutableArray<HostGlassSheetAction *> *settingRows=[NSMutableArray array];
+    [settingRows addObject:[HostGlassSheetAction actionWithTitle:enabled?@"关闭搜索历史":@"开启搜索历史" subtitle:enabled?@"关闭后将立即清除本机历史记录":@"开启后最多保留 20 条关键词，仅存本机" value:enabled?@"已开启":@"已关闭" icon:enabled?@"clock.badge.xmark":@"clock.badge.checkmark" tint:UIColor.systemBlueColor destructive:NO selected:NO handler:^{
+        MediaGlobalSearchViewController *owner=weakSelf;if(!owner)return;
+        [NSUserDefaults.standardUserDefaults setBool:!enabled forKey:@"media.globalSearchHistoryEnabled.v1"];
+        if(enabled){
+            owner.searchHistory=@[];
+            [NSUserDefaults.standardUserDefaults removeObjectForKey:@"media.globalSearchHistory.v1"];
+            id rawBrowse=[NSUserDefaults.standardUserDefaults dictionaryForKey:@"media.browseStates.v1"];
+            NSMutableDictionary *browse=[rawBrowse isKindOfClass:NSDictionary.class]?[rawBrowse mutableCopy]:[NSMutableDictionary dictionary];
+            [browse enumerateKeysAndObjectsUsingBlock:^(NSString *key,NSDictionary *state,BOOL *stop){if(![state isKindOfClass:NSDictionary.class])return;NSMutableDictionary *clean=[state mutableCopy];clean[@"keyword"]=@"";browse[key]=clean.copy;}];
+            [NSUserDefaults.standardUserDefaults setObject:browse forKey:@"media.browseStates.v1"];
+        }
+        [NSNotificationCenter.defaultCenter postNotificationName:@"MediaGlobalSearchHistoryDidChange" object:nil userInfo:@{@"enabled":@(!enabled)}];
+        [owner showSearchHistory];
+    }]];
+    if(enabled&&self.searchHistory.count){
+        [settingRows addObject:[HostGlassSheetAction actionWithTitle:@"清空搜索历史" subtitle:@"移除本机全部历史搜索词" value:nil icon:@"trash" tint:UIColor.systemRedColor destructive:YES selected:NO handler:^{
+            MediaGlobalSearchViewController *owner=weakSelf;if(!owner)return;
+            owner.searchHistory=@[];
+            [NSUserDefaults.standardUserDefaults removeObjectForKey:@"media.globalSearchHistory.v1"];
+            [owner showSearchHistory];
+        }]];
+    }
+    [sections addObject:[HostGlassSheetSection sectionWithTitle:@"隐私与历史" actions:settingRows]];
+    NSString *sub=enabled?(self.searchHistory.count?@"选择关键词重新搜索。历史只保存在本机，可随时清除。":@"还没有保存搜索词。"):@"搜索历史默认关闭；开启后最多保留 20 条关键词，仅保存在本机。";
+    [HostGlassActionSheetViewController presentOn:self
+                                            title:@"搜索历史"
+                                         subtitle:sub
+                                        badgeText:enabled?[NSString stringWithFormat:@"%lu 条",(unsigned long)self.searchHistory.count]:@"已关闭"
+                                       badgeColor:enabled?HostAccent():HostMutedText()
+                                         sections:sections
+                                       sourceView:(self.historyButton?:self.view)];
 }
 
 - (void)cancelJobsAndAdvanceGeneration {

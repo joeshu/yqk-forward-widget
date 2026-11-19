@@ -63,7 +63,7 @@ class SettingsRound2(unittest.TestCase):
     def test_theme_change_refreshes_rows_even_without_window(self):
         # view.window 为 nil 时主题仍已写入偏好：色板副标题不能一直显示旧主题。
         picker = method_body(self.settings, '- (void)presentThemePicker:')
-        self.assertIn('[self.table reloadData];', picker)
+        self.assertIn('[owner.table reloadData];', picker)
         appearance = method_body(self.settings, '- (void)appearanceChanged:')
         self.assertIn('[self.table reloadData]', appearance)
 

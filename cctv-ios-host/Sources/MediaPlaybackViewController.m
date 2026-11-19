@@ -825,11 +825,16 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 - (UIMenu *)playbackSleepTimerMenu {
     __weak typeof(self) weakSelf=self;NSMutableArray *items=[NSMutableArray array];
     for(NSNumber *candidate in @[@0,@15,@30,@60]){
-        NSInteger mins=candidate.integerValue;NSString *title=mins==0?@"关闭定时":[NSString stringWithFormat:@"%ld 分钟",(long)mins];
-        UIImage *mark=(self.mediaSleepMinutes==mins)?[UIImage systemImageNamed:@"checkmark"]:nil;
-        [items addObject:[UIAction actionWithTitle:title image:mark identifier:nil handler:^(__unused UIAction *a){[weakSelf configureMediaSleepTimerMinutes:mins];}]];
+        NSInteger mins=candidate.integerValue;NSString *title=mins==0?@"关闭定时":[NSString stringWithFormat:@"%ld 分钟后暂停",(long)mins];
+        UIAction *act=[UIAction actionWithTitle:title image:nil identifier:nil handler:^(__unused UIAction *a){[weakSelf configureMediaSleepTimerMinutes:mins];}];
+        act.state=(self.mediaSleepMinutes==mins)?UIMenuElementStateOn:UIMenuElementStateOff;
+        [items addObject:act];
     }
-    return [UIMenu menuWithTitle:@"睡眠定时" image:[UIImage systemImageNamed:@"moon.zzz"] identifier:nil options:0 children:items];
+    UIMenu *menu=[UIMenu menuWithTitle:@"睡眠定时" image:[UIImage systemImageNamed:@"moon.zzz"] identifier:nil options:0 children:items];
+    if(@available(iOS 16.0,*)){
+        menu.subtitle=self.mediaSleepMinutes>0?[NSString stringWithFormat:@"%ld 分钟后暂停",(long)self.mediaSleepMinutes]:@"已关闭";
+    }
+    return menu;
 }
 - (void)handlePlaybackDoubleTap:(UITapGestureRecognizer *)recognizer {
     if(self.gestureLockActive){[self showGestureFeedback:@"画面已锁定 · 点按左侧锁图标解锁"];return;}
@@ -1321,44 +1326,76 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     self.navigationItem.rightBarButtonItems=@[self.playbackOptionsItem];
 }
 - (UIMenu *)mediaSelectionMenuForCharacteristic:(AVMediaCharacteristic)characteristic title:(NSString *)title {
+    BOOL isAudio=[characteristic isEqual:AVMediaCharacteristicAudible];
+    UIImage *icon=[UIImage systemImageNamed:isAudio?@"waveform":@"captions.bubble"];
     if(self.cicadaAdapter){
-        NSString *kind=[characteristic isEqual:AVMediaCharacteristicAudible]?@"audio":@"subtitle";NSMutableArray *actions=[NSMutableArray array];__weak typeof(self) weakSelf=self;
+        NSString *kind=isAudio?@"audio":@"subtitle";NSMutableArray *actions=[NSMutableArray array];__weak typeof(self) weakSelf=self;
         for(NSDictionary *track in [self.cicadaAdapter availableTracks])if([track[@"type"] isEqual:kind]){NSInteger index=[track[@"index"] integerValue];[actions addObject:[UIAction actionWithTitle:track[@"name"] image:nil identifier:nil handler:^(UIAction *action){MediaPlaybackViewController *owner=weakSelf;if(![owner.cicadaAdapter selectTrackWithIndex:index])owner.status.text=@"当前引擎未能切换轨道";}]];}
+        NSString *subText=actions.count?[NSString stringWithFormat:@"%lu 个可选轨道",(unsigned long)actions.count]:@"无可用轨道";
         if(!actions.count){NSString *reason=[self.cicadaAdapter canSelectTracks]?@"当前引擎尚未返回可选轨道":@"当前引擎暂不支持轨道选择";UIAction *unavailable=[UIAction actionWithTitle:reason image:nil identifier:nil handler:^(UIAction *action){}];unavailable.attributes=UIMenuElementAttributesDisabled;[actions addObject:unavailable];}
-        return [UIMenu menuWithTitle:title children:actions];
+        UIMenu *menu=[UIMenu menuWithTitle:title image:icon identifier:nil options:0 children:actions];
+        if(@available(iOS 16.0,*))menu.subtitle=subText;
+        return menu;
     }
 
     AVPlayerItem *item=self.player.currentItem;BOOL ready=item&&item.status==AVPlayerItemStatusReadyToPlay&&[item.asset statusOfValueForKey:@"availableMediaCharacteristicsWithMediaSelectionOptions" error:NULL]==AVKeyValueStatusLoaded;AVMediaSelectionGroup *group=ready?[item.asset mediaSelectionGroupForMediaCharacteristic:characteristic]:nil;
-    if(!group.options.count){UIAction *unavailable=[UIAction actionWithTitle:[NSString stringWithFormat:@"当前视频未提供%@轨道",title] image:nil identifier:nil handler:^(UIAction *action){}];unavailable.attributes=UIMenuElementAttributesDisabled;return [UIMenu menuWithTitle:title children:@[unavailable]];}
+    if(!group.options.count){
+        UIAction *unavailable=[UIAction actionWithTitle:[NSString stringWithFormat:@"当前视频未提供%@轨道",title] image:nil identifier:nil handler:^(UIAction *action){}];unavailable.attributes=UIMenuElementAttributesDisabled;
+        UIMenu *menu=[UIMenu menuWithTitle:title image:icon identifier:nil options:0 children:@[unavailable]];
+        if(@available(iOS 16.0,*))menu.subtitle=@"无可用轨道";
+        return menu;
+    }
     NSMutableArray *actions=[NSMutableArray array];AVMediaSelection *selection=item.currentMediaSelection;AVMediaSelectionOption *selected=[selection selectedMediaOptionInMediaSelectionGroup:group];__weak typeof(self) weakSelf=self;
     if(group.allowsEmptySelection){UIAction *off=[UIAction actionWithTitle:@"关闭" image:nil identifier:nil handler:^(UIAction *action){AVPlayerItem *current=weakSelf.player.currentItem;AVMediaSelectionGroup *currentGroup=current?[current.asset mediaSelectionGroupForMediaCharacteristic:characteristic]:nil;if(current&&currentGroup)[current selectMediaOption:nil inMediaSelectionGroup:currentGroup];}];off.state=selected?UIMenuElementStateOff:UIMenuElementStateOn;[actions addObject:off];}
     for(AVMediaSelectionOption *option in group.options){NSString *name=option.displayName.length?option.displayName:@"默认";UIAction *optAct=[UIAction actionWithTitle:name image:nil identifier:nil handler:^(UIAction *action){AVPlayerItem *current=weakSelf.player.currentItem;AVMediaSelectionGroup *currentGroup=current?[current.asset mediaSelectionGroupForMediaCharacteristic:characteristic]:nil;if(current&&currentGroup)[current selectMediaOption:option inMediaSelectionGroup:currentGroup];}];optAct.state=[selected isEqual:option]?UIMenuElementStateOn:UIMenuElementStateOff;[actions addObject:optAct];}
-    return [UIMenu menuWithTitle:title children:actions];
+    UIMenu *menu=[UIMenu menuWithTitle:title image:icon identifier:nil options:0 children:actions];
+    if(@available(iOS 16.0,*))menu.subtitle=selected?(selected.displayName.length?selected.displayName:@"默认"):(group.allowsEmptySelection?@"关闭":@"默认");
+    return menu;
 }
 - (UIMenu *)playbackRateMenu {
     __weak typeof(self) weakSelf=self;NSMutableArray *rateActions=[NSMutableArray array];
     NSArray<NSNumber *> *rates=@[@0.5,@0.75,@1.0,@1.25,@1.5,@1.75,@2.0];double currentRate=[NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaPlaybackRate"]?[[NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaPlaybackRate"] doubleValue]:1.0;
-    for(NSNumber *candidate in rates){double rate=candidate.doubleValue;NSString *title=rate==1.0?@"正常速度": [NSString stringWithFormat:@"%.2gx",rate];UIAction *rateAct=[UIAction actionWithTitle:title image:nil identifier:nil handler:^(UIAction *action){[weakSelf setPlaybackRate:rate];}];rateAct.state=fabs(currentRate-rate)<0.01?UIMenuElementStateOn:UIMenuElementStateOff;[rateActions addObject:rateAct];}
-    return [UIMenu menuWithTitle:@"播放速度" children:rateActions];
+    for(NSNumber *candidate in rates){double rate=candidate.doubleValue;NSString *title=rate==1.0?@"正常速度 (1.0×)": [NSString stringWithFormat:@"%.2g×",rate];UIAction *rateAct=[UIAction actionWithTitle:title image:nil identifier:nil handler:^(UIAction *action){[weakSelf setPlaybackRate:rate];}];rateAct.state=fabs(currentRate-rate)<0.01?UIMenuElementStateOn:UIMenuElementStateOff;[rateActions addObject:rateAct];}
+    UIMenu *menu=[UIMenu menuWithTitle:@"播放速度" image:[UIImage systemImageNamed:@"gauge.with.needle"] identifier:nil options:0 children:rateActions];
+    if(@available(iOS 16.0,*))menu.subtitle=fabs(currentRate-1.0)<0.01?@"正常 1.0×":[NSString stringWithFormat:@"%.2g×",currentRate];
+    return menu;
 }
 - (UIMenu *)playbackOptionsMenu {
     __weak typeof(self) weakSelf=self;
     NSArray *gravityValues=@[@{ @"title":@"画面适应", @"value":AVLayerVideoGravityResizeAspect },@{ @"title":@"铺满裁切", @"value":AVLayerVideoGravityResizeAspectFill },@{ @"title":@"拉伸填满", @"value":AVLayerVideoGravityResize }];
     NSMutableArray *gravityActions=[NSMutableArray array];NSString *currentGravity=[NSUserDefaults.standardUserDefaults stringForKey:@"cctv.mediaVideoGravity"]?:AVLayerVideoGravityResizeAspect;
-    for(NSDictionary *option in gravityValues){NSString *value=option[@"value"];UIAction *gravAct=[UIAction actionWithTitle:option[@"title"] image:nil identifier:nil handler:^(UIAction *action){[weakSelf setVideoGravity:value];}];gravAct.state=[currentGravity isEqual:value]?UIMenuElementStateOn:UIMenuElementStateOff;[gravityActions addObject:gravAct];}
+    NSString *currentGravityTitle=@"画面适应";
+    for(NSDictionary *option in gravityValues){NSString *value=option[@"value"];BOOL active=[currentGravity isEqual:value];if(active)currentGravityTitle=option[@"title"];UIAction *gravAct=[UIAction actionWithTitle:option[@"title"] image:nil identifier:nil handler:^(UIAction *action){[weakSelf setVideoGravity:value];}];gravAct.state=active?UIMenuElementStateOn:UIMenuElementStateOff;[gravityActions addObject:gravAct];}
+    UIMenu *gravityMenu=[UIMenu menuWithTitle:@"画面比例" image:[UIImage systemImageNamed:@"aspectratio"] identifier:nil options:0 children:gravityActions];
+    if(@available(iOS 16.0,*))gravityMenu.subtitle=currentGravityTitle;
+
     UIAction *intro=[UIAction actionWithTitle:@"将当前时间记为片头结束" image:[UIImage systemImageNamed:@"forward.end"] identifier:nil handler:^(UIAction *action){[weakSelf rememberIntroEnd];}];
     UIAction *outro=[UIAction actionWithTitle:@"将剩余时间记为片尾" image:[UIImage systemImageNamed:@"forward.end.fill"] identifier:nil handler:^(UIAction *action){[weakSelf rememberOutroSkip];}];
-    BOOL keepAwake=[NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaKeepScreenAwake"]? [NSUserDefaults.standardUserDefaults boolForKey:@"cctv.mediaKeepScreenAwake"]:YES;
-    UIAction *awake=[UIAction actionWithTitle:keepAwake?@"关闭屏幕常亮":@"保持屏幕常亮" image:[UIImage systemImageNamed:keepAwake?@"moon":@"sun.max"] identifier:nil handler:^(UIAction *action){[weakSelf setKeepScreenAwake:!keepAwake];}];
-    BOOL autoNext=[NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaAutoPlayNext"]? [NSUserDefaults.standardUserDefaults boolForKey:@"cctv.mediaAutoPlayNext"]:YES;
-    UIAction *autoNextAction=[UIAction actionWithTitle:autoNext?@"关闭自动连播下一集":@"开启自动连播下一集" image:[UIImage systemImageNamed:autoNext?@"forward.end":@"forward.end.fill"] identifier:nil handler:^(UIAction *action){[NSUserDefaults.standardUserDefaults setBool:!autoNext forKey:@"cctv.mediaAutoPlayNext"];weakSelf.playbackOptionsItem.menu=[weakSelf playbackOptionsMenu];weakSelf.status.text=!autoNext?@"已开启自动连播下一集":@"已关闭自动连播下一集";}];
     UIAction *clear=[UIAction actionWithTitle:@"清除本片跳过位置" image:[UIImage systemImageNamed:@"eraser"] identifier:nil handler:^(UIAction *action){[MediaPlaybackStateStore clearSkipPointsForContext:weakSelf.context?:@{}];[weakSelf updateSkipButtonForCurrentPosition];weakSelf.status.text=@"已清除本片的片头片尾位置";}];
-    UIAction *danmaku=[UIAction actionWithTitle:@"弹幕 · 当前视频未提供弹幕轨道" image:[UIImage systemImageNamed:@"text.bubble"] identifier:nil handler:^(UIAction *action){}];danmaku.attributes=UIMenuElementAttributesDisabled;
+    clear.attributes=UIMenuElementAttributesDestructive;
+    UIMenu *skipMenu=[UIMenu menuWithTitle:@"片头片尾跳过" image:[UIImage systemImageNamed:@"forward.end.alt"] identifier:@"media.playback.menu.skip" options:0 children:@[intro,outro,clear]];
+    if(@available(iOS 16.0,*))skipMenu.subtitle=@"设置片头 / 片尾 / 清除";
+
+    BOOL keepAwake=[NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaKeepScreenAwake"]?[NSUserDefaults.standardUserDefaults boolForKey:@"cctv.mediaKeepScreenAwake"]:YES;
+    UIAction *awake=[UIAction actionWithTitle:@"保持屏幕常亮" image:[UIImage systemImageNamed:@"sun.max"] identifier:nil handler:^(UIAction *action){[weakSelf setKeepScreenAwake:!keepAwake];}];
+    awake.state=keepAwake?UIMenuElementStateOn:UIMenuElementStateOff;
+
+    BOOL autoNext=[NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaAutoPlayNext"]?[NSUserDefaults.standardUserDefaults boolForKey:@"cctv.mediaAutoPlayNext"]:YES;
+    UIAction *autoNextAction=[UIAction actionWithTitle:@"自动连播下一集" image:[UIImage systemImageNamed:@"play.square.stack"] identifier:nil handler:^(UIAction *action){[NSUserDefaults.standardUserDefaults setBool:!autoNext forKey:@"cctv.mediaAutoPlayNext"];weakSelf.playbackOptionsItem.menu=[weakSelf playbackOptionsMenu];weakSelf.status.text=!autoNext?@"已开启自动连播下一集":@"已关闭自动连播下一集";}];
+    autoNextAction.state=autoNext?UIMenuElementStateOn:UIMenuElementStateOff;
+
+    UIAction *danmaku=[UIAction actionWithTitle:@"弹幕" image:[UIImage systemImageNamed:@"text.bubble"] identifier:nil handler:^(UIAction *action){}];
+    danmaku.subtitle=@"当前视频未提供弹幕轨道";
+    danmaku.attributes=UIMenuElementAttributesDisabled;
+
     NSString *currentDecodeMode=[[NSUserDefaults standardUserDefaults] stringForKey:@"cctv.mediaDecodeMode.v1"]?:@"auto";
-    NSArray *decodeModes=@[@{@"title":@"自动（AVPlayer → Cicada 硬解 → 软解 cc）",@"value":@"auto"},@{@"title":@"优先 CicadaPlayer 硬解",@"value":@"cicada"},@{@"title":@"强制 CicadaPlayer 软解码 (cc)",@"value":@"cicada_soft"}];
+    NSArray *decodeModes=@[@{@"title":@"自动（AVPlayer → Cicada 硬解 → 软解）",@"short":@"自动 · 智能回退",@"value":@"auto"},@{@"title":@"优先 CicadaPlayer 硬解",@"short":@"Cicada 硬解",@"value":@"cicada"},@{@"title":@"强制 CicadaPlayer 软解码 (cc)",@"short":@"Cicada 软解",@"value":@"cicada_soft"}];
     NSMutableArray *decodeActions=[NSMutableArray array];
+    NSString *decodeShort=@"自动 · 智能回退";
     for(NSDictionary *modeOpt in decodeModes){
         NSString *val=modeOpt[@"value"];
+        BOOL active=[currentDecodeMode isEqualToString:val];
+        if(active)decodeShort=modeOpt[@"short"];
         UIAction *decAct=[UIAction actionWithTitle:modeOpt[@"title"] image:nil identifier:nil handler:^(__unused UIAction *a){
             MediaPlaybackViewController *owner=weakSelf;if(!owner)return;
             [[NSUserDefaults standardUserDefaults] setObject:val forKey:@"cctv.mediaDecodeMode.v1"];
@@ -1373,8 +1410,10 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
         decAct.state=[currentDecodeMode isEqualToString:val]?UIMenuElementStateOn:UIMenuElementStateOff;
         [decodeActions addObject:decAct];
     }
-    UIMenu *decodeMenu=[UIMenu menuWithTitle:@"解码模式 (原生 / 软解 cc)" image:[UIImage systemImageNamed:@"cpu"] identifier:nil options:0 children:decodeActions];
-    UIAction *copyDiag=[UIAction actionWithTitle:@"复制当前流媒体诊断信息" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){[weakSelf copyCurrentStreamDiagnostics];}];
+    UIMenu *decodeMenu=[UIMenu menuWithTitle:@"解码模式" image:[UIImage systemImageNamed:@"cpu"] identifier:nil options:0 children:decodeActions];
+    if(@available(iOS 16.0,*))decodeMenu.subtitle=decodeShort;
+
+    UIAction *copyDiag=[UIAction actionWithTitle:@"复制流媒体诊断信息" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){[weakSelf copyCurrentStreamDiagnostics];}];
     UIAction *openMonitor=[UIAction actionWithTitle:@"站点与播放适配监测" image:[UIImage systemImageNamed:@"waveform.path.ecg"] identifier:nil handler:^(__unused UIAction *a){[weakSelf openAdaptationMonitor];}];
     NSMutableArray<UIMenuElement *> *episodeNav=[NSMutableArray array];
     if(self.episodeIndex>0&&self.episodes.count>1){
@@ -1383,12 +1422,13 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     if(self.episodeIndex+1<self.episodes.count){
         [episodeNav addObject:[UIAction actionWithTitle:@"播放下一集" image:[UIImage systemImageNamed:@"forward.end.fill"] identifier:nil handler:^(__unused UIAction *a){[weakSelf playNextEpisodeManually];}]];
     }
-    UIMenu *playbackGroup=[UIMenu menuWithTitle:@"" image:nil identifier:@"media.playback.menu.av" options:UIMenuOptionsDisplayInline children:@[decodeMenu,[self mediaSelectionMenuForCharacteristic:AVMediaCharacteristicLegible title:@"字幕"],[self mediaSelectionMenuForCharacteristic:AVMediaCharacteristicAudible title:@"音轨"],danmaku,[self playbackRateMenu],[self playbackSleepTimerMenu],[UIMenu menuWithTitle:@"画面比例" children:gravityActions]]];
-    UIMenu *prefsGroup=[UIMenu menuWithTitle:@"" image:nil identifier:@"media.playback.menu.prefs" options:UIMenuOptionsDisplayInline children:@[autoNextAction,intro,outro,clear,awake]];
-    UIMenu *diagGroup=[UIMenu menuWithTitle:@"" image:nil identifier:@"media.playback.menu.diag" options:UIMenuOptionsDisplayInline children:@[openMonitor,copyDiag]];
+    UIMenu *playbackGroup=[UIMenu menuWithTitle:@"音画与解码" image:nil identifier:@"media.playback.menu.av" options:UIMenuOptionsDisplayInline children:@[decodeMenu,[self mediaSelectionMenuForCharacteristic:AVMediaCharacteristicLegible title:@"字幕"],[self mediaSelectionMenuForCharacteristic:AVMediaCharacteristicAudible title:@"音轨"],danmaku]];
+    UIMenu *controlsGroup=[UIMenu menuWithTitle:@"播放控制" image:nil identifier:@"media.playback.menu.controls" options:UIMenuOptionsDisplayInline children:@[[self playbackRateMenu],gravityMenu,[self playbackSleepTimerMenu]]];
+    UIMenu *prefsGroup=[UIMenu menuWithTitle:@"观看偏好" image:nil identifier:@"media.playback.menu.prefs" options:UIMenuOptionsDisplayInline children:@[autoNextAction,awake,skipMenu]];
+    UIMenu *diagGroup=[UIMenu menuWithTitle:@"诊断与监测" image:nil identifier:@"media.playback.menu.diag" options:UIMenuOptionsDisplayInline children:@[openMonitor,copyDiag]];
     NSMutableArray<UIMenuElement *> *topChildren=[NSMutableArray array];
     if(episodeNav.count)[topChildren addObject:[UIMenu menuWithTitle:@"" image:nil identifier:@"media.playback.menu.episodes" options:UIMenuOptionsDisplayInline children:episodeNav]];
-    [topChildren addObjectsFromArray:@[playbackGroup,prefsGroup,diagGroup]];
+    [topChildren addObjectsFromArray:@[playbackGroup,controlsGroup,prefsGroup,diagGroup]];
     UIMenu *menu=[UIMenu menuWithChildren:topChildren];if(self.inlineOptionsButton)self.inlineOptionsButton.menu=menu;return menu;
 }
 - (void)playNextEpisodeManually {

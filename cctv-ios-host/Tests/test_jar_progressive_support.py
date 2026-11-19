@@ -313,7 +313,7 @@ class AndroidJARProgressiveSupportTests(unittest.TestCase):
         mp_code = (SOURCES / 'MediaPlaybackViewController.m').read_text(encoding='utf-8')
         self.assertIn('sniffNativeStreamFromPageResult:(NSDictionary *)result playerGeneration:(NSUInteger)playerGeneration', mp_code)
         self.assertIn('teardownHiddenStreamSniffer', mp_code)
-        self.assertIn('解码模式 (原生 / 软解 cc)', mp_code)
+        self.assertIn('menuWithTitle:@"解码模式" image:[UIImage systemImageNamed:@"cpu"]', mp_code)
         self.assertIn('强制 CicadaPlayer 软解码 (cc)', mp_code)
         self.assertIn('self.cicadaAdapterSoftwareDecodeFallbackAttempted=YES;', mp_code)
 

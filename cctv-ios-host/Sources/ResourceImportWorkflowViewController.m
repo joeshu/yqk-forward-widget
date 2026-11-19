@@ -2,6 +2,7 @@
 #import "ResourceImportFetcher.h"
 #import "ResourceImportWorkflowViewController.h"
 #import "HostTheme.h"
+#import "HostGlassActionSheetViewController.h"
 #import "MediaPackageDownloader.h"
 #import "MediaPackageImporter.h"
 #import "ResourceImportSheetViewController.h"
@@ -806,14 +807,18 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
     NSArray *subScripts=[row[@"weboxScripts"] isKindOfClass:NSArray.class]?row[@"weboxScripts"]:nil;
     if([row[@"kind"] isEqual:@"page"]){[self expandSubScriptsForCandidateAtIndex:index];return;}
     if(subScripts.count){
-        UIAlertController *sheet=[UIAlertController alertControllerWithTitle:row[@"name"]?:@"合集操作" message:@"你可以将此索引拆分为独立子脚本逐个勾选，或修改合集名称。" preferredStyle:UIAlertControllerStyleActionSheet];
         __weak typeof(self) weakSelf=self;
-        [sheet addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"展开 %lu 个独立子脚本",(unsigned long)subScripts.count] style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[weakSelf expandSubScriptsForCandidateAtIndex:index];}]];
-        [sheet addAction:[UIAlertAction actionWithTitle:@"重命名此资源" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[weakSelf promptRenameCandidateAtIndex:index];}]];
-        [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-        sheet.popoverPresentationController.sourceView=sender;
-        sheet.popoverPresentationController.sourceRect=sender.bounds;
-        [self presentViewController:sheet animated:YES completion:nil];
+        NSArray<HostGlassSheetAction *> *acts=@[
+            [HostGlassSheetAction actionWithTitle:[NSString stringWithFormat:@"展开 %lu 个独立子脚本",(unsigned long)subScripts.count] subtitle:@"拆分为独立条目逐个勾选导入" value:[NSString stringWithFormat:@"%lu 项",(unsigned long)subScripts.count] icon:@"square.stack.3d.down.right" tint:HostAccent() destructive:NO selected:NO handler:^{[weakSelf expandSubScriptsForCandidateAtIndex:index];}],
+            [HostGlassSheetAction actionWithTitle:@"重命名此资源" subtitle:@"保存前自定义合集显示名称" value:nil icon:@"pencil" tint:UIColor.systemBlueColor destructive:NO selected:NO handler:^{[weakSelf promptRenameCandidateAtIndex:index];}]
+        ];
+        [HostGlassActionSheetViewController presentOn:self
+                                                title:(row[@"name"]?:@"合集操作")
+                                             subtitle:@"你可以将此索引拆分为独立子脚本逐个勾选，或修改合集名称。"
+                                            badgeText:@"资源合集"
+                                           badgeColor:HostAccent()
+                                             sections:@[[HostGlassSheetSection sectionWithTitle:@"合集操作" actions:acts]]
+                                           sourceView:(sender?:self.view)];
         return;
     }
     [self promptRenameCandidateAtIndex:index];
@@ -896,10 +901,25 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
     [self presentViewController:chooser animated:YES completion:nil];
 }
 - (void)chooseMediaServer {
-    UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"媒体服务器类型" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
     __weak typeof(self) weakSelf=self;
-    for(NSString *type in @[@"emby",@"jellyfin",@"xtream",@"webdav"])[sheet addAction:[UIAlertAction actionWithTitle:type.capitalizedString style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[weakSelf configureMediaServer:type];}]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];sheet.popoverPresentationController.sourceView=self.view;sheet.popoverPresentationController.sourceRect=CGRectMake(20,20,1,1);[self presentViewController:sheet animated:YES completion:nil];
+    NSArray<NSDictionary *> *types=@[
+        @{@"id":@"emby",@"sub":@"个人 Emby 媒体库（支持账号或 API Key）",@"icon":@"play.rectangle.on.rectangle"},
+        @{@"id":@"jellyfin",@"sub":@"开源 Jellyfin 媒体服务器",@"icon":@"film.stack"},
+        @{@"id":@"xtream",@"sub":@"Xtream Codes 直播与点播接口",@"icon":@"antenna.radiowaves.left.and.right"},
+        @{@"id":@"webdav",@"sub":@"WebDAV 网盘与局域网共享目录",@"icon":@"externaldrive.connected.to.line.below"}
+    ];
+    NSMutableArray<HostGlassSheetAction *> *acts=[NSMutableArray array];
+    for(NSDictionary *item in types){
+        NSString *type=item[@"id"];
+        [acts addObject:[HostGlassSheetAction actionWithTitle:type.capitalizedString subtitle:item[@"sub"] value:nil icon:item[@"icon"] tint:HostAccent() destructive:NO selected:NO handler:^{[weakSelf configureMediaServer:type];}]];
+    }
+    [HostGlassActionSheetViewController presentOn:self
+                                            title:@"媒体服务器类型"
+                                         subtitle:@"选择要接入的私有媒体服务器或网盘协议"
+                                        badgeText:@"媒体服务器"
+                                       badgeColor:HostAccent()
+                                         sections:@[[HostGlassSheetSection sectionWithTitle:@"支持的协议" actions:acts]]
+                                       sourceView:self.view];
 }
 - (void)configureMediaServer:(NSString *)type {
     UIAlertController *form=[UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"添加 %@",type.capitalizedString] message:@"保存后由你手动启用；媒体是否可播放取决于格式与来源权限。" preferredStyle:UIAlertControllerStyleAlert];
@@ -1004,10 +1024,28 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
 }
 - (void)chooseExistingResourceForCandidate:(NSMutableDictionary *)row {
     NSArray *targets=[row[@"matchTargets"] isKindOfClass:NSArray.class]?row[@"matchTargets"]:@[];if(targets.count<2)return;
-    UIAlertController *choices=[UIAlertController alertControllerWithTitle:@"选择要更新的旧资源" message:@"确认后会保留所选资源的 ID 和个人设置。" preferredStyle:UIAlertControllerStyleActionSheet];
     __weak typeof(self) weakSelf=self;
-    for(NSDictionary *target in targets){NSString *title=[NSString stringWithFormat:@"%@ · %@",target[@"name"]?:@"未命名资源",target[@"kindLabel"]?:@"资源"];[choices addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){ResourceImportWorkflowViewController *owner=weakSelf;if(!owner)return;owner.editRevision++;row[@"existingResourceID"]=target[@"id"]?:@"";row[@"existingResourceKind"]=target[@"kind"]?:@"";row[@"updatePreview"]=[NSString stringWithFormat:@"将更新「%@」并保留资源身份",target[@"name"]?:@"资源"];[owner updateView];}]];}
-    [choices addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];choices.popoverPresentationController.sourceView=self.view;choices.popoverPresentationController.sourceRect=CGRectMake(CGRectGetMidX(self.view.bounds),CGRectGetMidY(self.view.bounds),1,1);[self presentViewController:choices animated:YES completion:nil];
+    NSMutableArray<HostGlassSheetAction *> *acts=[NSMutableArray array];
+    for(NSDictionary *target in targets){
+        NSString *name=target[@"name"]?:@"未命名资源";
+        NSString *kindLabel=target[@"kindLabel"]?:@"资源";
+        BOOL selected=[row[@"existingResourceID"] isEqual:target[@"id"]];
+        [acts addObject:[HostGlassSheetAction actionWithTitle:name subtitle:@"更新内容并保留原资源 ID 与个人设置" value:kindLabel icon:@"arrow.triangle.2.circlepath" tint:HostAccent() destructive:NO selected:selected handler:^{
+            ResourceImportWorkflowViewController *owner=weakSelf;if(!owner)return;
+            owner.editRevision++;
+            row[@"existingResourceID"]=target[@"id"]?:@"";
+            row[@"existingResourceKind"]=target[@"kind"]?:@"";
+            row[@"updatePreview"]=[NSString stringWithFormat:@"将更新「%@」并保留资源身份",target[@"name"]?:@"资源"];
+            [owner updateView];
+        }]];
+    }
+    [HostGlassActionSheetViewController presentOn:self
+                                            title:@"选择要更新的旧资源"
+                                         subtitle:@"确认后会保留所选资源的 ID 和个人设置。"
+                                        badgeText:[NSString stringWithFormat:@"%lu 个匹配",(unsigned long)targets.count]
+                                       badgeColor:HostAccent()
+                                         sections:@[[HostGlassSheetSection sectionWithTitle:@"匹配到的已有资源" actions:acts]]
+                                       sourceView:self.view];
 }
 - (NSMutableDictionary *)candidateForData:(NSData *)data file:(NSURL *)file origin:(NSString *)origin companions:(NSDictionary *)companions hint:(NSString *)hint {
     ResourceDetectionResult *detection=[ResourceDetectionResult inspectData:data filename:file.lastPathComponent?:@""];

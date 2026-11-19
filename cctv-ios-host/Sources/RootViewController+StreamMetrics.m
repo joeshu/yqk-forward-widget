@@ -1,4 +1,5 @@
 #import "RootViewController_Internal.h"
+#import "HostGlassActionSheetViewController.h"
 
 @implementation RootViewController (StreamMetrics)
 - (NSString *)formatBitrateMbps:(double)bps {
@@ -753,13 +754,17 @@ static BOOL CCTVPreviewImageHasValidVideoContent(UIImage *image) {
     if(nextProgram.length)[summary appendFormat:@"\n稍后播：%@",nextProgram];
     if(canonical.length)[summary appendFormat:@"\n官方台号归一：%@",canonical.uppercaseString];
     if(sameStationList.count)[summary appendFormat:@" · 发现 %lu 个同台跨源频道",(unsigned long)sameStationList.count];
-    UIAlertController *sheet=[UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"%@ · 电视台增强",name] message:summary preferredStyle:UIAlertControllerStyleActionSheet];
     __weak typeof(self) weakSelf=self;
-    for(NSDictionary *alt in sameStationList){
-        NSString *altURL=[alt[@"remoteURL"] isKindOfClass:NSString.class]?alt[@"remoteURL"]:@"";
-        NSString *sourceLabel=altURL.length?([NSURL URLWithString:altURL].host?:@"订阅源"):@"央视官方源";
-        NSString *title=[NSString stringWithFormat:@"切换同台源 · %@ (%@)",alt[@"name"]?:name,sourceLabel];
-        [sheet addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[weakSelf selectChannel:alt];}]];
+    NSMutableArray<HostGlassSheetSection *> *sections=[NSMutableArray array];
+    if(sameStationList.count){
+        NSMutableArray<HostGlassSheetAction *> *altActions=[NSMutableArray array];
+        for(NSDictionary *alt in sameStationList){
+            NSString *altURL=[alt[@"remoteURL"] isKindOfClass:NSString.class]?alt[@"remoteURL"]:@"";
+            NSString *sourceLabel=altURL.length?([NSURL URLWithString:altURL].host?:@"订阅源"):@"央视官方源";
+            NSString *title=[NSString stringWithFormat:@"切换同台源 · %@ (%@)",alt[@"name"]?:name,sourceLabel];
+            [altActions addObject:[HostGlassSheetAction actionWithTitle:title subtitle:nil value:sourceLabel icon:@"antenna.radiowaves.left.and.right" tint:HostAccent() destructive:NO selected:NO handler:^{[weakSelf selectChannel:alt];}]];
+        }
+        [sections addObject:[HostGlassSheetSection sectionWithTitle:@"同台跨源切换" actions:altActions]];
     }
     NSArray *owners=[ProfileStore subscriptionSourcesForChannel:channel];
     NSString *primarySource=([channel[@"remoteURL"] length]&&owners.count)?owners.firstObject:@"";
@@ -767,16 +772,25 @@ static BOOL CCTVPreviewImageHasValidVideoContent(UIImage *image) {
     BOOL listLogoOn=[ProfileStore isChannelLogoEnabledForSource:primarySource];
     BOOL previewOn=[ProfileStore isChannelPreviewEnabledForSource:primarySource];
     BOOL telemetryOn=[ProfileStore isChannelTelemetryEnabledForSource:primarySource];
-    [sheet addAction:[UIAlertAction actionWithTitle:cornerOn?@"隐藏此资源播放器右上角台标":@"显示此资源播放器右上角台标" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[weakSelf applyResourceChannelLogoToggleForSource:primarySource enabled:!cornerOn cornerOnly:YES];}]];
-    [sheet addAction:[UIAlertAction actionWithTitle:listLogoOn?@"关闭此资源全部台标显示":@"开启此资源全部台标显示" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[weakSelf applyResourceChannelLogoToggleForSource:primarySource enabled:!listLogoOn cornerOnly:NO];}]];
-    [sheet addAction:[UIAlertAction actionWithTitle:previewOn?@"关闭此资源频道预览图":@"开启此资源频道预览图" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[weakSelf applyResourcePreviewOrTelemetryToggleForSource:primarySource enabled:!previewOn isPreview:YES];}]];
-    [sheet addAction:[UIAlertAction actionWithTitle:telemetryOn?@"关闭此资源速率与延迟显示":@"开启此资源速率与延迟显示" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[weakSelf applyResourcePreviewOrTelemetryToggleForSource:primarySource enabled:!telemetryOn isPreview:NO];}]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"查看本台完整节目单（EPG）" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[weakSelf openEPGforChannel:cid name:name];}]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"智能匹配官方高清台标与 EPG" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[weakSelf matchOfficialStationLogosAndEPGForSource:primarySource];}]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    NSArray<HostGlassSheetAction *> *toggleActions=@[
+        [HostGlassSheetAction actionWithTitle:cornerOn?@"隐藏此资源播放器右上角台标":@"显示此资源播放器右上角台标" subtitle:nil value:cornerOn?@"已开启":@"已关闭" icon:cornerOn?@"eye.slash":@"eye" tint:HostAccent() destructive:NO selected:NO handler:^{[weakSelf applyResourceChannelLogoToggleForSource:primarySource enabled:!cornerOn cornerOnly:YES];}],
+        [HostGlassSheetAction actionWithTitle:listLogoOn?@"关闭此资源全部台标显示":@"开启此资源全部台标显示" subtitle:nil value:listLogoOn?@"已开启":@"已关闭" icon:@"photo.on.rectangle" tint:UIColor.systemBlueColor destructive:NO selected:NO handler:^{[weakSelf applyResourceChannelLogoToggleForSource:primarySource enabled:!listLogoOn cornerOnly:NO];}],
+        [HostGlassSheetAction actionWithTitle:previewOn?@"关闭此资源频道预览图":@"开启此资源频道预览图" subtitle:nil value:previewOn?@"已开启":@"已关闭" icon:@"rectangle.inset.filled.and.person.filled" tint:UIColor.systemTealColor destructive:NO selected:NO handler:^{[weakSelf applyResourcePreviewOrTelemetryToggleForSource:primarySource enabled:!previewOn isPreview:YES];}],
+        [HostGlassSheetAction actionWithTitle:telemetryOn?@"关闭此资源速率与延迟显示":@"开启此资源速率与延迟显示" subtitle:nil value:telemetryOn?@"已开启":@"已关闭" icon:@"gauge.with.dots.needle.bottom.50percent" tint:UIColor.systemOrangeColor destructive:NO selected:NO handler:^{[weakSelf applyResourcePreviewOrTelemetryToggleForSource:primarySource enabled:!telemetryOn isPreview:NO];}]
+    ];
+    [sections addObject:[HostGlassSheetSection sectionWithTitle:@"台标与遥测显示" actions:toggleActions]];
+    NSArray<HostGlassSheetAction *> *epgActions=@[
+        [HostGlassSheetAction actionWithTitle:@"查看本台完整节目单（EPG）" subtitle:@"浏览频道今日预告与回看列表" value:nil icon:@"calendar.badge.clock" tint:UIColor.systemBlueColor destructive:NO selected:NO handler:^{[weakSelf openEPGforChannel:cid name:name];}],
+        [HostGlassSheetAction actionWithTitle:@"智能匹配官方高清台标与 EPG" subtitle:@"为当前资源自动补全高清台标和节目单" value:nil icon:@"wand.and.stars" tint:HostAccent() destructive:NO selected:NO handler:^{[weakSelf matchOfficialStationLogosAndEPGForSource:primarySource];}]
+    ];
+    [sections addObject:[HostGlassSheetSection sectionWithTitle:@"节目单与台标匹配" actions:epgActions]];
     UIView *anchor=sourceView?:self.playerChannelLogo?:self.view;
-    sheet.popoverPresentationController.sourceView=anchor;
-    sheet.popoverPresentationController.sourceRect=anchor.bounds;
-    [self presentViewController:sheet animated:YES completion:nil];
+    [HostGlassActionSheetViewController presentOn:self
+                                            title:[NSString stringWithFormat:@"%@ · 电视台增强",name]
+                                         subtitle:summary
+                                        badgeText:canonical.length?canonical.uppercaseString:@"电视台增强"
+                                       badgeColor:HostAccent()
+                                         sections:sections
+                                       sourceView:anchor];
 }
 @end

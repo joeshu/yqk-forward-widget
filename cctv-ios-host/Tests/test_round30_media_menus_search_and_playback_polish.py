@@ -12,7 +12,7 @@ class TestRound30MediaMenusSearchAndPlaybackPolish(unittest.TestCase):
         src = self._read("Sources/MediaPlaybackViewController.m")
         self.assertIn("optAct.state=[selected isEqual:option]?UIMenuElementStateOn:UIMenuElementStateOff;", src)
         self.assertIn("rateAct.state=fabs(currentRate-rate)<0.01?UIMenuElementStateOn:UIMenuElementStateOff;", src)
-        self.assertIn("gravAct.state=[currentGravity isEqual:value]?UIMenuElementStateOn:UIMenuElementStateOff;", src)
+        self.assertIn("gravAct.state=active?UIMenuElementStateOn:UIMenuElementStateOff;", src)
         self.assertIn("decAct.state=[currentDecodeMode isEqualToString:val]?UIMenuElementStateOn:UIMenuElementStateOff;", src)
         self.assertIn('identifier:@"media.playback.menu.av" options:UIMenuOptionsDisplayInline', src)
         self.assertIn('identifier:@"media.playback.menu.prefs" options:UIMenuOptionsDisplayInline', src)

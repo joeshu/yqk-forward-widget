@@ -152,7 +152,7 @@ class Round11SettingsDeepAuditTests(unittest.TestCase):
         self.assertIn("NSDictionary *catchupFallback = [weakSelf anyCatchupChannelForStation:channel];", self.playback_m)
         self.assertIn("self.nativePlaybackFailed=(self.currentPlayer==nil);if(self.currentPlayer)self.firstRender=YES;", self.playback_m)
         # ISS-99 & ISS-100: cumulative seek offset, fast-forward in replay, and EPG active timeshift seek
-        self.assertIn('[self seekCurrentChannelByOffsetMinutes:-forwardMinutes.doubleValue];', self.playback_m)
+        self.assertIn('[weakSelf seekCurrentChannelByOffsetMinutes:-fmins];', self.playback_m)
         self.assertIn(
             "(!owner.firstRender && !owner.nativeTimeShiftActive && !owner.nativeTransitionKind.length)",
             self.epg_m,

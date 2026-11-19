@@ -36,7 +36,7 @@ class SpatialImmersion2026Tests(unittest.TestCase):
         palette = read_source("HostThemePalette.m")
         self.assertIn('@"glassAlpha":@0.62', palette)
         self.assertIn('@"glassAlpha":@0.64', palette)
-        self.assertIn('@"glassAlpha":@0.68', palette)
+        self.assertIn('@"glassAlpha":@0.82', palette)
         self.assertNotIn('@"glassAlpha":@0.91', palette)
 
         theme_h = read_source("HostTheme.h")

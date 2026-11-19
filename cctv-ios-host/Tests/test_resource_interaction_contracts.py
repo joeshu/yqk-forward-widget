@@ -779,7 +779,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('AVPlayerItemAccessLogEvent *event=self.player.currentItem.accessLog.events.lastObject', self.playback)
         self.assertIn('AVMediaCharacteristicLegible title:@"字幕"', self.playback)
         self.assertIn('AVMediaCharacteristicAudible title:@"音轨"', self.playback)
-        self.assertIn('弹幕 · 当前视频未提供弹幕轨道', self.playback)
+        self.assertIn('danmaku.subtitle=@"当前视频未提供弹幕轨道";', self.playback)
 
     def test_detail_and_portrait_player_extend_under_top_chrome_without_hiding_controls(self):
         detail_page = self.detail[self.detail.index('@implementation MediaDetailViewController'):

@@ -9,7 +9,7 @@ SOURCES = ROOT / "Sources"
 class UI2026DeepRefinementsTests(unittest.TestCase):
     def test_ref1_settings_theme_palette_preview_dots_and_cards(self):
         settings = (SOURCES / "SettingsViewController.m").read_text(encoding="utf-8")
-        self.assertIn('NSString *dot=theme.dark?@"● ":@"○ ";', settings)
+        self.assertIn('[HostGlassSheetSection sectionWithTitle:@"浅色主题（默认）" actions:lightActions]', settings)
         self.assertIn("cell.layer.cornerRadius=14; cell.layer.cornerCurve=kCACornerCurveContinuous;", settings)
 
     def test_ref2_root_channel_list_cell_card_rounding_and_border(self):

@@ -138,6 +138,7 @@
     self.table.estimatedRowHeight = 68;
     self.table.backgroundColor = HostBackground();
     self.table.separatorColor = HostSeparator();
+    self.table.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
     UIRefreshControl *refresh = [UIRefreshControl new];
     [refresh addTarget:self action:@selector(fetch) forControlEvents:UIControlEventValueChanged];
     self.table.refreshControl = refresh;
@@ -352,27 +353,33 @@
     NSString *selected=(self.dates.selectedSegmentIndex>=0&&self.dates.selectedSegmentIndex<self.dateKeys.count)?self.dateKeys[self.dates.selectedSegmentIndex]:nil;
     [self.dateMenuButton setTitle:selected?([selected isEqualToString:today]?@"今天":selected):@"选择日期" forState:UIControlStateNormal];
     NSMutableArray<UIAction *> *actions=[NSMutableArray array];
-    for(NSUInteger i=0;i<self.dateKeys.count;i++){NSString *key=self.dateKeys[i];NSString *title=[key isEqualToString:today]?@"今天":key;__weak typeof(self) w=self;[actions addObject:[UIAction actionWithTitle:title image:(selected&&[key isEqualToString:selected])?[UIImage systemImageNamed:@"checkmark"]:nil identifier:nil handler:^(__unused UIAction *a){w.dates.selectedSegmentIndex=(NSInteger)i;[w updateDateMenuButton];[w filterDate];}]];}
+    for(NSUInteger i=0;i<self.dateKeys.count;i++){NSString *key=self.dateKeys[i];NSString *title=[key isEqualToString:today]?@"今天":key;__weak typeof(self) w=self;UIAction *dayAct=[UIAction actionWithTitle:title image:[UIImage systemImageNamed:@"calendar"] identifier:nil handler:^(__unused UIAction *a){w.dates.selectedSegmentIndex=(NSInteger)i;[w updateDateMenuButton];[w filterDate];}];dayAct.state=(selected&&[key isEqualToString:selected])?UIMenuElementStateOn:UIMenuElementStateOff;[actions addObject:dayAct];}
     self.dateMenuButton.menu=[UIMenu menuWithTitle:@"选择日期" children:actions];
 }
 - (UIMenu *)buildProgramFilterMenu {
     __weak typeof(self) weakSelf=self;
-    UIAction *all=[UIAction actionWithTitle:@"全部节目" image:self.programFilterMode==0?[UIImage systemImageNamed:@"checkmark"]:nil identifier:nil handler:^(__unused UIAction *a){weakSelf.programFilterMode=0;weakSelf.filterMenuItem.menu=[weakSelf buildProgramFilterMenu];[weakSelf refreshInlineActionBar];[weakSelf filterDate];}];
-    UIAction *replayOnly=[UIAction actionWithTitle:@"仅看已播 / 可回看" image:self.programFilterMode==1?[UIImage systemImageNamed:@"checkmark"]:nil identifier:nil handler:^(__unused UIAction *a){weakSelf.programFilterMode=1;weakSelf.filterMenuItem.menu=[weakSelf buildProgramFilterMenu];[weakSelf refreshInlineActionBar];[weakSelf filterDate];}];
-    UIAction *remindedOnly=[UIAction actionWithTitle:@"仅看已预约提醒" image:self.programFilterMode==2?[UIImage systemImageNamed:@"checkmark"]:nil identifier:nil handler:^(__unused UIAction *a){weakSelf.programFilterMode=2;weakSelf.filterMenuItem.menu=[weakSelf buildProgramFilterMenu];[weakSelf refreshInlineActionBar];[weakSelf filterDate];}];
-    UIAction *clearReminders=[UIAction actionWithTitle:@"清空本频道预约提醒" image:[UIImage systemImageNamed:@"bell.slash"] identifier:nil handler:^(__unused UIAction *a){[weakSelf clearChannelReminders];}];
-    clearReminders.attributes=UIMenuElementAttributesDestructive;
-    NSMutableArray<UIMenuElement *> *items=[NSMutableArray arrayWithObjects:all,replayOnly,remindedOnly,nil];
+    UIAction *all=[UIAction actionWithTitle:@"全部节目" image:[UIImage systemImageNamed:@"list.bullet"] identifier:nil handler:^(__unused UIAction *a){weakSelf.programFilterMode=0;weakSelf.filterMenuItem.menu=[weakSelf buildProgramFilterMenu];[weakSelf refreshInlineActionBar];[weakSelf filterDate];}];
+    all.state=(self.programFilterMode==0)?UIMenuElementStateOn:UIMenuElementStateOff;
+    UIAction *replayOnly=[UIAction actionWithTitle:@"仅看已播 / 可回看" image:[UIImage systemImageNamed:@"clock.arrow.circlepath"] identifier:nil handler:^(__unused UIAction *a){weakSelf.programFilterMode=1;weakSelf.filterMenuItem.menu=[weakSelf buildProgramFilterMenu];[weakSelf refreshInlineActionBar];[weakSelf filterDate];}];
+    replayOnly.state=(self.programFilterMode==1)?UIMenuElementStateOn:UIMenuElementStateOff;
+    UIAction *remindedOnly=[UIAction actionWithTitle:@"仅看已预约提醒" image:[UIImage systemImageNamed:@"bell.badge"] identifier:nil handler:^(__unused UIAction *a){weakSelf.programFilterMode=2;weakSelf.filterMenuItem.menu=[weakSelf buildProgramFilterMenu];[weakSelf refreshInlineActionBar];[weakSelf filterDate];}];
+    remindedOnly.state=(self.programFilterMode==2)?UIMenuElementStateOn:UIMenuElementStateOff;
+    UIMenu *filterGroup=[UIMenu menuWithTitle:@"节目筛选" image:nil identifier:@"epg.menu.filter" options:UIMenuOptionsDisplayInline children:@[all,replayOnly,remindedOnly]];
+    NSMutableArray<UIMenuElement *> *actionItems=[NSMutableArray array];
     if(!self.xmlSource.length && self.channelID.length){
-        UIAction *load7Days=[UIAction actionWithTitle:@"加载近 7 天完整回看节目单" image:[UIImage systemImageNamed:@"calendar.badge.clock"] identifier:@"epg.load.7days" handler:^(__unused UIAction *a){[weakSelf fetchOfficialSevenDayLookback];}];
-        [items addObject:load7Days];
+        UIAction *load7Days=[UIAction actionWithTitle:@"加载近 7 天回看节目单" image:[UIImage systemImageNamed:@"calendar.badge.clock"] identifier:@"epg.load.7days" handler:^(__unused UIAction *a){[weakSelf fetchOfficialSevenDayLookback];}];
+        [actionItems addObject:load7Days];
     }
     if(self.onReturnToLive){
         UIAction *backLive=[UIAction actionWithTitle:@"返回实时直播" image:[UIImage systemImageNamed:@"dot.radiowaves.left.and.right"] identifier:@"epg.return.live" handler:^(__unused UIAction *a){if(weakSelf.onReturnToLive)weakSelf.onReturnToLive();}];
-        [items addObject:backLive];
+        [actionItems addObject:backLive];
     }
-    [items addObject:clearReminders];
-    return [UIMenu menuWithTitle:@"节目筛选与预约" children:items];
+    UIAction *clearReminders=[UIAction actionWithTitle:@"清空本频道预约提醒" image:[UIImage systemImageNamed:@"bell.slash"] identifier:nil handler:^(__unused UIAction *a){[weakSelf clearChannelReminders];}];
+    clearReminders.attributes=UIMenuElementAttributesDestructive;
+    NSMutableArray<UIMenuElement *> *sections=[NSMutableArray arrayWithObject:filterGroup];
+    if(actionItems.count)[sections addObject:[UIMenu menuWithTitle:@"回看与直播" image:nil identifier:@"epg.menu.actions" options:UIMenuOptionsDisplayInline children:actionItems]];
+    [sections addObject:[UIMenu menuWithTitle:@"" image:nil identifier:@"epg.menu.danger" options:UIMenuOptionsDisplayInline children:@[clearReminders]]];
+    return [UIMenu menuWithTitle:@"" children:sections];
 }
 
 - (void)fetchOfficialSevenDayLookback {
@@ -579,32 +586,23 @@
     BOOL activeReplayRow = (self.activeReplayStart > 0 && fabs(start - self.activeReplayStart) < 2.0);
     cell.accessoryType=replayable?UITableViewCellAccessoryDisclosureIndicator:UITableViewCellAccessoryNone;
     cell.selectionStyle=(replayable||start>now)?UITableViewCellSelectionStyleDefault:UITableViewCellSelectionStyleNone;
+    cell.transform = CGAffineTransformIdentity;
     cell.backgroundColor = (live || activeReplayRow) ? HostSelectedSurface() : HostCard();
     cell.layer.cornerRadius=13; cell.layer.cornerCurve=kCACornerCurveContinuous; cell.clipsToBounds=YES;
     cell.layer.borderWidth=(live || activeReplayRow)?1.15:0.6; HostSetLayerBorderColor(cell,live?HostAccent():HostBorder()); if(activeReplayRow)HostSetLayerBorderColor(cell,HostAccent());
     UIView *epgSpecular = [cell.contentView viewWithTag:9103];
     if (!epgSpecular) {
-        epgSpecular = [UIView new]; epgSpecular.tag = 9103; epgSpecular.translatesAutoresizingMaskIntoConstraints = NO; epgSpecular.userInteractionEnabled = NO;
+        epgSpecular = [[UIView alloc] initWithFrame:CGRectMake(12, 0, MAX(0, CGRectGetWidth(cell.contentView.bounds) - 24), 0.5)]; epgSpecular.tag = 9103; epgSpecular.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleBottomMargin; epgSpecular.userInteractionEnabled = NO;
         [cell.contentView addSubview:epgSpecular];
-        [NSLayoutConstraint activateConstraints:@[
-            [epgSpecular.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:12],
-            [epgSpecular.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-12],
-            [epgSpecular.topAnchor constraintEqualToAnchor:cell.contentView.topAnchor],
-            [epgSpecular.heightAnchor constraintEqualToConstant:0.5]
-        ]];
     }
-    epgSpecular.backgroundColor = [UIColor colorWithWhite:1.0 alpha:(live || activeReplayRow) ? 0.16 : 0.06];
+    epgSpecular.frame = CGRectMake(12, 0, MAX(0, CGRectGetWidth(cell.contentView.bounds) - 24), 0.5);
+    epgSpecular.backgroundColor = HostIsDarkThemeSelected() ? [UIColor colorWithWhite:1.0 alpha:(live || activeReplayRow) ? 0.16 : 0.06] : [(live || activeReplayRow) ? HostAccent() : HostBorder() colorWithAlphaComponent:(live || activeReplayRow) ? 0.28 : 0.65];
     UIView *epgAccentBar = [cell.contentView viewWithTag:9104];
     if (!epgAccentBar) {
-        epgAccentBar = [UIView new]; epgAccentBar.tag = 9104; epgAccentBar.translatesAutoresizingMaskIntoConstraints = NO; epgAccentBar.layer.cornerRadius = 1.75; epgAccentBar.layer.cornerCurve = kCACornerCurveContinuous; epgAccentBar.userInteractionEnabled = NO;
+        epgAccentBar = [[UIView alloc] initWithFrame:CGRectMake(4, floor((CGRectGetHeight(cell.contentView.bounds) - 24.0) * 0.5), 3.5, 24.0)]; epgAccentBar.tag = 9104; epgAccentBar.autoresizingMask = UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleBottomMargin | UIViewAutoresizingFlexibleRightMargin; epgAccentBar.layer.cornerRadius = 1.75; epgAccentBar.layer.cornerCurve = kCACornerCurveContinuous; epgAccentBar.userInteractionEnabled = NO;
         [cell.contentView addSubview:epgAccentBar];
-        [NSLayoutConstraint activateConstraints:@[
-            [epgAccentBar.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:4],
-            [epgAccentBar.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
-            [epgAccentBar.widthAnchor constraintEqualToConstant:3.5],
-            [epgAccentBar.heightAnchor constraintEqualToConstant:24]
-        ]];
     }
+    epgAccentBar.frame = CGRectMake(4, floor((CGRectGetHeight(cell.contentView.bounds) - 24.0) * 0.5), 3.5, 24.0);
     BOOL isRemindedRow = [self isProgramReminded:row];
     epgAccentBar.backgroundColor = (live || activeReplayRow) ? HostAccent() : (isRemindedRow ? UIColor.systemOrangeColor : (replayable ? [HostAccent() colorWithAlphaComponent:0.38] : UIColor.clearColor));
     NSString *statusPillText = activeReplayRow ? @"  ↺ 回看中  " : (live ? @"  ● 直播中  " : (replayable ? @"  ↺ 回看  " : (isRemindedRow ? @"  ⏰ 已预约  " : @"")));

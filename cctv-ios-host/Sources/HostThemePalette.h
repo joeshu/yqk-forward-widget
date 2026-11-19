@@ -4,7 +4,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 // 主题色板偏好：保存所选主题的标识；未设置或未知标识时回退到默认主题。
 static NSString * const HostThemePaletteIdentifierPreferenceKey = @"cctv.themeIdentifier.v1";
-static NSString * const HostThemePaletteDefaultIdentifier = @"midnight";
+static NSString * const HostThemePaletteDefaultIdentifier = @"daylight";
 
 // 一套主题的完整色板。15 个颜色角色与 HostTheme.h 的 HostXxx() 辅助函数一一对应，
 // 各页面只通过 HostXxx() 取色，因此换主题不需要逐个页面改色值。

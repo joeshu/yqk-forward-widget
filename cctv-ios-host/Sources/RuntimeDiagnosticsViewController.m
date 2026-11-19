@@ -45,6 +45,7 @@
     self.table.separatorColor = HostSeparator();
     self.table.dataSource = self; self.table.delegate = self;
     self.table.rowHeight = UITableViewAutomaticDimension; self.table.estimatedRowHeight = 86;
+    self.table.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
     self.table.tintColor = HostAccent();
     HostInstallGlassBackdrop(self.table);
     UIRefreshControl *rc = [UIRefreshControl new];

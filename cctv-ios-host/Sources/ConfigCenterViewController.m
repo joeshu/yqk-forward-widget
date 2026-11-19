@@ -1,5 +1,6 @@
 #import "ConfigCenterViewController.h"
 #import "HostTheme.h"
+#import "HostGlassActionSheetViewController.h"
 #import "HostLogRedactor.h"
 #import "ProfileStore.h"
 #import "MediaAdaptationMonitor.h"
@@ -923,17 +924,17 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     HostSetLayerBorderColor(self.sortFilterButton,customSort?[HostAccent() colorWithAlphaComponent:0.35]:HostBorder());
     self.sortFilterButton.accessibilityLabel=[NSString stringWithFormat:@"资源排序：%@",shortTitle];
     __weak typeof(self) weakSelf=self;
-    NSArray *sortOptions=@[@{@"id":@"manual",@"name":@"手动顺序"},@{@"id":@"name",@"name":@"名称 A–Z"},@{@"id":@"recent",@"name":@"最近更新"},@{@"id":@"attention",@"name":@"待处理优先"},@{@"id":@"latency",@"name":@"测速最快优先"}];
+    NSArray *sortOptions=@[@{@"id":@"manual",@"name":@"手动顺序",@"icon":@"line.3.horizontal"},@{@"id":@"name",@"name":@"名称 A–Z",@"icon":@"textformat.abc"},@{@"id":@"recent",@"name":@"最近更新",@"icon":@"clock"},@{@"id":@"attention",@"name":@"待处理优先",@"icon":@"exclamationmark.triangle"},@{@"id":@"latency",@"name":@"测速最快优先",@"icon":@"gauge.with.needle"}];
     NSMutableArray<UIMenuElement *> *children=[NSMutableArray array];
     for(NSDictionary *option in sortOptions){
-        NSString *identifier=option[@"id"],*name=option[@"name"];
-        UIAction *action=[UIAction actionWithTitle:name image:[UIImage systemImageNamed:[identifier isEqual:self.sortMode]?@"checkmark":@"arrow.up.arrow.down"] identifier:nil handler:^(__unused UIAction *a){
+        NSString *identifier=option[@"id"],*name=option[@"name"],*icon=option[@"icon"];
+        UIAction *action=[UIAction actionWithTitle:name image:[UIImage systemImageNamed:icon] identifier:nil handler:^(__unused UIAction *a){
             ConfigCenterViewController *owner=weakSelf;if(!owner)return;
             owner.sortMode=identifier;
             [NSUserDefaults.standardUserDefaults setObject:identifier forKey:@"resourceListSortMode"];
             [owner reloadProfiles];
         }];
-        if([identifier isEqual:self.sortMode])action.state=UIMenuElementStateOn;
+        action.state=[identifier isEqual:self.sortMode]?UIMenuElementStateOn:UIMenuElementStateOff;
         [children addObject:action];
     }
     UIAction *moreFilter=[UIAction actionWithTitle:@"筛选与诊断摘要…" image:[UIImage systemImageNamed:@"line.3.horizontal.decrease.circle"] identifier:nil handler:^(__unused UIAction *a){[weakSelf showResourceFilters];}];
@@ -996,16 +997,41 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
 }
 - (void)showResourceFilters {
     NSString *sortName=@{@"manual":@"手动顺序",@"name":@"名称 A–Z",@"recent":@"最近更新",@"attention":@"待处理优先",@"latency":@"测速最快优先"}[self.sortMode]?:@"手动顺序";
-    UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"筛选与排序" message:[NSString stringWithFormat:@"来源筛选 · %@\n排序方式 · %@",[self.selectedKind isEqual:@"all"]?@"全部来源":self.selectedKind,sortName] preferredStyle:UIAlertControllerStyleActionSheet];
-    NSArray *sortOptions=@[@{@"id":@"manual",@"name":@"手动顺序"},@{@"id":@"name",@"name":@"名称 A–Z"},@{@"id":@"recent",@"name":@"最近更新"},@{@"id":@"attention",@"name":@"待处理优先"},@{@"id":@"latency",@"name":@"测速最快优先"}];
+    NSArray *sortOptions=@[@{@"id":@"manual",@"name":@"手动顺序",@"icon":@"line.3.horizontal"},@{@"id":@"name",@"name":@"名称 A–Z",@"icon":@"textformat.abc"},@{@"id":@"recent",@"name":@"最近更新",@"icon":@"clock"},@{@"id":@"attention",@"name":@"待处理优先",@"icon":@"exclamationmark.triangle"},@{@"id":@"latency",@"name":@"测速最快优先",@"icon":@"gauge.with.needle"}];
     __weak typeof(self) weakSelf=self;
-    for(NSDictionary *option in sortOptions){NSString *identifier=option[@"id"],*name=option[@"name"];NSString *title=[NSString stringWithFormat:@"排序 · %@%@",name,[identifier isEqual:self.sortMode]?@" ✓":@""];[sheet addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){ConfigCenterViewController *owner=weakSelf;if(!owner)return;owner.sortMode=identifier;[NSUserDefaults.standardUserDefaults setObject:identifier forKey:@"resourceListSortMode"];[owner reloadProfiles];}]];}
-    NSMutableArray *options=[NSMutableArray arrayWithArray:@[@{@"id":@"all",@"name":@"全部来源"},@{@"id":@"enabled",@"name":@"仅已启用资源"},@{@"id":@"script",@"name":@"脚本资源"}]];
-    NSMutableSet *seen=[NSMutableSet set];for(NSDictionary *profile in self.allProfiles){NSString *domain=[self resourceDomainForProfile:profile];if(!domain.length||[seen containsObject:domain])continue;[seen addObject:domain];[options addObject:@{@"id":[@"domain:" stringByAppendingString:domain],@"name":domain}];}
-    for(NSDictionary *option in options){NSString *identifier=option[@"id"],*name=option[@"name"];NSString *title=[NSString stringWithFormat:@"来源 · %@%@",name,[identifier isEqual:self.selectedKind]?@" ✓":@""];[sheet addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){ConfigCenterViewController *owner=weakSelf;if(!owner)return;owner.selectedKind=identifier;[owner reloadProfiles];}]];}
-    [sheet addAction:[UIAlertAction actionWithTitle:@"复制资源概览摘要" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[weakSelf copyResourceDiagnosticSummary];}]];
-    if(self.latencyResults.count)[sheet addAction:[UIAlertAction actionWithTitle:@"清除连接测速结果" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[weakSelf.latencyResults removeAllObjects];[weakSelf updateDashboardCard];[weakSelf.tableView reloadData];[weakSelf showResourceToast:@"已清除连接测速结果"];}]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];sheet.popoverPresentationController.sourceView=self.topActionsStack;sheet.popoverPresentationController.sourceRect=self.topActionsStack.bounds;[self presentViewController:sheet animated:YES completion:nil];
+    NSMutableArray<HostGlassSheetAction *> *sortActions=[NSMutableArray array];
+    for(NSDictionary *option in sortOptions){
+        NSString *identifier=option[@"id"],*name=option[@"name"],*icon=option[@"icon"];
+        [sortActions addObject:[HostGlassSheetAction actionWithTitle:name subtitle:nil value:nil icon:icon tint:HostAccent() destructive:NO selected:[identifier isEqual:self.sortMode] handler:^{
+            ConfigCenterViewController *owner=weakSelf;if(!owner)return;
+            owner.sortMode=identifier;[NSUserDefaults.standardUserDefaults setObject:identifier forKey:@"resourceListSortMode"];[owner reloadProfiles];
+        }]];
+    }
+    NSMutableArray *options=[NSMutableArray arrayWithArray:@[@{@"id":@"all",@"name":@"全部来源",@"icon":@"tray.full"},@{@"id":@"enabled",@"name":@"仅已启用资源",@"icon":@"checkmark.circle"},@{@"id":@"script",@"name":@"脚本资源",@"icon":@"terminal"}]];
+    NSMutableSet *seen=[NSMutableSet set];for(NSDictionary *profile in self.allProfiles){NSString *domain=[self resourceDomainForProfile:profile];if(!domain.length||[seen containsObject:domain])continue;[seen addObject:domain];[options addObject:@{@"id":[@"domain:" stringByAppendingString:domain],@"name":domain,@"icon":@"globe"}];}
+    NSMutableArray<HostGlassSheetAction *> *sourceActions=[NSMutableArray array];
+    for(NSDictionary *option in options){
+        NSString *identifier=option[@"id"],*name=option[@"name"],*icon=option[@"icon"];
+        [sourceActions addObject:[HostGlassSheetAction actionWithTitle:name subtitle:nil value:nil icon:icon tint:UIColor.systemBlueColor destructive:NO selected:[identifier isEqual:self.selectedKind] handler:^{
+            ConfigCenterViewController *owner=weakSelf;if(!owner)return;
+            owner.selectedKind=identifier;[owner reloadProfiles];
+        }]];
+    }
+    NSMutableArray<HostGlassSheetAction *> *toolActions=[NSMutableArray arrayWithObject:[HostGlassSheetAction actionWithTitle:@"复制资源概览摘要" subtitle:@"复制当前合集、订阅与运行态统计" value:nil icon:@"doc.on.doc" tint:UIColor.systemTealColor destructive:NO selected:NO handler:^{
+        [weakSelf copyResourceDiagnosticSummary];
+    }]];
+    if(self.latencyResults.count){
+        [toolActions addObject:[HostGlassSheetAction actionWithTitle:@"清除连接测速结果" subtitle:@"重置所有节点的响应延迟记录" value:nil icon:@"arrow.counterclockwise" tint:UIColor.systemOrangeColor destructive:NO selected:NO handler:^{
+            ConfigCenterViewController *owner=weakSelf;if(!owner)return;
+            [owner.latencyResults removeAllObjects];[owner updateDashboardCard];[owner.tableView reloadData];[owner showResourceToast:@"已清除连接测速结果"];
+        }]];
+    }
+    NSArray<HostGlassSheetSection *> *sections=@[
+        [HostGlassSheetSection sectionWithTitle:@"排序方式" actions:sortActions],
+        [HostGlassSheetSection sectionWithTitle:@"来源筛选" actions:sourceActions],
+        [HostGlassSheetSection sectionWithTitle:@"诊断与测速" actions:toolActions]
+    ];
+    [HostGlassActionSheetViewController presentOn:self title:@"筛选与排序" subtitle:[NSString stringWithFormat:@"当前筛选：%@ · 排序：%@",[self.selectedKind isEqual:@"all"]?@"全部来源":self.selectedKind,sortName] badgeText:sortName badgeColor:HostAccent() sections:sections sourceView:(self.topActionsStack?:self.view)];
 }
 - (void)selectKind:(UIButton *)sender {NSString *kind=[sender.accessibilityIdentifier stringByReplacingOccurrencesOfString:@"resource-filter-" withString:@""];if(!kind.length||[kind isEqual:self.selectedKind])return;self.selectedKind=kind;[self reloadProfiles];}
 - (BOOL)profile:(NSDictionary *)profile matchesSearchQuery:(NSString *)query {
@@ -1654,14 +1680,24 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     else if([profile[@"type"] isEqual:@"tvbox"]){if([source hasPrefix:@"tvbox:"]&&self.onOpenTVBoxCatalog)self.onOpenTVBoxCatalog([source substringFromIndex:6]);}
     else {
         if(self.onOpenSubscription){self.onOpenSubscription(source);return;}
-        UIAlertController *actions=[UIAlertController alertControllerWithTitle:profile[@"name"]?:@"订阅" message:source.length?source:nil preferredStyle:UIAlertControllerStyleActionSheet];
-        if(self.onSelectProfile)[actions addAction:[UIAlertAction actionWithTitle:@"打开频道" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){self.onSelectProfile(source);}]];
-        if(source.length&&self.onEditProfile)[actions addAction:[UIAlertAction actionWithTitle:@"编辑订阅与节目单" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){self.onEditProfile(source);}]];
-        if(source.length&&self.onRefreshProfile)[actions addAction:[UIAlertAction actionWithTitle:@"刷新此订阅" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){self.onRefreshProfile(source);}]];
-        if(source.length&&self.onRecheckProfile)[actions addAction:[UIAlertAction actionWithTitle:@"重新检测健康" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){self.onRecheckProfile(source);}]];
-        if(source.length&&self.onRematchEPGProfile)[actions addAction:[UIAlertAction actionWithTitle:@"重新匹配节目单（EPG）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){self.onRematchEPGProfile(source);}]];
-        [actions addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-        UITableViewCell *cell=[tableView cellForRowAtIndexPath:ip];actions.popoverPresentationController.sourceView=cell?:self.view;actions.popoverPresentationController.sourceRect=cell?cell.bounds:CGRectMake(CGRectGetMidX(self.view.bounds),CGRectGetMidY(self.view.bounds),1,1);[self presentViewController:actions animated:YES completion:nil];
+        NSMutableArray<HostGlassSheetAction *> *primaryActions=[NSMutableArray array];
+        if(self.onSelectProfile)[primaryActions addObject:[HostGlassSheetAction actionWithTitle:@"打开频道" subtitle:@"在频道页仅查看此订阅源" value:nil icon:@"tv" tint:HostAccent() destructive:NO selected:NO handler:^{self.onSelectProfile(source);}]];
+        if(source.length&&self.onEditProfile)[primaryActions addObject:[HostGlassSheetAction actionWithTitle:@"编辑订阅与节目单" subtitle:@"修改名称、地址、请求头与 EPG" value:nil icon:@"slider.horizontal.3" tint:UIColor.systemBlueColor destructive:NO selected:NO handler:^{self.onEditProfile(source);}]];
+        NSMutableArray<HostGlassSheetAction *> *maintActions=[NSMutableArray array];
+        if(source.length&&self.onRefreshProfile)[maintActions addObject:[HostGlassSheetAction actionWithTitle:@"刷新此订阅" subtitle:@"重新拉取最新频道列表" value:nil icon:@"arrow.clockwise" tint:HostAccent() destructive:NO selected:NO handler:^{self.onRefreshProfile(source);}]];
+        if(source.length&&self.onRecheckProfile)[maintActions addObject:[HostGlassSheetAction actionWithTitle:@"重新检测健康" subtitle:@"检测源站可达性与响应状态" value:nil icon:@"waveform.path.ecg" tint:UIColor.systemTealColor destructive:NO selected:NO handler:^{self.onRecheckProfile(source);}]];
+        if(source.length&&self.onRematchEPGProfile)[maintActions addObject:[HostGlassSheetAction actionWithTitle:@"重新匹配节目单（EPG）" subtitle:@"自动关联官方台标与节目预告" value:nil icon:@"calendar.badge.clock" tint:UIColor.systemOrangeColor destructive:NO selected:NO handler:^{self.onRematchEPGProfile(source);}]];
+        NSMutableArray<HostGlassSheetSection *> *sections=[NSMutableArray array];
+        if(primaryActions.count)[sections addObject:[HostGlassSheetSection sectionWithTitle:@"频道与配置" actions:primaryActions]];
+        if(maintActions.count)[sections addObject:[HostGlassSheetSection sectionWithTitle:@"维护与检测" actions:maintActions]];
+        UITableViewCell *cell=[tableView cellForRowAtIndexPath:ip];
+        [HostGlassActionSheetViewController presentOn:self
+                                                title:profile[@"name"]?:@"订阅"
+                                             subtitle:source.length?source:nil
+                                            badgeText:@"直播订阅"
+                                           badgeColor:HostAccent()
+                                             sections:sections
+                                           sourceView:cell?:self.view];
     }
 }
 - (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView

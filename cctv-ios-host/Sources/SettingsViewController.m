@@ -1,5 +1,6 @@
 #import "SettingsViewController.h"
 #import "HostTheme.h"
+#import "HostGlassActionSheetViewController.h"
 #import "HostImageLoader.h"
 #import "MediaMetadataCache.h"
 #import "MediaPlaybackStateStore.h"
@@ -360,7 +361,7 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
     self.allSections=@[
       @{ @"category":@"appearance", @"icon":@"paintbrush.fill", @"subtitle":@"主题色板 · 全局字号 · 导航恢复", @"title":@"外观与界面导航", @"footer":@"主题实时应用于全局；下方色板提供 6 套主题（4 套深色沉浸、2 套浅色），点选即时生效，无需重启。字号与底部导航偏好即时刷新生效。", @"rows":@[
         @{ @"title":@"全局主题", @"detail":@"系统 / 浅色 / 深色 · 全端即时响应", @"key":HostThemeModePreferenceKey, @"appearance":@YES, @"icon":@"circle.lefthalf.filled", @"subgroup":@"视觉风格" },
-        @{ @"title":@"主题色板", @"detail":@"午夜影院", @"action":@"themePalette", @"icon":@"paintpalette", @"subgroup":@"视觉风格" },
+        @{ @"title":@"主题色板", @"detail":@"晨光白", @"action":@"themePalette", @"icon":@"paintpalette", @"subgroup":@"视觉风格" },
         @{ @"title":@"字号", @"detail":@"应用内全局动态字号档位", @"key":@"cctv.appFontSize.v1", @"segmented":@YES, @"options":@[@"标准",@"大",@"特大"], @"values":@[@0,@1,@2], @"default":@0, @"icon":@"textformat.size", @"subgroup":@"界面排版" },
         @{ @"title":@"启动时恢复上次打开的页面", @"detail":@"关闭后每次启动默认进入央视直播页", @"key":@"cctv.restoreLastTab.v1", @"icon":@"arrow.uturn.left", @"default":@YES, @"subgroup":@"导航记忆" }
       ]},
@@ -671,7 +672,7 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
     if(self.heroQuickTilesStack){
         NSArray<UIView *> *tiles=self.heroQuickTilesStack.arrangedSubviews;
         NSArray<NSString *> *subtitles=@[
-            [HostThemePalette currentPalette].displayName?:@"午夜影院",
+            [HostThemePalette currentPalette].displayName?:@"晨光白",
             SettingsPreferredQualityText(),
             MediaAdaptationMonitor.shared.monitoringEnabled?@"实时监测中":@"已暂停",
             SettingsCompactCacheSizeText()
@@ -874,7 +875,7 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
     self.heroQuickTilesStack=quickTilesStack;
 
     NSArray<NSDictionary *> *quickSpecs=@[
-        @{@"title":@"外观色板", @"sub":[HostThemePalette currentPalette].displayName?:@"午夜影院", @"icon":@"paintpalette.fill", @"cat":@"appearance", @"id":@"settings.quick.theme"},
+        @{@"title":@"外观色板", @"sub":[HostThemePalette currentPalette].displayName?:@"晨光白", @"icon":@"paintpalette.fill", @"cat":@"appearance", @"id":@"settings.quick.theme"},
         @{@"title":@"默认画质", @"sub":qualityLabel, @"icon":@"4k.tv", @"cat":@"live", @"id":@"settings.quick.quality"},
         @{@"title":@"适配监测", @"sub":MediaAdaptationMonitor.shared.monitoringEnabled?@"实时监测中":@"已暂停", @"icon":@"waveform.path.ecg", @"cat":@"diagnostics", @"id":@"settings.quick.monitor"},
         @{@"title":@"释放缓存", @"sub":SettingsCompactCacheSizeText(), @"icon":@"sparkles", @"cat":@"storage", @"role":@"cache", @"id":@"settings.quick.cache"}
@@ -1069,35 +1070,40 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
 - (void)presentHeroQuickActionsSheet:(UIButton *)sender {
     if(self.presentedViewController)return;
     SettingsTriggerHapticSelection();
-    UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"设置中心全局操作" message:@"支持一键展开或收起分组、快速释放缓存、导出备份或复制诊断快照。" preferredStyle:UIAlertControllerStyleActionSheet];
     BOOL hasCollapsed=self.collapsedCategories.count>0;
-    [sheet addAction:[UIAlertAction actionWithTitle:hasCollapsed?@"展开全部分组":@"收起非首屏分组" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
-        if(hasCollapsed){
-            [self.collapsedCategories removeAllObjects];
-        }else{
-            for(NSDictionary *sec in self.allSections){
-                NSString *cat=sec[@"category"];
-                if(cat.length && ![cat isEqualToString:@"appearance"])[self.collapsedCategories addObject:cat];
+    NSString *cacheSize=SettingsCompactCacheSizeText();
+    __weak typeof(self) weakSelf=self;
+    HostGlassSheetSection *viewCacheSection=[HostGlassSheetSection sectionWithTitle:@"视图与缓存" actions:@[
+        [HostGlassSheetAction actionWithTitle:(hasCollapsed?@"展开全部分组":@"收起非首屏分组") subtitle:@"快速调整设置页面的分组折叠状态" value:nil icon:(hasCollapsed?@"rectangle.expand.vertical":@"rectangle.compress.vertical") tint:HostAccent() destructive:NO selected:NO handler:^{
+            SettingsViewController *owner=weakSelf;if(!owner)return;
+            if(hasCollapsed){
+                [owner.collapsedCategories removeAllObjects];
+            }else{
+                for(NSDictionary *sec in owner.allSections){
+                    NSString *cat=sec[@"category"];
+                    if(cat.length && ![cat isEqualToString:@"appearance"])[owner.collapsedCategories addObject:cat];
+                }
             }
-        }
-        [self.table reloadData];
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"一键清理全部缓存（%@）",SettingsCompactCacheSizeText()] style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
-        [self confirmClearAllCaches];
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"导出本机配置备份" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
-        if(self.onExportData)self.onExportData();
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"复制版本与运行环境摘要" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
-        [self copyVersionDiagnosticsFromIndexPath:nil];
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"恢复默认偏好设置" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action){
-        [self confirmResetDefaultPreferences];
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    sheet.popoverPresentationController.sourceView=sender?:self.view;
-    sheet.popoverPresentationController.sourceRect=sender?sender.bounds:CGRectMake(CGRectGetMidX(self.view.bounds),60,1,1);
-    [self presentViewController:sheet animated:YES completion:nil];
+            [owner.table reloadData];
+        }],
+        [HostGlassSheetAction actionWithTitle:@"一键清理全部缓存" subtitle:@"释放海报、节目单与临时网络缓存" value:cacheSize icon:@"trash.circle.fill" tint:UIColor.systemOrangeColor destructive:NO selected:NO handler:^{
+            [weakSelf confirmClearAllCaches];
+        }]
+    ]];
+    HostGlassSheetSection *backupDiagSection=[HostGlassSheetSection sectionWithTitle:@"备份与诊断" actions:@[
+        [HostGlassSheetAction actionWithTitle:@"导出本机配置备份" subtitle:@"打包收藏、历史、订阅与插件偏好" value:nil icon:@"square.and.arrow.up" tint:UIColor.systemBlueColor destructive:NO selected:NO handler:^{
+            if(weakSelf.onExportData)weakSelf.onExportData();
+        }],
+        [HostGlassSheetAction actionWithTitle:@"复制版本与运行环境摘要" subtitle:@"便于反馈问题或留存排查快照" value:nil icon:@"doc.on.doc" tint:UIColor.systemTealColor destructive:NO selected:NO handler:^{
+            [weakSelf copyVersionDiagnosticsFromIndexPath:nil];
+        }]
+    ]];
+    HostGlassSheetSection *dangerSection=[HostGlassSheetSection sectionWithTitle:@"重置" actions:@[
+        [HostGlassSheetAction actionWithTitle:@"恢复默认偏好设置" subtitle:@"重置外观与播放偏好，保留已导入资源" value:nil icon:@"arrow.counterclockwise" tint:UIColor.systemRedColor destructive:YES selected:NO handler:^{
+            [weakSelf confirmResetDefaultPreferences];
+        }]
+    ]];
+    [HostGlassActionSheetViewController presentOn:self title:@"设置中心全局操作" subtitle:@"一键管理分组折叠、释放本机缓存、导出配置备份或复制诊断快照。" badgeText:[NSString stringWithFormat:@"当前缓存 · %@",cacheSize] badgeColor:HostAccent() sections:@[viewCacheSection,backupDiagSection,dangerSection] sourceView:(sender?:self.view)];
 }
 
 - (void)selectCategoryPill:(UIButton *)sender {
@@ -1648,8 +1654,8 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
             if(self.onPreferenceChanged)self.onPreferenceChanged(@"cctv.mediaVideoGravity",YES);
         }else if([action isEqualToString:@"themePalette"]){
             [HostThemePalette setCurrentPaletteIdentifier:HostThemePaletteDefaultIdentifier];
-            [defaults setObject:@"dark" forKey:HostThemeModePreferenceKey];
-            [defaults setBool:YES forKey:HostDarkThemePreferenceKey];
+            [defaults setObject:@"light" forKey:HostThemeModePreferenceKey];
+            [defaults setBool:NO forKey:HostDarkThemePreferenceKey];
             UIWindow *window=self.view.window;
             if(window){HostApplyThemeToWindow(window);HostStyleNavigation(self.navigationController);HostRefreshAppearanceLayers(window);}
             [self reloadThemeAppearance];
@@ -1812,44 +1818,98 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
 }
 
 - (void)presentPlaybackRatePicker:(NSIndexPath *)ip {
+    if(self.presentedViewController)return;
     double current=[[NSUserDefaults standardUserDefaults] objectForKey:@"cctv.mediaPlaybackRate"]?[[NSUserDefaults standardUserDefaults] doubleForKey:@"cctv.mediaPlaybackRate"]:1.0;
-    UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"默认播放速度" message:@"下次播放影视时生效，也可在播放器右上角菜单里临时调整。" preferredStyle:UIAlertControllerStyleActionSheet];
-    for(NSNumber *candidate in @[@0.5,@0.75,@1.0,@1.25,@1.5,@1.75,@2.0]){
+    __weak typeof(self) weakSelf=self;
+    NSMutableArray<HostGlassSheetAction *> *baseChips=[NSMutableArray array];
+    for(NSNumber *candidate in @[@0.5,@0.75,@1.0]){
         double rate=candidate.doubleValue;
         NSString *title=rate==1.0?@"正常速度":[NSString stringWithFormat:@"%.2gx",rate];
-        [sheet addAction:[UIAlertAction actionWithTitle:fabs(current-rate)<0.01?[title stringByAppendingString:@" ✓"]:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+        BOOL selected=fabs(current-rate)<0.01;
+        [baseChips addObject:[HostGlassSheetAction actionWithTitle:title subtitle:nil value:nil icon:nil tint:HostAccent() destructive:NO selected:selected handler:^{
+            SettingsViewController *owner=weakSelf;if(!owner)return;
             [NSUserDefaults.standardUserDefaults setDouble:rate forKey:@"cctv.mediaPlaybackRate"];
-            [self.table reloadRowsAtIndexPaths:@[ip] withRowAnimation:UITableViewRowAnimationNone];
-            if(self.onPreferenceChanged)self.onPreferenceChanged(@"cctv.mediaPlaybackRate",YES);
+            [owner.table reloadRowsAtIndexPaths:@[ip] withRowAnimation:UITableViewRowAnimationNone];
+            if(owner.onPreferenceChanged)owner.onPreferenceChanged(@"cctv.mediaPlaybackRate",YES);
             UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,[NSString stringWithFormat:@"默认播放速度已设为%@",title]);
         }]];
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    [self presentActionSheet:sheet fromIndexPath:ip];
+    NSMutableArray<HostGlassSheetAction *> *fastChips=[NSMutableArray array];
+    for(NSNumber *candidate in @[@1.25,@1.5,@1.75,@2.0]){
+        double rate=candidate.doubleValue;
+        NSString *title=[NSString stringWithFormat:@"%.2gx",rate];
+        BOOL selected=fabs(current-rate)<0.01;
+        [fastChips addObject:[HostGlassSheetAction actionWithTitle:title subtitle:nil value:nil icon:nil tint:HostAccent() destructive:NO selected:selected handler:^{
+            SettingsViewController *owner=weakSelf;if(!owner)return;
+            [NSUserDefaults.standardUserDefaults setDouble:rate forKey:@"cctv.mediaPlaybackRate"];
+            [owner.table reloadRowsAtIndexPaths:@[ip] withRowAnimation:UITableViewRowAnimationNone];
+            if(owner.onPreferenceChanged)owner.onPreferenceChanged(@"cctv.mediaPlaybackRate",YES);
+            UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,[NSString stringWithFormat:@"默认播放速度已设为%@",title]);
+        }]];
+    }
+    UITableViewCell *cell=[self.table cellForRowAtIndexPath:ip];
+    NSString *badge=fabs(current-1.0)<0.01?@"当前 · 正常速度":[NSString stringWithFormat:@"当前 · %.2gx",current];
+    [HostGlassActionSheetViewController presentOn:self
+                                            title:@"默认播放速度"
+                                         subtitle:@"下次播放影视时生效，也可在播放器右上角菜单里临时调整。"
+                                        badgeText:badge
+                                       badgeColor:HostAccent()
+                                         sections:@[
+                                             [HostGlassSheetSection chipSectionWithTitle:@"慢速与标准" actions:baseChips],
+                                             [HostGlassSheetSection chipSectionWithTitle:@"倍速播放" actions:fastChips]
+                                         ]
+                                       sourceView:cell?:self.view];
 }
 
 - (void)presentVideoGravityPicker:(NSIndexPath *)ip {
+    if(self.presentedViewController)return;
     NSString *current=[[NSUserDefaults standardUserDefaults] stringForKey:@"cctv.mediaVideoGravity"]?:AVLayerVideoGravityResizeAspect;
-    UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"默认画面比例" message:@"下次播放影视时生效，也可在播放器右上角菜单里临时调整。" preferredStyle:UIAlertControllerStyleActionSheet];
-    for(NSDictionary *option in @[@{@"title":@"画面适应",@"value":AVLayerVideoGravityResizeAspect},@{@"title":@"铺满裁切",@"value":AVLayerVideoGravityResizeAspectFill},@{@"title":@"拉伸填满",@"value":AVLayerVideoGravityResize}]){
+    __weak typeof(self) weakSelf=self;
+    NSArray<NSDictionary *> *options=@[
+        @{@"title":@"画面适应",@"sub":@"保持原始宽高比，完整显示画面不裁切",@"icon":@"rectangle.arrowtriangle.2.inward",@"value":AVLayerVideoGravityResizeAspect},
+        @{@"title":@"铺满裁切",@"sub":@"按比例放大填满屏幕，边缘超出部分自动裁切",@"icon":@"rectangle.arrowtriangle.2.outward",@"value":AVLayerVideoGravityResizeAspectFill},
+        @{@"title":@"拉伸填满",@"sub":@"强制拉伸画面贴合屏幕边界",@"icon":@"arrow.up.left.and.arrow.down.right",@"value":AVLayerVideoGravityResize}
+    ];
+    NSMutableArray<HostGlassSheetAction *> *rows=[NSMutableArray array];
+    NSString *activeTitle=@"画面适应";
+    for(NSDictionary *option in options){
         NSString *title=option[@"title"],*value=option[@"value"];
-        [sheet addAction:[UIAlertAction actionWithTitle:[current isEqual:value]?[title stringByAppendingString:@" ✓"]:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+        BOOL selected=[current isEqual:value];
+        if(selected)activeTitle=title;
+        [rows addObject:[HostGlassSheetAction actionWithTitle:title subtitle:option[@"sub"] value:nil icon:option[@"icon"] tint:HostAccent() destructive:NO selected:selected handler:^{
+            SettingsViewController *owner=weakSelf;if(!owner)return;
             [NSUserDefaults.standardUserDefaults setObject:value forKey:@"cctv.mediaVideoGravity"];
-            [self.table reloadRowsAtIndexPaths:@[ip] withRowAnimation:UITableViewRowAnimationNone];
-            if(self.onPreferenceChanged)self.onPreferenceChanged(@"cctv.mediaVideoGravity",YES);
+            [owner.table reloadRowsAtIndexPaths:@[ip] withRowAnimation:UITableViewRowAnimationNone];
+            if(owner.onPreferenceChanged)owner.onPreferenceChanged(@"cctv.mediaVideoGravity",YES);
             UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,[NSString stringWithFormat:@"默认画面比例已设为%@",title]);
         }]];
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    [self presentActionSheet:sheet fromIndexPath:ip];
+    UITableViewCell *cell=[self.table cellForRowAtIndexPath:ip];
+    [HostGlassActionSheetViewController presentOn:self
+                                            title:@"默认画面比例"
+                                         subtitle:@"下次播放影视时生效，也可在播放器右上角菜单里临时调整。"
+                                        badgeText:[NSString stringWithFormat:@"当前 · %@",activeTitle]
+                                       badgeColor:HostAccent()
+                                         sections:@[[HostGlassSheetSection sectionWithTitle:@"画面填充模式" actions:rows]]
+                                       sourceView:cell?:self.view];
 }
 
 - (void)presentPreferredQualityPicker:(NSIndexPath *)ip {
+    if(self.presentedViewController)return;
     NSString *current=[[NSUserDefaults standardUserDefaults] stringForKey:@"cctv.mediaPreferredQuality.v1"]?:@"auto";
-    UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"默认清晰度" message:@"对多码率 HLS 流生效（影视页与直播 AVPlayer 回退）；央视直播走 SDK 时由 VDN 自动选线；单文件 MP4 无多码率可选。下次播放生效。" preferredStyle:UIAlertControllerStyleActionSheet];
-    for(NSDictionary *option in @[@{@"title":@"自动",@"value":@"auto"},@{@"title":@"流畅",@"value":@"smooth"},@{@"title":@"高清",@"value":@"hd"},@{@"title":@"超清",@"value":@"uhd"}]){
+    NSArray<NSDictionary *> *options=@[
+        @{@"title":@"自动",@"sub":@"根据网络带宽自适应选择最佳码率",@"val":@"自适应",@"icon":@"sparkles",@"value":@"auto"},
+        @{@"title":@"流畅",@"sub":@"省流优先，峰值码率约 1.5 Mbps",@"val":@"1.5M",@"icon":@"tortoise",@"value":@"smooth"},
+        @{@"title":@"高清",@"sub":@"清晰均衡，峰值码率约 4 Mbps",@"val":@"4M",@"icon":@"tv",@"value":@"hd"},
+        @{@"title":@"超清",@"sub":@"高码率画质优先，峰值约 8 Mbps",@"val":@"8M",@"icon":@"4k.tv",@"value":@"uhd"}
+    ];
+    NSMutableArray<HostGlassSheetAction *> *rows=[NSMutableArray array];
+    NSString *activeTitle=@"自动";
+    for(NSDictionary *option in options){
         NSString *title=option[@"title"],*value=option[@"value"];
-        [sheet addAction:[UIAlertAction actionWithTitle:[current isEqual:value]?[title stringByAppendingString:@" ✓"]:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+        BOOL selected=[current isEqual:value];
+        if(selected)activeTitle=title;
+        [rows addObject:[HostGlassSheetAction actionWithTitle:title subtitle:option[@"sub"] value:option[@"val"] icon:option[@"icon"] tint:HostAccent() destructive:NO selected:selected handler:^{
             [NSUserDefaults.standardUserDefaults setObject:value forKey:@"cctv.mediaPreferredQuality.v1"];
             [self refreshHeroSummaryChips];
             [self.table reloadRowsAtIndexPaths:@[ip] withRowAnimation:UITableViewRowAnimationNone];
@@ -1857,8 +1917,14 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
             UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,[NSString stringWithFormat:@"默认清晰度已设为%@",title]);
         }]];
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    [self presentActionSheet:sheet fromIndexPath:ip];
+    UITableViewCell *cell=[self.table cellForRowAtIndexPath:ip];
+    [HostGlassActionSheetViewController presentOn:self
+                                            title:@"默认清晰度"
+                                         subtitle:@"对多码率 HLS 流生效（影视页与直播 AVPlayer 回退）；央视直播走 SDK 时由 VDN 自动选线；单文件 MP4 无多码率可选。"
+                                        badgeText:[NSString stringWithFormat:@"当前 · %@",activeTitle]
+                                       badgeColor:HostAccent()
+                                         sections:@[[HostGlassSheetSection sectionWithTitle:@"码率偏好" actions:rows]]
+                                       sourceView:cell?:self.view];
 }
 
 - (void)presentSettingsAlert:(UIAlertController *)alert {
@@ -1872,7 +1938,7 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
     NSString *build = [([NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleVersion"] ?: @"?") description];
     NSString *variant = [([NSBundle.mainBundle objectForInfoDictionaryKey:@"CCTVHostBuildVariant"] ?: @"full") description];
     NSString *variantName = [variant isEqualToString:@"no-python"] ? @"无 Python 诊断版" : @"完整版";
-    NSString *themeName = [HostThemePalette currentPalette].displayName ?: @"午夜影院";
+    NSString *themeName = [HostThemePalette currentPalette].displayName ?: @"晨光白";
     NSInteger fontStep = [NSUserDefaults.standardUserDefaults integerForKey:@"cctv.appFontSize.v1"];
     NSString *fontTitle = fontStep == 2 ? @"特大" : (fontStep == 1 ? @"大" : @"标准");
     NSUInteger serviceCount = [ServiceStore services].count;
@@ -1964,26 +2030,34 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
 
 - (void)presentThemePicker:(NSIndexPath *)ip {
     HostThemePalette *current=[HostThemePalette currentPalette];
-    UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"主题色板" message:@"深色沉浸：午夜影院、曜石黑、深海蓝、鎏金棕；浅色：晨光白、雪原白。切换立即生效，无需重启。" preferredStyle:UIAlertControllerStyleActionSheet];
+    __weak typeof(self) weakSelf=self;
+    NSMutableArray<HostGlassSheetAction *> *lightActions=[NSMutableArray array];
+    NSMutableArray<HostGlassSheetAction *> *darkActions=[NSMutableArray array];
     for(HostThemePalette *theme in HostThemePalette.allThemes){
-        NSString *dot=theme.dark?@"● ":@"○ ";
-        NSString *title=[theme.identifier isEqualToString:current.identifier]?[NSString stringWithFormat:@"%@%@ · %@ ✓",dot,theme.displayName,theme.tagline]:[NSString stringWithFormat:@"%@%@ · %@",dot,theme.displayName,theme.tagline];
-        [sheet addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+        BOOL active=[theme.identifier isEqualToString:current.identifier];
+        NSString *icon=theme.dark?@"moon.stars.fill":([theme.identifier isEqualToString:@"snow"]?@"sparkles":@"sun.max.fill");
+        HostGlassSheetAction *act=[HostGlassSheetAction actionWithTitle:theme.displayName subtitle:theme.tagline value:(active?@"当前使用":nil) icon:icon tint:theme.accent destructive:NO selected:active handler:^{
+            SettingsViewController *owner=weakSelf;if(!owner)return;
             [HostThemePalette setCurrentPaletteIdentifier:theme.identifier];
             NSString *mode=theme.dark?@"dark":@"light";
             [NSUserDefaults.standardUserDefaults setObject:mode forKey:HostThemeModePreferenceKey];
             [NSUserDefaults.standardUserDefaults setBool:theme.dark forKey:HostDarkThemePreferenceKey];
-            UIWindow *window=self.view.window;
-            if(window){HostApplyThemeToWindow(window);HostStyleNavigation(self.navigationController);dispatch_async(dispatch_get_main_queue(),^{[window layoutIfNeeded];HostRefreshAppearanceLayers(window);});}
-            [self reloadThemeAppearance];
-            [self.table reloadData];
-            if(self.onPreferenceChanged)self.onPreferenceChanged(HostThemePaletteIdentifierPreferenceKey,theme.dark);
+            UIWindow *window=owner.view.window;
+            if(window){HostApplyThemeToWindow(window);HostStyleNavigation(owner.navigationController);dispatch_async(dispatch_get_main_queue(),^{[window layoutIfNeeded];HostRefreshAppearanceLayers(window);});}
+            [owner reloadThemeAppearance];
+            [owner.table reloadData];
+            if(owner.onPreferenceChanged)owner.onPreferenceChanged(HostThemePaletteIdentifierPreferenceKey,theme.dark);
             [[NSNotificationCenter defaultCenter] postNotificationName:@"HostThemeDidChangeNotification" object:nil];
             UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,[NSString stringWithFormat:@"主题已切换为%@",theme.displayName]);
-        }]];
+        }];
+        if(theme.dark)[darkActions addObject:act];
+        else [lightActions addObject:act];
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    [self presentActionSheet:sheet fromIndexPath:ip];
+    UITableViewCell *anchorCell=ip?[self.table cellForRowAtIndexPath:ip]:nil;
+    [HostGlassActionSheetViewController presentOn:self title:@"主题色板" subtitle:@"浅色通透与深色沉浸共 6 套主题，切换立即全端生效。" badgeText:[NSString stringWithFormat:@"当前 · %@",current.displayName] badgeColor:current.accent sections:@[
+        [HostGlassSheetSection sectionWithTitle:@"浅色主题（默认）" actions:lightActions],
+        [HostGlassSheetSection sectionWithTitle:@"深色沉浸" actions:darkActions]
+    ] sourceView:(anchorCell?:self.view)];
 }
 
 - (void)confirmResetDefaultPreferences {
@@ -2136,9 +2210,9 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
         [NSUserDefaults.standardUserDefaults setBool:dark forKey:HostDarkThemePreferenceKey];
         HostThemePalette *palette=[HostThemePalette currentPalette];
         if(dark && !palette.dark){
-            [HostThemePalette setCurrentPaletteIdentifier:HostThemePaletteDefaultIdentifier];
+            [HostThemePalette setCurrentPaletteIdentifier:HostThemePalette.defaultDarkPalette.identifier];
         } else if(!dark && palette.dark){
-            [HostThemePalette setCurrentPaletteIdentifier:@"daylight"];
+            [HostThemePalette setCurrentPaletteIdentifier:HostThemePalette.defaultLightPalette.identifier];
         }
     }
     UIWindow *window=self.view.window;

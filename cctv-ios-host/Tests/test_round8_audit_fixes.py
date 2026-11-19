@@ -13,8 +13,8 @@ class Round8AllPagesArchitectAuditTests(unittest.TestCase):
         more_body = play_m.split("- (void)showMorePlaybackActions {", 1)[1].split(
             "\n- (void)beginPlaybackPriority", 1
         )[0]
-        self.assertIn("if(self.avLayer && AVPictureInPictureController.isPictureInPictureSupported){", more_body)
-        self.assertIn('[sheet addAction:[UIAlertAction actionWithTitle:@"画中画"', more_body)
+        self.assertIn("BOOL pipAvailable = (self.avLayer && AVPictureInPictureController.isPictureInPictureSupported);", more_body)
+        self.assertIn("sheet.onPiP = ^{ [weakSelf togglePiP]; };", more_body)
 
         rvc_m = (SOURCES / "RootViewController.m").read_text(encoding="utf-8")
         pip_body = rvc_m.split("- (void)togglePiP {", 1)[1].split("\n#pragma mark - 播放区", 1)[0]

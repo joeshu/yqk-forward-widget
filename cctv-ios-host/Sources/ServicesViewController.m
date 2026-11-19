@@ -1,5 +1,6 @@
 #import "ServicesViewController.h"
 #import "HostTheme.h"
+#import "HostGlassActionSheetViewController.h"
 #import "HostToolbar.h"
 #import "HostLocalPort.h"
 #import "PluginLogStore.h"
@@ -679,66 +680,54 @@ static NSString *ServiceResolvedVersionText(NSDictionary *service){
         } else if (ip.row == 1)
             [self edit];
         else if (ip.row == 2) {
-            UIAlertController *a =
-                [UIAlertController alertControllerWithTitle:@"资源代码"
-                                                    message:nil
-                                             preferredStyle:UIAlertControllerStyleActionSheet];
             __weak typeof(self) weakSelf = self;
-            [a addAction:[UIAlertAction
-                             actionWithTitle:@"查看代码"
-                                       style:UIAlertActionStyleDefault
-                                     handler:^(UIAlertAction *action) {
-                                       ServiceDetailViewController *owner = weakSelf;
-                                       if (!owner) return;
-                                       NSString *codePath = [ServiceStore codePath:owner.service];
-                                       NSString *factoryPath = [ServiceStore bundledFactoryCodePathForService:owner.service];
-                                       ServiceCodeViewController *v = [ServiceCodeViewController new];
-                                       v.path = codePath;
-                                       v.bundledResourcePath = factoryPath;
-                                       v.readOnly = [owner.service[@"builtin"] boolValue];
-                                       v.onSaveCode = ^{
-                                           ServiceDetailViewController *innerOwner = weakSelf;
-                                           if (!innerOwner) return;
-                                           NSMutableDictionary *updated = [innerOwner.service mutableCopy];
-                                           NSData *factoryData = factoryPath.length ? [NSData dataWithContentsOfFile:factoryPath] : nil;
-                                           NSData *currentData = codePath.length ? [NSData dataWithContentsOfFile:codePath] : nil;
-                                           if (factoryData.length && [currentData isEqualToData:factoryData]) {
-                                               [updated removeObjectForKey:@"userEditedCode"];
-                                           } else {
-                                               updated[@"userEditedCode"] = @YES;
-                                           }
-                                           updated[@"updated"] = @(NSDate.date.timeIntervalSince1970);
-                                           [ServiceStore save:updated];
-                                           innerOwner.service = updated;
-                                           [innerOwner.tableView reloadData];
-                                       };
-                                       [owner.navigationController pushViewController:v animated:YES];
-                                     }]];
-            [a addAction:[UIAlertAction
-                             actionWithTitle:@"导出文件"
-                                       style:UIAlertActionStyleDefault
-                                     handler:^(UIAlertAction *action) {
-                                       ServiceDetailViewController *owner = weakSelf;
-                                       if (!owner) return;
-                                       // archivePath 为空且 codePath 校验失败返回 nil 时，
-                                       // @[nil] 会直接崩溃；先判空并提示。
-                                       NSString *exportPath=[owner.service[@"archivePath"] length]?owner.service[@"archivePath"]:[ServiceStore codePath:owner.service];
-                                       if(!exportPath.length){UIAlertController *notice=[UIAlertController alertControllerWithTitle:@"无法导出" message:@"未找到可导出的资源文件。" preferredStyle:UIAlertControllerStyleAlert];[notice addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:nil]];[owner presentViewController:notice animated:YES completion:nil];return;}
-                                       UIActivityViewController *v =
-                                           [[UIActivityViewController alloc] initWithActivityItems:@[
-                                               [NSURL fileURLWithPath:exportPath]
-                                           ]
-                                                                             applicationActivities:nil];
-                                       v.popoverPresentationController.sourceView = owner.view;
-                                       v.popoverPresentationController.sourceRect =
-                                           CGRectMake(owner.view.bounds.size.width / 2,
-                                                      owner.view.bounds.size.height / 2, 1, 1);
-                                       [owner presentViewController:v animated:YES completion:nil];
-                                     }]];
-            [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-            // 行已滑出可视区时 cell 为 nil：iPad 上 sourceView 为 nil 会崩溃，用 self.view 兜底。
-            UITableViewCell *actionCell=[tableView cellForRowAtIndexPath:ip];a.popoverPresentationController.sourceView=actionCell?:self.view;a.popoverPresentationController.sourceRect=actionCell?actionCell.bounds:CGRectMake(CGRectGetMidX(self.view.bounds),CGRectGetMidY(self.view.bounds),1,1);
-            [self presentViewController:a animated:YES completion:nil];
+            NSArray<HostGlassSheetAction *> *codeActs = @[
+                [HostGlassSheetAction actionWithTitle:@"查看代码" subtitle:@"在内置代码阅读器中查看或编辑脚本源码" value:nil icon:@"chevron.left.forwardslash.chevron.right" tint:HostAccent() destructive:NO selected:NO handler:^{
+                    ServiceDetailViewController *owner = weakSelf;
+                    if (!owner) return;
+                    NSString *codePath = [ServiceStore codePath:owner.service];
+                    NSString *factoryPath = [ServiceStore bundledFactoryCodePathForService:owner.service];
+                    ServiceCodeViewController *v = [ServiceCodeViewController new];
+                    v.path = codePath;
+                    v.bundledResourcePath = factoryPath;
+                    v.readOnly = [owner.service[@"builtin"] boolValue];
+                    v.onSaveCode = ^{
+                        ServiceDetailViewController *innerOwner = weakSelf;
+                        if (!innerOwner) return;
+                        NSMutableDictionary *updated = [innerOwner.service mutableCopy];
+                        NSData *factoryData = factoryPath.length ? [NSData dataWithContentsOfFile:factoryPath] : nil;
+                        NSData *currentData = codePath.length ? [NSData dataWithContentsOfFile:codePath] : nil;
+                        if (factoryData.length && [currentData isEqualToData:factoryData]) {
+                            [updated removeObjectForKey:@"userEditedCode"];
+                        } else {
+                            updated[@"userEditedCode"] = @YES;
+                        }
+                        updated[@"updated"] = @(NSDate.date.timeIntervalSince1970);
+                        [ServiceStore save:updated];
+                        innerOwner.service = updated;
+                        [innerOwner.tableView reloadData];
+                    };
+                    [owner.navigationController pushViewController:v animated:YES];
+                }],
+                [HostGlassSheetAction actionWithTitle:@"导出文件" subtitle:@"通过系统分享面板导出脚本或归档包" value:nil icon:@"square.and.arrow.up" tint:UIColor.systemBlueColor destructive:NO selected:NO handler:^{
+                    ServiceDetailViewController *owner = weakSelf;
+                    if (!owner) return;
+                    NSString *exportPath=[owner.service[@"archivePath"] length]?owner.service[@"archivePath"]:[ServiceStore codePath:owner.service];
+                    if(!exportPath.length){UIAlertController *notice=[UIAlertController alertControllerWithTitle:@"无法导出" message:@"未找到可导出的资源文件。" preferredStyle:UIAlertControllerStyleAlert];[notice addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:nil]];[owner presentViewController:notice animated:YES completion:nil];return;}
+                    UIActivityViewController *v = [[UIActivityViewController alloc] initWithActivityItems:@[[NSURL fileURLWithPath:exportPath]] applicationActivities:nil];
+                    v.popoverPresentationController.sourceView = owner.view;
+                    v.popoverPresentationController.sourceRect = CGRectMake(owner.view.bounds.size.width / 2, owner.view.bounds.size.height / 2, 1, 1);
+                    [owner presentViewController:v animated:YES completion:nil];
+                }]
+            ];
+            UITableViewCell *actionCell=[tableView cellForRowAtIndexPath:ip];
+            [HostGlassActionSheetViewController presentOn:self
+                                                    title:@"资源代码"
+                                                 subtitle:(self.service[@"name"] ?: @"脚本文件操作")
+                                                badgeText:([self.service[@"builtin"] boolValue] ? @"内置只读" : @"本机脚本")
+                                               badgeColor:HostAccent()
+                                                 sections:@[[HostGlassSheetSection sectionWithTitle:@"代码操作" actions:codeActs]]
+                                               sourceView:(actionCell?:self.view)];
         } else if (ip.row == 3) {
             if([self opensMedia]){if(self.onBrowseService)self.onBrowseService(self.service);return;}
             NSString *u = [ServiceStore subscriptionURLForService:self.service];
@@ -919,7 +908,21 @@ static NSString *ServiceResolvedVersionText(NSDictionary *service){
     [self refresh];
 }
 - (void)add {
-    if(self.onImportResource){__weak typeof(self) weakSelf=self;UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"添加资源" message:nil preferredStyle:UIAlertControllerStyleActionSheet];[sheet addAction:[UIAlertAction actionWithTitle:@"导入资源 · URL / 文件 / 文件夹" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){if(weakSelf.onImportResource)self.onImportResource();}]];[sheet addAction:[UIAlertAction actionWithTitle:@"添加 Python HTTP 服务" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){ServiceEditorViewController *editor=[ServiceEditorViewController new];[weakSelf.navigationController pushViewController:editor animated:YES];}]];[sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];sheet.popoverPresentationController.barButtonItem=self.navigationItem.rightBarButtonItems.firstObject;[self presentViewController:sheet animated:YES completion:nil];return;}
+    if(self.onImportResource){
+        __weak typeof(self) weakSelf=self;
+        NSArray<HostGlassSheetAction *> *actions=@[
+            [HostGlassSheetAction actionWithTitle:@"导入资源 · URL / 文件 / 文件夹" subtitle:@"自动识别 M3U、TVBox 合集或本地脚本" value:nil icon:@"square.and.arrow.down.on.square" tint:HostAccent() destructive:NO selected:NO handler:^{if(weakSelf.onImportResource)self.onImportResource();}],
+            [HostGlassSheetAction actionWithTitle:@"添加 Python HTTP 服务" subtitle:@"手动新建自定义本机脚本与端口配置" value:nil icon:@"terminal.fill" tint:UIColor.systemBlueColor destructive:NO selected:NO handler:^{ServiceEditorViewController *editor=[ServiceEditorViewController new];[weakSelf.navigationController pushViewController:editor animated:YES];}]
+        ];
+        [HostGlassActionSheetViewController presentOn:self
+                                                title:@"添加资源"
+                                             subtitle:@"选择通过统一导入向导添加，或手动创建本机 Python HTTP 服务。"
+                                            badgeText:@"资源服务"
+                                           badgeColor:HostAccent()
+                                             sections:@[[HostGlassSheetSection sectionWithTitle:@"添加方式" actions:actions]]
+                                           sourceView:self.view];
+        return;
+    }
     ServiceEditorViewController *v = [ServiceEditorViewController new];
     [self.navigationController pushViewController:v animated:YES];
 }

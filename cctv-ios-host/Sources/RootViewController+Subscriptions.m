@@ -1,4 +1,5 @@
 #import "RootViewController_Internal.h"
+#import "HostGlassActionSheetViewController.h"
 
 @implementation RootViewController (Subscriptions)
 - (NSDictionary *)resourceServiceForSource:(NSString *)source {if(![source hasPrefix:@"plugin:"])return nil;NSString *identifier=[source substringFromIndex:7];for(NSDictionary *service in [ServiceStore services])if([service[@"id"] isEqual:identifier])return service;return nil;}
@@ -158,10 +159,9 @@
     NSString *summaryMsg = orderedSources.count
         ? [NSString stringWithFormat:@"共 %lu 个直播订阅源 · 点选管理配置、刷新或匹配台标",(unsigned long)orderedSources.count]
         : @"尚未添加直播订阅源，点下方按钮可立即导入 M3U / TXT 列表。";
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"订阅源管理" message:summaryMsg preferredStyle:UIAlertControllerStyleActionSheet];
-    if (!orderedSources.count) {
-        [sheet addAction:[UIAlertAction actionWithTitle:@"暂无订阅" style:UIAlertActionStyleDefault handler:nil]];
-    }
+    __weak typeof(self) weakSelf = self;
+    NSMutableArray<HostGlassSheetSection *> *sections = [NSMutableArray array];
+    NSMutableArray<HostGlassSheetAction *> *sourceRows = [NSMutableArray array];
     for (NSString *u in orderedSources) {
         NSDictionary *profile = [self configurationProfileForSource:u] ?: @{};
         NSString *sourceName=[ProfileStore metadata:u][@"name"];
@@ -169,51 +169,58 @@
         NSString *baseTitle = sourceName.length?sourceName:(u.length > 42 ? [[u substringToIndex:42] stringByAppendingString:@"…"] : u);
         NSUInteger count = [profile[@"count"] unsignedIntegerValue];
         BOOL active = [self.activeSource isEqualToString:u];
-        NSString *title = count ? [NSString stringWithFormat:@"%@%@ · %lu 台", active ? @"✓ " : @"", baseTitle, (unsigned long)count] : [NSString stringWithFormat:@"%@%@", active ? @"✓ " : @"", baseTitle];
-        [sheet addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
-            NSString *statusLine = [profile[@"status"] isKindOfClass:NSString.class] ? profile[@"status"] : @"";
+        NSString *val = count ? [NSString stringWithFormat:@"%lu 台", (unsigned long)count] : nil;
+        NSString *statusLine = [profile[@"status"] isKindOfClass:NSString.class] ? profile[@"status"] : @"";
+        [sourceRows addObject:[HostGlassSheetAction actionWithTitle:baseTitle subtitle:(statusLine.length ? statusLine : CCTVServiceLogAddress(u)) value:val icon:@"antenna.radiowaves.left.and.right" tint:(active ? HostAccent() : UIColor.systemBlueColor) destructive:NO selected:active handler:^{
+            RootViewController *owner = weakSelf;
+            if (!owner) return;
             NSString *opMsg = statusLine.length ? [NSString stringWithFormat:@"%@\n%@", statusLine, CCTVServiceLogAddress(u)] : CCTVServiceLogAddress(u);
-            UIAlertController *op = [UIAlertController alertControllerWithTitle:baseTitle message:opMsg preferredStyle:UIAlertControllerStyleActionSheet];
-            [op addAction:[UIAlertAction actionWithTitle:@"仅查看此订阅频道" style:UIAlertActionStyleDefault handler:^(UIAlertAction *y) {
-                [self selectLiveResourceSource:u];
-            }]];
-            [op addAction:[UIAlertAction actionWithTitle:@"查看与编辑资源详情" style:UIAlertActionStyleDefault handler:^(UIAlertAction *y) {
-                [self openSubscriptionProfile:u editing:NO];
-            }]];
-            [op addAction:[UIAlertAction actionWithTitle:@"刷新" style:UIAlertActionStyleDefault handler:^(UIAlertAction *y) {
-                [self fetchSubscription:u silent:NO];
-            }]];
-            [op addAction:[UIAlertAction actionWithTitle:@"重新检测健康" style:UIAlertActionStyleDefault handler:^(UIAlertAction *y) {
-                [self recheckProfileHealth:u];
-            }]];
-            [op addAction:[UIAlertAction actionWithTitle:@"智能匹配官方台标与 EPG" style:UIAlertActionStyleDefault handler:^(UIAlertAction *y) {
-                [self matchOfficialStationLogosAndEPGForSource:u];
-            }]];
-            [op addAction:[UIAlertAction actionWithTitle:@"删除" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *y) {
-                NSString *sourceKey = [self stableURLKey:u];
-                [self.subscriptionURLs removeObject:sourceKey ?: u];
-                NSString *deletedKey = sourceKey ?: u;
-                self.subscriptionRequestVersions[deletedKey] = @([self.subscriptionRequestVersions[deletedKey] unsignedIntegerValue] + 1);
-                [self removeSubscriptionSource:deletedKey];
-                [[NSUserDefaults standardUserDefaults] setObject:self.subscriptionURLs.allObjects forKey:@"subscriptions"];
-                [self log:@"已删除订阅 %@", CCTVServiceLogAddress(u)];
-            }]];
-            [op addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-            UIPopoverPresentationController *opPop = op.popoverPresentationController;
-            if (opPop) { opPop.sourceView = self.catalogMoreButton ?: self.bottomBar; opPop.sourceRect = (self.catalogMoreButton ?: self.bottomBar).bounds; }
-            [self presentViewController:op animated:YES completion:nil];
+            NSArray<HostGlassSheetAction *> *viewOps = @[
+                [HostGlassSheetAction actionWithTitle:@"仅查看此订阅频道" subtitle:@"在频道列表中筛选显示本订阅源" value:nil icon:@"tv" tint:HostAccent() destructive:NO selected:active handler:^{[owner selectLiveResourceSource:u];}],
+                [HostGlassSheetAction actionWithTitle:@"查看与编辑资源详情" subtitle:@"查看地址、编辑名称与 EPG 配置" value:nil icon:@"slider.horizontal.3" tint:UIColor.systemBlueColor destructive:NO selected:NO handler:^{[owner openSubscriptionProfile:u editing:NO];}]
+            ];
+            NSArray<HostGlassSheetAction *> *maintOps = @[
+                [HostGlassSheetAction actionWithTitle:@"刷新" subtitle:@"重新拉取此订阅频道列表" value:nil icon:@"arrow.clockwise" tint:HostAccent() destructive:NO selected:NO handler:^{[owner fetchSubscription:u silent:NO];}],
+                [HostGlassSheetAction actionWithTitle:@"重新检测健康" subtitle:@"测试订阅接口可达性与状态" value:nil icon:@"waveform.path.ecg" tint:UIColor.systemTealColor destructive:NO selected:NO handler:^{[owner recheckProfileHealth:u];}],
+                [HostGlassSheetAction actionWithTitle:@"智能匹配官方台标与 EPG" subtitle:@"自动关联官方高清台标与节目预告" value:nil icon:@"wand.and.stars" tint:UIColor.systemOrangeColor destructive:NO selected:NO handler:^{[owner matchOfficialStationLogosAndEPGForSource:u];}]
+            ];
+            NSArray<HostGlassSheetAction *> *dangerOps = @[
+                [HostGlassSheetAction actionWithTitle:@"删除" subtitle:@"从本地移除此直播订阅源" value:nil icon:@"trash" tint:UIColor.systemRedColor destructive:YES selected:NO handler:^{
+                    NSString *sourceKey = [owner stableURLKey:u];
+                    [owner.subscriptionURLs removeObject:sourceKey ?: u];
+                    NSString *deletedKey = sourceKey ?: u;
+                    owner.subscriptionRequestVersions[deletedKey] = @([owner.subscriptionRequestVersions[deletedKey] unsignedIntegerValue] + 1);
+                    [owner removeSubscriptionSource:deletedKey];
+                    [[NSUserDefaults standardUserDefaults] setObject:owner.subscriptionURLs.allObjects forKey:@"subscriptions"];
+                    [owner log:@"已删除订阅 %@", CCTVServiceLogAddress(u)];
+                }]
+            ];
+            [HostGlassActionSheetViewController presentOn:owner
+                                                    title:baseTitle
+                                                 subtitle:opMsg
+                                                badgeText:(val ?: @"直播订阅")
+                                               badgeColor:(active ? HostAccent() : UIColor.systemBlueColor)
+                                                 sections:@[
+                                                     [HostGlassSheetSection sectionWithTitle:@"频道与配置" actions:viewOps],
+                                                     [HostGlassSheetSection sectionWithTitle:@"刷新与增强" actions:maintOps],
+                                                     [HostGlassSheetSection sectionWithTitle:@"管理" actions:dangerOps]
+                                                 ]
+                                               sourceView:(owner.catalogMoreButton ?: owner.bottomBar)];
         }]];
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"添加新订阅源" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
-        [self addSubscription];
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"关闭" style:UIAlertActionStyleCancel handler:nil]];
-    UIPopoverPresentationController *pop = sheet.popoverPresentationController;
-    if (pop) {
-        if (self.navigationItem.rightBarButtonItem) pop.barButtonItem = self.navigationItem.rightBarButtonItem;
-        else { pop.sourceView = self.catalogMoreButton ?: self.bottomBar; pop.sourceRect = (self.catalogMoreButton ?: self.bottomBar).bounds; }
+    if (sourceRows.count) {
+        [sections addObject:[HostGlassSheetSection sectionWithTitle:@"已添加的订阅源" actions:sourceRows]];
     }
-    [self presentViewController:sheet animated:YES completion:nil];
+    [sections addObject:[HostGlassSheetSection sectionWithTitle:@"新增" actions:@[
+        [HostGlassSheetAction actionWithTitle:@"添加新订阅源" subtitle:@"通过 URL、本地文件或文件夹导入 M3U / TXT" value:nil icon:@"plus.circle.fill" tint:HostAccent() destructive:NO selected:NO handler:^{[weakSelf addSubscription];}]
+    ]]];
+    [HostGlassActionSheetViewController presentOn:self
+                                            title:@"订阅源管理"
+                                         subtitle:summaryMsg
+                                        badgeText:[NSString stringWithFormat:@"%lu 个订阅", (unsigned long)orderedSources.count]
+                                       badgeColor:HostAccent()
+                                         sections:sections
+                                       sourceView:(self.catalogMoreButton ?: self.bottomBar)];
 }
 
 #pragma mark - 订阅（m3u 源 / 本地插件）
@@ -704,11 +711,16 @@
                           baseSubtitle,
                           sourceHost,
                           altCount ? [NSString stringWithFormat:@" · %lu 条备用源", (unsigned long)altCount] : @""];
-    UIAlertController *a=[UIAlertController alertControllerWithTitle:ch[@"name"] message:subtitle preferredStyle:UIAlertControllerStyleActionSheet];
+    __weak typeof(self) weakSelf=self;
+    NSMutableArray<HostGlassSheetSection *> *sections=[NSMutableArray array];
+    NSMutableArray<HostGlassSheetAction *> *playRows=[NSMutableArray array];
     if ([ch[@"id"] isEqualToString:self.channelID] && self.remoteCatchupActive) {
-        [a addAction:[UIAlertAction actionWithTitle:@"返回实时直播" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){[self returnToLivePlayback];}]];
+        [playRows addObject:[HostGlassSheetAction actionWithTitle:@"返回实时直播" subtitle:@"结束回看并回到最新直播流" value:nil icon:@"dot.radiowaves.left.and.right" tint:UIColor.systemGreenColor destructive:NO selected:NO handler:^{[weakSelf returnToLivePlayback];}]];
     }
-    [a addAction:[UIAlertAction actionWithTitle:@"重新播放" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){[self routePlayback:ch];}]];
+    [playRows addObject:[HostGlassSheetAction actionWithTitle:@"重新播放" subtitle:@"重新连接当前频道信号" value:nil icon:@"play.circle.fill" tint:HostAccent() destructive:NO selected:NO handler:^{[weakSelf routePlayback:ch];}]];
+    [playRows addObject:[HostGlassSheetAction actionWithTitle:@"静音预览（30 秒）" subtitle:@"小窗静音试看画面，不影响正式播放" value:@"30s" icon:@"speaker.slash.fill" tint:UIColor.systemTealColor destructive:NO selected:NO handler:^{[weakSelf previewChannel:ch];}]];
+    [sections addObject:[HostGlassSheetSection sectionWithTitle:@"播放与预览" actions:playRows]];
+    NSMutableArray<HostGlassSheetAction *> *altRows=[NSMutableArray array];
     NSUInteger altIdx = 0;
     for(NSString *url in alts){
         if([url isEqual:ch[@"remoteURL"]])continue;
@@ -716,15 +728,23 @@
         NSString *host = [NSURL URLWithString:url].host ?: @"备用源";
         NSString *proto = [url.lowercaseString containsString:@".m3u8"] ? @"HLS" : @"直链";
         NSString *altTitle = [NSString stringWithFormat:@"备用源 %lu · %@ (%@)", (unsigned long)altIdx, host, proto];
-        [a addAction:[UIAlertAction actionWithTitle:altTitle style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){NSMutableDictionary *other=[ch mutableCopy];other[@"remoteURL"]=url;[self routePlayback:other];}]];
+        [altRows addObject:[HostGlassSheetAction actionWithTitle:altTitle subtitle:nil value:proto icon:@"antenna.radiowaves.left.and.right" tint:UIColor.systemBlueColor destructive:NO selected:NO handler:^{NSMutableDictionary *other=[ch mutableCopy];other[@"remoteURL"]=url;[weakSelf routePlayback:other];}]];
     }
-    [a addAction:[UIAlertAction actionWithTitle:supportsCatchup?@"节目单与回看":@"节目单" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){[self openEPGforChannel:ch[@"id"] name:ch[@"name"]];}]];
+    if(altRows.count)[sections addObject:[HostGlassSheetSection sectionWithTitle:@"备用信号源" actions:altRows]];
+    NSMutableArray<HostGlassSheetAction *> *epgRows=[NSMutableArray array];
+    [epgRows addObject:[HostGlassSheetAction actionWithTitle:supportsCatchup?@"节目单与回看":@"节目单" subtitle:@"浏览频道预告并支持点播回看" value:nil icon:@"calendar.badge.clock" tint:UIColor.systemBlueColor destructive:NO selected:NO handler:^{[weakSelf openEPGforChannel:ch[@"id"] name:ch[@"name"]];}]];
     if ([ch[@"id"] isEqualToString:self.channelID] && (supportsCatchup || [self nativeFallbackChannelForChannel:ch])) {
-        [a addAction:[UIAlertAction actionWithTitle:@"时移 / 快速回退" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){[self showNativeTimeshiftActions];}]];
+        [epgRows addObject:[HostGlassSheetAction actionWithTitle:@"时移 / 快速回退" subtitle:@"快速回退 5/15/30/60 分钟" value:nil icon:@"clock.arrow.circlepath" tint:UIColor.systemOrangeColor destructive:NO selected:NO handler:^{[weakSelf showNativeTimeshiftActions];}]];
     }
-    [a addAction:[UIAlertAction actionWithTitle:@"EPG 手动匹配" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){[self editEPGMapping:ch];}]];
-    [a addAction:[UIAlertAction actionWithTitle:@"静音预览（30 秒）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){[self previewChannel:ch];}]];
-    [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];a.popoverPresentationController.sourceView=self.bottomBar;a.popoverPresentationController.sourceRect=self.bottomBar.bounds;[self presentViewController:a animated:YES completion:nil];
+    [epgRows addObject:[HostGlassSheetAction actionWithTitle:@"EPG 手动匹配" subtitle:@"自定义该频道关联的节目单 ID" value:nil icon:@"link" tint:HostSecondaryText() destructive:NO selected:NO handler:^{[weakSelf editEPGMapping:ch];}]];
+    [sections addObject:[HostGlassSheetSection sectionWithTitle:@"节目单与时移" actions:epgRows]];
+    [HostGlassActionSheetViewController presentOn:self
+                                            title:(ch[@"name"] ?: @"频道操作")
+                                         subtitle:subtitle
+                                        badgeText:(supportsCatchup ? @"支持回看" : @"订阅频道")
+                                       badgeColor:(supportsCatchup ? UIColor.systemOrangeColor : HostAccent())
+                                         sections:sections
+                                       sourceView:self.bottomBar];
 }
 - (void)previewChannel:(NSDictionary *)ch {
     if(self.currentPlayer||self.avPlayer||self.playbackReadiness){[self showServiceError:@"为保证正式播放，预览仅在没有频道播放时启动。"];return;}
@@ -742,7 +762,9 @@
     NSString *msg = self.recents.count
         ? [NSString stringWithFormat:@"共 %lu 条观看记录 · 点选频道立即续播", (unsigned long)self.recents.count]
         : @"还没有观看记录";
-    UIAlertController *a=[UIAlertController alertControllerWithTitle:@"最近观看" message:msg preferredStyle:UIAlertControllerStyleActionSheet];
+    __weak typeof(self) weakSelf=self;
+    NSMutableArray<HostGlassSheetSection *> *sections=[NSMutableArray array];
+    NSMutableArray<HostGlassSheetAction *> *rows=[NSMutableArray array];
     for(NSDictionary *r in self.recents){
         NSString *cid=[r[@"id"] isKindOfClass:NSString.class]?r[@"id"]:@"";
         NSDictionary *ch=cid.length?[self channelWithID:cid]:nil;
@@ -750,25 +772,65 @@
         if(!base.length)base=@"未知频道";
         NSString *tag=ch?([ch[@"remoteURL"] length]?@"订阅":@"官方"):@"已下线";
         NSString *prog=(cid.length&&[self.epgCache[cid][@"now"] isKindOfClass:NSString.class])?self.epgCache[cid][@"now"]:nil;
-        NSString *title=prog.length?[NSString stringWithFormat:@"%@ · %@ (%@)",base,prog,tag]:[NSString stringWithFormat:@"%@ · %@",base,tag];
-        [a addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){NSDictionary *target=[self channelWithID:r[@"id"]];if(target)[self selectChannel:target];else[self showServiceError:@"该频道已不在配置中，请刷新或重新导入原配置。"];}]];
+        [rows addObject:[HostGlassSheetAction actionWithTitle:base subtitle:(prog.length?[NSString stringWithFormat:@"正在播：%@",prog]:nil) value:tag icon:@"clock.arrow.circlepath" tint:(ch?HostAccent():HostMutedText()) destructive:NO selected:[cid isEqualToString:self.channelID] handler:^{
+            RootViewController *owner=weakSelf;if(!owner)return;
+            NSDictionary *target=[owner channelWithID:r[@"id"]];
+            if(target)[owner selectChannel:target];
+            else [owner showServiceError:@"该频道已不在配置中，请刷新或重新导入原配置。"];
+        }]];
     }
-    if(self.recents.count)[a addAction:[UIAlertAction actionWithTitle:@"清空历史" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *x){[self.recents removeAllObjects];[NSUserDefaults.standardUserDefaults setObject:@[] forKey:@"recents"];[self applyFilter];}]];
-    [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];a.popoverPresentationController.sourceView=self.bottomBar;a.popoverPresentationController.sourceRect=self.bottomBar.bounds;[self presentViewController:a animated:YES completion:nil];
+    if(rows.count)[sections addObject:[HostGlassSheetSection sectionWithTitle:@"最近续播" actions:rows]];
+    if(self.recents.count){
+        [sections addObject:[HostGlassSheetSection sectionWithTitle:@"管理" actions:@[
+            [HostGlassSheetAction actionWithTitle:@"清空历史" subtitle:@"移除全部最近观看记录" value:nil icon:@"trash" tint:UIColor.systemRedColor destructive:YES selected:NO handler:^{[weakSelf.recents removeAllObjects];[NSUserDefaults.standardUserDefaults setObject:@[] forKey:@"recents"];[weakSelf applyFilter];}]
+        ]]];
+    }
+    [HostGlassActionSheetViewController presentOn:self
+                                            title:@"最近观看"
+                                         subtitle:msg
+                                        badgeText:[NSString stringWithFormat:@"%lu 条记录",(unsigned long)self.recents.count]
+                                       badgeColor:HostAccent()
+                                         sections:sections
+                                       sourceView:self.bottomBar];
 }
 - (void)showFavoriteManager {
     NSString *msg = self.favorites.count
         ? [NSString stringWithFormat:@"共 %lu 个收藏频道 · 点选移到首位，列表左滑可取消收藏。", (unsigned long)self.favorites.count]
         : @"还没有收藏频道，长按频道即可收藏。";
-    UIAlertController *a=[UIAlertController alertControllerWithTitle:@"整理收藏" message:msg preferredStyle:UIAlertControllerStyleActionSheet];
-    for(NSString *cid in self.favorites){
+    __weak typeof(self) weakSelf=self;
+    NSMutableArray<HostGlassSheetSection *> *sections=[NSMutableArray array];
+    NSMutableArray<HostGlassSheetAction *> *rows=[NSMutableArray array];
+    for(NSUInteger idx=0;idx<self.favorites.count;idx++){
+        NSString *cid=self.favorites[idx];
         NSDictionary *ch=[self channelWithID:cid];
         NSString *base=([ch[@"name"] isKindOfClass:NSString.class]&&[ch[@"name"] length])?ch[@"name"]:cid;
         NSString *tag=ch?([ch[@"remoteURL"] length]?@"订阅":@"官方"):@"未加载";
-        NSString *title=[NSString stringWithFormat:@"%@ · %@",base,tag];
-        [a addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){[self.favorites removeObject:cid];[self.favorites insertObject:cid atIndex:0];[NSUserDefaults.standardUserDefaults setObject:self.favorites forKey:@"favorites"];[self applyFilter];}]];
+        [rows addObject:[HostGlassSheetAction actionWithTitle:base subtitle:(idx==0?@"已在首位":@"点选置顶到首位") value:tag icon:(idx==0?@"star.fill":@"arrow.up.to.line") tint:(idx==0?UIColor.systemYellowColor:HostAccent()) destructive:NO selected:(idx==0) handler:^{
+            RootViewController *owner=weakSelf;if(!owner)return;
+            [owner.favorites removeObject:cid];[owner.favorites insertObject:cid atIndex:0];
+            [NSUserDefaults.standardUserDefaults setObject:owner.favorites forKey:@"favorites"];[owner applyFilter];
+        }]];
     }
-    if(self.favorites.count)[a addAction:[UIAlertAction actionWithTitle:@"清空收藏" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *x){[self.favorites removeAllObjects];[NSUserDefaults.standardUserDefaults setObject:@[] forKey:@"favorites"];[self configureCatalogNavigation];[self applyFilter];}]];
-    [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];a.popoverPresentationController.sourceView=self.bottomBar;a.popoverPresentationController.sourceRect=self.bottomBar.bounds;[self presentViewController:a animated:YES completion:nil];
+    if(rows.count)[sections addObject:[HostGlassSheetSection sectionWithTitle:@"收藏排序（点选置顶）" actions:rows]];
+    if(self.favorites.count){
+        [sections addObject:[HostGlassSheetSection sectionWithTitle:@"管理" actions:@[
+            [HostGlassSheetAction actionWithTitle:@"清空收藏" subtitle:@"移除全部已收藏频道" value:nil icon:@"trash" tint:UIColor.systemRedColor destructive:YES selected:NO handler:^{
+                RootViewController *owner=weakSelf;if(!owner)return;
+                UIAlertController *confirm=[UIAlertController alertControllerWithTitle:@"清空收藏？" message:@"将移除全部收藏频道，此操作无法撤销。" preferredStyle:UIAlertControllerStyleAlert];
+                [confirm addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+                [confirm addAction:[UIAlertAction actionWithTitle:@"清空收藏" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *x){
+                    [self.favorites removeAllObjects];[NSUserDefaults.standardUserDefaults setObject:@[] forKey:@"favorites"];[self configureCatalogNavigation];[self applyFilter];
+                }]];
+                [owner presentViewController:confirm animated:YES completion:nil];
+            }]
+        ]]];
+    }
+    [HostGlassActionSheetViewController presentOn:self
+                                            title:@"整理收藏"
+                                         subtitle:msg
+                                        badgeText:[NSString stringWithFormat:@"%lu 个收藏",(unsigned long)self.favorites.count]
+                                       badgeColor:UIColor.systemYellowColor
+                                         sections:sections
+                                       sourceView:self.bottomBar];
 }
 @end

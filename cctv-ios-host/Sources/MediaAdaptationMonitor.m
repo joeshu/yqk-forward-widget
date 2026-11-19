@@ -1414,15 +1414,14 @@ static const NSUInteger MediaAdaptationProbeByteLimit = 4096;
 }
 
 - (void)confirmClearRecords {
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"清空监测记录"
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"清空监测记录"
                                                                    message:@"确定要清空所有已记录的站点、合集、影视接口与播放适配记录吗？"
-                                                            preferredStyle:UIAlertControllerStyleActionSheet];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"清空全部记录" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *action) {
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"清空全部记录" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *action) {
         [MediaAdaptationMonitor.shared clearAllRecords];
     }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    sheet.popoverPresentationController.barButtonItem = self.navigationItem.rightBarButtonItems.count > 2 ? self.navigationItem.rightBarButtonItems[2] : nil;
-    [self presentViewController:sheet animated:YES completion:nil];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)segmentChanged {

@@ -24,10 +24,10 @@ class Round19CCTVSubpagesAndMenusRefactorTests(unittest.TestCase):
         self.assertIn('@"channel.catalog.section.library"', cat_m)
         self.assertIn('@"channel.catalog.section.maintenance"', cat_m)
         self.assertIn("UIMenuOptionsDisplayInline", cat_m)
-        self.assertIn("✓ SDK 自动选线（推荐 · 智能调度）", cat_m)
+        self.assertIn("SDK 自动选线（推荐）", cat_m)
         self.assertIn("NSString *modeTag = CCTVRouteRequiresSDK(r)", cat_m)
-        self.assertIn("NSString *sheetMessage = [NSString stringWithFormat:@\"线路：%@ · %@%@\"", play_m)
-        self.assertIn("时移 / 回看 · 实时直播", play_m)
+        self.assertIn("CCTVLiveControlSheetViewController *sheet = [CCTVLiveControlSheetViewController new];", play_m)
+        self.assertIn('[HostGlassActionSheetViewController presentOn:self title:tsTitle subtitle:msg badgeText:(inCatchup ? @"↺ 回看中" : @"● 实时直播")', play_m)
 
     def test_02_epg_view_controller_dual_mode_inline_toolbar_and_row_badges(self):
         epg_m = (SOURCES / "EPGViewController.m").read_text(encoding="utf-8")
