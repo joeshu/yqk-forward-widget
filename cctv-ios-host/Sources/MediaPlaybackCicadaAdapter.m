@@ -299,23 +299,24 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
     self.config = config;
     if (config) {
         CicadaCallVoidInt(config, NSSelectorFromString(@"setNetworkTimeout:"), (int)llround(self.networkTimeout * 1000.0));
-        CicadaCallVoidInt(config, NSSelectorFromString(@"setNetworkRetryCount:"), 2);
-        [self updateBufferConfiguration];
+        CicadaCallVoidInt(config, NSSelectorFromString(@"setNetworkRetryCount:"), 3);
+        CicadaCallVoidBool(config, NSSelectorFromString(@"setClearShowWhenStop:"), NO);
         if (self.headers.count) {
             NSMutableArray<NSString *> *headerLines = [NSMutableArray arrayWithCapacity:self.headers.count];
+            NSString *userAgent = nil;
+            NSString *referer = nil;
             for (NSString *key in self.headers) {
                 NSString *value = [self.headers[key] description];
-                if (key.length && value.length) {
-                    [headerLines addObject:[NSString stringWithFormat:@"%@: %@", key, value]];
-                }
+                if (!key.length || !value.length) continue;
+                [headerLines addObject:[NSString stringWithFormat:@"%@: %@", key, value]];
+                if ([key caseInsensitiveCompare:@"User-Agent"] == NSOrderedSame) userAgent = value;
+                else if ([key caseInsensitiveCompare:@"Referer"] == NSOrderedSame || [key caseInsensitiveCompare:@"Referrer"] == NSOrderedSame) referer = value;
             }
             CicadaCallVoidObject(config, NSSelectorFromString(@"setHttpHeaders:"), headerLines);
-            NSString *userAgent = self.headers[@"User-Agent"] ?: self.headers[@"user-agent"];
-            NSString *referer = self.headers[@"Referer"] ?: self.headers[@"referer"];
             if (userAgent.length) CicadaCallVoidObject(config, NSSelectorFromString(@"setUserAgent:"), userAgent);
             if (referer.length) CicadaCallVoidObject(config, NSSelectorFromString(@"setReferer:"), referer);
         }
-        CicadaCallVoidObject(player, NSSelectorFromString(@"setConfig:"), config);
+        [self updateBufferConfiguration];
     }
     CicadaCallVoidBool(player, NSSelectorFromString(@"setEnableHardwareDecoder:"), self.enableHardwareDecoder);
     CicadaCallVoidBool(player, NSSelectorFromString(@"setAutoPlay:"), NO);
@@ -351,11 +352,12 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
     if(self.firstFrameWatchdog||self.firstFrameReported||self.destroyed)return;
     __weak typeof(self) weakSelf=self;NSUInteger generation=self.generation;
     self.firstFrameBudgetStarted=CACurrentMediaTime();
-    self.firstFrameWatchdog=[NSTimer scheduledTimerWithTimeInterval:MAX(.01,self.firstFrameRemaining) repeats:NO block:^(NSTimer *timer){
+    self.firstFrameWatchdog=[NSTimer timerWithTimeInterval:MAX(.01,self.firstFrameRemaining) repeats:NO block:^(NSTimer *timer){
         MediaPlaybackCicadaAdapter *owner=weakSelf;if(!owner||generation!=owner.generation||owner.destroyed)return;
         owner.firstFrameWatchdog=nil;owner.firstFrameRemaining=0;
         if(owner.playbackRequested&&!owner.firstFrameReported&&owner.state!=MediaPlaybackCicadaAdapterStateFailed&&owner.state!=MediaPlaybackCicadaAdapterStateCompleted)[owner reportErrorWithCode:-1001 message:[NSString stringWithFormat:@"CicadaPlayer %.0f 秒内未显示首帧",owner.firstFrameTimeout]];
     }];
+    [NSRunLoop.mainRunLoop addTimer:self.firstFrameWatchdog forMode:NSRunLoopCommonModes];
 }
 - (NSTimeInterval)firstFrameTimeout {
     return MAX(MediaPlaybackCicadaFirstFrameTimeout, self.networkTimeout + 10.0);
@@ -469,11 +471,12 @@ static dispatch_queue_t MediaPlaybackCicadaQuarantineQueue(void) {
     __weak typeof(self) weakSelf = self;
     NSUInteger generation = self.generation;
     [self.seekTimeoutTimer invalidate];
-    self.seekTimeoutTimer = [NSTimer scheduledTimerWithTimeInterval:MediaPlaybackCicadaSeekCallbackTimeout repeats:NO block:^(NSTimer *timer) {
+    self.seekTimeoutTimer = [NSTimer timerWithTimeInterval:MediaPlaybackCicadaSeekCallbackTimeout repeats:NO block:^(NSTimer *timer) {
         MediaPlaybackCicadaAdapter *owner = weakSelf;
         if (!owner || generation != owner.generation || owner.destroyed) return;
         [owner finishPendingSeekWithFinished:NO];
     }];
+    [NSRunLoop.mainRunLoop addTimer:self.seekTimeoutTimer forMode:NSRunLoopCommonModes];
 }
 
 - (void)setRate:(float)rate {
@@ -550,7 +553,7 @@ static dispatch_queue_t MediaPlaybackCicadaQuarantineQueue(void) {
     [self.pollTimer invalidate];
     __weak typeof(self) weakSelf = self;
     NSUInteger generation = self.generation;
-    self.pollTimer = [NSTimer scheduledTimerWithTimeInterval:MediaPlaybackCicadaPositionPollInterval repeats:YES block:^(NSTimer *timer) {
+    self.pollTimer = [NSTimer timerWithTimeInterval:MediaPlaybackCicadaPositionPollInterval repeats:YES block:^(NSTimer *timer) {
         MediaPlaybackCicadaAdapter *owner = weakSelf;
         if (!owner || generation != owner.generation || owner.destroyed || !owner.player) { [timer invalidate]; return; }
         NSTimeInterval position = owner.currentPosition;
@@ -561,6 +564,7 @@ static dispatch_queue_t MediaPlaybackCicadaQuarantineQueue(void) {
         // 完成兜底：位置到达时长末尾即视为播完（onCompletion 未到时也生效）。
         if (!owner.completedReported && owner.playbackRequested && owner.state==MediaPlaybackCicadaAdapterStatePlaying && duration > 0 && position >= duration - 0.1) [owner handleCompletion];
     }];
+    [NSRunLoop.mainRunLoop addTimer:self.pollTimer forMode:NSRunLoopCommonModes];
 }
 
 // ---------- 内部状态机（主线程） ----------

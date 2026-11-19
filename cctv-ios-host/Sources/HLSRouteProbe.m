@@ -129,8 +129,20 @@ static NSMutableDictionary<NSString *, NSDictionary *> *HLSRouteProbeCacheStore(
     if (plain && urlKey.length) {
         @synchronized(HLSRouteProbeCacheStore()) {
             NSMutableDictionary *store = HLSRouteProbeCacheStore();
-            if (store.count >= 64) [store removeAllObjects];
-            store[urlKey] = @{@"plain": @(plain), @"at": @(NSDate.date.timeIntervalSince1970)};
+            NSTimeInterval now = NSDate.date.timeIntervalSince1970;
+            if (store.count >= 64) {
+                NSMutableArray<NSString *> *expired = [NSMutableArray array];
+                NSString *oldestKey = nil;
+                NSTimeInterval oldestAt = now;
+                for (NSString *k in store) {
+                    NSTimeInterval at = [store[k][@"at"] doubleValue];
+                    if (now - at >= 60.0 || now < at) [expired addObject:k];
+                    else if (!oldestKey || at < oldestAt) { oldestKey = k; oldestAt = at; }
+                }
+                if (expired.count) [store removeObjectsForKeys:expired];
+                else if (oldestKey) [store removeObjectForKey:oldestKey];
+            }
+            store[urlKey] = @{@"plain": @(plain), @"at": @(now)};
         }
     }
     [task cancel];
@@ -170,7 +182,8 @@ static NSMutableDictionary<NSString *, NSDictionary *> *HLSRouteProbeCacheStore(
         isCurrentTask = (task == self.task);
         isCancelled = self.cancelled;
     }
-    BOOL valid = isCurrentTask && !isCancelled && [(NSHTTPURLResponse *)response statusCode] == 200 && response.expectedContentLength <= 256 * 1024;
+    NSInteger statusCode = [response isKindOfClass:NSHTTPURLResponse.class] ? [(NSHTTPURLResponse *)response statusCode] : 0;
+    BOOL valid = isCurrentTask && !isCancelled && (statusCode == 200 || statusCode == 206) && response.expectedContentLength <= 256 * 1024;
     completionHandler(valid ? NSURLSessionResponseAllow : NSURLSessionResponseCancel);
     if (!valid && isCurrentTask) [self finish:NO];
 }
@@ -217,7 +230,7 @@ static NSMutableDictionary<NSString *, NSDictionary *> *HLSRouteProbeCacheStore(
         bodySnapshot = [self.body copy];
     }
     if (error) { [self finish:NO]; return; }
-    NSString *text = bodySnapshot ? [[NSString alloc] initWithData:bodySnapshot encoding:NSUTF8StringEncoding] : nil;
+    NSString *text = bodySnapshot ? ([[NSString alloc] initWithData:bodySnapshot encoding:NSUTF8StringEncoding] ?: [[NSString alloc] initWithData:bodySnapshot encoding:NSISOLatin1StringEncoding]) : nil;
     if ([text hasPrefix:@"\uFEFF"]) text = [text substringFromIndex:1];
     text = [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     if (![text hasPrefix:@"#EXTM3U"]) { [self finish:NO]; return; }

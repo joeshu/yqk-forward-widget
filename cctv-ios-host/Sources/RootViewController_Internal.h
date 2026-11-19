@@ -435,6 +435,7 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 @property (nonatomic, strong) CCTVTimeshiftController *timeshiftController;
 @property(nonatomic,copy) NSString *nativeTransitionKind;
 @property(nonatomic) BOOL nativeTimeShiftActive;
+@property(nonatomic) BOOL nativeUserPaused;
 @property (nonatomic) BOOL nativePlaybackFailed;
 @property (nonatomic, strong) LocalServiceReadiness *playbackReadiness;
 @property (nonatomic, strong) NSMutableDictionary<NSString *,LocalServiceReadiness *> *subscriptionReadiness;
@@ -508,6 +509,13 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 @property (nonatomic, strong) NSArray<NSDictionary *> *shownChannels;
 @property (nonatomic, strong) NSArray<NSDictionary *> *channelIndexSourceArray;
 @property (nonatomic, strong) NSDictionary<NSString *, NSDictionary *> *channelIndexByID;
+@property (nonatomic, strong) NSDictionary<NSString *, NSDictionary *> *catchupIndexByGroupKey;
+@property (nonatomic, strong) NSDictionary<NSString *, NSDictionary *> *catchupIndexByCanonical;
+@property (nonatomic, strong) NSDictionary<NSString *, NSString *> *nativeIDIndexByName;
+@property (nonatomic, assign) BOOL catchupOnlyFilter;
+@property (nonatomic, copy) NSString *cachedCatalogFontCategory;
+@property (nonatomic, strong) UIFont *cachedCatalogTitleFont;
+@property (nonatomic, strong) UIFont *cachedCatalogSubtitleFont;
 @property (nonatomic, strong) NSArray<NSDictionary *> *shownChannelIndexSourceArray;
 @property (nonatomic, strong) NSDictionary<NSString *, NSNumber *> *shownChannelIndexByID;
 @property (nonatomic, assign) NSInteger retryCount;
@@ -729,7 +737,12 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 - (void)reloadVisibleCatalogItemForChannelID:(NSString *)cid;
 - (void)onLongPress:(UILongPressGestureRecognizer *)g;
 - (void)showRoutes;
+- (void)reloadActiveCatalogView;
+- (void)ensureChannelLookupIndexes;
 - (NSDictionary *)channelWithID:(NSString *)cid;
+- (void)switchToAdjacentChannel:(NSInteger)delta;
+- (UIFont *)catalogCardTitleFont;
+- (UIFont *)catalogCardSubtitleFont;
 - (void)presentRouteSheetForChannel:(NSDictionary *)ch fromIndexPath:(NSIndexPath *)ip;
 - (NSArray<NSDictionary *> *)playerCategoryRows;
 - (CCTVPlaybackListPanelController *)categoryPanel;
@@ -749,6 +762,7 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 
 @interface RootViewController (Playback)
 - (void)completeNativeFirstRenderIfNeededForTrigger:(NSString *)trigger;
+- (void)ensureNativeTimeshiftPlayingForTrigger:(NSString *)trigger;
 - (void)registerCallbackProtocol;
 - (void)activateAudioSession;
 - (void)configureSDKLogging;

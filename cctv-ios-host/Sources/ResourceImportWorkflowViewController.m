@@ -491,18 +491,26 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
     self.tableView.backgroundColor=HostBackground();
     self.address.backgroundColor=HostRaisedSurface();
     self.address.textColor=HostText();
+    HostSetLayerBorderColor(self.address,HostBorder());
     self.addressPlaceholder.textColor=HostSecondaryText();
     self.smartClipboardButton.tintColor=HostAccent();
     [self.smartClipboardButton setTitleColor:HostAccent() forState:UIControlStateNormal];
     self.smartClipboardButton.backgroundColor=[HostAccent() colorWithAlphaComponent:0.14];
+    HostSetLayerBorderColor(self.smartClipboardButton,[HostAccent() colorWithAlphaComponent:0.35]);
     self.pasteAddressButton.tintColor=HostAccent();
     self.pasteAddressButton.backgroundColor=HostSelectedSurface();
     self.pasteAndRecognizeButton.backgroundColor=HostAccent();
     self.clearAddressButton.tintColor=HostSecondaryText();
+    self.clearAddressButton.backgroundColor=HostNeutralSurface();
     self.runtime.selectedSegmentTintColor=HostAccent();
     self.duplicatePolicy.selectedSegmentTintColor=HostAccent();
     [self rebuildQuickPresetsBar];
+    HostRefreshAppearanceLayers(self.view);
     [self.tableView reloadData];
+}
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+    [super traitCollectionDidChange:previousTraitCollection];
+    if(previousTraitCollection&&[self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection])[self reloadThemeAppearance];
 }
 
 - (void)discardUncommittedCandidatesForFreshRecognition {
@@ -580,7 +588,18 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
     NSDictionary *immutable=snapshot.copy;NSUInteger revision=self.snapshotRevision;ResourceImportBackgroundTaskToken *task=nil;if(UIApplication.sharedApplication.applicationState==UIApplicationStateBackground){task=[ResourceImportBackgroundTaskToken new];__block ResourceImportBackgroundTaskToken *taskToken=task;task.identifier=[UIApplication.sharedApplication beginBackgroundTaskWithName:@"cctv.resourceImport.snapshot" expirationHandler:^{[taskToken endIfNeeded];}];}__weak typeof(self) weakSelf=self;ResourceImportEnqueueSnapshot(immutable,task,^(BOOL success){ResourceImportWorkflowViewController *owner=weakSelf;if(!owner||owner.snapshotRevision!=revision)return;owner.persistentSnapshotAvailable=success&&!blank;if(!success){[RuntimeDiagnostics.shared recordEvent:@"resource_import_snapshot_write_failed" category:@"resource_import" fields:@{@"revision":@(revision)}];}});
 }
 - (void)applicationDidEnterBackground:(NSNotification *)notification {[self persistSnapshot];}
-- (void)textViewDidChange:(UITextView *)textView {self.editRevision++;self.restoredAddress=textView.text?:@"";self.addressPlaceholder.hidden=textView.text.length>0;self.clearAddressButton.hidden=textView.text.length==0&&self.candidates.count==0;[self refreshSmartClipboardAndPresets];[self persistSnapshot];}
+- (void)textViewDidChange:(UITextView *)textView {
+    if(textView.markedTextRange!=nil)return;
+    self.editRevision++;
+    self.restoredAddress=textView.text?:@"";
+    self.addressPlaceholder.hidden=textView.text.length>0;
+    self.clearAddressButton.hidden=textView.text.length==0&&self.candidates.count==0;
+    if(self.detectedClipboardPayload.length){
+        NSString *trimmed=[self.restoredAddress stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        if([trimmed isEqualToString:self.detectedClipboardPayload]){self.detectedClipboardPayload=nil;self.smartClipboardButton.hidden=YES;}
+    }
+    [self persistSnapshot];
+}
 - (void)runtimeChanged:(UISegmentedControl *)sender {self.editRevision++;self.restoredRuntimeSelection=sender.selectedSegmentIndex;[self persistSnapshot];}
 - (void)duplicatePolicyChanged:(UISegmentedControl *)sender {self.editRevision++;self.finished=NO;[self updateView];}
 - (void)minimize {[self.view endEditing:YES];[self.navigationController dismissViewControllerAnimated:YES completion:nil];}
@@ -654,7 +673,11 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {
-    UITableViewCell *cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:nil];cell.backgroundColor=HostCard();cell.layer.cornerRadius=14;cell.layer.cornerCurve=kCACornerCurveContinuous;cell.clipsToBounds=YES;cell.layer.borderWidth=0.6;HostSetLayerBorderColor(cell,HostBorder());cell.textLabel.textColor=HostText();cell.detailTextLabel.textColor=HostSecondaryText();cell.textLabel.numberOfLines=0;cell.detailTextLabel.numberOfLines=0;cell.textLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];cell.detailTextLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];
+    BOOL isCandidateRow=(ip.section==1&&ip.row>0);
+    UITableViewCell *cell=isCandidateRow?[tableView dequeueReusableCellWithIdentifier:@"resource.import.candidate"]:nil;
+    if(!cell)cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:isCandidateRow?@"resource.import.candidate":nil];
+    cell.accessoryView=nil;cell.accessoryType=UITableViewCellAccessoryNone;cell.imageView.image=nil;cell.selectionStyle=UITableViewCellSelectionStyleDefault;
+    cell.backgroundColor=HostCard();cell.layer.cornerRadius=14;cell.layer.cornerCurve=kCACornerCurveContinuous;cell.clipsToBounds=YES;cell.layer.borderWidth=0.6;HostSetLayerBorderColor(cell,HostBorder());cell.textLabel.textColor=HostText();cell.detailTextLabel.textColor=HostSecondaryText();cell.textLabel.numberOfLines=0;cell.detailTextLabel.numberOfLines=0;cell.textLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];cell.detailTextLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];
     UIView *control=nil;
     if(ip.section==0){
         if(ip.row==0){
@@ -874,7 +897,8 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
 }
 - (void)chooseMediaServer {
     UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"媒体服务器类型" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
-    for(NSString *type in @[@"emby",@"jellyfin",@"xtream",@"webdav"])[sheet addAction:[UIAlertAction actionWithTitle:type.capitalizedString style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[self configureMediaServer:type];}]];
+    __weak typeof(self) weakSelf=self;
+    for(NSString *type in @[@"emby",@"jellyfin",@"xtream",@"webdav"])[sheet addAction:[UIAlertAction actionWithTitle:type.capitalizedString style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[weakSelf configureMediaServer:type];}]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];sheet.popoverPresentationController.sourceView=self.view;sheet.popoverPresentationController.sourceRect=CGRectMake(20,20,1,1);[self presentViewController:sheet animated:YES completion:nil];
 }
 - (void)configureMediaServer:(NSString *)type {
@@ -882,12 +906,14 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
     NSArray *labels=@[@"名称",@"服务器地址（http/https）",@"用户名",@"密码",@"API Key（Emby/Jellyfin，可选）",@"用户 ID（API Key 方式，可选）"];
     for(NSUInteger i=0;i<labels.count;i++){NSUInteger index=i;[form addTextFieldWithConfigurationHandler:^(UITextField *field){field.placeholder=labels[index];field.autocorrectionType=UITextAutocorrectionTypeNo;field.autocapitalizationType=UITextAutocapitalizationTypeNone;field.secureTextEntry=index==3||index==4;if(index==1)field.keyboardType=UIKeyboardTypeURL;}];}
     [form addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    __weak typeof(self) weakSelf=self;
     [form addAction:[UIAlertAction actionWithTitle:@"识别并预览" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+        ResourceImportWorkflowViewController *owner=weakSelf;if(!owner)return;
         NSMutableDictionary *config=[@{@"cctvhostServer":@1,@"type":type} mutableCopy];NSArray *keys=@[@"name",@"url",@"username",@"password",@"apiKey",@"userId"];
         for(NSUInteger i=0;i<keys.count;i++)config[keys[i]]=form.textFields[i].text?:@"";
         NSData *data=[NSJSONSerialization dataWithJSONObject:config options:0 error:NULL];NSURL *file=[NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"server-%@.json",NSUUID.UUID.UUIDString]]];
-        if(![data writeToURL:file atomically:YES]){self.stage=@"服务器配置写入失败，请重试";[self updateView];return;}
-        NSMutableDictionary *row=[self candidateForData:data file:file origin:nil companions:@{} hint:nil];[NSFileManager.defaultManager removeItemAtURL:file error:NULL];if(row)[self.candidates addObject:row];self.stage=@"服务器配置已识别 · 选择保存后再启用";[self updateView];
+        if(![data writeToURL:file atomically:YES]){owner.stage=@"服务器配置写入失败，请重试";[owner updateView];return;}
+        NSMutableDictionary *row=[owner candidateForData:data file:file origin:nil companions:@{} hint:nil];[NSFileManager.defaultManager removeItemAtURL:file error:NULL];if(row)[owner.candidates addObject:row];owner.stage=@"服务器配置已识别 · 选择保存后再启用";[owner updateView];
     }]];[self presentViewController:form animated:YES completion:nil];
 }
 - (void)applyImportCategory:(ResourceImportOption)option {
@@ -979,7 +1005,8 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
 - (void)chooseExistingResourceForCandidate:(NSMutableDictionary *)row {
     NSArray *targets=[row[@"matchTargets"] isKindOfClass:NSArray.class]?row[@"matchTargets"]:@[];if(targets.count<2)return;
     UIAlertController *choices=[UIAlertController alertControllerWithTitle:@"选择要更新的旧资源" message:@"确认后会保留所选资源的 ID 和个人设置。" preferredStyle:UIAlertControllerStyleActionSheet];
-    for(NSDictionary *target in targets){NSString *title=[NSString stringWithFormat:@"%@ · %@",target[@"name"]?:@"未命名资源",target[@"kindLabel"]?:@"资源"];[choices addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){self.editRevision++;row[@"existingResourceID"]=target[@"id"]?:@"";row[@"existingResourceKind"]=target[@"kind"]?:@"";row[@"updatePreview"]=[NSString stringWithFormat:@"将更新「%@」并保留资源身份",target[@"name"]?:@"资源"];[self updateView];}]];}
+    __weak typeof(self) weakSelf=self;
+    for(NSDictionary *target in targets){NSString *title=[NSString stringWithFormat:@"%@ · %@",target[@"name"]?:@"未命名资源",target[@"kindLabel"]?:@"资源"];[choices addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){ResourceImportWorkflowViewController *owner=weakSelf;if(!owner)return;owner.editRevision++;row[@"existingResourceID"]=target[@"id"]?:@"";row[@"existingResourceKind"]=target[@"kind"]?:@"";row[@"updatePreview"]=[NSString stringWithFormat:@"将更新「%@」并保留资源身份",target[@"name"]?:@"资源"];[owner updateView];}]];}
     [choices addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];choices.popoverPresentationController.sourceView=self.view;choices.popoverPresentationController.sourceRect=CGRectMake(CGRectGetMidX(self.view.bounds),CGRectGetMidY(self.view.bounds),1,1);[self presentViewController:choices animated:YES completion:nil];
 }
 - (NSMutableDictionary *)candidateForData:(NSData *)data file:(NSURL *)file origin:(NSString *)origin companions:(NSDictionary *)companions hint:(NSString *)hint {

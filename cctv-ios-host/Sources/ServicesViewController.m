@@ -49,6 +49,12 @@ static NSString *ServiceResolvedVersionText(NSDictionary *service){
     if([rawVersion isKindOfClass:NSNumber.class])return [(NSNumber *)rawVersion stringValue];
     NSString *codePath=[ServiceStore codePath:service];
     if(codePath.length){
+        static NSCache<NSString *,NSString *> *versionCache=nil;
+        static dispatch_once_t verCacheOnce;
+        dispatch_once(&verCacheOnce,^{versionCache=[NSCache new];versionCache.countLimit=128;});
+        NSString *cacheKey=[NSString stringWithFormat:@"%@|%@",codePath,service[@"updated"]?:@0];
+        NSString *cachedVer=[versionCache objectForKey:cacheKey];
+        if(cachedVer)return cachedVer;
         NSData *headData=[NSData dataWithContentsOfFile:codePath options:NSDataReadingMappedIfSafe error:NULL];
         if(headData.length){
             NSUInteger sliceLen=MIN((NSUInteger)4096,headData.length);
@@ -62,10 +68,13 @@ static NSString *ServiceResolvedVersionText(NSDictionary *service){
                 NSTextCheckingResult *m=[verRe firstMatchInString:head options:0 range:NSMakeRange(0,head.length)];
                 if(m&&m.numberOfRanges>1){
                     NSString *found=[head substringWithRange:[m rangeAtIndex:1]];
-                    if(found.length)return [NSString stringWithFormat:@"v%@ · 脚本声明",found];
+                    if(found.length){NSString *resolved=[NSString stringWithFormat:@"v%@ · 脚本声明",found];[versionCache setObject:resolved forKey:cacheKey];return resolved;}
                 }
             }
         }
+        NSString *fallbackVer=[service[@"builtin"] boolValue]?@"内置同步":@"1.0 · 脚本内联";
+        [versionCache setObject:fallbackVer forKey:cacheKey];
+        return fallbackVer;
     }
     return [service[@"builtin"] boolValue]?@"内置同步":@"1.0 · 脚本内联";
 }
@@ -445,7 +454,7 @@ static NSString *ServiceResolvedVersionText(NSDictionary *service){
     c.textLabel.numberOfLines = subtitleLayout ? 2 : 1;
     c.detailTextLabel.numberOfLines = 0;
     c.selectionStyle = UITableViewCellSelectionStyleNone;
-    c.accessoryView=nil;c.accessoryType=UITableViewCellAccessoryNone;c.imageView.image=nil;c.detailTextLabel.text=@"";c.textLabel.textAlignment=NSTextAlignmentNatural;c.detailTextLabel.textAlignment=NSTextAlignmentNatural;
+    c.accessoryView=nil;c.accessoryType=UITableViewCellAccessoryNone;c.imageView.image=nil;c.textLabel.attributedText=nil;c.detailTextLabel.attributedText=nil;c.detailTextLabel.text=@"";c.textLabel.textAlignment=NSTextAlignmentNatural;c.detailTextLabel.textAlignment=NSTextAlignmentNatural;
     if (ip.section == 0) {
         if (ip.row == 0) {
             BOOL isRunning = [self running];
@@ -674,21 +683,23 @@ static NSString *ServiceResolvedVersionText(NSDictionary *service){
                 [UIAlertController alertControllerWithTitle:@"资源代码"
                                                     message:nil
                                              preferredStyle:UIAlertControllerStyleActionSheet];
+            __weak typeof(self) weakSelf = self;
             [a addAction:[UIAlertAction
                              actionWithTitle:@"查看代码"
                                        style:UIAlertActionStyleDefault
                                      handler:^(UIAlertAction *action) {
-                                       NSString *codePath = [ServiceStore codePath:self.service];
-                                       NSString *factoryPath = [ServiceStore bundledFactoryCodePathForService:self.service];
+                                       ServiceDetailViewController *owner = weakSelf;
+                                       if (!owner) return;
+                                       NSString *codePath = [ServiceStore codePath:owner.service];
+                                       NSString *factoryPath = [ServiceStore bundledFactoryCodePathForService:owner.service];
                                        ServiceCodeViewController *v = [ServiceCodeViewController new];
                                        v.path = codePath;
                                        v.bundledResourcePath = factoryPath;
-                                       v.readOnly = [self.service[@"builtin"] boolValue];
-                                       __weak typeof(self) weakSelf = self;
+                                       v.readOnly = [owner.service[@"builtin"] boolValue];
                                        v.onSaveCode = ^{
-                                           ServiceDetailViewController *owner = weakSelf;
-                                           if (!owner) return;
-                                           NSMutableDictionary *updated = [owner.service mutableCopy];
+                                           ServiceDetailViewController *innerOwner = weakSelf;
+                                           if (!innerOwner) return;
+                                           NSMutableDictionary *updated = [innerOwner.service mutableCopy];
                                            NSData *factoryData = factoryPath.length ? [NSData dataWithContentsOfFile:factoryPath] : nil;
                                            NSData *currentData = codePath.length ? [NSData dataWithContentsOfFile:codePath] : nil;
                                            if (factoryData.length && [currentData isEqualToData:factoryData]) {
@@ -698,29 +709,31 @@ static NSString *ServiceResolvedVersionText(NSDictionary *service){
                                            }
                                            updated[@"updated"] = @(NSDate.date.timeIntervalSince1970);
                                            [ServiceStore save:updated];
-                                           owner.service = updated;
-                                           [owner.tableView reloadData];
+                                           innerOwner.service = updated;
+                                           [innerOwner.tableView reloadData];
                                        };
-                                       [self.navigationController pushViewController:v animated:YES];
+                                       [owner.navigationController pushViewController:v animated:YES];
                                      }]];
             [a addAction:[UIAlertAction
                              actionWithTitle:@"导出文件"
                                        style:UIAlertActionStyleDefault
                                      handler:^(UIAlertAction *action) {
+                                       ServiceDetailViewController *owner = weakSelf;
+                                       if (!owner) return;
                                        // archivePath 为空且 codePath 校验失败返回 nil 时，
                                        // @[nil] 会直接崩溃；先判空并提示。
-                                       NSString *exportPath=[self.service[@"archivePath"] length]?self.service[@"archivePath"]:[ServiceStore codePath:self.service];
-                                       if(!exportPath.length){UIAlertController *notice=[UIAlertController alertControllerWithTitle:@"无法导出" message:@"未找到可导出的资源文件。" preferredStyle:UIAlertControllerStyleAlert];[notice addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:nil]];[self presentViewController:notice animated:YES completion:nil];return;}
+                                       NSString *exportPath=[owner.service[@"archivePath"] length]?owner.service[@"archivePath"]:[ServiceStore codePath:owner.service];
+                                       if(!exportPath.length){UIAlertController *notice=[UIAlertController alertControllerWithTitle:@"无法导出" message:@"未找到可导出的资源文件。" preferredStyle:UIAlertControllerStyleAlert];[notice addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:nil]];[owner presentViewController:notice animated:YES completion:nil];return;}
                                        UIActivityViewController *v =
                                            [[UIActivityViewController alloc] initWithActivityItems:@[
                                                [NSURL fileURLWithPath:exportPath]
                                            ]
                                                                              applicationActivities:nil];
-                                       v.popoverPresentationController.sourceView = self.view;
+                                       v.popoverPresentationController.sourceView = owner.view;
                                        v.popoverPresentationController.sourceRect =
-                                           CGRectMake(self.view.bounds.size.width / 2,
-                                                      self.view.bounds.size.height / 2, 1, 1);
-                                       [self presentViewController:v animated:YES completion:nil];
+                                           CGRectMake(owner.view.bounds.size.width / 2,
+                                                      owner.view.bounds.size.height / 2, 1, 1);
+                                       [owner presentViewController:v animated:YES completion:nil];
                                      }]];
             [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
             // 行已滑出可视区时 cell 为 nil：iPad 上 sourceView 为 nil 会崩溃，用 self.view 兜底。
@@ -730,7 +743,7 @@ static NSString *ServiceResolvedVersionText(NSDictionary *service){
             if([self opensMedia]){if(self.onBrowseService)self.onBrowseService(self.service);return;}
             NSString *u = [ServiceStore subscriptionURLForService:self.service];
             if (self.onSubscribe)
-                if(u.length)self.onSubscribe(u);else{UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"未配置直播列表" message:@"请编辑服务，填写或修复播放列表路径后再添加频道。" preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"编辑服务" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self edit];}]];[alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[self presentViewController:alert animated:YES completion:nil];}
+                if(u.length)self.onSubscribe(u);else{__weak typeof(self) weakSelf=self;UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"未配置直播列表" message:@"请编辑服务，填写或修复播放列表路径后再添加频道。" preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"编辑服务" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[weakSelf edit];}]];[alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[self presentViewController:alert animated:YES completion:nil];}
         } else if (ip.row == 4) {
             [self restart];
         }
@@ -906,7 +919,7 @@ static NSString *ServiceResolvedVersionText(NSDictionary *service){
     [self refresh];
 }
 - (void)add {
-    if(self.onImportResource){UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"添加资源" message:nil preferredStyle:UIAlertControllerStyleActionSheet];[sheet addAction:[UIAlertAction actionWithTitle:@"导入资源 · URL / 文件 / 文件夹" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){self.onImportResource();}]];[sheet addAction:[UIAlertAction actionWithTitle:@"添加 Python HTTP 服务" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){ServiceEditorViewController *editor=[ServiceEditorViewController new];[self.navigationController pushViewController:editor animated:YES];}]];[sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];sheet.popoverPresentationController.barButtonItem=self.navigationItem.rightBarButtonItems.firstObject;[self presentViewController:sheet animated:YES completion:nil];return;}
+    if(self.onImportResource){__weak typeof(self) weakSelf=self;UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"添加资源" message:nil preferredStyle:UIAlertControllerStyleActionSheet];[sheet addAction:[UIAlertAction actionWithTitle:@"导入资源 · URL / 文件 / 文件夹" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){if(weakSelf.onImportResource)self.onImportResource();}]];[sheet addAction:[UIAlertAction actionWithTitle:@"添加 Python HTTP 服务" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){ServiceEditorViewController *editor=[ServiceEditorViewController new];[weakSelf.navigationController pushViewController:editor animated:YES];}]];[sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];sheet.popoverPresentationController.barButtonItem=self.navigationItem.rightBarButtonItems.firstObject;[self presentViewController:sheet animated:YES completion:nil];return;}
     ServiceEditorViewController *v = [ServiceEditorViewController new];
     [self.navigationController pushViewController:v animated:YES];
 }
@@ -1036,5 +1049,12 @@ static NSString *ServiceResolvedVersionText(NSDictionary *service){
     v.onSubscribe = self.onSubscribe;
     v.onBrowseService=self.onBrowseService;
     [self.navigationController pushViewController:v animated:YES];
+}
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+    [super traitCollectionDidChange:previousTraitCollection];
+    if(previousTraitCollection&&[self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection]){
+        HostRefreshAppearanceLayers(self.view.window);
+        [self reloadThemeAppearance];
+    }
 }
 @end

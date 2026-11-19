@@ -32,7 +32,7 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
     button.titleLabel.adjustsFontForContentSizeCategory=YES;
 }
 
-@interface MediaEpisodeSelectionViewController ()
+@interface MediaEpisodeSelectionViewController () <UIContextMenuInteractionDelegate>
 @property(nonatomic) NSUInteger generation;
 @property(nonatomic) NSUInteger refreshGeneration;
 @property(nonatomic,copy) NSString *inFlightEpisodeSignature;
@@ -232,7 +232,7 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
     self.refreshButton=[self iconButton:@"arrow.clockwise" label:@"刷新影片分集" action:@selector(refreshDetail)];self.refreshButton.accessibilityIdentifier=@"media-episode-refresh";[header addArrangedSubview:self.refreshButton];[self.refreshButton.widthAnchor constraintEqualToConstant:44].active=YES;[self.refreshButton.heightAnchor constraintEqualToConstant:44].active=YES;
     self.refreshSpinner=[[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];self.refreshSpinner.translatesAutoresizingMaskIntoConstraints=NO;self.refreshSpinner.color=UIColor.whiteColor;self.refreshSpinner.hidesWhenStopped=YES;[self.refreshButton addSubview:self.refreshSpinner];[NSLayoutConstraint activateConstraints:@[[self.refreshSpinner.centerXAnchor constraintEqualToAnchor:self.refreshButton.centerXAnchor],[self.refreshSpinner.centerYAnchor constraintEqualToAnchor:self.refreshButton.centerYAnchor]]];
 
-    self.scrollView=[UIScrollView new];self.scrollView.translatesAutoresizingMaskIntoConstraints=NO;self.scrollView.alwaysBounceVertical=YES;self.scrollView.showsVerticalScrollIndicator=NO;self.scrollView.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever;UIRefreshControl *epRefresh=[UIRefreshControl new];epRefresh.tintColor=HostAccent();epRefresh.accessibilityIdentifier=@"media.episode.refreshControl";[epRefresh addTarget:self action:@selector(refreshDetail) forControlEvents:UIControlEventValueChanged];self.scrollView.refreshControl=epRefresh;[self.view addSubview:self.scrollView];
+    self.scrollView=[UIScrollView new];self.scrollView.translatesAutoresizingMaskIntoConstraints=NO;self.scrollView.alwaysBounceVertical=YES;self.scrollView.showsVerticalScrollIndicator=NO;self.scrollView.keyboardDismissMode=UIScrollViewKeyboardDismissModeOnDrag;self.scrollView.contentInsetAdjustmentBehavior=UIScrollViewContentInsetAdjustmentNever;UIRefreshControl *epRefresh=[UIRefreshControl new];epRefresh.tintColor=HostAccent();epRefresh.accessibilityIdentifier=@"media.episode.refreshControl";[epRefresh addTarget:self action:@selector(refreshDetail) forControlEvents:UIControlEventValueChanged];self.scrollView.refreshControl=epRefresh;[self.view addSubview:self.scrollView];
     self.contentStack=[UIStackView new];self.contentStack.translatesAutoresizingMaskIntoConstraints=NO;self.contentStack.axis=UILayoutConstraintAxisVertical;self.contentStack.spacing=15;self.contentStack.layoutMargins=UIEdgeInsetsMake(8,16,24,16);self.contentStack.layoutMarginsRelativeArrangement=YES;[self.scrollView addSubview:self.contentStack];
 
     UIView *playBar=[UIView new];playBar.translatesAutoresizingMaskIntoConstraints=NO;playBar.backgroundColor=[UIColor colorWithRed:.035 green:.039 blue:.052 alpha:.97];playBar.layer.borderColor=[UIColor colorWithWhite:1 alpha:.10].CGColor;playBar.layer.borderWidth=.6;[self.view addSubview:playBar];
@@ -365,7 +365,7 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
         UIStackView *row=[UIStackView new];row.axis=UILayoutConstraintAxisHorizontal;row.spacing=7;row.distribution=UIStackViewDistributionFillEqually;
         for(NSUInteger col=0;col<columns;col++){
             NSUInteger displayIndex=start+rowIndex*columns+col;UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];button.translatesAutoresizingMaskIntoConstraints=NO;button.layer.cornerRadius=14;button.layer.cornerCurve=kCACornerCurveContinuous;button.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];button.titleLabel.adjustsFontForContentSizeCategory=YES;button.titleLabel.adjustsFontSizeToFitWidth=YES;button.titleLabel.minimumScaleFactor=0.78;button.titleLabel.lineBreakMode=NSLineBreakByTruncatingTail;button.accessibilityTraits|=UIAccessibilityTraitButton;
-            if(displayIndex<end){NSUInteger index=CCTVEpisodeSourceIndex(displayIndex,episodes.count,self.episodeOrderReversed);NSDictionary *episode=episodes[index];NSString *name=[episode[@"name"] isKindOfClass:NSString.class]?episode[@"name"]:[NSString stringWithFormat:@"第 %lu 集",(unsigned long)index+1];BOOL selected=self.selectionUpdatesPlayer&&(NSInteger)index==self.selectedEpisodeIndex;NSString *displayTitle=CCTVEpisodeFormattedDisplayTitle(episode,index,epStyle,selected,NO,showEpBadge);[button setTitle:displayTitle forState:UIControlStateNormal];if(epStyle==CCTVEpisodeLayoutStyleList||epStyle==CCTVEpisodeLayoutStyleCard2){button.contentHorizontalAlignment=UIControlContentHorizontalAlignmentLeft;button.contentEdgeInsets=UIEdgeInsetsMake(10,14,10,14);button.titleLabel.numberOfLines=epStyle==CCTVEpisodeLayoutStyleCard2?2:1;}button.tag=index;button.accessibilityIdentifier=[NSString stringWithFormat:@"media-episode-item-%lu",(unsigned long)index];button.accessibilityLabel=[NSString stringWithFormat:@"%@，第 %lu 集",name,(unsigned long)index+1];button.backgroundColor=selected?[HostAccent() colorWithAlphaComponent:.78]:[UIColor colorWithWhite:1 alpha:.08];[button setTitleColor:selected?UIColor.whiteColor:MediaSelectionMuted() forState:UIControlStateNormal];button.layer.borderWidth=selected?0:.6;button.layer.borderColor=[UIColor colorWithWhite:1 alpha:.09].CGColor;[button addTarget:self action:@selector(selectEpisode:) forControlEvents:UIControlEventTouchUpInside];HostInstallPressFeedback(button);[self.episodeButtons addObject:button];}else{button.hidden=YES;button.accessibilityElementsHidden=YES;}
+            if(displayIndex<end){NSUInteger index=CCTVEpisodeSourceIndex(displayIndex,episodes.count,self.episodeOrderReversed);NSDictionary *episode=episodes[index];NSString *name=[episode[@"name"] isKindOfClass:NSString.class]?episode[@"name"]:[NSString stringWithFormat:@"第 %lu 集",(unsigned long)index+1];BOOL selected=self.selectionUpdatesPlayer&&(NSInteger)index==self.selectedEpisodeIndex;NSString *displayTitle=CCTVEpisodeFormattedDisplayTitle(episode,index,epStyle,selected,NO,showEpBadge);[button setTitle:displayTitle forState:UIControlStateNormal];if(epStyle==CCTVEpisodeLayoutStyleList||epStyle==CCTVEpisodeLayoutStyleCard2){button.contentHorizontalAlignment=UIControlContentHorizontalAlignmentLeft;button.contentEdgeInsets=UIEdgeInsetsMake(10,14,10,14);button.titleLabel.numberOfLines=epStyle==CCTVEpisodeLayoutStyleCard2?2:1;}button.tag=index;button.accessibilityIdentifier=[NSString stringWithFormat:@"media-episode-item-%lu",(unsigned long)index];button.accessibilityLabel=[NSString stringWithFormat:@"%@，第 %lu 集",name,(unsigned long)index+1];button.backgroundColor=selected?[HostAccent() colorWithAlphaComponent:.78]:[UIColor colorWithWhite:1 alpha:.08];[button setTitleColor:selected?UIColor.whiteColor:MediaSelectionMuted() forState:UIControlStateNormal];button.layer.borderWidth=selected?0:.6;button.layer.borderColor=[UIColor colorWithWhite:1 alpha:.09].CGColor;[button addTarget:self action:@selector(selectEpisode:) forControlEvents:UIControlEventTouchUpInside];if(@available(iOS 13.0,*)){[button addInteraction:[[UIContextMenuInteraction alloc] initWithDelegate:self]];}HostInstallPressFeedback(button);[self.episodeButtons addObject:button];}else{button.hidden=YES;button.accessibilityElementsHidden=YES;}
             [row addArrangedSubview:button];
         }
         [self.episodeGrid addArrangedSubview:row];[row.heightAnchor constraintGreaterThanOrEqualToConstant:epStyle==CCTVEpisodeLayoutStyleCard2?52:(epStyle==CCTVEpisodeLayoutStyleList?48:44)].active=YES;
@@ -487,6 +487,21 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
         if(owner.selectionUpdatesPlayer&&owner.navigationController.topViewController==owner){UINavigationController *navigation=owner.navigationController;dispatch_block_t onPlaybackReturn=[owner.onPlaybackReturn copy];[navigation popViewControllerAnimated:YES];id<UIViewControllerTransitionCoordinator> transition=navigation.transitionCoordinator;if(transition)[transition animateAlongsideTransition:nil completion:^(id<UIViewControllerTransitionCoordinatorContext> transitionContext){if(!transitionContext.isCancelled&&onPlaybackReturn)onPlaybackReturn();}];else dispatch_async(dispatch_get_main_queue(),^{if(navigation.topViewController!=owner&&onPlaybackReturn)onPlaybackReturn();});}
     }];
 }
+- (UIContextMenuConfiguration *)contextMenuInteraction:(UIContextMenuInteraction *)interaction configurationForMenuAtLocation:(CGPoint)location API_AVAILABLE(ios(13.0)) {
+    UIView *target=interaction.view;
+    if(![target isKindOfClass:UIButton.class])return nil;
+    UIButton *epBtn=(UIButton *)target;
+    NSArray *episodes=[self episodesForLine:self.selectedLineIndex];
+    if(epBtn.tag<0||epBtn.tag>=(NSInteger)episodes.count)return nil;
+    NSDictionary *episode=episodes[(NSUInteger)epBtn.tag];
+    NSString *epName=[episode[@"name"] isKindOfClass:NSString.class]&&[episode[@"name"] length]?episode[@"name"]:[NSString stringWithFormat:@"第 %ld 集",(long)epBtn.tag+1];
+    __weak typeof(self) weakSelf=self;
+    return [UIContextMenuConfiguration configurationWithIdentifier:nil previewProvider:nil actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggested){
+        UIAction *playAct=[UIAction actionWithTitle:@"立即播放此集" image:[UIImage systemImageNamed:@"play.fill"] identifier:nil handler:^(__unused UIAction *a){[weakSelf selectEpisode:epBtn];}];
+        UIAction *copyAct=[UIAction actionWithTitle:@"复制分集名称" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){UIPasteboard.generalPasteboard.string=epName;}];
+        return [UIMenu menuWithTitle:epName children:@[playAct,copyAct]];
+    }];
+}
 - (void)reloadThemeAppearance {
     self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
     if(!self.isViewLoaded)return;
@@ -495,5 +510,9 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
     self.continueButton.backgroundColor=HostAccent();
     [self.descriptionToggle setTitleColor:HostAccent() forState:UIControlStateNormal];
     [self rebuildSelection];
+}
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+    [super traitCollectionDidChange:previousTraitCollection];
+    if([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection])[self reloadThemeAppearance];
 }
 @end

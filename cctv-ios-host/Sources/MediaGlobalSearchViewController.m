@@ -215,7 +215,7 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
     self.tableView.tableHeaderView = header;
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"搜索" style:UIBarButtonItemStyleDone target:self action:@selector(submitSearch)];
     [self updateSearchScopePresentation];[self updateFilters];[self.tableView reloadData];[self updateEmptyState];
-    NSString *initial=[self.initialKeyword stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];if(initial.length){self.searchBar.text=initial;dispatch_async(dispatch_get_main_queue(),^{if(self.isViewLoaded&&self.initialKeyword.length&&[self.searchBar.text isEqual:self.initialKeyword])[self submitSearch];});}
+    NSString *initial=self.initialKeyword.length?[self.initialKeyword stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]:@"";if(initial.length){self.searchBar.text=initial;__weak typeof(self) weakSelf=self;dispatch_async(dispatch_get_main_queue(),^{MediaGlobalSearchViewController *owner=weakSelf;if(owner&&owner.isViewLoaded&&owner.initialKeyword.length&&[owner.searchBar.text isEqual:owner.initialKeyword])[owner submitSearch];});}
 }
 
 - (void)updateSearchScopePresentation {
@@ -831,6 +831,16 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
     return cell;
 }
 
+- (void)tableView:(UITableView *)tableView didHighlightRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
+    if (!cell || UIAccessibilityIsReduceMotionEnabled()) return;
+    [UIView animateWithDuration:0.10 delay:0 usingSpringWithDamping:0.8 initialSpringVelocity:0.2 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{ cell.transform = CGAffineTransformMakeScale(0.985, 0.985); } completion:nil];
+}
+- (void)tableView:(UITableView *)tableView didUnhighlightRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
+    if (!cell) return;
+    [UIView animateWithDuration:0.22 delay:0 usingSpringWithDamping:0.78 initialSpringVelocity:0.25 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{ cell.transform = CGAffineTransformIdentity; } completion:nil];
+}
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     if (indexPath.section >= self.searchSources.count || indexPath.section >= self.rows.count) return;
@@ -906,6 +916,10 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
     [self updateFilters];
     [self updateEmptyState];
     [self.tableView reloadData];
+}
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+    [super traitCollectionDidChange:previousTraitCollection];
+    if ([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection]) [self reloadThemeAppearance];
 }
 - (void)searchBarSearchButtonClicked:(UISearchBar *)searchBar { [self submitSearch]; }
 - (void)dealloc { [NSNotificationCenter.defaultCenter removeObserver:self]; [self cancelJobsAndAdvanceGeneration]; }

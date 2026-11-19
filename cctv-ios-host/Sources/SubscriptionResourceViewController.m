@@ -15,10 +15,22 @@
 @property(nonatomic) BOOL suppressMetadataReload;
 @property(nonatomic,copy) NSString *notice;
 @property(nonatomic,weak) id<UIGestureRecognizerDelegate> previousPopDelegate;
+@property(nonatomic,strong) UIView *heroContainer;
+@property(nonatomic,strong) UIView *heroCard;
+@property(nonatomic,strong) UIView *heroSpecularLine;
+@property(nonatomic,strong) UILabel *heroTitleLabel;
+@property(nonatomic,strong) UILabel *heroKindBadge;
+@property(nonatomic,strong) UILabel *heroSubtitleLabel;
+@property(nonatomic,strong) NSArray<UIView *> *heroMetricPills;
+@property(nonatomic,strong) NSArray<UILabel *> *heroMetricValues;
+@property(nonatomic,strong) NSArray<UILabel *> *heroMetricTitles;
 -  (void)changed;
 -  (void)loadFields;
 -  (void)updateAction;
 -  (void)metadataChanged;
+-  (void)buildHeroHeaderView;
+-  (void)updateHeroSummary;
+-  (void)showTransientPrompt:(NSString *)prompt;
 -  (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section;
 @end
 
@@ -52,11 +64,206 @@
     target.text=clip;
     [self changed];
 }
+- (void)buildHeroHeaderView {
+    CGFloat width=MAX(320.0,self.view.bounds.size.width>0?self.view.bounds.size.width:375.0);
+    UIView *container=[[UIView alloc] initWithFrame:CGRectMake(0,0,width,138)];
+    container.backgroundColor=UIColor.clearColor;
+
+    UIView *card=[UIView new];
+    card.translatesAutoresizingMaskIntoConstraints=NO;
+    card.backgroundColor=HostCard();
+    card.layer.cornerRadius=16;
+    card.layer.cornerCurve=kCACornerCurveContinuous;
+    card.layer.borderWidth=0.8;
+    HostSetLayerBorderColor(card,HostBorder());
+    card.accessibilityIdentifier=@"subscription.hero.card";
+    [container addSubview:card];
+
+    UIView *spec=[UIView new];
+    spec.translatesAutoresizingMaskIntoConstraints=NO;
+    spec.backgroundColor=[UIColor colorWithWhite:1.0 alpha:0.12];
+    spec.userInteractionEnabled=NO;
+    [card addSubview:spec];
+
+    UILabel *titleLbl=[UILabel new];
+    titleLbl.translatesAutoresizingMaskIntoConstraints=NO;
+    titleLbl.font=[UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];
+    titleLbl.adjustsFontForContentSizeCategory=YES;
+    titleLbl.textColor=HostText();
+    titleLbl.lineBreakMode=NSLineBreakByTruncatingTail;
+    [card addSubview:titleLbl];
+
+    UILabel *kindBadge=[UILabel new];
+    kindBadge.translatesAutoresizingMaskIntoConstraints=NO;
+    kindBadge.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]];
+    kindBadge.adjustsFontForContentSizeCategory=YES;
+    kindBadge.textColor=HostAccent();
+    kindBadge.backgroundColor=HostSelectedSurface();
+    kindBadge.textAlignment=NSTextAlignmentCenter;
+    kindBadge.layer.cornerRadius=8;
+    kindBadge.layer.cornerCurve=kCACornerCurveContinuous;
+    kindBadge.clipsToBounds=YES;
+    [kindBadge setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+    [kindBadge setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+    [card addSubview:kindBadge];
+
+    UILabel *subLbl=[UILabel new];
+    subLbl.translatesAutoresizingMaskIntoConstraints=NO;
+    subLbl.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];
+    subLbl.adjustsFontForContentSizeCategory=YES;
+    subLbl.textColor=HostSecondaryText();
+    subLbl.lineBreakMode=NSLineBreakByTruncatingTail;
+    [card addSubview:subLbl];
+
+    UIStackView *grid=[UIStackView new];
+    grid.translatesAutoresizingMaskIntoConstraints=NO;
+    grid.axis=UILayoutConstraintAxisHorizontal;
+    grid.distribution=UIStackViewDistributionFillEqually;
+    grid.spacing=8;
+    [card addSubview:grid];
+
+    NSArray<NSString *> *titles=@[@"缓存频道",@"EPG 节目单",@"显示增强"];
+    NSMutableArray<UIView *> *pills=[NSMutableArray arrayWithCapacity:3];
+    NSMutableArray<UILabel *> *vals=[NSMutableArray arrayWithCapacity:3];
+    NSMutableArray<UILabel *> *caps=[NSMutableArray arrayWithCapacity:3];
+    for(NSString *t in titles){
+        UIView *pill=[UIView new];
+        pill.backgroundColor=HostRaisedSurface();
+        pill.layer.cornerRadius=11;
+        pill.layer.cornerCurve=kCACornerCurveContinuous;
+        pill.layer.borderWidth=0.55;
+        HostSetLayerBorderColor(pill,HostBorder());
+        [pills addObject:pill];
+
+        UILabel *v=[UILabel new];
+        v.translatesAutoresizingMaskIntoConstraints=NO;
+        v.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleSubheadline] scaledFontForFont:[UIFont monospacedDigitSystemFontOfSize:13 weight:UIFontWeightBold]];
+        v.adjustsFontForContentSizeCategory=YES;
+        v.adjustsFontSizeToFitWidth=YES;
+        v.minimumScaleFactor=0.75;
+        v.textColor=HostText();
+        v.textAlignment=NSTextAlignmentCenter;
+        v.text=@"—";
+        [pill addSubview:v];
+
+        UILabel *c=[UILabel new];
+        c.translatesAutoresizingMaskIntoConstraints=NO;
+        c.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption2];
+        c.adjustsFontForContentSizeCategory=YES;
+        c.textColor=HostSecondaryText();
+        c.textAlignment=NSTextAlignmentCenter;
+        c.text=t;
+        [pill addSubview:c];
+
+        [NSLayoutConstraint activateConstraints:@[
+            [v.topAnchor constraintEqualToAnchor:pill.topAnchor constant:7],
+            [v.leadingAnchor constraintEqualToAnchor:pill.leadingAnchor constant:4],
+            [v.trailingAnchor constraintEqualToAnchor:pill.trailingAnchor constant:-4],
+            [c.topAnchor constraintEqualToAnchor:v.bottomAnchor constant:2],
+            [c.leadingAnchor constraintEqualToAnchor:pill.leadingAnchor constant:4],
+            [c.trailingAnchor constraintEqualToAnchor:pill.trailingAnchor constant:-4],
+            [c.bottomAnchor constraintEqualToAnchor:pill.bottomAnchor constant:-6]
+        ]];
+        [grid addArrangedSubview:pill];
+        [vals addObject:v];
+        [caps addObject:c];
+    }
+
+    [NSLayoutConstraint activateConstraints:@[
+        [card.topAnchor constraintEqualToAnchor:container.topAnchor constant:8],
+        [card.leadingAnchor constraintEqualToAnchor:container.leadingAnchor constant:16],
+        [card.trailingAnchor constraintEqualToAnchor:container.trailingAnchor constant:-16],
+        [card.bottomAnchor constraintEqualToAnchor:container.bottomAnchor constant:-4],
+        [spec.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:14],
+        [spec.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-14],
+        [spec.topAnchor constraintEqualToAnchor:card.topAnchor],
+        [spec.heightAnchor constraintEqualToConstant:0.5],
+        [titleLbl.topAnchor constraintEqualToAnchor:card.topAnchor constant:12],
+        [titleLbl.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:14],
+        [kindBadge.centerYAnchor constraintEqualToAnchor:titleLbl.centerYAnchor],
+        [kindBadge.leadingAnchor constraintGreaterThanOrEqualToAnchor:titleLbl.trailingAnchor constant:8],
+        [kindBadge.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-14],
+        [kindBadge.heightAnchor constraintEqualToConstant:22],
+        [subLbl.topAnchor constraintEqualToAnchor:titleLbl.bottomAnchor constant:3],
+        [subLbl.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:14],
+        [subLbl.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-14],
+        [grid.topAnchor constraintEqualToAnchor:subLbl.bottomAnchor constant:10],
+        [grid.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:12],
+        [grid.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-12],
+        [grid.bottomAnchor constraintEqualToAnchor:card.bottomAnchor constant:-11]
+    ]];
+
+    self.heroContainer=container;
+    self.heroCard=card;
+    self.heroSpecularLine=spec;
+    self.heroTitleLabel=titleLbl;
+    self.heroKindBadge=kindBadge;
+    self.heroSubtitleLabel=subLbl;
+    self.heroMetricPills=pills;
+    self.heroMetricValues=vals;
+    self.heroMetricTitles=caps;
+    self.tableView.tableHeaderView=container;
+}
+- (void)updateHeroSummary {
+    if(!self.heroCard)return;
+    NSDictionary *profile=self.cachedProfile?:@{};
+    NSString *name=self.nameField.text.length?self.nameField.text:(profile[@"name"]?:(self.source.length?@"直播资源":@"央视直播 · 官方频道"));
+    self.heroTitleLabel.text=name;
+    NSString *kindText=!self.source.length?@"  官方内置  ":([self.source hasPrefix:@"local-playlist:"]?@"  本地列表  ":@"  HTTP 订阅  ");
+    self.heroKindBadge.text=kindText;
+    NSString *status=profile[@"status"]?:(self.source.length?@"等待检测或刷新":@"内置官方 · 实时就绪");
+    self.heroSubtitleLabel.text=status;
+    NSUInteger chCount=[profile[@"count"] unsignedIntegerValue];
+    NSString *epgText=profile[@"epgStatus"]?:(self.source.length?@"自动匹配":@"官方");
+    NSInteger enabledSwitches=([ProfileStore isChannelLogoEnabledForSource:self.source]?1:0)
+        +([ProfileStore isPlayerCornerLogoEnabledForSource:self.source]?1:0)
+        +([ProfileStore isChannelPreviewEnabledForSource:self.source]?1:0)
+        +([ProfileStore isChannelTelemetryEnabledForSource:self.source]?1:0);
+    NSArray<NSString *> *vals=@[
+        [NSString stringWithFormat:@"%lu 台",(unsigned long)chCount],
+        epgText,
+        [NSString stringWithFormat:@"%ld / 4 项",(long)enabledSwitches]
+    ];
+    for(NSUInteger i=0;i<self.heroMetricValues.count&&i<vals.count;i++){
+        UILabel *lbl=self.heroMetricValues[i];
+        lbl.text=vals[i];
+        if(i==0&&chCount>0)lbl.textColor=HostAccent();
+        else if(i==2&&enabledSwitches>0)lbl.textColor=UIColor.systemGreenColor;
+        else lbl.textColor=HostText();
+    }
+}
+- (void)showTransientPrompt:(NSString *)prompt {
+    self.navigationItem.prompt=prompt;
+    __weak typeof(self) weakSelf=self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(1.6*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
+        if([weakSelf.navigationItem.prompt isEqualToString:prompt])weakSelf.navigationItem.prompt=nil;
+    });
+}
+- (void)handlePullRefresh {
+    if(self.onRefresh){
+        self.onRefresh();
+        [self showTransientPrompt:self.source.length?@"已发起订阅刷新":@"已同步内置官方频道"];
+    }
+    [self loadFields];
+    [self.tableView reloadData];
+    [self.refreshControl endRefreshing];
+}
 - (void)viewDidLoad {
     [super viewDidLoad];self.title=@"直播资源";self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();self.tableView.backgroundColor=HostBackground();self.tableView.keyboardDismissMode=UIScrollViewKeyboardDismissModeOnDrag;self.tableView.rowHeight=UITableViewAutomaticDimension;self.tableView.estimatedRowHeight=64;
-    self.nameField=[self field:@"资源名称" allowPaste:NO tag:0];self.urlField=[self field:@"HTTP / HTTPS 订阅地址" allowPaste:YES tag:1];self.urlField.keyboardType=UIKeyboardTypeURL;self.epgField=[self field:@"留空使用列表提供的 EPG" allowPaste:YES tag:2];self.epgField.keyboardType=UIKeyboardTypeURL;self.editingResource=self.initiallyEditing;[self loadFields];
+    self.nameField=[self field:@"资源名称" allowPaste:NO tag:0];self.urlField=[self field:@"HTTP / HTTPS 订阅地址" allowPaste:YES tag:1];self.urlField.keyboardType=UIKeyboardTypeURL;self.epgField=[self field:@"留空使用列表提供的 EPG" allowPaste:YES tag:2];self.epgField.keyboardType=UIKeyboardTypeURL;self.editingResource=self.initiallyEditing;
+    [self buildHeroHeaderView];
+    [self loadFields];
     self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithTitle:@"返回" style:UIBarButtonItemStylePlain target:self action:@selector(close)];[self updateAction];
+    UIRefreshControl *rc=[UIRefreshControl new];
+    [rc addTarget:self action:@selector(handlePullRefresh) forControlEvents:UIControlEventValueChanged];
+    self.refreshControl=rc;
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(metadataChanged) name:ProfileStoreMetadataDidChangeNotification object:nil];
+}
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    if(self.heroContainer&&self.tableView.bounds.size.width>0&&fabs(self.heroContainer.frame.size.width-self.tableView.bounds.size.width)>0.5){
+        CGRect f=self.heroContainer.frame;f.size.width=self.tableView.bounds.size.width;self.heroContainer.frame=f;self.tableView.tableHeaderView=self.heroContainer;
+    }
 }
 - (void)reloadThemeAppearance {
     if(!self.isViewLoaded)return;
@@ -66,7 +273,20 @@
     self.nameField.textColor=HostText();self.nameField.tintColor=HostAccent();
     self.urlField.textColor=HostText();self.urlField.tintColor=HostAccent();
     self.epgField.textColor=HostText();self.epgField.tintColor=HostAccent();
+    self.heroCard.backgroundColor=HostCard();HostSetLayerBorderColor(self.heroCard,HostBorder());
+    self.heroTitleLabel.textColor=HostText();
+    self.heroKindBadge.textColor=HostAccent();self.heroKindBadge.backgroundColor=HostSelectedSurface();
+    self.heroSubtitleLabel.textColor=HostSecondaryText();
+    for(UIView *pill in self.heroMetricPills){pill.backgroundColor=HostRaisedSurface();HostSetLayerBorderColor(pill,HostBorder());}
+    for(UILabel *lbl in self.heroMetricTitles)lbl.textColor=HostSecondaryText();
+    [self updateHeroSummary];
     [self.tableView reloadData];
+}
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+    [super traitCollectionDidChange:previousTraitCollection];
+    if ([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection]) {
+        [self reloadThemeAppearance];
+    }
 }
 - (void)dealloc {[NSNotificationCenter.defaultCenter removeObserver:self];}
 - (void)viewWillAppear:(BOOL)animated {
@@ -78,6 +298,7 @@
         [self metadataChanged];
     }else if(!self.cachedProfile.count&&self.profileProvider){
         self.cachedProfile=self.profileProvider()?:@{};
+        [self updateHeroSummary];
     }
     self.hasAppearedOnce=YES;
 }
@@ -93,6 +314,7 @@
     self.urlField.text=self.source?:@"";
     self.epgField.text=metadata[@"epgURL"]?:@"";
     self.snapshot=[self values];
+    [self updateHeroSummary];
 }
 - (void)metadataChanged {
     if(!NSThread.isMainThread){__weak typeof(self) weakSelf=self;dispatch_async(dispatch_get_main_queue(),^{[weakSelf metadataChanged];});return;}
@@ -119,15 +341,15 @@
 - (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gestureRecognizer {if(self.saving)return NO;if(self.editingResource&&![[self values] isEqual:self.snapshot]){[self close];return NO;}return YES;}
 - (NSArray<NSDictionary *> *)managementRows {
     NSMutableArray<NSDictionary *> *rows=[NSMutableArray arrayWithObjects:
-        @{@"title":@"查看频道",@"icon":@"play.tv",@"action":@"open"},
-        @{@"title":@"刷新此订阅",@"icon":@"arrow.clockwise",@"action":@"refresh"},
+        @{@"title":@"查看频道",@"detail":@"返回频道页并仅展示此订阅来源的直播台",@"icon":@"play.tv",@"action":@"open"},
+        @{@"title":@"刷新此订阅",@"detail":@"重新拉取最新播放列表并更新本地缓存",@"icon":@"arrow.clockwise",@"action":@"refresh"},
         nil];
-    if(self.onRecheckHealth)[rows addObject:@{@"title":@"重新检测健康",@"icon":@"checkmark.shield",@"action":@"recheck"}];
-    if(self.onRematchEPG)[rows addObject:@{@"title":@"重新匹配节目单（EPG）",@"icon":@"calendar.badge.clock",@"action":@"rematch"}];
-    [rows addObject:@{@"title":@"智能匹配官方高清台标与节目单",@"icon":@"sparkles.tv",@"action":@"matchLogos"}];
-    [rows addObject:@{@"title":@"导出单项资源文件",@"icon":@"square.and.arrow.up",@"action":@"export"}];
-    if(self.source.length)[rows addObject:@{@"title":@"复制订阅地址",@"icon":@"doc.on.doc",@"action":@"copy"}];
-    if(self.source.length&&self.onDelete)[rows addObject:@{@"title":@"移除此订阅",@"icon":@"trash",@"action":@"delete",@"destructive":@YES}];
+    if(self.onRecheckHealth)[rows addObject:@{@"title":@"重新检测健康",@"detail":@"检测订阅源连通性与首屏响应速度",@"icon":@"checkmark.shield",@"action":@"recheck"}];
+    if(self.onRematchEPG)[rows addObject:@{@"title":@"重新匹配节目单（EPG）",@"detail":@"按频道标识重新关联 XMLTV 与官方节目单",@"icon":@"calendar.badge.clock",@"action":@"rematch"}];
+    [rows addObject:@{@"title":@"智能匹配官方高清台标与节目单",@"detail":@"自动归一常见央视/卫视频道台标与 EPG",@"icon":@"sparkles.tv",@"action":@"matchLogos"}];
+    [rows addObject:@{@"title":@"导出单项资源文件",@"detail":@"导出为可分享或备份的独立资源配置",@"icon":@"square.and.arrow.up",@"action":@"export"}];
+    if(self.source.length)[rows addObject:@{@"title":@"复制订阅地址",@"detail":@"复制原始订阅链接到系统剪贴板",@"icon":@"doc.on.doc",@"action":@"copy"}];
+    if(self.source.length&&self.onDelete)[rows addObject:@{@"title":@"移除此订阅",@"detail":@"删除此订阅源及其独有频道，不影响其他源",@"icon":@"trash",@"action":@"delete",@"destructive":@YES}];
     return rows;
 }
 - (void)applyInPlaceSwitchFeedbackForRow:(NSInteger)row detail:(NSString *)detail iconName:(NSString *)iconName {
@@ -140,6 +362,7 @@
         }
         [cell setNeedsLayout];
     }
+    [self updateHeroSummary];
     UITableViewHeaderFooterView *footer=[self.tableView footerViewForSection:0];
     if(footer.textLabel){
         footer.textLabel.text=[self tableView:self.tableView titleForFooterInSection:0];
@@ -188,7 +411,7 @@
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {return section==0?3:(section==1?6:self.managementRows.count);}
 - (void)tableView:(UITableView *)tableView willDisplayHeaderView:(UIView *)view forSection:(NSInteger)section { HostStyleSectionHeaderView(view); }
 - (void)tableView:(UITableView *)tableView willDisplayFooterView:(UIView *)view forSection:(NSInteger)section { HostStyleSectionFooterView(view); }
-- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {return @[@"资源配置",@"内容状态",@"使用与管理"][section];}
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {return @[@"资源配置",@"内容状态与显示增强",@"使用与管理"][section];}
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {if(section==0)return self.notice?:@"修改订阅地址会先读取新清单，验证成功后替换。EPG 留空使用列表自动提供的地址。";return nil;}
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {
     NSString *reuseID=(ip.section==0&&self.editingResource)?[NSString stringWithFormat:@"subscription.edit.%ld",(long)ip.row]:(ip.section==1&&ip.row>=2?[NSString stringWithFormat:@"subscription.switch.%ld",(long)ip.row]:@"subscription.subtitle.cell");
@@ -269,7 +492,8 @@
             cell.imageView.image=[UIImage systemImageNamed:@"tv"];
         }else if(ip.row==1){
             NSString *defaultStatus=self.source.length?@"尚未检查":@"内置官方 · 实时就绪";
-            cell.textLabel.text=profile[@"status"]?:defaultStatus;
+            NSString *statusText=profile[@"status"]?:defaultStatus;
+            cell.textLabel.text=statusText;
             NSTimeInterval updated=[profile[@"updatedAt"] doubleValue];
             if(updated>0){
                 static NSDateFormatter *fmt;static dispatch_once_t once;
@@ -279,7 +503,11 @@
             }else{
                 cell.detailTextLabel.text=self.source.length?@"尚无成功刷新时间记录":@"内置官方频道 · 实时同步";
             }
-            cell.imageView.image=[UIImage systemImageNamed:@"checkmark.shield"];
+            BOOL hasWarn=([statusText containsString:@"失败"]||[statusText containsString:@"异常"]||[statusText containsString:@"超时"]);
+            cell.imageView.image=[UIImage systemImageNamed:hasWarn?@"exclamationmark.triangle.fill":@"checkmark.shield"];
+            cell.imageView.tintColor=hasWarn?UIColor.systemOrangeColor:UIColor.systemGreenColor;
+            cell.selectionStyle=UITableViewCellSelectionStyleNone;
+            return cell;
         }else if(ip.row==2){
             BOOL logoEnabled=[ProfileStore isChannelLogoEnabledForSource:self.source];
             cell.textLabel.text=@"频道列表与网格台标";
@@ -338,6 +566,7 @@
             NSDictionary *item=rows[ip.row];
             BOOL destructive=[item[@"destructive"] boolValue];
             cell.textLabel.text=item[@"title"];
+            cell.detailTextLabel.text=item[@"detail"];
             cell.textLabel.textColor=destructive?UIColor.systemRedColor:HostAccent();
             cell.imageView.image=[UIImage systemImageNamed:item[@"icon"]];
             cell.imageView.tintColor=destructive?UIColor.systemRedColor:HostAccent();
@@ -361,18 +590,18 @@
 }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)ip {
     [tableView deselectRowAtIndexPath:ip animated:YES];if(self.saving||self.editingResource)return;
-    if(ip.section==0&&ip.row>0){NSString *value=ip.row==1?self.source:([ProfileStore metadata:self.source][@"epgURL"]?:[ProfileStore metadata:self.source][@"detectedEPGURL"]);if(!value.length)return;UIAlertController *alert=[UIAlertController alertControllerWithTitle:ip.row==1?@"完整订阅地址":@"EPG 地址" message:value preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"复制完整地址" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){UIPasteboard.generalPasteboard.string=value;}]];[alert addAction:[UIAlertAction actionWithTitle:@"关闭" style:UIAlertActionStyleCancel handler:nil]];[self presentViewController:alert animated:YES completion:nil];}
+    if(ip.section==0&&ip.row>0){NSString *value=ip.row==1?self.source:([ProfileStore metadata:self.source][@"epgURL"]?:[ProfileStore metadata:self.source][@"detectedEPGURL"]);if(!value.length)return;UIAlertController *alert=[UIAlertController alertControllerWithTitle:ip.row==1?@"完整订阅地址":@"EPG 地址" message:value preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"复制完整地址" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){UIPasteboard.generalPasteboard.string=value;[self showTransientPrompt:@"完整地址已复制"];}]];[alert addAction:[UIAlertAction actionWithTitle:@"关闭" style:UIAlertActionStyleCancel handler:nil]];[self presentViewController:alert animated:YES completion:nil];}
     else if(ip.section==2){
         NSArray<NSDictionary *> *rows=self.managementRows;
         if(ip.row<0||ip.row>=(NSInteger)rows.count)return;
         NSString *action=rows[ip.row][@"action"];
         if([action isEqual:@"open"]){if(self.onOpen)self.onOpen();}
-        else if([action isEqual:@"refresh"]){if(self.onRefresh){self.onRefresh();self.notice=self.source.length?@"刷新请求已发起":@"已同步内置官方频道与节目单";[self loadFields];[self.tableView reloadData];}}
-        else if([action isEqual:@"recheck"]){if(self.onRecheckHealth){self.onRecheckHealth();self.notice=self.source.length?@"正在重新检测订阅健康状态…":@"内置官方频道健康状态正常";[self loadFields];[self.tableView reloadData];}}
-        else if([action isEqual:@"rematch"]){if(self.onRematchEPG){self.onRematchEPG();self.notice=@"已发起节目单（EPG）重新匹配";[self loadFields];[self.tableView reloadData];}}
-        else if([action isEqual:@"matchLogos"]){if(self.onMatchStationLogos)self.onMatchStationLogos();self.notice=@"已完成官方高清台标与节目单归一匹配";[self loadFields];[self.tableView reloadData];}
+        else if([action isEqual:@"refresh"]){if(self.onRefresh){self.onRefresh();self.notice=self.source.length?@"刷新请求已发起":@"已同步内置官方频道与节目单";[self showTransientPrompt:self.notice];[self loadFields];[self.tableView reloadData];}}
+        else if([action isEqual:@"recheck"]){if(self.onRecheckHealth){self.onRecheckHealth();self.notice=self.source.length?@"正在重新检测订阅健康状态…":@"内置官方频道健康状态正常";[self showTransientPrompt:self.notice];[self loadFields];[self.tableView reloadData];}}
+        else if([action isEqual:@"rematch"]){if(self.onRematchEPG){self.onRematchEPG();self.notice=@"已发起节目单（EPG）重新匹配";[self showTransientPrompt:self.notice];[self loadFields];[self.tableView reloadData];}}
+        else if([action isEqual:@"matchLogos"]){if(self.onMatchStationLogos)self.onMatchStationLogos();self.notice=@"已完成官方高清台标与节目单归一匹配";[self showTransientPrompt:self.notice];[self loadFields];[self.tableView reloadData];}
         else if([action isEqual:@"export"]){if(self.onExport)self.onExport();}
-        else if([action isEqual:@"copy"]){if(self.source.length){UIPasteboard.generalPasteboard.string=self.source;self.notice=@"订阅地址已复制到剪贴板";[self.tableView reloadData];}}
+        else if([action isEqual:@"copy"]){if(self.source.length){UIPasteboard.generalPasteboard.string=self.source;self.notice=@"订阅地址已复制到剪贴板";[self showTransientPrompt:self.notice];}}
         else if([action isEqual:@"delete"]){[self confirmDeleteSubscription];}
     }
 }
@@ -395,9 +624,9 @@
     return [UIContextMenuConfiguration configurationWithIdentifier:ip previewProvider:nil actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggested){
         NSMutableArray<UIMenuElement *> *items=[NSMutableArray array];
         if(detail.length){
-            [items addObject:[UIAction actionWithTitle:@"复制此项内容" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){UIPasteboard.generalPasteboard.string=detail;weakSelf.notice=@"已复制到剪贴板";[weakSelf.tableView reloadData];}]];
+            [items addObject:[UIAction actionWithTitle:@"复制此项内容" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){UIPasteboard.generalPasteboard.string=detail;[weakSelf showTransientPrompt:@"已复制到剪贴板"];}]];
         }
-        [items addObject:[UIAction actionWithTitle:@"复制完整键值" image:[UIImage systemImageNamed:@"list.clipboard"] identifier:nil handler:^(__unused UIAction *a){UIPasteboard.generalPasteboard.string=detail.length?[NSString stringWithFormat:@"%@：%@",title,detail]:title;}]];
+        [items addObject:[UIAction actionWithTitle:@"复制完整键值" image:[UIImage systemImageNamed:@"list.clipboard"] identifier:nil handler:^(__unused UIAction *a){UIPasteboard.generalPasteboard.string=detail.length?[NSString stringWithFormat:@"%@：%@",title,detail]:title;[weakSelf showTransientPrompt:@"已复制到剪贴板"];}]];
         return [UIMenu menuWithTitle:title children:items];
     }];
 }

@@ -59,6 +59,10 @@ NSString *MediaPlaybackSniffContainerFormat(NSData *headerBytes) {
     if (len >= 8 && (memcmp(b + 4, "ftyp", 4) == 0 || memcmp(b + 4, "styp", 4) == 0 ||
                      memcmp(b + 4, "moof", 4) == 0 || memcmp(b + 4, "moov", 4) == 0)) return @"mp4";
     if (b[0] == 0x47 && (len < 189 || b[188] == 0x47)) return @"ts";
+    if (b[0] == 'f' && b[1] == 'L' && b[2] == 'a' && b[3] == 'C') return @"flac";
+    if (len >= 12 && memcmp(b, "RIFF", 4) == 0 && memcmp(b + 8, "WAVE", 4) == 0) return @"wav";
+    if ((b[0] == 'I' && b[1] == 'D' && b[2] == '3') || (b[0] == 0xFF && (b[1] == 0xFB || b[1] == 0xF3 || b[1] == 0xF2))) return @"mp3";
+    if (b[0] == 0xFF && (b[1] == 0xF1 || b[1] == 0xF9)) return @"aac";
     NSUInteger offset = (len >= 3 && b[0] == 0xEF && b[1] == 0xBB && b[2] == 0xBF) ? 3 : 0;
     while (offset < len && (b[offset] == ' ' || b[offset] == '\t' || b[offset] == '\r' || b[offset] == '\n')) offset++;
     if (len - offset >= 7 && memcmp(b + offset, "#EXTM3U", 7) == 0) return @"hls";
@@ -104,9 +108,13 @@ BOOL MediaPlaybackResultSupportsCicadaPlayer(NSDictionary *result) {
     if ([formats containsObject:format] || [mimes containsObject:mime]) return YES;
     NSString *raw = MediaPlaybackDecodeResultURLString(result);
     NSString *lowerRaw = raw.lowercaseString;
-    if ([lowerRaw hasPrefix:@"rtmp://"] || [lowerRaw hasPrefix:@"rtmps://"]) return YES;
+    if ([lowerRaw hasPrefix:@"rtmp://"] || [lowerRaw hasPrefix:@"rtmps://"] || [lowerRaw hasPrefix:@"udp://"]) return YES;
     NSString *extension = MediaPlaybackDecodeResultExtension(result);
-    return [@[@"flv", @"mpd", @"mkv", @"webm", @"3gp", @"3gpp"] containsObject:extension];
+    if ([@[@"flv", @"mpd", @"mkv", @"webm", @"3gp", @"3gpp"] containsObject:extension]) return YES;
+    if (!extension.length && lowerRaw.length) {
+        if ([lowerRaw containsString:@".flv?"] || [lowerRaw containsString:@"format=flv"] || [lowerRaw containsString:@"type=flv"] || [lowerRaw containsString:@"format=mpd"] || [lowerRaw containsString:@".mpd?"]) return YES;
+    }
+    return NO;
 }
 
 BOOL MediaPlaybackResultRequiresWebViewOnly(NSDictionary *result) {

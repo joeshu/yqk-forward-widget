@@ -95,7 +95,7 @@ BOOL MediaPlaybackResultSupportsAVPlayer(NSDictionary *result) {
     if([@[@"m3u8",@"m3u",@"mp4",@"m4v",@"mov",@"m4a",@"mp3",@"aac",@"ts",@"m4s",@"f4v",@"wav",@"flac",@"ac3",@"eac3"] containsObject:extension])return YES;
     if(!extension.length&&[raw isKindOfClass:NSString.class]&&raw.length){
         NSString *lowerRaw=[raw lowercaseString];
-        if([lowerRaw containsString:@".m3u8"]||[lowerRaw containsString:@".mp4"]||[lowerRaw containsString:@"/m3u8/"]||[lowerRaw containsString:@"/hls/"]||[lowerRaw containsString:@"/cenc/"]||[lowerRaw containsString:@"format=m3u8"]||[lowerRaw containsString:@"type=m3u8"]||[lowerRaw containsString:@"ctype=m3u8"]||[lowerRaw containsString:@"playtype=m3u8"]||[lowerRaw containsString:@"ext=m3u8"]||[lowerRaw containsString:@"ext=mp4"]||[lowerRaw containsString:@"type=mp4"]||[lowerRaw containsString:@"mime=video"])return YES;
+        if([lowerRaw containsString:@".m3u8"]||[lowerRaw containsString:@".mp4"]||[lowerRaw containsString:@"/m3u8/"]||[lowerRaw containsString:@"/hls/"]||[lowerRaw containsString:@"/cenc/"]||[lowerRaw containsString:@"format=m3u8"]||[lowerRaw containsString:@"type=m3u8"]||[lowerRaw containsString:@"ctype=m3u8"]||[lowerRaw containsString:@"playtype=m3u8"]||[lowerRaw containsString:@"format=hls"]||[lowerRaw containsString:@"type=hls"]||[lowerRaw containsString:@"ext=m3u8"]||[lowerRaw containsString:@"ext=mp4"]||[lowerRaw containsString:@"format=mp4"]||[lowerRaw containsString:@"playtype=mp4"]||[lowerRaw containsString:@"ctype=mp4"]||[lowerRaw containsString:@"type=mp4"]||[lowerRaw containsString:@".ts?"]||[lowerRaw containsString:@"mime=video"])return YES;
     }
     return NO;
 }
@@ -117,7 +117,9 @@ BOOL MediaPlaybackResultSupportsCicada(NSDictionary *result) {
     NSSet *extensions=[NSSet setWithArray:@[@"mpd",@"flv",@"mkv",@"webm",@"3gp",@"3gpp"]];
     NSSet *mimes=[NSSet setWithArray:@[@"application/dash+xml",@"video/x-flv",@"video/x-matroska",@"video/webm",@"video/3gpp",@"video/3gpp2",@"application/x-rtmp"]];
     NSString *scheme=components.scheme.lowercaseString;
-    return [formats containsObject:format]||[extensions containsObject:extension]||[mimes containsObject:mime]||[mimes containsObject:format]||[scheme isEqual:@"rtmp"]||[scheme isEqual:@"rtmps"];
+    if([formats containsObject:format]||[extensions containsObject:extension]||[mimes containsObject:mime]||[mimes containsObject:format]||[scheme isEqual:@"rtmp"]||[scheme isEqual:@"rtmps"]||[scheme isEqual:@"udp"])return YES;
+    if(!extension.length&&[raw isKindOfClass:NSString.class]&&raw.length){NSString *lowerRaw=[raw lowercaseString];if([lowerRaw containsString:@".flv?"]||[lowerRaw containsString:@"format=flv"]||[lowerRaw containsString:@"type=flv"]||[lowerRaw containsString:@"format=mpd"]||[lowerRaw containsString:@".mpd?"])return YES;}
+    return NO;
 }
 
 BOOL MediaPlaybackResultSupportsNativePlayback(NSDictionary *result) {

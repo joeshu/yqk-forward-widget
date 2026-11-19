@@ -4,7 +4,7 @@
 #import "PyHost.h"
 #import "ServiceStore.h"
 
-@interface PluginViewController ()
+@interface PluginViewController () <UIContextMenuInteractionDelegate>
 @property(nonatomic,strong) UILabel *statusLabel;
 @property(nonatomic,strong) UILabel *urlLabel;
 @property(nonatomic,strong) UILabel *countLabel;
@@ -25,6 +25,10 @@
 @property(nonatomic, assign) NSUInteger restartGeneration;
 @property(nonatomic, assign) NSUInteger startStopGeneration;
 @property(nonatomic, assign) BOOL startStopPending;
+@property(nonatomic, strong) NSMutableArray<UIButton *> *styledButtons;
+@property(nonatomic, strong) NSMutableArray<UIView *> *cardViews;
+- (void)reloadThemeAppearance;
+- (void)copyURL;
 - (void)updateStatusLabelWithPort:(NSInteger)port;
 - (void)showRestartError:(NSError *)error;
 -  (UILabel *)label:(NSString *)text size:(CGFloat)size weight:(UIFontWeight)weight color:(UIColor *)color;
@@ -45,6 +49,8 @@
     [super viewDidLoad];
     self.overrideUserInterfaceStyle = HostSelectedInterfaceStyle();
     self.title = @"服务";
+    self.styledButtons = [NSMutableArray array];
+    self.cardViews = [NSMutableArray array];
     self.view.backgroundColor = HostBackground();
 
     UIScrollView *scroll = [UIScrollView new];
@@ -100,6 +106,7 @@
     [content addArrangedSubview:statusCard];
 
     UIView *feedCard = [self card];
+    [feedCard addInteraction:[[UIContextMenuInteraction alloc] initWithDelegate:self]];
     UIStackView *feedStack = [self verticalStack];
     [feedCard addSubview:feedStack];
     [NSLayoutConstraint activateConstraints:@[[feedStack.leadingAnchor constraintEqualToAnchor:feedCard.leadingAnchor constant:16],[feedStack.trailingAnchor constraintEqualToAnchor:feedCard.trailingAnchor constant:-16],[feedStack.topAnchor constraintEqualToAnchor:feedCard.topAnchor constant:14],[feedStack.bottomAnchor constraintEqualToAnchor:feedCard.bottomAnchor constant:-14]]];
@@ -107,6 +114,9 @@
     self.urlLabel = [self label:@"http://127.0.0.1:8767/all.m3u" size:14 weight:UIFontWeightMedium color:HostText()];
     self.urlLabel.numberOfLines = 0;
     self.urlLabel.lineBreakMode = NSLineBreakByCharWrapping;
+    self.urlLabel.userInteractionEnabled = YES;
+    self.urlLabel.accessibilityHint = @"轻点复制播放列表地址";
+    [self.urlLabel addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(copyURL)]];
     [feedStack addArrangedSubview:self.urlLabel];
     UIStackView *feedActions = [self rowStack];
     UIButton *copy = [self button:@"复制地址" action:@selector(copyURL)];
@@ -158,13 +168,19 @@
     self.urlLabel.textColor=HostText();
     self.countLabel.textColor=HostText();
     self.scrollView.refreshControl.tintColor=HostAccent();
-    for(UIButton *b in @[self.startButton?:[UIButton new],self.stopButton?:[UIButton new],self.restartButton?:[UIButton new],self.probeButton?:[UIButton new]]){if(b.superview){[b setTitleColor:HostText() forState:UIControlStateNormal];b.backgroundColor=HostRaisedSurface();HostSetLayerBorderColor(b,HostBorder());}}
+    for(UIView *c in self.cardViews){if(c.superview)HostStyleGlassCard(c,18);}
+    for(UIButton *b in self.styledButtons){if(b.superview){[b setTitleColor:HostText() forState:UIControlStateNormal];b.backgroundColor=HostRaisedSurface();HostSetLayerBorderColor(b,HostBorder());}}
     HostRefreshAppearanceLayers(self.view);
+}
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+    [super traitCollectionDidChange:previousTraitCollection];
+    if(previousTraitCollection&&[self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection])[self reloadThemeAppearance];
 }
 - (void)pullRefreshPluginStatus:(UIRefreshControl *)sender {
     [self refreshStatus];
     [self probeHTTPIfNeeded];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,350*NSEC_PER_MSEC),dispatch_get_main_queue(),^{[sender endRefreshing];});
+    __weak typeof(sender) weakSender=sender;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,350*NSEC_PER_MSEC),dispatch_get_main_queue(),^{[weakSender endRefreshing];});
 }
 - (void)manualProbeHTTP {
     if(!self.running){self.statusLabel.text=@"未运行 · 请先启动服务后再检测接口";return;}
@@ -174,7 +190,17 @@
 - (UIView *)card {
     UIView *v = [UIView new];
     HostStyleGlassCard(v,18);
+    [self.cardViews addObject:v];
     return v;
+}
+- (UIContextMenuConfiguration *)contextMenuInteraction:(UIContextMenuInteraction *)interaction configurationForMenuAtLocation:(CGPoint)location {
+    (void)interaction;(void)location;
+    __weak typeof(self) weakSelf=self;
+    return [UIContextMenuConfiguration configurationWithIdentifier:@"plugin.feed.card" previewProvider:nil actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggested){
+        UIAction *copyAction=[UIAction actionWithTitle:@"复制播放列表地址" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){[weakSelf copyURL];}];
+        UIAction *probeAction=[UIAction actionWithTitle:@"检测本机接口健康" image:[UIImage systemImageNamed:@"waveform.path.ecg"] identifier:nil handler:^(__unused UIAction *a){[weakSelf manualProbeHTTP];}];
+        return [UIMenu menuWithTitle:@"播放列表接口" children:@[copyAction,probeAction]];
+    }];
 }
 - (UIStackView *)verticalStack {
     UIStackView *s = [UIStackView new]; s.axis = UILayoutConstraintAxisVertical; s.spacing = 12; s.translatesAutoresizingMaskIntoConstraints = NO; return s;
@@ -204,6 +230,7 @@
     HostSetLayerBorderColor(b, HostBorder());
     b.contentEdgeInsets = UIEdgeInsetsMake(13, 12, 13, 12);
     [b addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
+    [self.styledButtons addObject:b];
     return b;
 }
 - (void)viewWillAppear:(BOOL)animated {
@@ -287,8 +314,8 @@
     self.stopButton.alpha = (running&&!self.restarting) ? 1.0 : 0.45;
     self.restartButton.alpha = (running&&!self.restarting) ? 1.0 : 0.45;
 }
-- (void)start { if(self.startStopPending)return;self.startStopPending=YES;self.startButton.enabled=NO;self.stopButton.enabled=NO;if(self.onStart)self.onStart();[self armStartStopWatchdog]; }
-- (void)stop { if(self.startStopPending)return;self.startStopPending=YES;self.startButton.enabled=NO;self.stopButton.enabled=NO;if(self.onStop)self.onStop();[self armStartStopWatchdog]; }
+- (void)start { if(self.startStopPending)return;self.startStopPending=YES;self.startButton.enabled=NO;self.stopButton.enabled=NO;self.restartButton.enabled=NO;self.startButton.alpha=0.45;self.stopButton.alpha=0.45;self.restartButton.alpha=0.45;self.statusLabel.text=@"正在启动服务…";if(self.onStart)self.onStart();[self armStartStopWatchdog]; }
+- (void)stop { if(self.startStopPending)return;self.startStopPending=YES;self.startButton.enabled=NO;self.stopButton.enabled=NO;self.restartButton.enabled=NO;self.startButton.alpha=0.45;self.stopButton.alpha=0.45;self.restartButton.alpha=0.45;self.statusLabel.text=@"正在停止服务…";if(self.onStop)self.onStop();[self armStartStopWatchdog]; }
 - (void)armStartStopWatchdog {
     // 启停是异步的：状态通知回来前按钮仍可用，连点会重复下发启停。
     // 先锁住按钮，状态通知（refreshStatus）或 10 秒看门狗会恢复。

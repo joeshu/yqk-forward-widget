@@ -12,6 +12,7 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
 
 @interface DiagnosticLogLineCell : UITableViewCell
 @property(nonatomic,strong) UIView *cardView;
+@property(nonatomic,strong) UIView *accentBar;
 @property(nonatomic,strong) UILabel *messageLabel;
 @property(nonatomic,strong) UIView *categoryDot;
 @end
@@ -21,22 +22,27 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
     if((self=[super initWithStyle:style reuseIdentifier:reuseIdentifier])){
         self.backgroundColor=UIColor.clearColor;
         self.selectionStyle=UITableViewCellSelectionStyleNone;
-        UIView *card=[UIView new];card.translatesAutoresizingMaskIntoConstraints=NO;card.backgroundColor=HostCard();card.layer.cornerRadius=14;card.layer.cornerCurve=kCACornerCurveContinuous;card.layer.borderWidth=0.6;HostSetLayerBorderColor(card,HostBorder());
+        UIView *card=[UIView new];card.translatesAutoresizingMaskIntoConstraints=NO;card.backgroundColor=HostCard();card.layer.cornerRadius=14;card.layer.cornerCurve=kCACornerCurveContinuous;card.layer.borderWidth=0.6;HostSetLayerBorderColor(card,HostBorder());card.clipsToBounds=YES;
         self.cardView=card;
         [self.contentView addSubview:card];
+        self.accentBar=[UIView new];self.accentBar.translatesAutoresizingMaskIntoConstraints=NO;self.accentBar.layer.cornerRadius=1.5;self.accentBar.layer.cornerCurve=kCACornerCurveContinuous;
         self.categoryDot=[UIView new];self.categoryDot.translatesAutoresizingMaskIntoConstraints=NO;self.categoryDot.layer.cornerRadius=3;
         self.messageLabel=[UILabel new];self.messageLabel.translatesAutoresizingMaskIntoConstraints=NO;self.messageLabel.numberOfLines=0;self.messageLabel.font=[[UIFontMetrics defaultMetrics] scaledFontForFont:[UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightRegular]];self.messageLabel.adjustsFontForContentSizeCategory=YES;self.messageLabel.textColor=HostMutedText();self.messageLabel.lineBreakMode=NSLineBreakByCharWrapping;
-        [card addSubview:self.categoryDot];[card addSubview:self.messageLabel];
+        [card addSubview:self.accentBar];[card addSubview:self.categoryDot];[card addSubview:self.messageLabel];
         [NSLayoutConstraint activateConstraints:@[
             [card.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:14],
             [card.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-14],
             [card.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:3],
             [card.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-3],
-            [self.categoryDot.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:12],
-            [self.categoryDot.topAnchor constraintEqualToAnchor:card.topAnchor constant:15],
+            [self.accentBar.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:4],
+            [self.accentBar.topAnchor constraintEqualToAnchor:card.topAnchor constant:8],
+            [self.accentBar.bottomAnchor constraintEqualToAnchor:card.bottomAnchor constant:-8],
+            [self.accentBar.widthAnchor constraintEqualToConstant:3],
+            [self.categoryDot.leadingAnchor constraintEqualToAnchor:self.accentBar.trailingAnchor constant:8],
+            [self.categoryDot.topAnchor constraintEqualToAnchor:card.topAnchor constant:14],
             [self.categoryDot.widthAnchor constraintEqualToConstant:6],
             [self.categoryDot.heightAnchor constraintEqualToConstant:6],
-            [self.messageLabel.leadingAnchor constraintEqualToAnchor:self.categoryDot.trailingAnchor constant:10],
+            [self.messageLabel.leadingAnchor constraintEqualToAnchor:self.categoryDot.trailingAnchor constant:8],
             [self.messageLabel.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-12],
             [self.messageLabel.topAnchor constraintEqualToAnchor:card.topAnchor constant:10],
             [self.messageLabel.bottomAnchor constraintEqualToAnchor:card.bottomAnchor constant:-10]
@@ -50,8 +56,13 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
 @property(nonatomic,strong) UISegmentedControl *categories;
 @property(nonatomic,strong) UISearchBar *searchBar;
 @property(nonatomic,strong) UITableView *tableView;
+@property(nonatomic,strong) UIStackView *statsStack;
+@property(nonatomic,copy) NSArray<UIButton *> *statChipButtons;
+@property(nonatomic,strong) UIButton *jumpBottomButton;
 @property(nonatomic,strong) UILabel *summaryLabel;
 @property(nonatomic,strong) UILabel *emptyLabel;
+- (void)handleStatChipTap:(UIButton *)sender;
+- (void)updateStatChipsWithTotal:(NSUInteger)total playback:(NSUInteger)playback plugin:(NSUInteger)plugin errors:(NSUInteger)errors;
 @property(nonatomic,copy) NSArray<NSString *> *allLines;
 @property(nonatomic,copy) NSArray<NSString *> *visibleLines;
 @property(nonatomic) BOOL refreshScheduled;
@@ -93,13 +104,25 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
     self.tableView=[[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];self.tableView.translatesAutoresizingMaskIntoConstraints=NO;self.tableView.backgroundColor=HostBackground();self.tableView.separatorStyle=UITableViewCellSeparatorStyleNone;self.tableView.dataSource=self;self.tableView.delegate=self;self.tableView.estimatedRowHeight=54;self.tableView.rowHeight=UITableViewAutomaticDimension;self.tableView.accessibilityIdentifier=@"diagnostic.logs.list";[self.tableView registerClass:DiagnosticLogLineCell.class forCellReuseIdentifier:@"diagnostic.line"];HostInstallGlassBackdrop(self.tableView);
     UIRefreshControl *rc=[UIRefreshControl new];[rc addTarget:self action:@selector(pullRefreshLogs:) forControlEvents:UIControlEventValueChanged];self.tableView.refreshControl=rc;
     self.emptyLabel=[UILabel new];self.emptyLabel.translatesAutoresizingMaskIntoConstraints=NO;self.emptyLabel.numberOfLines=0;self.emptyLabel.text=@"暂无日志";self.emptyLabel.textColor=HostSecondaryText();self.emptyLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];self.emptyLabel.adjustsFontForContentSizeCategory=YES;self.emptyLabel.textAlignment=NSTextAlignmentCenter;
-    [self.view addSubview:self.categories];[self.view addSubview:self.searchBar];[self.view addSubview:self.summaryLabel];[self.view addSubview:self.tableView];[self.view addSubview:self.emptyLabel];
+    self.statsStack=[UIStackView new];self.statsStack.translatesAutoresizingMaskIntoConstraints=NO;self.statsStack.axis=UILayoutConstraintAxisHorizontal;self.statsStack.distribution=UIStackViewDistributionFillEqually;self.statsStack.spacing=8;self.statsStack.accessibilityIdentifier=@"diagnostic.logs.stats";
+    NSMutableArray<UIButton *> *chips=[NSMutableArray arrayWithCapacity:4];
+    for(NSUInteger i=0;i<4;i++){
+        UIButton *chip=[UIButton buttonWithType:UIButtonTypeSystem];chip.tag=(NSInteger)i;chip.titleLabel.font=HostMonospacedDigitFont(11.5,UIFontWeightSemibold,UIFontTextStyleCaption1);chip.titleLabel.lineBreakMode=NSLineBreakByTruncatingTail;chip.backgroundColor=HostRaisedSurface();chip.tintColor=HostText();chip.layer.cornerRadius=10;chip.layer.cornerCurve=kCACornerCurveContinuous;chip.layer.borderWidth=0.55;HostSetLayerBorderColor(chip,HostBorder());chip.accessibilityIdentifier=[NSString stringWithFormat:@"log.stat.%lu",(unsigned long)i];HostInstallPressFeedback(chip);[chip addTarget:self action:@selector(handleStatChipTap:) forControlEvents:UIControlEventTouchUpInside];[self.statsStack addArrangedSubview:chip];[chips addObject:chip];
+    }
+    self.statChipButtons=chips;
+    self.jumpBottomButton=[UIButton buttonWithType:UIButtonTypeSystem];self.jumpBottomButton.translatesAutoresizingMaskIntoConstraints=NO;[self.jumpBottomButton setImage:[UIImage systemImageNamed:@"arrow.down.to.line" withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:13 weight:UIImageSymbolWeightSemibold]] forState:UIControlStateNormal];self.jumpBottomButton.backgroundColor=HostRaisedSurface();self.jumpBottomButton.tintColor=HostAccent();self.jumpBottomButton.layer.cornerRadius=20;self.jumpBottomButton.layer.cornerCurve=kCACornerCurveContinuous;self.jumpBottomButton.layer.borderWidth=0.7;HostSetLayerBorderColor(self.jumpBottomButton,[HostAccent() colorWithAlphaComponent:0.35]);self.jumpBottomButton.accessibilityIdentifier=@"diagnostic.logs.jump-bottom";self.jumpBottomButton.accessibilityLabel=@"跳到最新末尾";HostInstallPressFeedback(self.jumpBottomButton);[self.jumpBottomButton addTarget:self action:@selector(scrollToBottomLog) forControlEvents:UIControlEventTouchUpInside];
+
+    [self.view addSubview:self.categories];[self.view addSubview:self.statsStack];[self.view addSubview:self.searchBar];[self.view addSubview:self.summaryLabel];[self.view addSubview:self.tableView];[self.view addSubview:self.emptyLabel];[self.view addSubview:self.jumpBottomButton];
     UILayoutGuide *safe=self.view.safeAreaLayoutGuide;
     [NSLayoutConstraint activateConstraints:@[
         [self.categories.topAnchor constraintEqualToAnchor:safe.topAnchor constant:10],
         [self.categories.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:16],
         [self.categories.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-16],
-        [self.searchBar.topAnchor constraintEqualToAnchor:self.categories.bottomAnchor constant:5],
+        [self.statsStack.topAnchor constraintEqualToAnchor:self.categories.bottomAnchor constant:8],
+        [self.statsStack.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:16],
+        [self.statsStack.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-16],
+        [self.statsStack.heightAnchor constraintEqualToConstant:30],
+        [self.searchBar.topAnchor constraintEqualToAnchor:self.statsStack.bottomAnchor constant:4],
         [self.searchBar.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:8],
         [self.searchBar.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-8],
         [self.summaryLabel.topAnchor constraintEqualToAnchor:self.searchBar.bottomAnchor constant:0],
@@ -114,7 +137,11 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
         [self.emptyLabel.centerXAnchor constraintEqualToAnchor:self.tableView.centerXAnchor],
         [self.emptyLabel.centerYAnchor constraintEqualToAnchor:self.tableView.centerYAnchor],
         [self.emptyLabel.leadingAnchor constraintGreaterThanOrEqualToAnchor:safe.leadingAnchor constant:24],
-        [self.emptyLabel.trailingAnchor constraintLessThanOrEqualToAnchor:safe.trailingAnchor constant:-24]
+        [self.emptyLabel.trailingAnchor constraintLessThanOrEqualToAnchor:safe.trailingAnchor constant:-24],
+        [self.jumpBottomButton.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-16],
+        [self.jumpBottomButton.bottomAnchor constraintEqualToAnchor:safe.bottomAnchor constant:-16],
+        [self.jumpBottomButton.widthAnchor constraintEqualToConstant:40],
+        [self.jumpBottomButton.heightAnchor constraintEqualToConstant:40]
     ]];
 }
 - (void)reloadThemeAppearance {
@@ -128,7 +155,47 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
     self.summaryLabel.textColor=HostSecondaryText();
     self.emptyLabel.textColor=HostSecondaryText();
     self.tableView.backgroundColor=HostBackground();
+    self.jumpBottomButton.backgroundColor=HostRaisedSurface();
+    self.jumpBottomButton.tintColor=HostAccent();
+    HostSetLayerBorderColor(self.jumpBottomButton,[HostAccent() colorWithAlphaComponent:0.35]);
+    [self applyFilterFollowingTail:NO];
     [self.tableView reloadData];
+}
+
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+    [super traitCollectionDidChange:previousTraitCollection];
+    if ([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection]) {
+        [self reloadThemeAppearance];
+    }
+}
+
+- (void)handleStatChipTap:(UIButton *)sender {
+    if(sender.tag<0||sender.tag>3)return;
+    self.categories.selectedSegmentIndex=sender.tag;
+    HostAnimateSelection(sender);
+    [self filterChanged];
+}
+
+- (void)updateStatChipsWithTotal:(NSUInteger)total playback:(NSUInteger)playback plugin:(NSUInteger)plugin errors:(NSUInteger)errors {
+    NSArray<NSString *> *titles=@[
+        [NSString stringWithFormat:@"全部 %lu",(unsigned long)total],
+        [NSString stringWithFormat:@"播放 %lu",(unsigned long)playback],
+        [NSString stringWithFormat:@"插件 %lu",(unsigned long)plugin],
+        [NSString stringWithFormat:@"错误 %lu",(unsigned long)errors]
+    ];
+    NSArray<UIColor *> *tints=@[HostAccent(),UIColor.systemBlueColor,UIColor.systemPurpleColor,UIColor.systemRedColor];
+    NSInteger selected=self.categories.selectedSegmentIndex;
+    for(NSUInteger i=0;i<self.statChipButtons.count&&i<4;i++){
+        UIButton *chip=self.statChipButtons[i];
+        [chip setTitle:titles[i] forState:UIControlStateNormal];
+        BOOL active=((NSInteger)i==selected);
+        BOOL hasErrors=(i==3&&errors>0);
+        UIColor *tint=tints[i];
+        chip.tintColor=(active||hasErrors)?tint:HostSecondaryText();
+        chip.backgroundColor=active?[tint colorWithAlphaComponent:0.15]:(hasErrors?[UIColor.systemRedColor colorWithAlphaComponent:0.08]:HostRaisedSurface());
+        HostSetLayerBorderColor(chip,(active||hasErrors)?[tint colorWithAlphaComponent:0.42]:HostBorder());
+    }
+    self.jumpBottomButton.hidden=(self.visibleLines.count<6);
 }
 - (void)showTransientPrompt:(NSString *)prompt {
     self.navigationItem.prompt=prompt;
@@ -193,7 +260,7 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
         if(query.length&&[line rangeOfString:query options:NSCaseInsensitiveSearch].location==NSNotFound)continue;
         [filtered addObject:line];
     }
-    self.visibleLines=filtered;BOOL filteredByUser=query.length>0||selected!=0;self.summaryLabel.text=[NSString stringWithFormat:@"共 %lu 条%@ · 错误 %lu · 插件 %lu · 播放 %lu · 点按单行可复制",(unsigned long)filtered.count,filteredByUser?@" · 已筛选":@" · 实时刷新",(unsigned long)errorCount,(unsigned long)pluginCount,(unsigned long)playbackCount];self.emptyLabel.text=self.allLines.count?@"没有符合筛选的日志":@"暂无日志";self.emptyLabel.hidden=filtered.count>0;self.tableView.hidden=filtered.count==0;[self.tableView reloadData];
+    self.visibleLines=filtered;BOOL filteredByUser=query.length>0||selected!=0;self.summaryLabel.text=[NSString stringWithFormat:@"共 %lu 条%@ · 错误 %lu · 插件 %lu · 播放 %lu · 点按单行可复制",(unsigned long)filtered.count,filteredByUser?@" · 已筛选":@" · 实时刷新",(unsigned long)errorCount,(unsigned long)pluginCount,(unsigned long)playbackCount];[self updateStatChipsWithTotal:self.allLines.count playback:playbackCount plugin:pluginCount errors:errorCount];self.emptyLabel.text=self.allLines.count?@"没有符合筛选的日志":@"暂无日志";self.emptyLabel.hidden=filtered.count>0;self.tableView.hidden=filtered.count==0;[self.tableView reloadData];
     if(followsTail&&filtered.count&&query.length==0&&selected==0)[self.tableView scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:filtered.count-1 inSection:0] atScrollPosition:UITableViewScrollPositionBottom animated:NO];
 }
 - (DiagnosticLogCategory)categoryForLine:(NSString *)line {
@@ -212,7 +279,7 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
 }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section{return self.visibleLines.count;}
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    DiagnosticLogLineCell *cell=[tableView dequeueReusableCellWithIdentifier:@"diagnostic.line" forIndexPath:indexPath];if(indexPath.row<0||indexPath.row>=self.visibleLines.count)return cell;NSString *line=self.visibleLines[indexPath.row];DiagnosticLogCategory cat=[self categoryForLine:line];UIColor *color=[self colorForLine:line];cell.cardView.backgroundColor=HostCard();cell.cardView.layer.borderWidth=cat==DiagnosticLogCategoryError?0.9:0.6;HostSetLayerBorderColor(cell.cardView,cat==DiagnosticLogCategoryError?[UIColor.systemRedColor colorWithAlphaComponent:0.45]:HostBorder());cell.messageLabel.attributedText=nil;cell.messageLabel.text=line;cell.messageLabel.textColor=color;NSString *q=self.searchBar.text?:@"";if(q.length){NSRange match=[line rangeOfString:q options:NSCaseInsensitiveSearch];if(match.location!=NSNotFound){NSMutableAttributedString *attr=[[NSMutableAttributedString alloc] initWithString:line attributes:@{NSForegroundColorAttributeName:color,NSFontAttributeName:cell.messageLabel.font}];[attr addAttributes:@{NSBackgroundColorAttributeName:[HostAccent() colorWithAlphaComponent:0.25],NSForegroundColorAttributeName:HostText()} range:match];cell.messageLabel.attributedText=attr;}}cell.categoryDot.backgroundColor=color;cell.accessibilityHint=@"点按复制这行日志";return cell;
+    DiagnosticLogLineCell *cell=[tableView dequeueReusableCellWithIdentifier:@"diagnostic.line" forIndexPath:indexPath];if(indexPath.row<0||indexPath.row>=self.visibleLines.count)return cell;NSString *line=self.visibleLines[indexPath.row];DiagnosticLogCategory cat=[self categoryForLine:line];UIColor *color=[self colorForLine:line];cell.cardView.backgroundColor=HostCard();cell.cardView.layer.borderWidth=cat==DiagnosticLogCategoryError?0.9:0.6;HostSetLayerBorderColor(cell.cardView,cat==DiagnosticLogCategoryError?[UIColor.systemRedColor colorWithAlphaComponent:0.45]:HostBorder());cell.accentBar.backgroundColor=[color colorWithAlphaComponent:cat==DiagnosticLogCategoryError?0.9:0.55];cell.messageLabel.attributedText=nil;NSMutableAttributedString *attr=[[NSMutableAttributedString alloc] initWithString:line attributes:@{NSForegroundColorAttributeName:color,NSFontAttributeName:cell.messageLabel.font}];if([line hasPrefix:@"["]){NSRange closeBracket=[line rangeOfString:@"]"];if(closeBracket.location!=NSNotFound&&closeBracket.location<36){[attr addAttribute:NSForegroundColorAttributeName value:HostMutedText() range:NSMakeRange(0,closeBracket.location+1)];}}NSString *q=self.searchBar.text?:@"";if(q.length){NSRange match=[line rangeOfString:q options:NSCaseInsensitiveSearch];if(match.location!=NSNotFound){[attr addAttributes:@{NSBackgroundColorAttributeName:[HostAccent() colorWithAlphaComponent:0.25],NSForegroundColorAttributeName:HostText()} range:match];}}cell.messageLabel.attributedText=attr;cell.categoryDot.backgroundColor=color;cell.accessibilityHint=@"点按复制这行日志";return cell;
 }
 - (void)pullRefreshLogs:(UIRefreshControl *)sender {[self refreshLog];[sender endRefreshing];}
 - (void)tableView:(UITableView *)tableView didHighlightRowAtIndexPath:(NSIndexPath *)indexPath {

@@ -1285,6 +1285,12 @@ static const NSUInteger MediaAdaptationProbeByteLimit = 4096;
     self.probeResultLabel.textColor = HostSecondaryText();
     [self.tableView reloadData];
 }
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+    [super traitCollectionDidChange:previousTraitCollection];
+    if ([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection]) {
+        [self reloadThemeAppearance];
+    }
+}
 
 - (void)buildProbePanel {
     UIView *card = [UIView new];

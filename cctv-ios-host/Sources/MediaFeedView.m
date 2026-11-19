@@ -79,6 +79,15 @@ static void MediaFeedLoadPosterWithRetry(NSString *url, UIImageView *imageView, 
 @end
 @implementation MediaFeedSkeletonCell
 - (instancetype)initWithFrame:(CGRect)frame {if((self=[super initWithFrame:frame])){self.art=[UIView new];self.line=[UIView new];self.smallLine=[UIView new];for(UIView *view in @[self.art,self.line,self.smallLine]){view.backgroundColor=HostNeutralSurface();view.layer.cornerRadius=view==self.art?14:4;view.layer.cornerCurve=kCACornerCurveContinuous;[self.contentView addSubview:view];}self.isAccessibilityElement=YES;self.accessibilityLabel=@"影片加载中";self.accessibilityIdentifier=@"media-feed-skeleton";}return self;}
+- (void)updateSkeletonPulse {
+    [self.contentView.layer removeAnimationForKey:@"media.skeleton.pulse"];
+    if(!self.window||UIAccessibilityIsReduceMotionEnabled()){self.contentView.alpha=1.0;return;}
+    CABasicAnimation *pulse=[CABasicAnimation animationWithKeyPath:@"opacity"];
+    pulse.fromValue=@(1.0);pulse.toValue=@(0.55);pulse.duration=0.9;pulse.autoreverses=YES;pulse.repeatCount=HUGE_VALF;pulse.timingFunction=[CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
+    [self.contentView.layer addAnimation:pulse forKey:@"media.skeleton.pulse"];
+}
+- (void)didMoveToWindow {[super didMoveToWindow];[self updateSkeletonPulse];}
+- (void)prepareForReuse {[super prepareForReuse];[self.contentView.layer removeAnimationForKey:@"media.skeleton.pulse"];self.contentView.alpha=1.0;}
 - (void)layoutSubviews {[super layoutSubviews];for(UIView *view in @[self.art,self.line,self.smallLine])view.backgroundColor=HostNeutralSurface();CGFloat width=CGRectGetWidth(self.bounds),art=MIN(width*1.5,MAX(0,CGRectGetHeight(self.bounds)-46));self.art.frame=CGRectMake(0,0,width,art);self.line.frame=CGRectMake(1,art+9,width*.84,12);self.smallLine.frame=CGRectMake(1,art+29,width*.55,8);}
 @end
 
@@ -266,9 +275,18 @@ static void MediaFeedLoadPosterWithRetry(NSString *url, UIImageView *imageView, 
 - (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:(NSIndexPath *)indexPath {NSDictionary *section=[self sectionAt:indexPath.section];NSString *kind=MediaFeedString(section[@"kind"]);if([@[@"hero",@"status",@"skeleton"] containsObject:kind])return;NSArray *items=MediaFeedItems(section);if(indexPath.item<items.count&&self.onSelectItem)self.onSelectItem(items[indexPath.item],section);}
 - (UIContextMenuConfiguration *)collectionView:(UICollectionView *)collectionView contextMenuConfigurationForItemAtIndexPath:(NSIndexPath *)indexPath point:(CGPoint)point {
     NSDictionary *section=[self sectionAt:indexPath.section];NSString *kind=MediaFeedString(section[@"kind"]);
-    if([@[@"hero",@"status",@"skeleton"] containsObject:kind])return nil;
-    NSArray *items=MediaFeedItems(section);if(indexPath.item<0||indexPath.item>=(NSInteger)items.count)return nil;
-    NSDictionary *item=[items[indexPath.item] isKindOfClass:NSDictionary.class]?items[indexPath.item]:nil;if(!item)return nil;
+    if([@[@"status",@"skeleton"] containsObject:kind])return nil;
+    NSArray *items=MediaFeedItems(section);
+    NSDictionary *item=nil;
+    if([kind isEqual:@"hero"]){
+        MediaFeedHeroCell *heroCell=(MediaFeedHeroCell *)[collectionView cellForItemAtIndexPath:indexPath];
+        NSUInteger idx=([heroCell isKindOfClass:MediaFeedHeroCell.class]&&heroCell.page<items.count)?heroCell.page:0;
+        item=idx<items.count&&[items[idx] isKindOfClass:NSDictionary.class]?items[idx]:nil;
+    }else{
+        if(indexPath.item<0||indexPath.item>=(NSInteger)items.count)return nil;
+        item=[items[indexPath.item] isKindOfClass:NSDictionary.class]?items[indexPath.item]:nil;
+    }
+    if(!item)return nil;
     NSString *name=MediaFeedString(item[@"name"]).length?item[@"name"]:@"影片";
     NSString *remarks=MediaFeedString(item[@"remarks"]);
     __weak typeof(self) weakSelf=self;
@@ -300,5 +318,5 @@ static void MediaFeedLoadPosterWithRetry(NSString *url, UIImageView *imageView, 
     if(hasGrid&&scrollView.contentOffset.y+CGRectGetHeight(scrollView.bounds)>=scrollView.contentSize.height-MAX(360,CGRectGetHeight(scrollView.bounds)*.85))self.onNearEnd();
 }
 - (void)layoutSubviews {[super layoutSubviews];CGFloat width=CGRectGetWidth(self.bounds);if(width>0&&fabs(width-self.lastLayoutWidth)>.5){self.lastLayoutWidth=width;[self.collectionViewLayout invalidateLayout];}for(UICollectionViewCell *cell in self.visibleCells)if([cell isKindOfClass:MediaFeedHeroCell.class])[(MediaFeedHeroCell *)cell updateTimer];}
-- (void)traitCollectionDidChange:(UITraitCollection *)previous {[super traitCollectionDidChange:previous];if(![previous.preferredContentSizeCategory isEqual:self.traitCollection.preferredContentSizeCategory])[self.collectionViewLayout invalidateLayout];}
+- (void)traitCollectionDidChange:(UITraitCollection *)previous {[super traitCollectionDidChange:previous];if(![previous.preferredContentSizeCategory isEqual:self.traitCollection.preferredContentSizeCategory])[self.collectionViewLayout invalidateLayout];if([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previous]){self.backgroundColor=HostBackground();[super reloadData];}}
 @end

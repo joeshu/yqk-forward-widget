@@ -172,6 +172,7 @@
 }
 - (void)updateLiveQualityBadge {
     if (!self.playbackQualityBadgeBtn) return;
+    if (UIApplication.sharedApplication.applicationState != UIApplicationStateActive || self.activeTab >= 2) return;
     if (!self.firstRender) {
         [self.playbackQualityBadgeBtn setTitle:@"信息" forState:UIControlStateNormal];
         return;
@@ -324,7 +325,7 @@
     }else{
         [self refreshChannelPreviewSnapshotsForChannels:self.shownChannels force:NO];
     }
-    if(self.isViewLoaded){[self.table reloadData];[self.channelGrid reloadData];[self refreshConfigurationPage];}
+    if(self.isViewLoaded){[self reloadActiveCatalogView];[self refreshConfigurationPage];}
 }
 - (void)applyResourcePreviewOrTelemetryToggleForSource:(NSString *)source enabled:(BOOL)enabled isPreview:(BOOL)isPreview {
     NSDictionary *service=[self resourceServiceForSource:source];
@@ -337,7 +338,7 @@
         [ProfileStore setChannelTelemetryEnabled:enabled forSource:source];
         if(subURL.length)[ProfileStore setChannelTelemetryEnabled:enabled forSource:subURL];
     }
-    [self.table reloadData];[self.channelGrid reloadData];[self refreshConfigurationPage];
+    [self reloadActiveCatalogView];[self refreshConfigurationPage];
 }
 - (NSString *)channelPreviewCacheDirectory {
     static NSString *cachedDir=nil;
@@ -528,11 +529,13 @@ static BOOL CCTVPreviewImageHasValidVideoContent(UIImage *image) {
                                         completionHandler:^(__unused CMTime requestedTime,CGImageRef imageRef,__unused CMTime actualTime,AVAssetImageGeneratorResult result,__unused NSError *error){
             if(result==AVAssetImageGeneratorSucceeded&&imageRef!=NULL){
                 UIImage *realFrame=[UIImage imageWithCGImage:imageRef];
-                dispatch_async(dispatch_get_main_queue(),^{
-                    RootViewController *owner=weakSelf;if(!owner)return;
-                    [owner storeRealPreviewImage:realFrame forChannelID:cid];
-                    [owner reloadVisibleCatalogItemForChannelID:cid];
-                });
+                if(realFrame && CCTVPreviewImageHasValidVideoContent(realFrame)){
+                    dispatch_async(dispatch_get_main_queue(),^{
+                        RootViewController *owner=weakSelf;if(!owner)return;
+                        [owner storeRealPreviewImage:realFrame forChannelID:cid];
+                        [owner reloadVisibleCatalogItemForChannelID:cid];
+                    });
+                }
             }
         }];
         return;
@@ -648,7 +651,7 @@ static BOOL CCTVPreviewImageHasValidVideoContent(UIImage *image) {
     }
     NSDictionary *active=[self channelWithID:self.channelID];
     if(active)[self updatePlayerChannelLogoForChannel:active];
-    [self.table reloadData];[self.channelGrid reloadData];[self refreshConfigurationPage];
+    [self reloadActiveCatalogView];[self refreshConfigurationPage];
 }
 - (NSArray<NSDictionary *> *)sameStationAlternateChannelsForChannel:(NSDictionary *)channel {
     if(![channel isKindOfClass:NSDictionary.class])return @[];

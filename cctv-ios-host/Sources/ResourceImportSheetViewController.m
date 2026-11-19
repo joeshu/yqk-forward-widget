@@ -164,6 +164,7 @@
     self.tableView.estimatedSectionHeaderHeight=34;
     self.tableView.sectionFooterHeight=UITableViewAutomaticDimension;
     self.tableView.estimatedSectionFooterHeight=34;
+    self.tableView.keyboardDismissMode=UIScrollViewKeyboardDismissModeOnDrag;
     self.tableView.contentInset=UIEdgeInsetsMake(0,0,20,0);
     self.tableView.translatesAutoresizingMaskIntoConstraints=NO;
     [self.tableView registerClass:ResourceImportSheetCell.class forCellReuseIdentifier:@"resource-option"];
@@ -202,6 +203,10 @@
     self.closeButton.backgroundColor=HostRaisedSurface();
     HostSetLayerBorderColor(self.closeButton,HostBorder());
     [self.tableView reloadData];
+}
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+    [super traitCollectionDidChange:previousTraitCollection];
+    if(previousTraitCollection&&[self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection])[self reloadThemeAppearance];
 }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 3; }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return [self optionsForSection:section].count; }
@@ -259,16 +264,15 @@
     ResourceImportSheetCell *cell=[tableView dequeueReusableCellWithIdentifier:@"resource-option" forIndexPath:indexPath];
     NSArray *options=[self optionsForSection:indexPath.section];if(indexPath.row<0||indexPath.row>=options.count)return cell;
     NSDictionary *item=options[indexPath.row];
-    cell.accessibilityIdentifier=[NSString stringWithFormat:@"resource-import-option-%ld-%ld",(long)indexPath.section,(long)indexPath.row];
     [cell configureWithTitle:item[@"title"] detail:item[@"detail"] icon:item[@"icon"] color:item[@"color"]];
-    cell.accessibilityIdentifier=[@"resource-import.option." stringByAppendingString:item[@"id"]?:@"unknown"];
+    cell.accessibilityIdentifier=[item[@"id"] length]?[@"resource-import.option." stringByAppendingString:item[@"id"]]:[NSString stringWithFormat:@"resource-import-option-%ld-%ld",(long)indexPath.section,(long)indexPath.row];
     return cell;
 }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     // 快速连点会 dismiss 两次并回调两次 onSelect（上层可能重复 push）；只认第一次。
-    if(self.didSelectOption)return;self.didSelectOption=YES;
     NSArray *options=[self optionsForSection:indexPath.section];if(indexPath.row<0||indexPath.row>=options.count)return;
+    if(self.didSelectOption)return;self.didSelectOption=YES;
     NSNumber *storedOption=options[indexPath.row][@"option"];
     ResourceImportOption option=(ResourceImportOption)storedOption.integerValue;
     void (^selection)(ResourceImportOption)=self.onSelect;
@@ -280,7 +284,7 @@
     __weak typeof(self) weakSelf=self;
     return [UIContextMenuConfiguration configurationWithIdentifier:indexPath previewProvider:nil actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggested){
         UIAction *select=[UIAction actionWithTitle:@"使用此方式导入" image:[UIImage systemImageNamed:item[@"icon"]?:@"plus.circle"] identifier:nil handler:^(__unused UIAction *a){[weakSelf tableView:tableView didSelectRowAtIndexPath:indexPath];}];
-        UIAction *copy=[UIAction actionWithTitle:@"复制导入说明" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){UIPasteboard.generalPasteboard.string=[NSString stringWithFormat:@"%@：%@",title,detail];}];
+        UIAction *copy=[UIAction actionWithTitle:@"复制导入说明" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){UIPasteboard.generalPasteboard.string=[NSString stringWithFormat:@"%@：%@",title,detail];UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,@"已复制导入说明");}];
         return [UIMenu menuWithTitle:title children:@[select,copy]];
     }];
 }

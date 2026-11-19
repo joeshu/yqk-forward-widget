@@ -15,6 +15,7 @@ static BOOL MediaWebIsOfficialWatchPageURL(NSURL *url) {
 @property(nonatomic) BOOL resolvingMedia;
 @property(nonatomic) BOOL observingWebKVO;
 @property(nonatomic) NSUInteger mediaGeneration;
+@property(nonatomic) NSUInteger promptGeneration;
 @property(nonatomic,strong) UIBarButtonItem *nativeButton;
 @property(nonatomic, strong) WKWebView *web;
 @property(nonatomic, strong) UIActivityIndicatorView *spinner;
@@ -24,6 +25,7 @@ static BOOL MediaWebIsOfficialWatchPageURL(NSURL *url) {
 - (void)installCookieHeader:(NSString *)cookie forURL:(NSURL *)url completion:(dispatch_block_t)completion;
 - (void)loadInitialPageAtURL:(NSURL *)url cookie:(NSString *)cookie;
 - (void)showStatusMessage:(NSString *)message;
+- (void)showTransientPrompt:(NSString *)message;
 - (void)removeWebKVOIfNeeded;
 - (void)refresh;
 -  (void)failed:(NSError *)error;
@@ -35,17 +37,30 @@ static BOOL MediaWebIsOfficialWatchPageURL(NSURL *url) {
     self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(close)];
     UIBarButtonItem *refresh=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemRefresh target:self action:@selector(refresh)];
     __weak typeof(self) weakSelf=self;
-    UIAction *backAction=[UIAction actionWithTitle:@"后退上一页" image:[UIImage systemImageNamed:@"chevron.backward"] identifier:nil handler:^(__unused UIAction *a){if(weakSelf.web.canGoBack)[weakSelf.web goBack];}];
-    UIAction *forwardAction=[UIAction actionWithTitle:@"前进下一页" image:[UIImage systemImageNamed:@"chevron.forward"] identifier:nil handler:^(__unused UIAction *a){if(weakSelf.web.canGoForward)[weakSelf.web goForward];}];
-    UIAction *copyURLAction=[UIAction actionWithTitle:@"复制当前网页地址" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){NSString *current=weakSelf.web.URL.absoluteString?:weakSelf.result[@"url"];if([current isKindOfClass:NSString.class]&&current.length){UIPasteboard.generalPasteboard.string=current;weakSelf.navigationItem.prompt=@"已复制当前网页地址";}}];
-    UIAction *openSafariAction=[UIAction actionWithTitle:@"在系统浏览器中打开" image:[UIImage systemImageNamed:@"safari"] identifier:@"media.web.safari" handler:^(__unused UIAction *a){NSURL *u=weakSelf.web.URL?:[NSURL URLWithString:weakSelf.result[@"url"]?:@""];NSString *h=u.host.lowercaseString?:@"";BOOL loop=[h isEqualToString:@"127.0.0.1"]||[h isEqualToString:@"localhost"]||[h isEqualToString:@"::1"];if(u&&[@[@"http",@"https"] containsObject:u.scheme.lowercaseString]&&!loop)[UIApplication.sharedApplication openURL:u options:@{} completionHandler:nil];else weakSelf.navigationItem.prompt=@"本机配置页仅限应用内打开";}];
-    UIBarButtonItem *more=[[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"] menu:[UIMenu menuWithTitle:@"网页操作" children:@[backAction,forwardAction,copyURLAction,openSafariAction]]];
+    UIMenuElement *navElement=nil;
+    if(@available(iOS 15.0,*)){
+        navElement=[UIDeferredMenuElement elementWithUncachedProvider:^(void (^completion)(NSArray<UIMenuElement *> *)){
+            MediaWebViewController *owner=weakSelf;
+            UIAction *backAction=[UIAction actionWithTitle:@"后退上一页" image:[UIImage systemImageNamed:@"chevron.backward"] identifier:nil handler:^(__unused UIAction *a){if(weakSelf.web.canGoBack)[weakSelf.web goBack];}];
+            if(!owner||!owner.web.canGoBack)backAction.attributes=UIMenuElementAttributesDisabled;
+            UIAction *forwardAction=[UIAction actionWithTitle:@"前进下一页" image:[UIImage systemImageNamed:@"chevron.forward"] identifier:nil handler:^(__unused UIAction *a){if(weakSelf.web.canGoForward)[weakSelf.web goForward];}];
+            if(!owner||!owner.web.canGoForward)forwardAction.attributes=UIMenuElementAttributesDisabled;
+            completion(@[backAction,forwardAction]);
+        }];
+    }else{
+        UIAction *backAction=[UIAction actionWithTitle:@"后退上一页" image:[UIImage systemImageNamed:@"chevron.backward"] identifier:nil handler:^(__unused UIAction *a){if(weakSelf.web.canGoBack)[weakSelf.web goBack];}];
+        UIAction *forwardAction=[UIAction actionWithTitle:@"前进下一页" image:[UIImage systemImageNamed:@"chevron.forward"] identifier:nil handler:^(__unused UIAction *a){if(weakSelf.web.canGoForward)[weakSelf.web goForward];}];
+        navElement=[UIMenu menuWithTitle:@"" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:@[backAction,forwardAction]];
+    }
+    UIAction *copyURLAction=[UIAction actionWithTitle:@"复制当前网页地址" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){NSString *current=weakSelf.web.URL.absoluteString?:weakSelf.result[@"url"];if([current isKindOfClass:NSString.class]&&current.length){UIPasteboard.generalPasteboard.string=current;[weakSelf showTransientPrompt:@"已复制当前网页地址"];}}];
+    UIAction *openSafariAction=[UIAction actionWithTitle:@"在系统浏览器中打开" image:[UIImage systemImageNamed:@"safari"] identifier:@"media.web.safari" handler:^(__unused UIAction *a){NSURL *u=weakSelf.web.URL?:[NSURL URLWithString:weakSelf.result[@"url"]?:@""];NSString *h=u.host.lowercaseString?:@"";BOOL loop=[h isEqualToString:@"127.0.0.1"]||[h isEqualToString:@"localhost"]||[h isEqualToString:@"::1"];if(u&&[@[@"http",@"https"] containsObject:u.scheme.lowercaseString]&&!loop)[UIApplication.sharedApplication openURL:u options:@{} completionHandler:nil];else [weakSelf showTransientPrompt:@"本机配置页仅限应用内打开"];}];
+    UIBarButtonItem *more=[[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"] menu:[UIMenu menuWithTitle:@"网页操作" children:@[navElement,copyURLAction,openSafariAction]]];
     more.accessibilityIdentifier=@"media.web.more";
     more.accessibilityLabel=@"更多网页操作";
     BOOL officialWatchPage=MediaWebIsOfficialWatchPageURL([NSURL URLWithString:self.result[@"url"]]);
     if(!officialWatchPage&&(self.onTryNativePlayback||self.onResolvedMedia)){UIBarButtonItem *native=[[UIBarButtonItem alloc] initWithTitle:@"原生播放" style:UIBarButtonItemStylePlain target:self action:@selector(tryNativePlayback)];self.nativeButton=native;self.navigationItem.rightBarButtonItems=@[native,more,refresh];}else self.navigationItem.rightBarButtonItems=@[more,refresh];
     WKWebViewConfiguration *configuration=[WKWebViewConfiguration new];configuration.websiteDataStore=WKWebsiteDataStore.nonPersistentDataStore;configuration.allowsInlineMediaPlayback=YES;configuration.mediaTypesRequiringUserActionForPlayback=WKAudiovisualMediaTypeNone;
-    self.web=[[WKWebView alloc] initWithFrame:self.view.bounds configuration:configuration];self.web.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;self.web.navigationDelegate=self;self.web.allowsBackForwardNavigationGestures=YES;UIRefreshControl *webRefresh=[UIRefreshControl new];webRefresh.tintColor=HostAccent();[webRefresh addTarget:self action:@selector(refresh) forControlEvents:UIControlEventValueChanged];self.web.scrollView.refreshControl=webRefresh;[self.web addObserver:self forKeyPath:@"estimatedProgress" options:NSKeyValueObservingOptionNew context:NULL];[self.web addObserver:self forKeyPath:@"title" options:NSKeyValueObservingOptionNew context:NULL];self.observingWebKVO=YES;[self.view addSubview:self.web];
+    self.web=[[WKWebView alloc] initWithFrame:self.view.bounds configuration:configuration];self.web.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;self.web.navigationDelegate=self;self.web.allowsBackForwardNavigationGestures=YES;UIRefreshControl *webRefresh=[UIRefreshControl new];webRefresh.tintColor=HostAccent();[webRefresh addTarget:self action:@selector(refresh) forControlEvents:UIControlEventValueChanged];self.web.scrollView.keyboardDismissMode=UIScrollViewKeyboardDismissModeOnDrag;self.web.scrollView.refreshControl=webRefresh;[self.web addObserver:self forKeyPath:@"estimatedProgress" options:NSKeyValueObservingOptionNew context:NULL];[self.web addObserver:self forKeyPath:@"title" options:NSKeyValueObservingOptionNew context:NULL];self.observingWebKVO=YES;[self.view addSubview:self.web];
     self.webProgressView=[[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleBar];self.webProgressView.translatesAutoresizingMaskIntoConstraints=NO;self.webProgressView.progressTintColor=HostAccent();self.webProgressView.trackTintColor=UIColor.clearColor;self.webProgressView.accessibilityIdentifier=@"media.web.progress";[self.view addSubview:self.webProgressView];
     [NSLayoutConstraint activateConstraints:@[[self.webProgressView.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],[self.webProgressView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],[self.webProgressView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],[self.webProgressView.heightAnchor constraintEqualToConstant:2.5]]];
     self.spinner=[[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];self.spinner.center=self.view.center;self.spinner.autoresizingMask=UIViewAutoresizingFlexibleLeftMargin|UIViewAutoresizingFlexibleRightMargin|UIViewAutoresizingFlexibleTopMargin|UIViewAutoresizingFlexibleBottomMargin;[self.view addSubview:self.spinner];
@@ -72,6 +87,12 @@ static BOOL MediaWebIsOfficialWatchPageURL(NSURL *url) {
         [self loadInitialPageAtURL:configurationURL cookie:cookie];
     }
 }
+- (void)showTransientPrompt:(NSString *)message {
+    self.navigationItem.prompt=message;
+    NSUInteger gen=++self.promptGeneration;
+    __weak typeof(self) weakSelf=self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,2*NSEC_PER_SEC),dispatch_get_main_queue(),^{MediaWebViewController *owner=weakSelf;if(!owner||owner.didClose||owner.promptGeneration!=gen)return;owner.navigationItem.prompt=nil;});
+}
 - (void)reloadThemeAppearance {
     self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
     if(!self.isViewLoaded)return;
@@ -81,6 +102,7 @@ static BOOL MediaWebIsOfficialWatchPageURL(NSURL *url) {
     self.statusLabel.textColor=HostSecondaryText();
     if(self.statusCard)HostStyleGlassCard(self.statusCard,16);
 }
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {[super traitCollectionDidChange:previousTraitCollection];if([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection])[self reloadThemeAppearance];}
 - (void)loadInitialPageAtURL:(NSURL *)url cookie:(NSString *)cookie {
     __weak typeof(self) weakSelf=self;__block BOOL started=NO;
     dispatch_block_t startLoading=^{MediaWebViewController *owner=weakSelf;if(!owner||owner.didClose||started)return;started=YES;[owner refresh];};

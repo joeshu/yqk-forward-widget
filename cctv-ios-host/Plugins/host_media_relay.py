@@ -155,11 +155,12 @@ def _tune_raw_socket(sock):
 class UpstreamConnectionPool:
     """Thread-safe HTTP/1.1 Keep-Alive connection pool keyed by (scheme, host, timeout)."""
 
-    def __init__(self, max_per_host=6, idle_timeout=45.0):
+    def __init__(self, max_per_host=6, idle_timeout=45.0, max_hosts=32):
         self._lock = threading.Lock()
         self._pools = collections.defaultdict(collections.deque)
         self._max_per_host = max(1, int(max_per_host))
         self._idle_timeout = float(idle_timeout)
+        self._max_hosts = max(4, int(max_hosts))
         self.reused_count = 0
         self.created_count = 0
 
@@ -209,15 +210,33 @@ class UpstreamConnectionPool:
             except Exception:
                 pass
             return
+        to_close = []
+        now = time.monotonic()
         with self._lock:
+            stale_keys = []
+            for k, b in list(self._pools.items()):
+                while b and (now - b[0][1] >= self._idle_timeout or not self._is_socket_ready(b[0][0])):
+                    old_conn, _ = b.popleft()
+                    to_close.append(old_conn)
+                if not b and k != key:
+                    stale_keys.append(k)
+            for k in stale_keys:
+                self._pools.pop(k, None)
+            if key not in self._pools and len(self._pools) >= self._max_hosts:
+                oldest_key = min(self._pools.keys(), key=lambda k: self._pools[k][-1][1] if self._pools[k] else 0.0)
+                evicted = self._pools.pop(oldest_key, ())
+                for old_conn, _ in evicted:
+                    to_close.append(old_conn)
             bucket = self._pools[key]
             while len(bucket) >= self._max_per_host:
                 old, _ = bucket.popleft()
-                try:
-                    old.close()
-                except Exception:
-                    pass
-            bucket.append((conn, time.monotonic()))
+                to_close.append(old)
+            bucket.append((conn, now))
+        for old_conn in to_close:
+            try:
+                old_conn.close()
+            except Exception:
+                pass
 
     def clear(self):
         with self._lock:
@@ -463,6 +482,21 @@ def _open_with_timeout_retry(request, diagnostic_id=''):
             opener = cached_aia
     try:
         return _tune_response_socket(opener.open(request, timeout=8))
+    except (http.client.RemoteDisconnected, ConnectionResetError, BrokenPipeError):
+        if method not in ('GET', 'HEAD'):
+            raise
+        print('[CCTVHostMediaRelay] ' + json.dumps({
+            'event': 'media_relay_retry',
+            'request_id': diagnostic_id or uuid.uuid4().hex,
+            'stage': 'upstream_keepalive_reset',
+            'attempt': 2,
+            'retry_timeout_ms': 6000,
+            'method': method,
+            'upstream_host': parsed.hostname or '',
+        }, separators=(',', ':')))
+        retry_opener = opener if use_cached_opener else urllib.request.build_opener(
+            ScopedRedirect(), urllib.request.HTTPSHandler(context=_DEFAULT_SSL_CONTEXT))
+        return _tune_response_socket(retry_opener.open(_retry_request(request), timeout=6))
     except (TimeoutError, socket.timeout, urllib.error.URLError) as error:
         if use_cached_opener and method in ('GET', 'HEAD') and _is_missing_intermediate_ca_error(error):
             aia_opener = _resolve_aia_opener_for_host(parsed.hostname, parsed.port or 443)

@@ -42,6 +42,7 @@ static const NSUInteger MediaChannelProbeByteLimit = 4096;
     self.task=[self.session dataTaskWithRequest:request];
     [self.task resume];
 }
+- (void)dealloc {[self cancel];}
 - (void)cancel {
     NSURLSessionDataTask *task=nil;
     NSURLSession *session=nil;
@@ -73,7 +74,7 @@ static const NSUInteger MediaChannelProbeByteLimit = 4096;
         self.session=nil;self.task=nil;
     }
     [session finishTasksAndInvalidate];
-    if(completion)completion(result);
+    if(completion){if(NSThread.isMainThread)completion(result);else dispatch_async(dispatch_get_main_queue(),^{completion(result);});}
 }
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task didReceiveResponse:(NSURLResponse *)response completionHandler:(void (^)(NSURLSessionResponseDisposition))completionHandler {
     NSInteger code=0;

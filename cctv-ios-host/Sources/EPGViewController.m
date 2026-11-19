@@ -31,7 +31,15 @@
 @property(nonatomic,strong) UIBarButtonItem *filterMenuItem;
 @property(nonatomic,assign) NSInteger programFilterMode;
 @property(nonatomic,strong) UIView *hintCard;
+@property(nonatomic,strong) UIStackView *inlineActionStack;
+@property(nonatomic,strong) UIButton *inlineLiveButton;
+@property(nonatomic,strong) UIButton *inlineSevenDayButton;
+@property(nonatomic,strong) UIButton *inlineReturnLiveButton;
+@property(nonatomic,strong) UIButton *inlineFilterButton;
 @property(nonatomic,strong) NSMutableSet<NSString *> *loadedOfficialDates;
+- (UIButton *)makeInlineChipButtonWithTitle:(NSString *)title symbol:(NSString *)symbol accent:(BOOL)accent identifier:(NSString *)identifier action:(SEL)action;
+- (void)handleInlineReturnToLive;
+- (void)refreshInlineActionBar;
 - (void)fetchOfficialSevenDayLookback;
 - (void)rebuildDates;
 - (void)updateEmptyState;
@@ -79,7 +87,7 @@
 
     self.loadedOfficialDates = [NSMutableSet set];
     self.hintCard = [[UIView alloc] initWithFrame:CGRectMake(16, 12, self.view.bounds.size.width - 32, 28)];
-    HostStyleGlassCard(self.hintCard, 10);
+    HostStyleGlassCard(self.hintCard, 12);
     [self.view addSubview:self.hintCard];
     self.hint = [[UILabel alloc] initWithFrame:CGRectMake(16, 12, self.view.bounds.size.width - 32, 20)];
     self.hint.textColor = HostSecondaryText();
@@ -88,6 +96,24 @@
     self.hint.numberOfLines = 2;
     self.hint.text = @"正在获取节目单…";
     [self.view addSubview:self.hint];
+
+    self.inlineActionStack = [UIStackView new];
+    self.inlineActionStack.axis = UILayoutConstraintAxisHorizontal;
+    self.inlineActionStack.alignment = UIStackViewAlignmentCenter;
+    self.inlineActionStack.distribution = UIStackViewDistributionFillProportionally;
+    self.inlineActionStack.spacing = 6;
+    self.inlineActionStack.accessibilityIdentifier = @"epg.inline.toolbar";
+    self.inlineLiveButton = [self makeInlineChipButtonWithTitle:@"正在播" symbol:@"dot.radiowaves.left.and.right" accent:NO identifier:@"epg.inline.live" action:@selector(scrollToLiveProgram)];
+    self.inlineSevenDayButton = [self makeInlineChipButtonWithTitle:@"7天回看" symbol:@"calendar.badge.clock" accent:NO identifier:@"epg.inline.7days" action:@selector(fetchOfficialSevenDayLookback)];
+    self.inlineReturnLiveButton = [self makeInlineChipButtonWithTitle:@"返回直播" symbol:@"arrow.uturn.left.circle.fill" accent:YES identifier:@"epg.inline.return-live" action:@selector(handleInlineReturnToLive)];
+    self.inlineFilterButton = [self makeInlineChipButtonWithTitle:@"筛选" symbol:@"line.3.horizontal.decrease.circle" accent:NO identifier:@"epg.inline.filter" action:NULL];
+    self.inlineFilterButton.showsMenuAsPrimaryAction = YES;
+    self.inlineFilterButton.menu = [self buildProgramFilterMenu];
+    for (UIButton *b in @[self.inlineLiveButton, self.inlineSevenDayButton, self.inlineReturnLiveButton, self.inlineFilterButton]) {
+        [self.inlineActionStack addArrangedSubview:b];
+    }
+    [self.view addSubview:self.inlineActionStack];
+    [self refreshInlineActionBar];
 
     self.spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
     self.spinner.accessibilityLabel = @"正在加载节目单";
@@ -146,7 +172,55 @@
     HostStylePillButton(self.dateMenuButton, NO);
     self.dateMenuButton.titleLabel.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleSubheadline] scaledFontForFont:[UIFont systemFontOfSize:15]];
     self.dateMenuButton.titleLabel.adjustsFontForContentSizeCategory = YES;
+    for (UIButton *b in @[self.inlineLiveButton ?: [UIButton new], self.inlineSevenDayButton ?: [UIButton new], self.inlineFilterButton ?: [UIButton new]]) {
+        b.backgroundColor = HostRaisedSurface();
+        b.tintColor = HostText();
+        HostSetLayerBorderColor(b, HostBorder());
+    }
+    if (self.inlineReturnLiveButton) {
+        self.inlineReturnLiveButton.backgroundColor = HostSelectedSurface();
+        self.inlineReturnLiveButton.tintColor = HostAccent();
+        HostSetLayerBorderColor(self.inlineReturnLiveButton, [HostAccent() colorWithAlphaComponent:0.40]);
+    }
     [self.table reloadData];
+}
+
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+    [super traitCollectionDidChange:previousTraitCollection];
+    if ([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection]) {
+        [self reloadThemeAppearance];
+    }
+}
+
+- (UIButton *)makeInlineChipButtonWithTitle:(NSString *)title symbol:(NSString *)symbol accent:(BOOL)accent identifier:(NSString *)identifier action:(SEL)action {
+    UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
+    [btn setTitle:[NSString stringWithFormat:@" %@", title] forState:UIControlStateNormal];
+    UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration configurationWithPointSize:11 weight:UIImageSymbolWeightSemibold];
+    [btn setImage:[UIImage systemImageNamed:symbol withConfiguration:cfg] forState:UIControlStateNormal];
+    btn.titleLabel.font = HostMonospacedDigitFont(11.5, UIFontWeightSemibold, UIFontTextStyleCaption1);
+    btn.titleLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+    btn.contentEdgeInsets = UIEdgeInsetsMake(4, 9, 4, 9);
+    btn.backgroundColor = accent ? HostSelectedSurface() : HostRaisedSurface();
+    btn.tintColor = accent ? HostAccent() : HostText();
+    btn.layer.cornerRadius = 9.5;
+    btn.layer.cornerCurve = kCACornerCurveContinuous;
+    btn.layer.borderWidth = 0.6;
+    HostSetLayerBorderColor(btn, accent ? [HostAccent() colorWithAlphaComponent:0.40] : HostBorder());
+    btn.accessibilityIdentifier = identifier;
+    HostInstallPressFeedback(btn);
+    if (action) [btn addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
+    return btn;
+}
+
+- (void)handleInlineReturnToLive {
+    if (self.onReturnToLive) self.onReturnToLive();
+}
+
+- (void)refreshInlineActionBar {
+    if (!self.inlineActionStack) return;
+    self.inlineSevenDayButton.hidden = (self.xmlSource.length > 0 || !self.channelID.length);
+    self.inlineReturnLiveButton.hidden = (self.onReturnToLive == nil);
+    self.inlineFilterButton.menu = [self buildProgramFilterMenu];
 }
 
 - (void)viewWillAppear:(BOOL)animated {
@@ -238,7 +312,14 @@
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];CGFloat top=self.view.safeAreaInsets.top;CGFloat bottom=self.view.safeAreaInsets.bottom;CGFloat width=self.view.bounds.size.width;
     CGFloat hintHeight=ceil(self.hint.font.lineHeight*2);
-    self.dates.frame=CGRectMake(16,top+8,width-32,44);self.dateMenuButton.frame=self.dates.frame;self.hintCard.frame=CGRectMake(16,top+58,width-32,hintHeight+4);self.hint.frame=CGRectMake(26,top+60,MAX(0,width-52),hintHeight);self.table.frame=CGRectMake(0,top+60+hintHeight+8,width,MAX(0,self.view.bounds.size.height-top-60-hintHeight-8-bottom));self.spinner.center=CGPointMake(width/2,top+150);
+    self.dates.frame=CGRectMake(16,top+8,width-32,44);self.dateMenuButton.frame=self.dates.frame;
+    self.inlineActionStack.frame=CGRectMake(16,top+58,MAX(0,width-32),30);
+    CGFloat hintTop=top+94;
+    self.hintCard.frame=CGRectMake(16,hintTop,MAX(0,width-32),hintHeight+6);
+    self.hint.frame=CGRectMake(26,hintTop+3,MAX(0,width-52),hintHeight);
+    CGFloat tableTop=hintTop+hintHeight+10;
+    self.table.frame=CGRectMake(0,tableTop,width,MAX(0,self.view.bounds.size.height-tableTop-8-bottom));
+    self.spinner.center=CGPointMake(width/2,tableTop+64);
 }
 - (void)updateEmptyState {
     self.emptyLabel.hidden = self.rows.count > 0 || self.spinner.isAnimating;
@@ -276,9 +357,9 @@
 }
 - (UIMenu *)buildProgramFilterMenu {
     __weak typeof(self) weakSelf=self;
-    UIAction *all=[UIAction actionWithTitle:@"全部节目" image:self.programFilterMode==0?[UIImage systemImageNamed:@"checkmark"]:nil identifier:nil handler:^(__unused UIAction *a){weakSelf.programFilterMode=0;weakSelf.filterMenuItem.menu=[weakSelf buildProgramFilterMenu];[weakSelf filterDate];}];
-    UIAction *replayOnly=[UIAction actionWithTitle:@"仅看已播 / 可回看" image:self.programFilterMode==1?[UIImage systemImageNamed:@"checkmark"]:nil identifier:nil handler:^(__unused UIAction *a){weakSelf.programFilterMode=1;weakSelf.filterMenuItem.menu=[weakSelf buildProgramFilterMenu];[weakSelf filterDate];}];
-    UIAction *remindedOnly=[UIAction actionWithTitle:@"仅看已预约提醒" image:self.programFilterMode==2?[UIImage systemImageNamed:@"checkmark"]:nil identifier:nil handler:^(__unused UIAction *a){weakSelf.programFilterMode=2;weakSelf.filterMenuItem.menu=[weakSelf buildProgramFilterMenu];[weakSelf filterDate];}];
+    UIAction *all=[UIAction actionWithTitle:@"全部节目" image:self.programFilterMode==0?[UIImage systemImageNamed:@"checkmark"]:nil identifier:nil handler:^(__unused UIAction *a){weakSelf.programFilterMode=0;weakSelf.filterMenuItem.menu=[weakSelf buildProgramFilterMenu];[weakSelf refreshInlineActionBar];[weakSelf filterDate];}];
+    UIAction *replayOnly=[UIAction actionWithTitle:@"仅看已播 / 可回看" image:self.programFilterMode==1?[UIImage systemImageNamed:@"checkmark"]:nil identifier:nil handler:^(__unused UIAction *a){weakSelf.programFilterMode=1;weakSelf.filterMenuItem.menu=[weakSelf buildProgramFilterMenu];[weakSelf refreshInlineActionBar];[weakSelf filterDate];}];
+    UIAction *remindedOnly=[UIAction actionWithTitle:@"仅看已预约提醒" image:self.programFilterMode==2?[UIImage systemImageNamed:@"checkmark"]:nil identifier:nil handler:^(__unused UIAction *a){weakSelf.programFilterMode=2;weakSelf.filterMenuItem.menu=[weakSelf buildProgramFilterMenu];[weakSelf refreshInlineActionBar];[weakSelf filterDate];}];
     UIAction *clearReminders=[UIAction actionWithTitle:@"清空本频道预约提醒" image:[UIImage systemImageNamed:@"bell.slash"] identifier:nil handler:^(__unused UIAction *a){[weakSelf clearChannelReminders];}];
     clearReminders.attributes=UIMenuElementAttributesDestructive;
     NSMutableArray<UIMenuElement *> *items=[NSMutableArray arrayWithObjects:all,replayOnly,remindedOnly,nil];
@@ -318,14 +399,20 @@
         NSString *u = [NSString stringWithFormat:@"https://api.cntv.cn/epg/epginfo3?serviceId=cbox&c=%@&d=%@", encoded, dayStr];
         NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:u] cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:8];
         [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *err) {
+            EPGViewController *owner = weakSelf;
+            if (!owner || generation != owner.requestGeneration) {
+                dispatch_group_leave(group);
+                return;
+            }
             if (!err && data.length > 0 && data.length <= 4 * 1024 * 1024) {
                 id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
                 if ([json isKindOfClass:NSDictionary.class]) {
-                    NSDictionary *channelNode = [json[weakSelf.channelID] isKindOfClass:NSDictionary.class] ? json[weakSelf.channelID] : json;
+                    NSString *cid = owner.channelID ?: @"";
+                    NSDictionary *channelNode = (cid.length && [json[cid] isKindOfClass:NSDictionary.class]) ? json[cid] : json;
                     NSArray *programList = [channelNode[@"program"] isKindOfClass:NSArray.class] ? channelNode[@"program"] : (channelNode[@"EPG"] ?: channelNode[@"data"]);
                     if ([programList isKindOfClass:NSArray.class]) {
-                        NSArray *norm = [weakSelf normalize:programList];
-                        @synchronized(collected) { [collected addObjectsFromArray:norm]; }
+                        NSArray *norm = [owner normalize:programList];
+                        if (norm.count) { @synchronized(collected) { [collected addObjectsFromArray:norm]; } }
                     }
                 }
             }
@@ -494,7 +581,59 @@
     cell.selectionStyle=(replayable||start>now)?UITableViewCellSelectionStyleDefault:UITableViewCellSelectionStyleNone;
     cell.backgroundColor = (live || activeReplayRow) ? HostSelectedSurface() : HostCard();
     cell.layer.cornerRadius=13; cell.layer.cornerCurve=kCACornerCurveContinuous; cell.clipsToBounds=YES;
-    cell.layer.borderWidth=(live || activeReplayRow)?1.1:0.6; HostSetLayerBorderColor(cell,live?HostAccent():HostBorder()); if(activeReplayRow)HostSetLayerBorderColor(cell,HostAccent());
+    cell.layer.borderWidth=(live || activeReplayRow)?1.15:0.6; HostSetLayerBorderColor(cell,live?HostAccent():HostBorder()); if(activeReplayRow)HostSetLayerBorderColor(cell,HostAccent());
+    UIView *epgSpecular = [cell.contentView viewWithTag:9103];
+    if (!epgSpecular) {
+        epgSpecular = [UIView new]; epgSpecular.tag = 9103; epgSpecular.translatesAutoresizingMaskIntoConstraints = NO; epgSpecular.userInteractionEnabled = NO;
+        [cell.contentView addSubview:epgSpecular];
+        [NSLayoutConstraint activateConstraints:@[
+            [epgSpecular.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:12],
+            [epgSpecular.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-12],
+            [epgSpecular.topAnchor constraintEqualToAnchor:cell.contentView.topAnchor],
+            [epgSpecular.heightAnchor constraintEqualToConstant:0.5]
+        ]];
+    }
+    epgSpecular.backgroundColor = [UIColor colorWithWhite:1.0 alpha:(live || activeReplayRow) ? 0.16 : 0.06];
+    UIView *epgAccentBar = [cell.contentView viewWithTag:9104];
+    if (!epgAccentBar) {
+        epgAccentBar = [UIView new]; epgAccentBar.tag = 9104; epgAccentBar.translatesAutoresizingMaskIntoConstraints = NO; epgAccentBar.layer.cornerRadius = 1.75; epgAccentBar.layer.cornerCurve = kCACornerCurveContinuous; epgAccentBar.userInteractionEnabled = NO;
+        [cell.contentView addSubview:epgAccentBar];
+        [NSLayoutConstraint activateConstraints:@[
+            [epgAccentBar.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:4],
+            [epgAccentBar.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
+            [epgAccentBar.widthAnchor constraintEqualToConstant:3.5],
+            [epgAccentBar.heightAnchor constraintEqualToConstant:24]
+        ]];
+    }
+    BOOL isRemindedRow = [self isProgramReminded:row];
+    epgAccentBar.backgroundColor = (live || activeReplayRow) ? HostAccent() : (isRemindedRow ? UIColor.systemOrangeColor : (replayable ? [HostAccent() colorWithAlphaComponent:0.38] : UIColor.clearColor));
+    NSString *statusPillText = activeReplayRow ? @"  ↺ 回看中  " : (live ? @"  ● 直播中  " : (replayable ? @"  ↺ 回看  " : (isRemindedRow ? @"  ⏰ 已预约  " : @"")));
+    if (statusPillText.length) {
+        UILabel *pill = ([cell.accessoryView isKindOfClass:UILabel.class] && cell.accessoryView.tag == 9105) ? (UILabel *)cell.accessoryView : nil;
+        if (!pill) {
+            pill = [UILabel new];
+            pill.tag = 9105;
+            pill.font = HostMonospacedDigitFont(10.5, UIFontWeightSemibold, UIFontTextStyleCaption2);
+            pill.textAlignment = NSTextAlignmentCenter;
+            pill.layer.cornerRadius = 7; pill.layer.cornerCurve = kCACornerCurveContinuous;
+            pill.layer.borderWidth = 0.55; pill.clipsToBounds = YES;
+            pill.accessibilityIdentifier = @"epg.row.status.badge";
+        }
+        pill.text = statusPillText;
+        if (live || activeReplayRow) {
+            pill.textColor = HostAccent(); pill.backgroundColor = HostSelectedSurface(); HostSetLayerBorderColor(pill, [HostAccent() colorWithAlphaComponent:0.42]);
+        } else if (isRemindedRow) {
+            pill.textColor = UIColor.systemOrangeColor; pill.backgroundColor = [UIColor.systemOrangeColor colorWithAlphaComponent:0.14]; HostSetLayerBorderColor(pill, [UIColor.systemOrangeColor colorWithAlphaComponent:0.35]);
+        } else {
+            pill.textColor = HostSecondaryText(); pill.backgroundColor = HostRaisedSurface(); HostSetLayerBorderColor(pill, HostBorder());
+        }
+        [pill sizeToFit];
+        pill.frame = CGRectMake(0, 0, MAX(48, ceil(pill.bounds.size.width) + 4), 22);
+        cell.accessoryView = pill;
+        cell.accessoryType = UITableViewCellAccessoryNone;
+    } else {
+        cell.accessoryView = nil;
+    }
     UIProgressView *liveProgress = (UIProgressView *)[cell.contentView viewWithTag:9102];
     if (!liveProgress) {
         liveProgress = [[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleBar];

@@ -48,16 +48,89 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     static NSString *reuse=@"cctv.playback.panel";
     UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:reuse];
-    if(!cell){cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:reuse];cell.backgroundColor=HostCard();cell.textLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];cell.detailTextLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];cell.textLabel.adjustsFontForContentSizeCategory=YES;cell.detailTextLabel.adjustsFontForContentSizeCategory=YES;cell.detailTextLabel.numberOfLines=3;cell.textLabel.textColor=HostText();cell.detailTextLabel.textColor=HostSecondaryText();}
+    if(!cell){
+        cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:reuse];
+        cell.backgroundColor=HostCard();
+        cell.textLabel.font=HostRoundedFont(15.5,UIFontWeightSemibold,UIFontTextStyleBody);
+        cell.detailTextLabel.font=HostMonospacedDigitFont(12.0,UIFontWeightRegular,UIFontTextStyleCaption1);
+        cell.textLabel.adjustsFontForContentSizeCategory=YES;
+        cell.detailTextLabel.adjustsFontForContentSizeCategory=YES;
+        cell.detailTextLabel.numberOfLines=3;
+        cell.textLabel.textColor=HostText();
+        cell.detailTextLabel.textColor=HostSecondaryText();
+    }
     NSDictionary *item=self.items[indexPath.row];BOOL selected=[item[@"selected"] boolValue];
     cell.backgroundColor=selected?HostSelectedSurface():HostCard();
     cell.layer.cornerRadius=14;cell.layer.cornerCurve=kCACornerCurveContinuous;cell.clipsToBounds=YES;
     cell.layer.borderWidth=selected?1.1:0.6;HostSetLayerBorderColor(cell,selected?HostAccent():HostBorder());
-    cell.textLabel.text=item[@"title"]?:@"";cell.detailTextLabel.text=item[@"detail"]?:@"";
-    cell.textLabel.textColor=selected?HostAccent():HostText();cell.detailTextLabel.textColor=HostSecondaryText();
-    cell.accessoryType=selected?UITableViewCellAccessoryCheckmark:UITableViewCellAccessoryDisclosureIndicator;
+
+    UIView *specular=[cell.contentView viewWithTag:8901];
+    if(!specular){
+        specular=[UIView new];specular.tag=8901;specular.translatesAutoresizingMaskIntoConstraints=NO;specular.userInteractionEnabled=NO;
+        [cell.contentView addSubview:specular];
+        [NSLayoutConstraint activateConstraints:@[
+            [specular.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:12],
+            [specular.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-12],
+            [specular.topAnchor constraintEqualToAnchor:cell.contentView.topAnchor],
+            [specular.heightAnchor constraintEqualToConstant:0.5]
+        ]];
+    }
+    specular.backgroundColor=[UIColor colorWithWhite:1.0 alpha:selected?0.16:0.07];
+
+    UIView *accentBar=[cell.contentView viewWithTag:8902];
+    if(!accentBar){
+        accentBar=[UIView new];accentBar.tag=8902;accentBar.translatesAutoresizingMaskIntoConstraints=NO;accentBar.layer.cornerRadius=1.75;accentBar.layer.cornerCurve=kCACornerCurveContinuous;accentBar.userInteractionEnabled=NO;
+        [cell.contentView addSubview:accentBar];
+        [NSLayoutConstraint activateConstraints:@[
+            [accentBar.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:4],
+            [accentBar.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
+            [accentBar.widthAnchor constraintEqualToConstant:3.5],
+            [accentBar.heightAnchor constraintEqualToConstant:24]
+        ]];
+    }
+    accentBar.backgroundColor=selected?HostAccent():UIColor.clearColor;
+
+    cell.textLabel.text=item[@"title"]?:@"";
+    NSString *detailStr=[item[@"detail"] isKindOfClass:NSString.class]?item[@"detail"]:@"";
+    cell.detailTextLabel.attributedText=nil;
+    if(detailStr.length){
+        NSMutableParagraphStyle *para=[NSMutableParagraphStyle new];para.lineSpacing=2.4;
+        NSMutableAttributedString *attr=[[NSMutableAttributedString alloc] initWithString:detailStr attributes:@{NSFontAttributeName:cell.detailTextLabel.font,NSForegroundColorAttributeName:HostSecondaryText(),NSParagraphStyleAttributeName:para}];
+        NSRange nl=[detailStr rangeOfString:@"\n"];
+        if(nl.location!=NSNotFound){
+            [attr addAttribute:NSForegroundColorAttributeName value:[HostText() colorWithAlphaComponent:0.84] range:NSMakeRange(0,nl.location)];
+            [attr addAttribute:NSForegroundColorAttributeName value:HostMutedText() range:NSMakeRange(nl.location+1,detailStr.length-nl.location-1)];
+        }
+        cell.detailTextLabel.attributedText=attr;
+    }else{
+        cell.detailTextLabel.text=@"";
+    }
+    cell.textLabel.textColor=selected?HostAccent():HostText();
     cell.tintColor=HostAccent();cell.selectionStyle=UITableViewCellSelectionStyleDefault;
-    NSString *symbol=item[@"symbol"];cell.imageView.image=symbol.length?[UIImage systemImageNamed:symbol]:nil;cell.imageView.tintColor=HostAccent();
+    NSString *symbol=item[@"symbol"];
+    cell.imageView.image=symbol.length?[UIImage systemImageNamed:symbol withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:16 weight:selected?UIImageSymbolWeightSemibold:UIImageSymbolWeightRegular]]:nil;
+    cell.imageView.tintColor=selected?HostAccent():[HostAccent() colorWithAlphaComponent:0.82];
+
+    NSString *badgeText=[item[@"badge"] isKindOfClass:NSString.class]?item[@"badge"]:@"";
+    if(badgeText.length){
+        UILabel *badge=[UILabel new];
+        badge.text=[NSString stringWithFormat:@"  %@  ",badgeText];
+        badge.font=HostMonospacedDigitFont(10.5,UIFontWeightSemibold,UIFontTextStyleCaption2);
+        badge.textAlignment=NSTextAlignmentCenter;
+        badge.textColor=selected?HostAccent():HostSecondaryText();
+        badge.backgroundColor=selected?HostSelectedSurface():HostRaisedSurface();
+        badge.layer.cornerRadius=7;badge.layer.cornerCurve=kCACornerCurveContinuous;
+        badge.layer.borderWidth=0.55;HostSetLayerBorderColor(badge,selected?[HostAccent() colorWithAlphaComponent:0.38]:HostBorder());
+        badge.clipsToBounds=YES;
+        badge.accessibilityIdentifier=@"cctv.panel.badge";
+        [badge sizeToFit];
+        badge.frame=CGRectMake(0,0,MAX(44,ceil(badge.bounds.size.width)+4),22);
+        cell.accessoryView=badge;
+        cell.accessoryType=UITableViewCellAccessoryNone;
+    }else{
+        cell.accessoryView=nil;
+        cell.accessoryType=selected?UITableViewCellAccessoryCheckmark:UITableViewCellAccessoryDisclosureIndicator;
+    }
     return cell;
 }
 - (void)tableView:(UITableView *)tableView didHighlightRowAtIndexPath:(NSIndexPath *)indexPath { UITableViewCell *c=[tableView cellForRowAtIndexPath:indexPath]; if(!c||UIAccessibilityIsReduceMotionEnabled())return; [UIView animateWithDuration:0.10 delay:0 usingSpringWithDamping:0.8 initialSpringVelocity:0.2 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{c.transform=CGAffineTransformMakeScale(0.982,0.982);} completion:nil]; }
@@ -872,6 +945,7 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
     if(relayRecord){NSMutableDictionary *fields=[relayRecord mutableCopy];NSString *event=fields[@"event"];[fields removeObjectForKey:@"event"];fields[@"service_id"]=identifier;if(fields[@"request_id"])fields[@"correlation_id"]=fields[@"request_id"];[RuntimeDiagnostics.shared recordEvent:event category:[event hasPrefix:@"media_play_"]?@"media_api":@"media_relay" fields:fields];}
 
     dispatch_async(dispatch_get_main_queue(),^{[[NSNotificationCenter defaultCenter] postNotificationName:CCTVHostDiagnosticLogDidUpdateNotification object:identifier];});
+    if([relayRecord[@"event"] isEqualToString:@"media_relay_client_disconnected"])return;
     [self log:@"[%@] %@",name.length?name:@"插件",line];
 }
 - (void)clearServiceLogHandlers:(NSString *)identifier {
@@ -1510,7 +1584,7 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
     NSError *error=nil;NSDictionary *backup=[HostBackup validatedBackup:data error:&error];if(!backup){[self showServiceError:error.localizedDescription];return;}
     UIAlertController *a=[UIAlertController alertControllerWithTitle:@"导入本机配置" message:@"将替换本机订阅、收藏和偏好。Python 服务代码单独导入，不受影响。" preferredStyle:UIAlertControllerStyleAlert];[a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[a addAction:[UIAlertAction actionWithTitle:@"导入" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
         for(NSString *source in self.subscriptionURLs.allObjects){self.subscriptionRequestVersions[source]=@([self.subscriptionRequestVersions[source] unsignedIntegerValue]+1);[self removeSubscriptionSource:source];}
-        [HostBackup restore:backup];self.subscriptionURLs=[NSMutableSet setWithArray:backup[@"subscriptions"]];self.favorites=[backup[@"favorites"] mutableCopy];self.recents=[[NSUserDefaults.standardUserDefaults arrayForKey:@"recents"] mutableCopy]?:[NSMutableArray array];self.activeSource=nil;self.gridMode=CCTVBoolPreference(@"channelGridMode",YES);NSInteger restoredCols=[NSUserDefaults.standardUserDefaults integerForKey:@"cctv.channelGridColumns.v1"];self.gridColumns=(restoredCols==3)?3:4;self.channelSortMode=[NSUserDefaults.standardUserDefaults integerForKey:@"cctv.channelSortMode.v1"]==1?1:0;[RuntimeDiagnostics.shared setEnabled:CCTVBoolPreference(@"runtimeDiagnosticsEnabled",NO)];MediaAdaptationMonitor.shared.monitoringEnabled=CCTVBoolPreference(@"cctv.adaptationMonitor.enabled",YES);[self configureSDKLogging];for(NSString *source in self.subscriptionURLs)[self fetchSubscription:source silent:YES];[self activateAudioSession];[self configureCatalogNavigation];[self applyFilter];[self selectBottomTab:(UIButton *)self.bottomBar.arrangedSubviews.firstObject];
+        [HostBackup restore:backup];self.subscriptionURLs=[NSMutableSet setWithArray:backup[@"subscriptions"]];self.favorites=[backup[@"favorites"] mutableCopy];self.recents=[[NSUserDefaults.standardUserDefaults arrayForKey:@"recents"] mutableCopy]?:[NSMutableArray array];self.activeSource=nil;self.gridMode=CCTVBoolPreference(@"channelGridMode",YES);NSInteger restoredCols=[NSUserDefaults.standardUserDefaults integerForKey:@"cctv.channelGridColumns.v1"];self.gridColumns=(restoredCols==3)?3:4;self.channelSortMode=[NSUserDefaults.standardUserDefaults integerForKey:@"cctv.channelSortMode.v1"];if(self.channelSortMode<0||self.channelSortMode>2)self.channelSortMode=0;[RuntimeDiagnostics.shared setEnabled:CCTVBoolPreference(@"runtimeDiagnosticsEnabled",NO)];MediaAdaptationMonitor.shared.monitoringEnabled=CCTVBoolPreference(@"cctv.adaptationMonitor.enabled",YES);[self configureSDKLogging];for(NSString *source in self.subscriptionURLs)[self fetchSubscription:source silent:YES];[self activateAudioSession];[self configureCatalogNavigation];[self applyFilter];[self selectBottomTab:(UIButton *)self.bottomBar.arrangedSubviews.firstObject];
         // 备份里的主题与字号刚恢复：立即应用到窗口并重刷可见页面，
         // 否则要等下次启动才生效。
         UIWindow *window=self.view.window;if(window){HostApplyThemeToWindow(window);HostStyleNavigation(self.navigationController);HostRefreshAppearanceLayers(window);}[self reloadThemeAppearance];[self applyFontSizeOverride];MediaBrowserViewController *browser=(MediaBrowserViewController *)self.tabPages[@2];if(browser)[browser reloadMediaDisplayConfigurationIfLoaded];[NSNotificationCenter.defaultCenter postNotificationName:CCTVMediaEpisodeLayoutStyleDidChangeNotification object:nil];[self.table reloadData];[self.view setNeedsLayout];

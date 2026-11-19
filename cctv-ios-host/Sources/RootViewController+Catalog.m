@@ -50,15 +50,21 @@
     NSDictionary *ch=rows[(NSUInteger)ip.row];__weak typeof(self) w=self;
     return [UIContextMenuConfiguration configurationWithIdentifier:ch[@"id"] previewProvider:nil actionProvider:^UIMenu *(NSArray *suggested){
         BOOL favorite=[w.favorites containsObject:ch[@"id"]];
+        UIAction *play=[UIAction actionWithTitle:@"立即播放" image:[UIImage systemImageNamed:@"play.fill"] identifier:nil handler:^(UIAction *a){[w selectChannel:ch];}];
         UIAction *fav=[UIAction actionWithTitle:favorite?@"取消收藏":@"收藏频道" image:[UIImage systemImageNamed:favorite?@"heart.slash":@"heart"] identifier:nil handler:^(UIAction *a){if(favorite)[w.favorites removeObject:ch[@"id"]];else[w.favorites addObject:ch[@"id"]];[NSUserDefaults.standardUserDefaults setObject:w.favorites forKey:@"favorites"];[w configureCatalogNavigation];[w applyFilter];}];
-        UIAction *route=[UIAction actionWithTitle:@"线路与节目单" image:[UIImage systemImageNamed:@"list.bullet"] identifier:nil handler:^(UIAction *a){if([ch[@"remoteURL"] length])[w openEPGforChannel:ch[@"id"] name:ch[@"name"]];else[w presentRouteSheetForChannel:ch fromIndexPath:ip];}];
-        NSMutableArray *actions=[NSMutableArray arrayWithObjects:fav,route,nil];
+        UIAction *route=[UIAction actionWithTitle:[ch[@"remoteURL"] length]?@"节目单与回看":@"线路与节目单" image:[UIImage systemImageNamed:@"list.bullet"] identifier:nil handler:^(UIAction *a){if([ch[@"remoteURL"] length])[w openEPGforChannel:ch[@"id"] name:ch[@"name"]];else[w presentRouteSheetForChannel:ch fromIndexPath:ip];}];
+        UIMenu *primary=[UIMenu menuWithTitle:@"" image:nil identifier:@"channel.list.ctx.primary" options:UIMenuOptionsDisplayInline children:@[play,fav,route]];
+        NSMutableArray<UIMenuElement *> *tools=[NSMutableArray array];
         if([ch[@"remoteURL"] length]){
-            [actions addObject:[UIAction actionWithTitle:@"静音预览（30 秒）" image:[UIImage systemImageNamed:@"play.rectangle"] identifier:nil handler:^(UIAction *a){[w previewChannel:ch];}]];
-            [actions addObject:[UIAction actionWithTitle:@"EPG 手动匹配" image:[UIImage systemImageNamed:@"calendar"] identifier:nil handler:^(UIAction *a){[w editEPGMapping:ch];}]];
+            [tools addObject:[UIAction actionWithTitle:@"静音预览（30 秒）" image:[UIImage systemImageNamed:@"play.rectangle"] identifier:nil handler:^(UIAction *a){[w previewChannel:ch];}]];
+            [tools addObject:[UIAction actionWithTitle:@"EPG 手动匹配" image:[UIImage systemImageNamed:@"calendar"] identifier:nil handler:^(UIAction *a){[w editEPGMapping:ch];}]];
+            [tools addObject:[UIAction actionWithTitle:@"备用源与频道工具" image:[UIImage systemImageNamed:@"wrench.and.screwdriver"] identifier:nil handler:^(UIAction *a){[w showRemoteTools:ch];}]];
         }
-        [actions addObject:[UIAction actionWithTitle:@"电视台增强与同台多源" image:[UIImage systemImageNamed:@"sparkles.tv"] identifier:nil handler:^(UIAction *a){[w presentStationEnhancementSheetForChannel:ch sourceView:t];}]];
-        return [UIMenu menuWithTitle:ch[@"name"]?:@"频道操作" children:actions];
+        [tools addObject:[UIAction actionWithTitle:@"电视台增强与同台多源" image:[UIImage systemImageNamed:@"sparkles.tv"] identifier:nil handler:^(UIAction *a){[w presentStationEnhancementSheetForChannel:ch sourceView:t];}]];
+        UIMenu *secondary=[UIMenu menuWithTitle:@"" image:nil identifier:@"channel.list.ctx.tools" options:UIMenuOptionsDisplayInline children:tools];
+        NSString *nowProg=[w.epgCache[ch[@"id"]?:@""][@"now"] isKindOfClass:NSString.class]?w.epgCache[ch[@"id"]?:@""][@"now"]:@"";
+        NSString *menuTitle=nowProg.length?[NSString stringWithFormat:@"%@ · %@",ch[@"name"]?:@"频道",nowProg]:(ch[@"name"]?:@"频道操作");
+        return [UIMenu menuWithTitle:menuTitle children:@[primary,secondary]];
     }];
 }
 - (UISwipeActionsConfiguration *)tableView:(UITableView *)t trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)ip {
@@ -170,6 +176,8 @@
     self.gridMode=!self.gridMode;
     [NSUserDefaults.standardUserDefaults setBool:self.gridMode forKey:@"channelGridMode"];
     [self configureCatalogNavigation];
+    if(self.gridMode)[self.channelGrid reloadData];
+    else [self.table reloadData];
     [self.view setNeedsLayout];
     [self.view layoutIfNeeded];
     self.table.contentOffset=listOffset;
@@ -201,6 +209,7 @@
     NSInteger next=current==NSNotFound?0:(current+direction+(NSInteger)self.shownChannels.count)%(NSInteger)self.shownChannels.count;
     if(next<0||next>=(NSInteger)self.shownChannels.count)return;
     [self selectChannel:self.shownChannels[next]];
+    [self scrollCatalogToPlayingChannel];
 }
 - (void)scrollCatalogToPlayingChannel {
     // 回到正在播放：把列表滚到当前频道所在行；未选台或频道不在当前列表时不操作。
@@ -223,14 +232,34 @@
     UIAction *history=[UIAction actionWithTitle:@"最近观看" image:[UIImage systemImageNamed:@"clock"] identifier:nil handler:^(UIAction *a){[w showHistory];}];
     UIAction *playing=[UIAction actionWithTitle:@"返回正在播放" image:[UIImage systemImageNamed:@"play.circle"] identifier:nil handler:^(UIAction *a){if(!w.channelID.length)return;[w selectBottomTab:(id)w.bottomBar.arrangedSubviews[w.currentRemoteURL.length?1:0]];w.playerExpanded=YES;[w configureCatalogNavigation];[w.view setNeedsLayout];dispatch_async(dispatch_get_main_queue(),^{[w scrollCatalogToPlayingChannel];});}];
     UIAction *manage=[UIAction actionWithTitle:@"整理收藏" image:[UIImage systemImageNamed:@"heart"] identifier:nil handler:^(UIAction *a){[w showFavoriteManager];}];
-    UIAction *favorites=[UIAction actionWithTitle:self.favoritesOnly?@"显示全部频道":@"查看收藏频道" image:[UIImage systemImageNamed:@"heart.fill"] identifier:nil handler:^(UIAction *a){w.recentsOnly=NO;w.favoritesOnly=!w.favoritesOnly;w.groupControl.selectedSegmentIndex=w.favoritesOnly?5:0;[w configureCatalogNavigation];[w applyFilter];}];
+    UIAction *favorites=[UIAction actionWithTitle:self.favoritesOnly?@"显示全部频道":@"查看收藏频道" image:[UIImage systemImageNamed:@"heart.fill"] identifier:nil handler:^(UIAction *a){w.recentsOnly=NO;w.favoritesOnly=!w.favoritesOnly;NSUInteger favIdx=[[w currentCatalogGroupTitles] indexOfObject:@"收藏"];w.groupControl.selectedSegmentIndex=(w.favoritesOnly&&favIdx!=NSNotFound)?(NSInteger)favIdx:0;[w configureCatalogNavigation];[w applyFilter];}];
     UIAction *castCenter=[UIAction actionWithTitle:@"投屏中心 · AirPlay / 电视投屏" image:[UIImage systemImageNamed:@"airplayvideo"] identifier:@"channel.catalog.cast.center" handler:^(UIAction *a){[w showCastingCenter];}];
-    UIAction *sort=[UIAction actionWithTitle:self.channelSortMode==1?@"按默认顺序排列":@"按名称排序" image:[UIImage systemImageNamed:@"arrow.up.arrow.down"] identifier:nil handler:^(UIAction *a){w.channelSortMode=w.channelSortMode==1?0:1;[NSUserDefaults.standardUserDefaults setInteger:w.channelSortMode forKey:@"cctv.channelSortMode.v1"];[w applyFilter];}];
-    NSMutableArray *actions=[NSMutableArray arrayWithObjects:search,group,columns,castCenter,refresh,hide,playing,history,favorites,manage,sort,nil];
-    if(self.recentsOnly&&self.recents.count){UIAction *clearRecents=[UIAction actionWithTitle:@"清空最近观看记录" image:[UIImage systemImageNamed:@"trash"] identifier:@"channel.catalog.recents.clear" handler:^(UIAction *a){[w.recents removeAllObjects];[NSUserDefaults.standardUserDefaults setObject:@[] forKey:@"recents"];[w applyFilter];}];clearRecents.attributes=UIMenuElementAttributesDestructive;[actions insertObject:clearRecents atIndex:0];}
-    if(self.subscriptionCatalog)[actions insertObject:add atIndex:2];
-    if(self.channelID.length){BOOL favorite=[self.favorites containsObject:self.channelID];UIAction *currentFavorite=[UIAction actionWithTitle:favorite?@"取消收藏当前频道":@"收藏当前频道" image:[UIImage systemImageNamed:favorite?@"heart.fill":@"heart"] identifier:nil handler:^(UIAction *a){[w toggleCurrentFavorite];}];UIAction *playbackInfo=[UIAction actionWithTitle:@"播放信息" image:[UIImage systemImageNamed:@"info.circle"] identifier:nil handler:^(UIAction *a){[w showPlaybackInfo];}];[actions insertObjects:@[currentFavorite,playbackInfo] atIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0,2)]];}
-    return [UIMenu menuWithTitle:@"" children:actions];
+    NSString *sortTitle = self.channelSortMode==1 ? @"按延迟最快排序" : (self.channelSortMode==2 ? @"按默认顺序排列" : @"按名称排序");
+    UIAction *sort=[UIAction actionWithTitle:sortTitle image:[UIImage systemImageNamed:@"arrow.up.arrow.down"] identifier:@"channel.catalog.sort" handler:^(UIAction *a){w.channelSortMode=(w.channelSortMode+1)%3;[NSUserDefaults.standardUserDefaults setInteger:w.channelSortMode forKey:@"cctv.channelSortMode.v1"];[w configureCatalogNavigation];[w applyFilter];}];
+    NSMutableArray<UIMenuElement *> *sections=[NSMutableArray array];
+    if(self.channelID.length){
+        BOOL favorite=[self.favorites containsObject:self.channelID];
+        UIAction *currentFavorite=[UIAction actionWithTitle:favorite?@"取消收藏当前频道":@"收藏当前频道" image:[UIImage systemImageNamed:favorite?@"heart.fill":@"heart"] identifier:nil handler:^(UIAction *a){[w toggleCurrentFavorite];}];
+        UIAction *playbackInfo=[UIAction actionWithTitle:@"播放信息" image:[UIImage systemImageNamed:@"info.circle"] identifier:nil handler:^(UIAction *a){[w showPlaybackInfo];}];
+        UIAction *prevCh=[UIAction actionWithTitle:@"切换上一台" image:[UIImage systemImageNamed:@"chevron.up.circle"] identifier:@"channel.catalog.prev" handler:^(UIAction *a){[w switchToAdjacentChannel:-1];}];
+        UIAction *nextCh=[UIAction actionWithTitle:@"切换下一台" image:[UIImage systemImageNamed:@"chevron.down.circle"] identifier:@"channel.catalog.next" handler:^(UIAction *a){[w switchToAdjacentChannel:1];}];
+        [sections addObject:[UIMenu menuWithTitle:@"" image:nil identifier:@"channel.catalog.section.current" options:UIMenuOptionsDisplayInline children:@[prevCh,nextCh,currentFavorite,playbackInfo,playing,hide]]];
+    }else{
+        [sections addObject:[UIMenu menuWithTitle:@"" image:nil identifier:@"channel.catalog.section.player" options:UIMenuOptionsDisplayInline children:@[hide]]];
+    }
+    UIAction *catchupFilter=[UIAction actionWithTitle:self.catchupOnlyFilter?@"✓ 仅看支持回看（点按关闭）":@"仅看支持回看" image:[UIImage systemImageNamed:self.catchupOnlyFilter?@"clock.arrow.circlepath":@"clock"] identifier:@"channel.catalog.catchup-only" handler:^(UIAction *a){w.catchupOnlyFilter=!w.catchupOnlyFilter;[w configureCatalogNavigation];[w applyFilter];}];
+    NSMutableArray<UIAction *> *browseActions=[NSMutableArray arrayWithObjects:search,group,catchupFilter,columns,sort,nil];
+    if(self.subscriptionCatalog){
+        UIAction *manageSubs=[UIAction actionWithTitle:@"管理订阅源" image:[UIImage systemImageNamed:@"dot.radiowaves.left.and.right"] identifier:@"channel.catalog.manage-subscriptions" handler:^(UIAction *a){[w manageSubscriptions];}];
+        [browseActions insertObject:add atIndex:2];
+        [browseActions insertObject:manageSubs atIndex:3];
+    }
+    [sections addObject:[UIMenu menuWithTitle:@"" image:nil identifier:@"channel.catalog.section.browse" options:UIMenuOptionsDisplayInline children:browseActions]];
+    [sections addObject:[UIMenu menuWithTitle:@"" image:nil identifier:@"channel.catalog.section.library" options:UIMenuOptionsDisplayInline children:@[castCenter,favorites,history,manage]]];
+    NSMutableArray<UIAction *> *maintActions=[NSMutableArray arrayWithObjects:refresh,nil];
+    if(self.recentsOnly&&self.recents.count){UIAction *clearRecents=[UIAction actionWithTitle:@"清空最近观看记录" image:[UIImage systemImageNamed:@"trash"] identifier:@"channel.catalog.recents.clear" handler:^(UIAction *a){[w.recents removeAllObjects];[NSUserDefaults.standardUserDefaults setObject:@[] forKey:@"recents"];[w applyFilter];}];clearRecents.attributes=UIMenuElementAttributesDestructive;[maintActions addObject:clearRecents];}
+    [sections addObject:[UIMenu menuWithTitle:@"" image:nil identifier:@"channel.catalog.section.maintenance" options:UIMenuOptionsDisplayInline children:maintActions]];
+    return [UIMenu menuWithTitle:@"" children:sections];
 }
 - (void)showCatalogSearch {
     NSString *message=self.subscriptionCatalog?@"按频道名称或编号筛选订阅频道。":@"按频道名称或编号筛选 CCTV。";
@@ -238,12 +267,21 @@
     [alert addTextFieldWithConfigurationHandler:^(UITextField *field){field.text=self.query?:@"";field.placeholder=@"频道名称或编号";field.clearButtonMode=UITextFieldViewModeWhileEditing;field.returnKeyType=UIReturnKeySearch;}];
     __weak typeof(self) weakSelf=self;
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    if(self.query.length){
+        [alert addAction:[UIAlertAction actionWithTitle:@"清除搜索" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action){RootViewController *owner=weakSelf;if(!owner)return;owner.query=@"";owner.searchController.searchBar.text=@"";[owner applyFilter];}]];
+    }
     [alert addAction:[UIAlertAction actionWithTitle:@"搜索" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){RootViewController *owner=weakSelf;if(!owner)return;owner.query=[alert.textFields.firstObject.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]?:@"";owner.searchController.searchBar.text=owner.query;[owner applyFilter];}]];
     [self presentViewController:alert animated:YES completion:nil];
 }
 - (void)showGroupMenu {
-    UIAlertController *a=[UIAlertController alertControllerWithTitle:@"频道分组" message:@"按频道类型筛选当前列表" preferredStyle:UIAlertControllerStyleActionSheet];NSInteger selected=self.groupControl.selectedSegmentIndex;
-    for(NSUInteger i=0;i<self.groupControl.numberOfSegments;i++){NSString *group=[self.groupControl titleForSegmentAtIndex:i]?:@"全部";NSString *title=(NSInteger)i==selected?[NSString stringWithFormat:@"✓  %@",group]:group;[a addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){self.groupControl.selectedSegmentIndex=i;[self onGroupChanged];}]];}
+    NSArray<NSDictionary *> *categoryRows=[self playerCategoryRows];
+    UIAlertController *a=[UIAlertController alertControllerWithTitle:@"频道分组" message:[NSString stringWithFormat:@"共 %lu 个分组 · 按频道类型快速筛选",(unsigned long)self.groupControl.numberOfSegments] preferredStyle:UIAlertControllerStyleActionSheet];NSInteger selected=self.groupControl.selectedSegmentIndex;
+    for(NSUInteger i=0;i<self.groupControl.numberOfSegments;i++){
+        NSString *group=[self.groupControl titleForSegmentAtIndex:i]?:@"全部";
+        NSString *countHint=(i<categoryRows.count && [categoryRows[i][@"detail"] length])?[NSString stringWithFormat:@" · %@",categoryRows[i][@"detail"]]:@"";
+        NSString *title=(NSInteger)i==selected?[NSString stringWithFormat:@"✓  %@%@",group,countHint]:[NSString stringWithFormat:@"%@%@",group,countHint];
+        [a addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){self.groupControl.selectedSegmentIndex=i;[self onGroupChanged];}]];
+    }
     [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];UIPopoverPresentationController *popover=a.popoverPresentationController;if(popover){if(self.catalogMoreButton){popover.sourceView=self.catalogMoreButton;popover.sourceRect=self.catalogMoreButton.bounds;}else{popover.sourceView=self.view;popover.sourceRect=CGRectMake(CGRectGetMidX(self.view.bounds),CGRectGetMidY(self.view.bounds),1,1);}}[self presentViewController:a animated:YES completion:nil];
 }
 - (NSInteger)collectionView:(UICollectionView *)collectionView numberOfItemsInSection:(NSInteger)section {return self.shownChannels.count;}
@@ -275,18 +313,32 @@
     if (![channel[@"remoteURL"] length]) return nil;
     return [self anyCatchupChannelForStation:channel];
 }
+- (UIFont *)catalogCardTitleFont {
+    NSString *cat = self.traitCollection.preferredContentSizeCategory ?: @"";
+    if (!self.cachedCatalogTitleFont || ![self.cachedCatalogFontCategory isEqualToString:cat]) {
+        self.cachedCatalogFontCategory = cat;
+        self.cachedCatalogTitleFont = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold] compatibleWithTraitCollection:self.traitCollection];
+        self.cachedCatalogSubtitleFont = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:9] compatibleWithTraitCollection:self.traitCollection];
+    }
+    return self.cachedCatalogTitleFont;
+}
+- (UIFont *)catalogCardSubtitleFont {
+    [self catalogCardTitleFont];
+    return self.cachedCatalogSubtitleFont;
+}
 - (NSDictionary *)anyCatchupChannelForStation:(NSDictionary *)channel {
     if (![channel isKindOfClass:NSDictionary.class]) return nil;
     if ([channel[@"catchupSource"] isKindOfClass:NSString.class] && [channel[@"catchupSource"] length] > 0 && [channel[@"remoteURL"] length]) return channel;
+    [self ensureChannelLookupIndexes];
     NSString *groupKey = CCTVRouteGroupKey(channel);
+    if (groupKey.length) {
+        NSDictionary *hit = self.catchupIndexByGroupKey[groupKey];
+        if (hit) return hit;
+    }
     NSString *canonical = [ProfileStore canonicalStationIDForChannel:channel];
-    for (NSDictionary *cand in self.allChannels) {
-        if (![cand isKindOfClass:NSDictionary.class] || ![cand[@"remoteURL"] length]) continue;
-        if (![cand[@"catchupSource"] isKindOfClass:NSString.class] || ![cand[@"catchupSource"] length]) continue;
-        if ((groupKey.length && [CCTVRouteGroupKey(cand) isEqualToString:groupKey]) ||
-            (canonical.length && [[ProfileStore canonicalStationIDForChannel:cand] isEqualToString:canonical])) {
-            return cand;
-        }
+    if (canonical.length) {
+        NSDictionary *hit = self.catchupIndexByCanonical[canonical];
+        if (hit) return hit;
     }
     return nil;
 }
@@ -327,8 +379,8 @@
     UIEdgeInsets inset=flow?flow.sectionInset:UIEdgeInsetsZero;
     CGFloat spacing=flow?flow.minimumInteritemSpacing:6;
     CGFloat itemWidth=floor(MAX(1,(collectionView.bounds.size.width-inset.left-inset.right-(columns-1)*spacing)/columns));
-    UIFont *titleFont=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold] compatibleWithTraitCollection:self.traitCollection];
-    UIFont *subtitleFont=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:9] compatibleWithTraitCollection:self.traitCollection];
+    UIFont *titleFont=[self catalogCardTitleFont];
+    UIFont *subtitleFont=[self catalogCardSubtitleFont];
     NSDictionary *channel=ip.item>=0&&ip.item<self.shownChannels.count?self.shownChannels[ip.item]:@{};
     NSString *name=[channel[@"name"] isKindOfClass:NSString.class]?channel[@"name"]:([channel[@"id"] isKindOfClass:NSString.class]?channel[@"id"]:@"");
     if([self.favorites containsObject:channel[@"id"]])name=[@"♥ " stringByAppendingString:name];
@@ -355,15 +407,18 @@
         title=[UILabel new];title.tag=titleTag;title.autoresizingMask=UIViewAutoresizingFlexibleWidth;title.adjustsFontForContentSizeCategory=YES;title.numberOfLines=2;title.lineBreakMode=NSLineBreakByTruncatingTail;[cell.contentView addSubview:title];
         subtitle=[UILabel new];subtitle.tag=subtitleTag;subtitle.autoresizingMask=UIViewAutoresizingFlexibleWidth;subtitle.adjustsFontForContentSizeCategory=YES;subtitle.numberOfLines=2;subtitle.lineBreakMode=NSLineBreakByTruncatingTail;subtitle.textColor=HostSecondaryText();[cell.contentView addSubview:subtitle];
         selectedMark=[UIImageView new];selectedMark.tag=selectedTag;selectedMark.contentMode=UIViewContentModeScaleAspectFit;selectedMark.image=[UIImage systemImageNamed:@"checkmark.circle.fill"];selectedMark.tintColor=HostAccent();selectedMark.backgroundColor=[UIColor colorWithWhite:0 alpha:.42];selectedMark.layer.cornerRadius=9;selectedMark.clipsToBounds=YES;[poster addSubview:selectedMark];}
-    title.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold] compatibleWithTraitCollection:self.traitCollection];subtitle.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:9] compatibleWithTraitCollection:self.traitCollection];
+    title.font=[self catalogCardTitleFont];subtitle.font=[self catalogCardSubtitleFont];
     CGFloat width=cell.contentView.bounds.size.width;
     CGFloat posterHeight=MIN(78,MAX(44,floor(width*.68)));
     NSString *channelID=[ch[@"id"] isKindOfClass:NSString.class]?ch[@"id"]:@"";
     NSString *name=[ch[@"name"] isKindOfClass:NSString.class]?ch[@"name"]:([ch[@"id"] isKindOfClass:NSString.class]?ch[@"id"]:@"");
     BOOL selected=[channelID isEqualToString:self.channelID];
+    NSString *xmlSource=[ProfileStore epgSourceForChannel:ch];
+    if(xmlSource.length && !self.epgCache[channelID])[self cacheXMLRows:[[XMLTVStore shared] cachedRowsForSource:xmlSource channel:[ProfileStore epgIDForChannel:ch]] channel:channelID];
     NSString *titleText=[NSString stringWithFormat:@"%@%@",[self.favorites containsObject:channelID]?@"♥ ":@"",name];
-    title.text=titleText;subtitle.text=[self catalogSubtitleForChannel:ch];
-    CGFloat labelWidth=MAX(1,width-4),titleHeight=[self catalogTextHeight:titleText font:title.font width:labelWidth maximumLines:2],subtitleHeight=[self catalogTextHeight:subtitle.text font:subtitle.font width:labelWidth maximumLines:2];
+    NSString *subtitleText=[self catalogSubtitleForChannel:ch];
+    title.text=titleText;subtitle.text=subtitleText;
+    CGFloat labelWidth=MAX(1,width-4),titleHeight=[self catalogTextHeight:titleText font:title.font width:labelWidth maximumLines:2],subtitleHeight=[self catalogTextHeight:subtitleText font:subtitle.font width:labelWidth maximumLines:2];
     CGFloat titleTop=posterHeight+5,subtitleTop=titleTop+titleHeight+1;
     poster.frame=CGRectMake(0,0,width,posterHeight);poster.layer.borderWidth=selected?1.8:.5;HostSetLayerBorderColor(poster,selected?HostAccent():HostBorder());
     CGFloat logoInset=MAX(8,floor(width*.15)),logoHeight=MIN(30,MAX(20,floor(posterHeight*.44)));logo.frame=CGRectMake(logoInset,floor((posterHeight-logoHeight)/2),MAX(1,width-logoInset*2),logoHeight);brand.frame=CGRectMake(5,MAX(4,floor((posterHeight-34)/2)),MAX(1,width-10),34);number.frame=CGRectMake(6,posterHeight-15,62,12);selectedMark.frame=CGRectMake(MAX(2,width-22),5,16,16);selectedMark.hidden=!selected;
@@ -382,13 +437,13 @@
         UIColor *tColor=nil;NSString *tText=[self telemetryBadgeTextForChannel:ch color:&tColor];
         telemetryBadge.text=tText;telemetryBadge.textColor=tColor?:HostSecondaryText();
         telemetryBadge.frame=CGRectMake(34,posterHeight-15,MAX(1,width-39),12);
-        [self probeTelemetryForChannel:ch];
+        if(!collectionView.isDragging && !collectionView.isDecelerating)[self probeTelemetryForChannel:ch];
     }else{
         telemetryBadge.text=nil;
     }
     number.text=[NSString stringWithFormat:@"%03lu",(unsigned long)ip.item+1];title.textColor=selected?HostAccent():HostText();cell.contentView.backgroundColor=selected?HostSelectedSurface():UIColor.clearColor;
     cell.accessibilityIdentifier=[@"channel-card-" stringByAppendingString:channelID];cell.accessibilityLabel=name;cell.accessibilityValue=[self telemetryAccessibilityValueForChannel:ch selected:selected];cell.accessibilityHint=@"轻点播放，长按选择线路与节目单";
-    NSString *xmlSource=[ProfileStore epgSourceForChannel:ch];if(xmlSource.length && !self.epgCache[channelID])[self cacheXMLRows:[[XMLTVStore shared] cachedRowsForSource:xmlSource channel:[ProfileStore epgIDForChannel:ch]] channel:channelID];if(!self.epgCache[channelID] && !collectionView.isDragging && !collectionView.isDecelerating){[self loadEPGForChannel:channelID channel:ch section:ip];}subtitle.text=[self catalogSubtitleForChannel:ch];return cell;
+    if(!self.epgCache[channelID] && !collectionView.isDragging && !collectionView.isDecelerating){[self loadEPGForChannel:channelID channel:ch section:ip];}return cell;
 }
 - (void)collectionView:(UICollectionView *)collectionView didHighlightItemAtIndexPath:(NSIndexPath *)ip { UICollectionViewCell *c=[collectionView cellForItemAtIndexPath:ip]; if(!c||UIAccessibilityIsReduceMotionEnabled())return; [UIView animateWithDuration:0.10 delay:0 usingSpringWithDamping:0.78 initialSpringVelocity:0.25 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{c.transform=CGAffineTransformMakeScale(0.968,0.968);} completion:nil]; }
 - (void)collectionView:(UICollectionView *)collectionView didUnhighlightItemAtIndexPath:(NSIndexPath *)ip { UICollectionViewCell *c=[collectionView cellForItemAtIndexPath:ip]; if(!c)return; [UIView animateWithDuration:0.24 delay:0 usingSpringWithDamping:0.74 initialSpringVelocity:0.25 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{c.transform=CGAffineTransformIdentity;} completion:nil]; }
@@ -396,10 +451,24 @@
 - (UIContextMenuConfiguration *)collectionView:(UICollectionView *)collectionView contextMenuConfigurationForItemAtIndexPath:(NSIndexPath *)ip point:(CGPoint)point {
     if(ip.item<0||ip.item>=(NSInteger)self.shownChannels.count)return nil;
     NSDictionary *ch=self.shownChannels[ip.item];__weak typeof(self) w=self;
-    return [UIContextMenuConfiguration configurationWithIdentifier:ch[@"id"] previewProvider:nil actionProvider:^UIMenu *(NSArray *suggested){BOOL favorite=[w.favorites containsObject:ch[@"id"]];UIAction *fav=[UIAction actionWithTitle:favorite?@"取消收藏":@"收藏频道" image:[UIImage systemImageNamed:@"heart"] identifier:nil handler:^(UIAction *a){if(favorite)[w.favorites removeObject:ch[@"id"]];else[w.favorites addObject:ch[@"id"]];[NSUserDefaults.standardUserDefaults setObject:w.favorites forKey:@"favorites"];[w configureCatalogNavigation];[w applyFilter];}];UIAction *route=[UIAction actionWithTitle:@"线路与节目单" image:[UIImage systemImageNamed:@"list.bullet"] identifier:nil handler:^(UIAction *a){if([ch[@"remoteURL"] length])[w openEPGforChannel:ch[@"id"] name:ch[@"name"]];else[w presentRouteSheetForChannel:ch fromIndexPath:nil];}];NSMutableArray *actions=[NSMutableArray arrayWithObjects:fav,route,nil];
-        if([ch[@"remoteURL"] length]){[actions addObject:[UIAction actionWithTitle:@"静音预览（30 秒）" image:[UIImage systemImageNamed:@"play.rectangle"] identifier:nil handler:^(UIAction *a){[w previewChannel:ch];}]];[actions addObject:[UIAction actionWithTitle:@"EPG 手动匹配" image:[UIImage systemImageNamed:@"calendar"] identifier:nil handler:^(UIAction *a){[w editEPGMapping:ch];}]];}
-        [actions addObject:[UIAction actionWithTitle:@"电视台增强与同台多源" image:[UIImage systemImageNamed:@"sparkles.tv"] identifier:nil handler:^(UIAction *a){[w presentStationEnhancementSheetForChannel:ch sourceView:collectionView];}]];
-        return [UIMenu menuWithTitle:ch[@"name"] children:actions];}];
+    return [UIContextMenuConfiguration configurationWithIdentifier:ch[@"id"] previewProvider:nil actionProvider:^UIMenu *(NSArray *suggested){
+        BOOL favorite=[w.favorites containsObject:ch[@"id"]];
+        NSString *nowShow=[w.epgCache[ch[@"id"]][@"now"] isKindOfClass:NSString.class]?w.epgCache[ch[@"id"]][@"now"]:@"";
+        NSString *menuTitle=nowShow.length?[NSString stringWithFormat:@"%@ · %@",ch[@"name"]?:@"频道",nowShow]:(ch[@"name"]?:@"频道");
+        UIAction *playNow=[UIAction actionWithTitle:@"立即播放" image:[UIImage systemImageNamed:@"play.fill"] identifier:nil handler:^(UIAction *a){[w selectChannel:ch];}];
+        UIAction *epgAction=[UIAction actionWithTitle:@"节目单与回看" image:[UIImage systemImageNamed:@"clock.arrow.circlepath"] identifier:nil handler:^(UIAction *a){[w openEPGforChannel:ch[@"id"] name:ch[@"name"]];}];
+        UIAction *route=[UIAction actionWithTitle:[ch[@"remoteURL"] length]?@"备用源与频道工具":@"线路与节目单" image:[UIImage systemImageNamed:[ch[@"remoteURL"] length]?@"wrench.and.screwdriver":@"antenna.radiowaves.left.and.right"] identifier:nil handler:^(UIAction *a){if([ch[@"remoteURL"] length])[w showRemoteTools:ch];else[w presentRouteSheetForChannel:ch fromIndexPath:nil];}];
+        UIAction *fav=[UIAction actionWithTitle:favorite?@"取消收藏":@"收藏频道" image:[UIImage systemImageNamed:favorite?@"heart.slash":@"heart.fill"] identifier:nil handler:^(UIAction *a){if(favorite)[w.favorites removeObject:ch[@"id"]];else[w.favorites addObject:ch[@"id"]];[NSUserDefaults.standardUserDefaults setObject:w.favorites forKey:@"favorites"];[w configureCatalogNavigation];[w applyFilter];}];
+        UIMenu *primaryGroup=[UIMenu menuWithTitle:@"" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:@[playNow,epgAction,route,fav]];
+        NSMutableArray<UIAction *> *extra=[NSMutableArray array];
+        [extra addObject:[UIAction actionWithTitle:@"电视台增强与同台多源" image:[UIImage systemImageNamed:@"sparkles.tv"] identifier:nil handler:^(UIAction *a){[w presentStationEnhancementSheetForChannel:ch sourceView:collectionView];}]];
+        if([ch[@"remoteURL"] length]){
+            [extra addObject:[UIAction actionWithTitle:@"静音预览（30 秒）" image:[UIImage systemImageNamed:@"play.rectangle"] identifier:nil handler:^(UIAction *a){[w previewChannel:ch];}]];
+            [extra addObject:[UIAction actionWithTitle:@"EPG 手动匹配" image:[UIImage systemImageNamed:@"calendar"] identifier:nil handler:^(UIAction *a){[w editEPGMapping:ch];}]];
+        }
+        UIMenu *secondaryGroup=[UIMenu menuWithTitle:@"" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:extra];
+        return [UIMenu menuWithTitle:menuTitle children:@[primaryGroup,secondaryGroup]];
+    }];
 }
 - (void)selectChannel:(NSDictionary *)ch {
     // Repeated taps on an active/connecting channel must not restart VDN/DRM.
@@ -550,12 +619,12 @@
             if(tText.length&&![cell.detailTextLabel.text containsString:tText]){
                 cell.detailTextLabel.text=[NSString stringWithFormat:@"%@ · %@",cell.detailTextLabel.text?:@"",tText];
             }
-            [self probeTelemetryForChannel:ch];
+            if (!t.isDragging && !t.isDecelerating) [self probeTelemetryForChannel:ch];
         }else{
             listCell.telemetryBadgeLabel.text=nil;
         }
     }
-    [self loadEPGForChannel:cid channel:ch section:ip];
+    if (!self.epgCache[cid] && !t.isDragging && !t.isDecelerating) [self loadEPGForChannel:cid channel:ch section:ip];
     return cell;
 }
 
@@ -570,6 +639,9 @@
         NSString *cid = [ch[@"id"] isKindOfClass:NSString.class] ? ch[@"id"] : @"";
         if (cid.length && !self.epgCache[cid]) {
             [self loadEPGForChannel:cid channel:ch section:ip];
+        }
+        if ([ProfileStore isChannelTelemetryEnabledForChannel:ch]) {
+            [self probeTelemetryForChannel:ch];
         }
     }
 }
@@ -653,19 +725,60 @@
     [self presentRouteSheetForChannel:ch fromIndexPath:nil];
 }
 
+- (void)reloadActiveCatalogView {
+    if (!self.isViewLoaded) return;
+    if (self.gridMode) [self.channelGrid reloadData];
+    else [self.table reloadData];
+}
+- (void)ensureChannelLookupIndexes {
+    NSArray<NSDictionary *> *currentAll = self.allChannels;
+    if (self.channelIndexSourceArray == currentAll && self.channelIndexByID) return;
+    NSMutableDictionary<NSString *, NSDictionary *> *idMap = [NSMutableDictionary dictionaryWithCapacity:currentAll.count];
+    NSMutableDictionary<NSString *, NSDictionary *> *catchupGroup = [NSMutableDictionary dictionary];
+    NSMutableDictionary<NSString *, NSDictionary *> *catchupCanon = [NSMutableDictionary dictionary];
+    NSMutableDictionary<NSString *, NSString *> *nativeNames = [NSMutableDictionary dictionary];
+    for (NSDictionary *c in currentAll) {
+        if (![c isKindOfClass:NSDictionary.class]) continue;
+        NSString *k = [c[@"id"] isKindOfClass:NSString.class] ? c[@"id"] : @"";
+        if (k.length && !idMap[k]) idMap[k] = c;
+        BOOL isRemote = [c[@"remoteURL"] length] > 0;
+        if (!isRemote) {
+            NSString *nm = [c[@"name"] isKindOfClass:NSString.class] ? c[@"name"] : @"";
+            if (nm.length && k.length && !nativeNames[nm]) nativeNames[nm] = k;
+        } else if ([c[@"catchupSource"] isKindOfClass:NSString.class] && [c[@"catchupSource"] length] > 0) {
+            NSString *gk = CCTVRouteGroupKey(c);
+            if (gk.length && !catchupGroup[gk]) catchupGroup[gk] = c;
+            NSString *cn = [ProfileStore canonicalStationIDForChannel:c];
+            if (cn.length && !catchupCanon[cn]) catchupCanon[cn] = c;
+        }
+    }
+    self.channelIndexByID = idMap.copy;
+    self.catchupIndexByGroupKey = catchupGroup.copy;
+    self.catchupIndexByCanonical = catchupCanon.copy;
+    self.nativeIDIndexByName = nativeNames.copy;
+    self.channelIndexSourceArray = currentAll;
+}
 - (NSDictionary *)channelWithID:(NSString *)cid {
     if (!cid.length) return nil;
-    NSArray<NSDictionary *> *currentAll = self.allChannels;
-    if (self.channelIndexSourceArray != currentAll || !self.channelIndexByID) {
-        NSMutableDictionary<NSString *, NSDictionary *> *map = [NSMutableDictionary dictionaryWithCapacity:currentAll.count];
-        for (NSDictionary *c in currentAll) {
-            NSString *k = [c[@"id"] isKindOfClass:NSString.class] ? c[@"id"] : @"";
-            if (k.length && !map[k]) map[k] = c;
-        }
-        self.channelIndexByID = map.copy;
-        self.channelIndexSourceArray = currentAll;
-    }
+    [self ensureChannelLookupIndexes];
     return self.channelIndexByID[cid];
+}
+- (void)switchToAdjacentChannel:(NSInteger)delta {
+    NSArray<NSDictionary *> *list = self.shownChannels.count ? self.shownChannels : self.allChannels;
+    if (!list.count) return;
+    NSInteger currentIdx = NSNotFound;
+    if (self.channelID.length) {
+        currentIdx = (NSInteger)[list indexOfObjectPassingTest:^BOOL(NSDictionary *c, NSUInteger idx, BOOL *stop) {
+            return [c[@"id"] isEqualToString:self.channelID];
+        }];
+    }
+    NSInteger count = (NSInteger)list.count;
+    NSInteger nextIdx = (currentIdx == NSNotFound) ? (delta >= 0 ? 0 : count - 1) : ((currentIdx + delta) % count + count) % count;
+    NSDictionary *target = list[(NSUInteger)nextIdx];
+    if (target) {
+        [self selectChannel:target];
+        [self scrollCatalogToPlayingChannel];
+    }
 }
 
 - (void)presentRouteSheetForChannel:(NSDictionary *)ch fromIndexPath:(NSIndexPath *)ip {
@@ -675,12 +788,16 @@
                                                                   message:[NSString stringWithFormat:@"当前线路：%@ · %lu 个地址\n自选地址交给央视 SDK 播放；许可及版权仍由 SDK 处理。",
                                                                            [ch[@"id"] isEqual:self.channelID]?(self.routeName?:@"自动"):@"未选择", (unsigned long)routes.count]
                                                            preferredStyle:UIAlertControllerStyleActionSheet];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"SDK 自动选线" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+    BOOL isActiveChannel = [ch[@"id"] isEqual:self.channelID];
+    BOOL autoSelected = isActiveChannel && (self.requestedNativeRoute == nil);
+    [sheet addAction:[UIAlertAction actionWithTitle:autoSelected ? @"✓ SDK 自动选线（推荐 · 智能调度）" : @"SDK 自动选线（推荐 · 智能调度）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         [self playChannel:ch route:nil];
     }]];
     for (NSDictionary *r in routes) {
         NSString *res = [r[@"w"] intValue] > 0 ? [NSString stringWithFormat:@"%dx%d", [r[@"w"] intValue], [r[@"h"] intValue]] : @"";
-        NSString *title = [NSString stringWithFormat:@"自选地址 %@ · 源标注 %@", [r[@"provider"] uppercaseString], res.length?res:@"未知"];
+        BOOL routeSelected = isActiveChannel && self.requestedNativeRoute && [[r[@"provider"] description] caseInsensitiveCompare:[self.requestedNativeRoute[@"provider"] description] ?: @""] == NSOrderedSame;
+        NSString *modeTag = CCTVRouteRequiresSDK(r) ? @"UDRM" : @"HLS";
+        NSString *title = [NSString stringWithFormat:@"%@自选地址 %@ · %@ · 源标注 %@", routeSelected ? @"✓ " : @"", [r[@"provider"] uppercaseString], modeTag, res.length?res:@"未知"];
         [sheet addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
             [self playChannel:ch route:r];
         }]];
@@ -735,7 +852,7 @@
         counts[group]=@([counts[group] unsignedIntegerValue]+1);
     }
     NSDictionary<NSString *,NSString *> *groupIcons=@{@"全部":@"square.grid.2x2",@"央视":@"tv.fill",@"卫视":@"sparkles.tv",@"地方":@"map.fill",@"教育":@"book.fill",@"其他":@"rectangle.stack.fill",@"收藏":@"heart.fill",@"最近":@"clock.arrow.circlepath"};
-    NSMutableArray *rows=[NSMutableArray array];for(NSUInteger i=0;i<groups.count;i++){NSString *group=groups[i];[rows addObject:@{@"index":@(i),@"title":group,@"detail":[NSString stringWithFormat:@"%lu 个频道",(unsigned long)[counts[group] unsignedIntegerValue]],@"selected":@(self.groupControl.selectedSegmentIndex==(NSInteger)i),@"symbol":groupIcons[group]?:@"folder"}];}return rows;
+    NSMutableArray *rows=[NSMutableArray array];for(NSUInteger i=0;i<groups.count;i++){NSString *group=groups[i];NSUInteger c=(unsigned long)[counts[group] unsignedIntegerValue];BOOL sel=(self.groupControl.selectedSegmentIndex==(NSInteger)i);[rows addObject:@{@"index":@(i),@"title":group,@"detail":[NSString stringWithFormat:@"%lu 个频道",(unsigned long)c],@"badge":sel?[NSString stringWithFormat:@"✓ %lu",(unsigned long)c]:[NSString stringWithFormat:@"%lu 频道",(unsigned long)c],@"selected":@(sel),@"symbol":groupIcons[group]?:@"folder"}];}return rows;
 }
 - (CCTVPlaybackListPanelController *)categoryPanel {
     CCTVPlaybackListPanelController *panel=[CCTVPlaybackListPanelController new];panel.items=[self playerCategoryRows];panel.emptyMessage=@"当前没有可显示的频道分组";__weak typeof(self) weakSelf=self;
@@ -745,11 +862,11 @@
     CCTVPlaybackListPanelController *panel=[CCTVPlaybackListPanelController new];NSMutableArray *rows=[NSMutableArray array];NSDictionary *channel=[self channelWithID:self.channelID];
     if(self.currentRemoteURL.length){
         NSString *name=channel[@"name"]?:self.channelName?:@"订阅频道";NSArray *alternates=self.altSources[CCTVRouteGroupKey(channel)]?:@[self.currentRemoteURL];NSMutableSet *seen=[NSMutableSet set];NSUInteger index=0;
-        for(NSString *url in alternates){NSString *stable=[self stableURLKey:url];if(!stable.length||[seen containsObject:stable])continue;[seen addObject:stable];index++;BOOL selected=[stable isEqualToString:self.currentRemoteURL];NSURL *target=[NSURL URLWithString:url];NSString *host=target.host?:@"播放源";NSString *title=alternates.count>1?[NSString stringWithFormat:@"播放源 %lu · %@",(unsigned long)index,host]:name;NSString *detail=[NSString stringWithFormat:@"%@ · %@",selected?@"当前播放":@"点按切换",[self displaySafeSourceURL:url]];[rows addObject:@{@"kind":@"remote",@"url":url,@"title":title,@"detail":detail,@"selected":@(selected),@"symbol":@"dot.radiowaves.left.and.right"}];}
+        for(NSString *url in alternates){NSString *stable=[self stableURLKey:url];if(!stable.length||[seen containsObject:stable])continue;[seen addObject:stable];index++;BOOL selected=[stable isEqualToString:self.currentRemoteURL];NSURL *target=[NSURL URLWithString:url];NSString *host=target.host?:@"播放源";NSString *title=alternates.count>1?[NSString stringWithFormat:@"播放源 %lu · %@",(unsigned long)index,host]:name;NSString *detail=[NSString stringWithFormat:@"%@\n%@",selected?@"当前播放中":@"点按切换至此源",[self displaySafeSourceURL:url]];[rows addObject:@{@"kind":@"remote",@"url":url,@"title":title,@"detail":detail,@"badge":selected?@"● 当前":@"切换",@"selected":@(selected),@"symbol":@"dot.radiowaves.left.and.right"}];}
     }else if(channel){
         NSArray *routes=[channel[@"routes"] isKindOfClass:NSArray.class]?channel[@"routes"]:@[];BOOL automatic=self.requestedNativeRoute==nil;
-        [rows addObject:@{@"kind":@"automatic",@"title":@"SDK 自动选择",@"detail":@"由央视 SDK 调度并处理版权；节点未主动探测",@"selected":@(automatic),@"symbol":@"sparkles"}];
-        for(NSDictionary *route in routes){NSString *provider=[route[@"provider"] isKindOfClass:NSString.class]?route[@"provider"]:@"线路";NSInteger width=[route[@"w"] integerValue],height=[route[@"h"] integerValue];NSString *resolution=width>0&&height>0?[NSString stringWithFormat:@"源标注 %ld × %ld",(long)width,(long)height]:@"源标注分辨率未知";NSString *url=[route[@"url"] isKindOfClass:NSString.class]?route[@"url"]:@"";BOOL selected=[provider caseInsensitiveCompare:self.requestedNativeRoute[@"provider"]?:@""]==NSOrderedSame;[rows addObject:@{@"kind":@"native",@"route":route,@"title":[NSString stringWithFormat:@"自选地址 %@",provider.uppercaseString],@"detail":[NSString stringWithFormat:@"%@ · 明文用 AVPlayer，其余交给央视 SDK\n%@",resolution,[self displaySafeSourceURL:url]],@"selected":@(selected),@"symbol":@"antenna.radiowaves.left.and.right"}];}
+        [rows addObject:@{@"kind":@"automatic",@"title":@"SDK 自动选择",@"detail":@"由央视 SDK 调度并处理版权；节点未主动探测",@"badge":automatic?@"● 当前":@"推荐",@"selected":@(automatic),@"symbol":@"sparkles"}];
+        for(NSDictionary *route in routes){NSString *provider=[route[@"provider"] isKindOfClass:NSString.class]?route[@"provider"]:@"线路";NSInteger width=[route[@"w"] integerValue],height=[route[@"h"] integerValue];NSString *resolution=width>0&&height>0?[NSString stringWithFormat:@"源标注 %ld × %ld",(long)width,(long)height]:@"源标注分辨率未知";NSString *url=[route[@"url"] isKindOfClass:NSString.class]?route[@"url"]:@"";BOOL selected=[provider caseInsensitiveCompare:self.requestedNativeRoute[@"provider"]?:@""]==NSOrderedSame;NSString *badge=selected?@"● 当前":(CCTVRouteRequiresSDK(route)?@"UDRM":@"HLS");[rows addObject:@{@"kind":@"native",@"route":route,@"title":[NSString stringWithFormat:@"自选地址 %@",provider.uppercaseString],@"detail":[NSString stringWithFormat:@"%@ · 明文用 AVPlayer，其余交给央视 SDK\n%@",resolution,[self displaySafeSourceURL:url]],@"badge":badge,@"selected":@(selected),@"symbol":@"antenna.radiowaves.left.and.right"}];}
     }
     panel.items=rows;panel.emptyMessage=self.channelID.length?@"此频道没有可用的线路信息。可以使用顶部线路菜单或检查频道来源。":@"请先选择频道";__weak typeof(self) weakSelf=self;
     NSString *panelChannelID=self.channelID.copy;
@@ -836,6 +953,7 @@
     self.activeSource = nil;
     self.favoritesOnly = NO;
     self.recentsOnly = NO;
+    self.catchupOnlyFilter = NO;
     self.groupControl.selectedSegmentIndex = 0;
     [self configureCatalogNavigation];
     [self applyFilter];
@@ -845,6 +963,7 @@
 - (void)resetCatalogFilterToAll {
     self.favoritesOnly = NO;
     self.recentsOnly = NO;
+    self.catchupOnlyFilter = NO;
     self.query = @"";
     self.searchController.searchBar.text = @"";
     self.groupControl.selectedSegmentIndex = 0;
@@ -886,7 +1005,7 @@
         HostStylePillButton(actionButton, YES);
         actionButton.accessibilityIdentifier = @"catalog.empty.enable-native";
         [actionButton addTarget:self action:@selector(enableNativeChannelsFromEmptyState) forControlEvents:UIControlEventTouchUpInside];
-    } else if (self.favoritesOnly || self.recentsOnly || self.query.length || self.groupControl.selectedSegmentIndex > 0) {
+    } else if (self.favoritesOnly || self.recentsOnly || self.catchupOnlyFilter || self.query.length || self.groupControl.selectedSegmentIndex > 0) {
         actionButton = [UIButton buttonWithType:UIButtonTypeSystem];
         [actionButton setTitle:@"  查看全部频道  " forState:UIControlStateNormal];
         HostStylePillButton(actionButton, NO);
@@ -962,6 +1081,11 @@
             return [[name lowercaseString] containsString:q] || [[cid lowercaseString] containsString:q] || [[groupStr lowercaseString] containsString:q] || [[epgNow lowercaseString] containsString:q] || [[canonical lowercaseString] containsString:q];
         }]];
     }
+    if (self.catchupOnlyFilter) {
+        base = [base filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *o, NSDictionary *b) {
+            return [self channelSupportsCatchup:o];
+        }]];
+    }
     NSArray *sorted = base;
     if (!isRecentsSegment) {
         NSMutableDictionary<NSString *,NSNumber *> *ranks=[NSMutableDictionary dictionary];
@@ -972,13 +1096,19 @@
             if(left || right)return left?NSOrderedAscending:NSOrderedDescending;
             // 按名称排序：收藏仍置顶（按收藏顺序），其余按名称排序；默认模式保持订阅原始顺序。
             if(self.channelSortMode==1){NSString *an=[(a[@"name"]?:@"") description],*bn=[(b[@"name"]?:@"") description];return [an localizedCaseInsensitiveCompare:bn];}
+            if(self.channelSortMode==2){
+                NSDictionary *ta=self.channelTelemetryStore[a[@"id"]?:@""],*tb=self.channelTelemetryStore[b[@"id"]?:@""];
+                double ma=([ta[@"ok"] boolValue]&&[ta[@"requestMs"] doubleValue]>0)?[ta[@"requestMs"] doubleValue]:1e9;
+                double mb=([tb[@"ok"] boolValue]&&[tb[@"requestMs"] doubleValue]>0)?[tb[@"requestMs"] doubleValue]:1e9;
+                if(ma!=mb)return ma<mb?NSOrderedAscending:NSOrderedDescending;
+            }
             return NSOrderedSame;
         }];
     }
     self.shownChannels = sorted;
-    [self.table reloadData];
-    [self.channelGrid reloadData];
-    NSString *empty=self.query.length?@"没有找到匹配频道":(isRecentsSegment?@"暂无最近观看记录\n点选任意频道即可自动记录上次播放":(self.favoritesOnly?@"还没有收藏频道\n长按或左滑任意频道即可加入收藏":(self.subscriptionCatalog?@"暂无订阅频道\n点击下方按钮或右下角更多 → 添加直播订阅":(!CCTVBoolPreference(@"nativeChannelsEnabled",YES)?@"官方频道已关闭\n点击下方按钮可立即启用央视与卫视频道":@"当前分组下暂无可用频道"))));
+    if (self.gridMode) [self.channelGrid reloadData];
+    else [self.table reloadData];
+    NSString *empty=self.query.length?@"没有找到匹配频道":(self.catchupOnlyFilter?@"当前分组下暂无支持回看的频道\n点击下方按钮可查看全部频道":(isRecentsSegment?@"暂无最近观看记录\n点选任意频道即可自动记录上次播放":(self.favoritesOnly?@"还没有收藏频道\n长按或左滑任意频道即可加入收藏":(self.subscriptionCatalog?@"暂无订阅频道\n点击下方按钮或右下角更多 → 添加直播订阅":(!CCTVBoolPreference(@"nativeChannelsEnabled",YES)?@"官方频道已关闭\n点击下方按钮可立即启用央视与卫视频道":@"当前分组下暂无可用频道")))));
     self.channelGrid.backgroundView=sorted.count?nil:[self buildCatalogEmptyBackgroundViewWithMessage:empty];
     self.table.backgroundView=sorted.count?nil:[self buildCatalogEmptyBackgroundViewWithMessage:empty];
 }

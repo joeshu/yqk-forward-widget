@@ -9,9 +9,18 @@
 @property(nonatomic,strong) UISearchController *searchController;
 @property(nonatomic,copy) NSString *searchText;
 @property(nonatomic,strong) UISegmentedControl *contentFilter;
+@property(nonatomic,strong) UIView *headerCardView;
 @property(nonatomic,strong) UILabel *summaryLabel;
+- (void)pullRefreshCatalog:(UIRefreshControl *)sender;
+- (void)updateHeaderLayoutIfNeeded;
+@property(nonatomic,copy) NSArray *cachedFilteredSites;
+@property(nonatomic,copy) NSArray *cachedFilteredLives;
+@property(nonatomic,assign) NSInteger cachedFilterScope;
+@property(nonatomic,copy) NSString *cachedFilterQuery;
 @property(nonatomic) NSUInteger alertPresentationGeneration;
 @property(nonatomic,copy) dispatch_block_t pendingAlertRetry;
+- (void)rebuildFilteredCatalogCache;
+- (void)showTransientPrompt:(NSString *)prompt;
 - (void)updateEmptyState;
 - (void)updateCatalogSummary;
 - (void)presentCatalogAlert:(UIAlertController *)alert sourceView:(nullable UIView *)sourceView sourceRect:(CGRect)sourceRect;
@@ -27,19 +36,45 @@
 }
 - (NSArray *)sites { return [self.catalog[@"sites"] isKindOfClass:NSArray.class]?self.catalog[@"sites"]:@[]; }
 - (NSArray *)lives { return [self.catalog[@"lives"] isKindOfClass:NSArray.class]?self.catalog[@"lives"]:@[]; }
-- (NSArray *)filteredRowsForSection:(NSInteger)section {
-    NSArray *rows=section==0?self.sites:self.lives;NSString *query=self.searchText.lowercaseString;
-    NSInteger scope=self.contentFilter.selectedSegmentIndex;
-    if((scope==1&&section==1)||(scope==2&&section==0))return @[];
-    if(scope==3)rows=[rows filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *row,NSDictionary *bindings){return ![row[@"supported"] boolValue];}]];
-    if(!query.length)return rows;
-    return [rows filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *row,NSDictionary *bindings){
+- (void)rebuildFilteredCatalogCache {
+    NSString *query=[[self.searchText stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] lowercaseString]?:@"";
+    NSInteger scope=self.contentFilter?self.contentFilter.selectedSegmentIndex:0;
+    NSArray *(^filterSection)(NSArray *, NSInteger) = ^NSArray *(NSArray *rows, NSInteger section){
+        if((scope==1&&section==1)||(scope==2&&section==0))return @[];
+        NSArray *cur=rows;
+        if(scope==3)cur=[cur filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *row,NSDictionary *bindings){return ![row[@"supported"] boolValue];}]];
+        if(!query.length)return cur;
         NSArray *keys=section==0?@[@"name",@"status",@"api",@"key"]:@[@"name",@"url"];
-        for(NSString *key in keys){id value=row[key];if([value isKindOfClass:NSString.class]&&[[(NSString *)value lowercaseString] containsString:query])return YES;}
-        return NO;
-    }]];
+        return [cur filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *row,NSDictionary *bindings){
+            for(NSString *key in keys){id value=row[key];if([value isKindOfClass:NSString.class]&&[[(NSString *)value lowercaseString] containsString:query])return YES;}
+            return NO;
+        }]];
+    };
+    self.cachedFilteredSites=filterSection(self.sites,0);
+    self.cachedFilteredLives=filterSection(self.lives,1);
+    self.cachedFilterScope=scope;
+    self.cachedFilterQuery=query;
 }
-- (void)updateSearchResultsForSearchController:(UISearchController *)searchController {self.searchText=searchController.searchBar.text?:@"";[self.tableView reloadData];[self updateEmptyState];}
+- (NSArray *)filteredRowsForSection:(NSInteger)section {
+    NSString *query=[[self.searchText stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] lowercaseString]?:@"";
+    NSInteger scope=self.contentFilter?self.contentFilter.selectedSegmentIndex:0;
+    if(!self.cachedFilteredSites||self.cachedFilterScope!=scope||![self.cachedFilterQuery isEqualToString:query])[self rebuildFilteredCatalogCache];
+    return section==0?(self.cachedFilteredSites?:@[]):(self.cachedFilteredLives?:@[]);
+}
+- (void)showTransientPrompt:(NSString *)prompt {
+    NSString *fallback=@"点按需要的站点按需加载 · 不必全量导入";
+    self.navigationItem.prompt=prompt;
+    __weak typeof(self) weakSelf=self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(1.6*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
+        if([weakSelf.navigationItem.prompt isEqualToString:prompt])weakSelf.navigationItem.prompt=fallback;
+    });
+}
+- (void)updateSearchResultsForSearchController:(UISearchController *)searchController {
+    if(searchController.searchBar.searchTextField.markedTextRange)return;
+    NSString *next=searchController.searchBar.text?:@"";
+    if([next isEqualToString:self.searchText?:@""])return;
+    self.searchText=next;[self.tableView reloadData];[self updateEmptyState];
+}
 - (void)updateCatalogSummary {
     if(!self.summaryLabel)return;
     NSUInteger supportedSites=0,nativeSites=0,scriptSites=0,supportedLives=0;
@@ -126,38 +161,94 @@
     NSMutableArray<UIMenuElement *> *exportChildren=[NSMutableArray arrayWithObjects:json,zip,nil];
     NSString *catalogURL=[self.catalog[@"url"] isKindOfClass:NSString.class]?self.catalog[@"url"]:@"";
     if(catalogURL.length){
-        UIAction *copyCatalogURL=[UIAction actionWithTitle:@"复制合集源地址" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){UIPasteboard.generalPasteboard.string=[HostLogRedactor redactText:catalogURL];}];
+        UIAction *copyCatalogURL=[UIAction actionWithTitle:@"复制合集源地址" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){UIPasteboard.generalPasteboard.string=[HostLogRedactor redactText:catalogURL];[weakSelf showTransientPrompt:@"合集源地址已复制"];}];
         [exportChildren addObject:copyCatalogURL];
     }
     UIBarButtonItem *more=[[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"] style:UIBarButtonItemStylePlain target:nil action:nil];
     more.accessibilityLabel=@"合集操作";more.menu=[UIMenu menuWithChildren:@[[UIMenu menuWithTitle:@"导出与复制" children:exportChildren],[UIMenu menuWithTitle:@"高级操作" children:@[bulk]],remove]];self.navigationItem.rightBarButtonItem=more;
     self.contentFilter=[[UISegmentedControl alloc] initWithItems:@[@"全部",@"影视",@"直播",@"不支持"]];self.contentFilter.selectedSegmentIndex=0;self.contentFilter.selectedSegmentTintColor=HostAccent();[self.contentFilter setTitleTextAttributes:@{NSForegroundColorAttributeName:HostText(),NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1]} forState:UIControlStateNormal];[self.contentFilter setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent(),NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1]} forState:UIControlStateSelected];[self.contentFilter addTarget:self action:@selector(filterChanged) forControlEvents:UIControlEventValueChanged];
-    UIView *header=[[UIView alloc] initWithFrame:CGRectMake(0,0,self.tableView.bounds.size.width,92)];
-    UIView *headerCard=[[UIView alloc] initWithFrame:CGRectMake(16,4,MAX(1,header.bounds.size.width-32),80)];
-    headerCard.autoresizingMask=UIViewAutoresizingFlexibleWidth;
+    UIView *header=[[UIView alloc] initWithFrame:CGRectMake(0,0,MAX(320,self.tableView.bounds.size.width),96)];
+    UIView *headerCard=[UIView new];
+    headerCard.translatesAutoresizingMaskIntoConstraints=NO;
     HostStyleGlassCard(headerCard,16);
+    self.headerCardView=headerCard;
     [header addSubview:headerCard];
-    self.summaryLabel=[[UILabel alloc] initWithFrame:CGRectMake(14,8,MAX(1,headerCard.bounds.size.width-28),20)];
-    self.summaryLabel.autoresizingMask=UIViewAutoresizingFlexibleWidth;
+    self.summaryLabel=[UILabel new];
+    self.summaryLabel.translatesAutoresizingMaskIntoConstraints=NO;
+    self.summaryLabel.numberOfLines=0;
     self.summaryLabel.font=HostMonospacedDigitFont(12.5,UIFontWeightSemibold,UIFontTextStyleCaption1);
+    self.summaryLabel.adjustsFontForContentSizeCategory=YES;
     self.summaryLabel.textColor=HostSecondaryText();
     self.summaryLabel.accessibilityIdentifier=@"tvbox.catalog.summary";
     [headerCard addSubview:self.summaryLabel];
-    self.contentFilter.frame=CGRectMake(10,32,MAX(1,headerCard.bounds.size.width-20),40);self.contentFilter.autoresizingMask=UIViewAutoresizingFlexibleWidth;[headerCard addSubview:self.contentFilter];self.tableView.tableHeaderView=header;
+    self.contentFilter.translatesAutoresizingMaskIntoConstraints=NO;
+    [headerCard addSubview:self.contentFilter];
+    [NSLayoutConstraint activateConstraints:@[
+        [headerCard.leadingAnchor constraintEqualToAnchor:header.leadingAnchor constant:16],
+        [headerCard.trailingAnchor constraintEqualToAnchor:header.trailingAnchor constant:-16],
+        [headerCard.topAnchor constraintEqualToAnchor:header.topAnchor constant:4],
+        [headerCard.bottomAnchor constraintEqualToAnchor:header.bottomAnchor constant:-8],
+        [self.summaryLabel.leadingAnchor constraintEqualToAnchor:headerCard.leadingAnchor constant:14],
+        [self.summaryLabel.trailingAnchor constraintEqualToAnchor:headerCard.trailingAnchor constant:-14],
+        [self.summaryLabel.topAnchor constraintEqualToAnchor:headerCard.topAnchor constant:10],
+        [self.contentFilter.leadingAnchor constraintEqualToAnchor:headerCard.leadingAnchor constant:10],
+        [self.contentFilter.trailingAnchor constraintEqualToAnchor:headerCard.trailingAnchor constant:-10],
+        [self.contentFilter.topAnchor constraintEqualToAnchor:self.summaryLabel.bottomAnchor constant:8],
+        [self.contentFilter.heightAnchor constraintGreaterThanOrEqualToConstant:36],
+        [self.contentFilter.bottomAnchor constraintEqualToAnchor:headerCard.bottomAnchor constant:-10]
+    ]];
+    self.tableView.tableHeaderView=header;
+    UIRefreshControl *rc=[UIRefreshControl new];
+    rc.tintColor=HostAccent();
+    [rc addTarget:self action:@selector(pullRefreshCatalog:) forControlEvents:UIControlEventValueChanged];
+    self.refreshControl=rc;
     [self updateCatalogSummary];
+    [self updateHeaderLayoutIfNeeded];
     [self updateEmptyState];
+}
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    [self updateHeaderLayoutIfNeeded];
+}
+- (void)updateHeaderLayoutIfNeeded {
+    UIView *header=self.tableView.tableHeaderView;
+    CGFloat w=CGRectGetWidth(self.tableView.bounds);
+    if(!header||w<=0)return;
+    CGSize target=CGSizeMake(w,UILayoutFittingCompressedSize.height);
+    CGFloat h=ceil([header systemLayoutSizeFittingSize:target withHorizontalFittingPriority:UILayoutPriorityRequired verticalFittingPriority:UILayoutPriorityFittingSizeLevel].height);
+    if(fabs(CGRectGetWidth(header.frame)-w)>0.5||fabs(CGRectGetHeight(header.frame)-h)>0.5){
+        header.frame=CGRectMake(0,0,w,MAX(88,h));
+        self.tableView.tableHeaderView=header;
+    }
+}
+- (void)pullRefreshCatalog:(UIRefreshControl *)sender {
+    [self updateCatalogSummary];
+    [self updateHeaderLayoutIfNeeded];
+    [self.tableView reloadData];
+    [self updateEmptyState];
+    __weak typeof(sender) weakSender=sender;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,250*NSEC_PER_MSEC),dispatch_get_main_queue(),^{[weakSender endRefreshing];});
 }
 - (void)reloadThemeAppearance {
     if(!self.isViewLoaded)return;
     self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
     self.view.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
     self.tableView.backgroundColor=HostBackground();
+    self.tableView.keyboardDismissMode=UIScrollViewKeyboardDismissModeOnDrag;
+    if(self.headerCardView)HostStyleGlassCard(self.headerCardView,16);
     self.summaryLabel.textColor=HostSecondaryText();
     self.contentFilter.selectedSegmentTintColor=HostAccent();
     [self.contentFilter setTitleTextAttributes:@{NSForegroundColorAttributeName:HostText(),NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1]} forState:UIControlStateNormal];
     [self.contentFilter setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent(),NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1]} forState:UIControlStateSelected];
     [self updateEmptyState];
     [self.tableView reloadData];
+}
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+    [super traitCollectionDidChange:previousTraitCollection];
+    if(previousTraitCollection&&[self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection]){
+        HostRefreshAppearanceLayers(self.view.window);
+        [self reloadThemeAppearance];
+    }
 }
 - (void)filterChanged {[self.tableView reloadData];[self updateEmptyState];}
 
@@ -175,11 +266,14 @@
     cell.textLabel.font=HostRoundedFont(16,UIFontWeightSemibold,UIFontTextStyleHeadline);
     cell.detailTextLabel.font=HostMonospacedDigitFont(12,UIFontWeightRegular,UIFontTextStyleCaption1);
     BOOL supported=[row[@"supported"] boolValue];NSDictionary *service=ip.section==0&&self.serviceForSite?self.serviceForSite(row):nil;BOOL serviceRunning=service&&[PyHost isRunningServiceIdentifier:service[@"id"]];NSString *status=[row[@"status"] description]?:@"";if(service)status=serviceRunning?@"服务运行中 · 点按打开资源":@"服务已导入 · 点按启动并打开资源";cell.detailTextLabel.text=ip.section==0?[NSString stringWithFormat:@"%@\n%@",status,[HostLogRedactor redactText:[row[@"api"] description]?:@""]]:[NSString stringWithFormat:@"%@\n%@",status,[HostLogRedactor redactText:[row[@"url"] description]?:@""]];
-    if(cell.detailTextLabel.text.length){NSMutableParagraphStyle *pStyle=[NSMutableParagraphStyle new];pStyle.lineSpacing=3.0;pStyle.paragraphSpacing=1.5;cell.detailTextLabel.attributedText=[[NSAttributedString alloc] initWithString:cell.detailTextLabel.text attributes:@{NSFontAttributeName:cell.detailTextLabel.font,NSForegroundColorAttributeName:HostSecondaryText(),NSParagraphStyleAttributeName:pStyle}];}
+    if(cell.detailTextLabel.text.length){NSMutableParagraphStyle *pStyle=[NSMutableParagraphStyle new];pStyle.lineSpacing=3.0;pStyle.paragraphSpacing=1.5;cell.detailTextLabel.attributedText=[[NSAttributedString alloc] initWithString:cell.detailTextLabel.text attributes:@{NSFontAttributeName:cell.detailTextLabel.font,NSForegroundColorAttributeName:HostSecondaryText(),NSParagraphStyleAttributeName:pStyle}];}else{cell.detailTextLabel.attributedText=nil;}
     NSString *iconName=ip.section==0?([row[@"apiKind"] isEqual:@"script"]?@"terminal":@"bolt.horizontal.circle"):@"dot.radiowaves.left.and.right";
     cell.imageView.image=[UIImage systemImageNamed:iconName];
     cell.imageView.tintColor=supported?(serviceRunning?UIColor.systemGreenColor:HostAccent()):HostMutedText();
     if(serviceRunning){cell.layer.borderWidth=1.05;HostSetLayerBorderColor(cell,HostAccent());}
+    UIView *accentBar=[cell.contentView viewWithTag:9201];
+    if(!accentBar){accentBar=[UIView new];accentBar.tag=9201;accentBar.translatesAutoresizingMaskIntoConstraints=NO;accentBar.layer.cornerRadius=1.5;accentBar.userInteractionEnabled=NO;[cell.contentView addSubview:accentBar];[NSLayoutConstraint activateConstraints:@[[accentBar.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:2],[accentBar.topAnchor constraintEqualToAnchor:cell.contentView.topAnchor constant:10],[accentBar.bottomAnchor constraintEqualToAnchor:cell.contentView.bottomAnchor constant:-10],[accentBar.widthAnchor constraintEqualToConstant:3]]];}
+    accentBar.backgroundColor=serviceRunning?UIColor.systemGreenColor:(supported?HostAccent():[HostMutedText() colorWithAlphaComponent:0.35]);
     cell.accessoryType=supported?UITableViewCellAccessoryDisclosureIndicator:UITableViewCellAccessoryNone;cell.selectionStyle=supported?UITableViewCellSelectionStyleDefault:UITableViewCellSelectionStyleNone;cell.textLabel.textColor=supported?HostText():HostMutedText();return cell;
 }
 - (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)ip point:(CGPoint)point {
@@ -194,9 +288,9 @@
         UIAction *export=[UIAction actionWithTitle:[NSString stringWithFormat:@"导出 %@ JSON",title] image:[UIImage systemImageNamed:@"square.and.arrow.up"] identifier:nil handler:^(UIAction *action){if(weakSelf.onExportSingleResource)weakSelf.onExportSingleResource(row,kind,index);}];
         [children addObject:export];
         NSString *endpoint=[row[ip.section==0?@"api":@"url"] description]?:@"";
-        UIAction *copyEndpoint=[UIAction actionWithTitle:@"复制接口地址" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *action){if(endpoint.length)UIPasteboard.generalPasteboard.string=[HostLogRedactor redactText:endpoint];}];
+        UIAction *copyEndpoint=[UIAction actionWithTitle:@"复制接口地址" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *action){if(endpoint.length){UIPasteboard.generalPasteboard.string=[HostLogRedactor redactText:endpoint];[weakSelf showTransientPrompt:@"接口地址已复制"];}}];
         [children addObject:copyEndpoint];
-        UIAction *copyTitle=[UIAction actionWithTitle:@"复制资源名称" image:[UIImage systemImageNamed:@"textformat"] identifier:nil handler:^(__unused UIAction *action){UIPasteboard.generalPasteboard.string=title;}];
+        UIAction *copyTitle=[UIAction actionWithTitle:@"复制资源名称" image:[UIImage systemImageNamed:@"textformat"] identifier:nil handler:^(__unused UIAction *action){UIPasteboard.generalPasteboard.string=title;[weakSelf showTransientPrompt:@"资源名称已复制"];}];
         [children addObject:copyTitle];
         return [UIMenu menuWithTitle:@"单项资源" children:children];
     }];
@@ -207,8 +301,9 @@
     if(![row[@"supported"] boolValue])return;
     BOOL nativeAPI=[row[@"apiKind"] isEqual:@"tvbox-api"]||[row[@"apiKind"] isEqual:@"maccms-api"]||[row[@"apiKind"] isEqual:@"douban-index"]||[row[@"apiKind"] isEqual:@"jar-bridge"];if(nativeAPI){if(self.onUseNativeSite)self.onUseNativeSite(row);return;}
     NSDictionary *existing=self.serviceForSite?self.serviceForSite(row):nil;UIAlertController *alert=[UIAlertController alertControllerWithTitle:[row[@"name"] description]?:@"未命名" message:existing?@"此脚本已在资源中。打开后会启动该资源并进入影视库。":@"仅对当前选择的站点执行脚本导入。可直接导入并浏览，也可先保存到资源页。ext 会作为 Spider 初始化配置传递。" preferredStyle:UIAlertControllerStyleActionSheet];
-    if(existing){[alert addAction:[UIAlertAction actionWithTitle:@"启动并打开资源" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){if(self.onUseImportedService)self.onUseImportedService(existing);}]];[alert addAction:[UIAlertAction actionWithTitle:@"查看能力与设置" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){if(self.onOpenImportedService)self.onOpenImportedService(existing);}]];}
-    else {[alert addAction:[UIAlertAction actionWithTitle:@"导入并打开资源" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){if(self.onImportSite)self.onImportSite(row,YES);}]];[alert addAction:[UIAlertAction actionWithTitle:@"仅导入到资源页" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){if(self.onImportSite)self.onImportSite(row,NO);}]];}
+    __weak typeof(self) weakSelf=self;
+    if(existing){[alert addAction:[UIAlertAction actionWithTitle:@"启动并打开资源" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){if(weakSelf.onUseImportedService)weakSelf.onUseImportedService(existing);}]];[alert addAction:[UIAlertAction actionWithTitle:@"查看能力与设置" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){if(weakSelf.onOpenImportedService)weakSelf.onOpenImportedService(existing);}]];}
+    else {[alert addAction:[UIAlertAction actionWithTitle:@"导入并打开资源" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){if(weakSelf.onImportSite)weakSelf.onImportSite(row,YES);}]];[alert addAction:[UIAlertAction actionWithTitle:@"仅导入到资源页" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){if(weakSelf.onImportSite)weakSelf.onImportSite(row,NO);}]];}
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     UITableViewCell *cell=[tableView cellForRowAtIndexPath:ip];[self presentCatalogAlert:alert sourceView:cell sourceRect:cell.bounds];
 }

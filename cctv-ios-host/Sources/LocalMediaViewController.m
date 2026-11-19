@@ -6,39 +6,210 @@
 
 @interface LocalMediaViewController () <UIDocumentPickerDelegate>
 @property(nonatomic,strong) LocalMediaStore *store;
+@property(nonatomic,copy) NSArray<NSURL *> *allFiles;
 @property(nonatomic,copy) NSArray<NSURL *> *files;
+@property(nonatomic,strong) NSMutableDictionary<NSURL *, NSNumber *> *fileSizesByURL;
+@property(nonatomic,assign) NSInteger filterKind; // 0=all, 1=video, 2=audio
+@property(nonatomic,assign) NSInteger sortMode;   // 0=name, 1=size desc
 @property(nonatomic,strong) UIView *progressHeader;
 @property(nonatomic,strong) UILabel *progressLabel;
 @property(nonatomic,strong) UIButton *stopButton;
+@property(nonatomic,strong) UIView *summaryHeaderContainer;
+@property(nonatomic,strong) UIView *summaryCard;
+@property(nonatomic,strong) UILabel *summaryTitleLabel;
+@property(nonatomic,strong) UILabel *summaryDetailLabel;
+@property(nonatomic,strong) UIButton *summaryImportButton;
+@property(nonatomic,strong) UIBarButtonItem *sortBarButton;
 @property(nonatomic,strong) UILabel *emptyLabel;
 - (void)tableView:(UITableView *)t commitEditingStyle:(UITableViewCellEditingStyle)s forRowAtIndexPath:(NSIndexPath *)ip;
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)path;
--  (void)updateFromStore;
--  (void)updateProgressHeaderSize;
+- (void)updateFromStore;
+- (void)updateProgressHeaderSize;
+- (void)buildSummaryHeaderView;
+- (void)applyFilterAndSort;
+- (UIMenu *)buildSortFilterMenu;
+- (NSString *)displayNameForURL:(NSURL *)url;
+- (void)importMedia;
+- (void)stopImport;
+- (void)refreshLocalMedia;
 @end
 
 @implementation LocalMediaViewController
 - (instancetype)init {return [super initWithStyle:UITableViewStyleInsetGrouped];}
+- (BOOL)isAudioURL:(NSURL *)url {
+    NSString *ext=url.pathExtension.lowercaseString;
+    return [ext isEqualToString:@"mp3"]||[ext isEqualToString:@"m4a"]||[ext isEqualToString:@"aac"]||[ext isEqualToString:@"flac"]||[ext isEqualToString:@"wav"];
+}
+- (void)buildSummaryHeaderView {
+    CGFloat width=MAX(320.0,self.view.bounds.size.width>0?self.view.bounds.size.width:375.0);
+    UIView *container=[[UIView alloc] initWithFrame:CGRectMake(0,0,width,80)];
+    container.backgroundColor=UIColor.clearColor;
+    UIView *card=[UIView new];
+    card.translatesAutoresizingMaskIntoConstraints=NO;
+    card.backgroundColor=HostCard();
+    card.layer.cornerRadius=15;
+    card.layer.cornerCurve=kCACornerCurveContinuous;
+    card.layer.borderWidth=0.7;
+    HostSetLayerBorderColor(card,HostBorder());
+    card.accessibilityIdentifier=@"local.media.summary-card";
+    [container addSubview:card];
+
+    UILabel *title=[UILabel new];
+    title.translatesAutoresizingMaskIntoConstraints=NO;
+    title.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];
+    title.adjustsFontForContentSizeCategory=YES;
+    title.textColor=HostText();
+    [card addSubview:title];
+
+    UILabel *detail=[UILabel new];
+    detail.translatesAutoresizingMaskIntoConstraints=NO;
+    detail.font=HostMonospacedDigitFont(12,UIFontWeightRegular,UIFontTextStyleCaption1);
+    detail.adjustsFontForContentSizeCategory=YES;
+    detail.textColor=HostSecondaryText();
+    [card addSubview:detail];
+
+    UIButton *btn=[UIButton buttonWithType:UIButtonTypeSystem];
+    btn.translatesAutoresizingMaskIntoConstraints=NO;
+    [btn setTitle:@"导入" forState:UIControlStateNormal];
+    [btn setImage:[UIImage systemImageNamed:@"plus.circle.fill"] forState:UIControlStateNormal];
+    btn.titleLabel.font=[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
+    btn.tintColor=HostAccent();
+    btn.backgroundColor=HostSelectedSurface();
+    btn.layer.cornerRadius=10;
+    btn.layer.cornerCurve=kCACornerCurveContinuous;
+    btn.contentEdgeInsets=UIEdgeInsetsMake(6,10,6,10);
+    btn.accessibilityIdentifier=@"local.media.summary-import";
+    HostInstallPressFeedback(btn);
+    [btn addTarget:self action:@selector(importMedia) forControlEvents:UIControlEventTouchUpInside];
+    [btn setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+    [card addSubview:btn];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [card.topAnchor constraintEqualToAnchor:container.topAnchor constant:8],
+        [card.leadingAnchor constraintEqualToAnchor:container.leadingAnchor constant:16],
+        [card.trailingAnchor constraintEqualToAnchor:container.trailingAnchor constant:-16],
+        [card.bottomAnchor constraintEqualToAnchor:container.bottomAnchor constant:-4],
+        [title.topAnchor constraintEqualToAnchor:card.topAnchor constant:12],
+        [title.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:14],
+        [title.trailingAnchor constraintLessThanOrEqualToAnchor:btn.leadingAnchor constant:-10],
+        [detail.topAnchor constraintEqualToAnchor:title.bottomAnchor constant:3],
+        [detail.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:14],
+        [detail.trailingAnchor constraintLessThanOrEqualToAnchor:btn.leadingAnchor constant:-10],
+        [detail.bottomAnchor constraintEqualToAnchor:card.bottomAnchor constant:-11],
+        [btn.centerYAnchor constraintEqualToAnchor:card.centerYAnchor],
+        [btn.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-12],
+        [btn.heightAnchor constraintGreaterThanOrEqualToConstant:32]
+    ]];
+    self.summaryHeaderContainer=container;
+    self.summaryCard=card;
+    self.summaryTitleLabel=title;
+    self.summaryDetailLabel=detail;
+    self.summaryImportButton=btn;
+}
+- (UIMenu *)buildSortFilterMenu {
+    __weak typeof(self) w=self;
+    UIAction *allF=[UIAction actionWithTitle:@"全部文件" image:[UIImage systemImageNamed:@"tray.full"] identifier:nil handler:^(__unused UIAction *a){w.filterKind=0;[w applyFilterAndSort];}];
+    allF.state=(self.filterKind==0)?UIMenuElementStateOn:UIMenuElementStateOff;
+    UIAction *vidF=[UIAction actionWithTitle:@"仅视频" image:[UIImage systemImageNamed:@"film.fill"] identifier:nil handler:^(__unused UIAction *a){w.filterKind=1;[w applyFilterAndSort];}];
+    vidF.state=(self.filterKind==1)?UIMenuElementStateOn:UIMenuElementStateOff;
+    UIAction *audF=[UIAction actionWithTitle:@"仅音频" image:[UIImage systemImageNamed:@"waveform.circle.fill"] identifier:nil handler:^(__unused UIAction *a){w.filterKind=2;[w applyFilterAndSort];}];
+    audF.state=(self.filterKind==2)?UIMenuElementStateOn:UIMenuElementStateOff;
+    UIMenu *filterSection=[UIMenu menuWithTitle:@"" image:nil identifier:@"local.media.filter" options:UIMenuOptionsDisplayInline children:@[allF,vidF,audF]];
+    UIAction *byName=[UIAction actionWithTitle:@"按名称排序" image:[UIImage systemImageNamed:@"textformat.abc"] identifier:nil handler:^(__unused UIAction *a){w.sortMode=0;[w applyFilterAndSort];}];
+    byName.state=(self.sortMode==0)?UIMenuElementStateOn:UIMenuElementStateOff;
+    UIAction *bySize=[UIAction actionWithTitle:@"按文件大小排序" image:[UIImage systemImageNamed:@"arrow.down.circle"] identifier:nil handler:^(__unused UIAction *a){w.sortMode=1;[w applyFilterAndSort];}];
+    bySize.state=(self.sortMode==1)?UIMenuElementStateOn:UIMenuElementStateOff;
+    UIMenu *sortSection=[UIMenu menuWithTitle:@"" image:nil identifier:@"local.media.sort.section" options:UIMenuOptionsDisplayInline children:@[byName,bySize]];
+    return [UIMenu menuWithTitle:@"筛选与排序" children:@[filterSection,sortSection]];
+}
+- (void)applyFilterAndSort {
+    NSMutableArray<NSURL *> *filtered=[NSMutableArray array];
+    for(NSURL *url in self.allFiles?:@[]){
+        BOOL audio=[self isAudioURL:url];
+        if(self.filterKind==1&&audio)continue;
+        if(self.filterKind==2&&!audio)continue;
+        [filtered addObject:url];
+    }
+    if(self.sortMode==1){
+        NSDictionary<NSURL *, NSNumber *> *sizes=self.fileSizesByURL?:@{};
+        [filtered sortUsingComparator:^NSComparisonResult(NSURL *a,NSURL *b){
+            NSNumber *sa=sizes[a]?:@0,*sb=sizes[b]?:@0;
+            return [sb compare:sa];
+        }];
+    }else{
+        [filtered sortUsingComparator:^NSComparisonResult(NSURL *a,NSURL *b){
+            return [[self displayNameForURL:a] localizedStandardCompare:[self displayNameForURL:b]];
+        }];
+    }
+    self.files=filtered.copy;
+    self.sortBarButton.menu=[self buildSortFilterMenu];
+    [self.tableView reloadData];
+}
 - (void)viewDidLoad {
-    [super viewDidLoad];self.store=LocalMediaStore.shared;self.title=@"本地媒体";self.tableView.rowHeight=UITableViewAutomaticDimension;self.tableView.estimatedRowHeight=72;self.tableView.backgroundColor=HostBackground();
-    self.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAdd target:self action:@selector(importMedia)];
-    self.progressHeader=[UIView new];self.progressHeader.backgroundColor=HostCard();self.progressHeader.layer.cornerRadius=14;self.progressLabel=[UILabel new];self.progressLabel.translatesAutoresizingMaskIntoConstraints=NO;self.progressLabel.numberOfLines=0;self.progressLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];self.progressLabel.adjustsFontForContentSizeCategory=YES;self.progressLabel.textColor=HostText();
+    [super viewDidLoad];self.store=LocalMediaStore.shared;self.fileSizesByURL=[NSMutableDictionary dictionary];self.title=@"本地媒体";self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();self.tableView.rowHeight=UITableViewAutomaticDimension;self.tableView.estimatedRowHeight=72;self.tableView.backgroundColor=HostBackground();self.tableView.keyboardDismissMode=UIScrollViewKeyboardDismissModeOnDrag;UIRefreshControl *localRefresh=[UIRefreshControl new];localRefresh.tintColor=HostAccent();localRefresh.accessibilityIdentifier=@"local.media.refreshControl";[localRefresh addTarget:self action:@selector(refreshLocalMedia) forControlEvents:UIControlEventValueChanged];self.refreshControl=localRefresh;
+    UIBarButtonItem *addItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAdd target:self action:@selector(importMedia)];
+    self.sortBarButton=[[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"line.3.horizontal.decrease.circle"] menu:[self buildSortFilterMenu]];
+    self.sortBarButton.accessibilityIdentifier=@"local.media.sort";
+    self.sortBarButton.accessibilityLabel=@"筛选与排序本地媒体";
+    self.navigationItem.rightBarButtonItems=@[addItem,self.sortBarButton];
+    [self buildSummaryHeaderView];
+    self.progressHeader=[UIView new];self.progressHeader.backgroundColor=HostCard();self.progressHeader.layer.cornerRadius=14;self.progressHeader.layer.cornerCurve=kCACornerCurveContinuous;self.progressHeader.layer.borderWidth=0.6;HostSetLayerBorderColor(self.progressHeader,HostBorder());self.progressLabel=[UILabel new];self.progressLabel.translatesAutoresizingMaskIntoConstraints=NO;self.progressLabel.numberOfLines=0;self.progressLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];self.progressLabel.adjustsFontForContentSizeCategory=YES;self.progressLabel.textColor=HostText();
     self.stopButton=[UIButton buttonWithType:UIButtonTypeSystem];self.stopButton.translatesAutoresizingMaskIntoConstraints=NO;[self.stopButton setTitle:@"停止" forState:UIControlStateNormal];self.stopButton.accessibilityLabel=@"停止后续导入";self.stopButton.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];self.stopButton.titleLabel.adjustsFontForContentSizeCategory=YES;[self.stopButton addTarget:self action:@selector(stopImport) forControlEvents:UIControlEventTouchUpInside];[self.progressHeader addSubview:self.progressLabel];[self.progressHeader addSubview:self.stopButton];[NSLayoutConstraint activateConstraints:@[[self.progressLabel.leadingAnchor constraintEqualToAnchor:self.progressHeader.leadingAnchor constant:14],[self.progressLabel.topAnchor constraintEqualToAnchor:self.progressHeader.topAnchor constant:10],[self.progressLabel.bottomAnchor constraintEqualToAnchor:self.progressHeader.bottomAnchor constant:-10],[self.progressLabel.trailingAnchor constraintLessThanOrEqualToAnchor:self.stopButton.leadingAnchor constant:-8],[self.stopButton.widthAnchor constraintGreaterThanOrEqualToConstant:44],[self.stopButton.trailingAnchor constraintEqualToAnchor:self.progressHeader.trailingAnchor constant:-10],[self.stopButton.centerYAnchor constraintEqualToAnchor:self.progressHeader.centerYAnchor],[self.stopButton.heightAnchor constraintGreaterThanOrEqualToConstant:44]]];
     self.emptyLabel=[UILabel new];self.emptyLabel.text=@"暂无本地媒体文件\n点右上角「+」导入视频或音频到本机播放";self.emptyLabel.numberOfLines=0;self.emptyLabel.textAlignment=NSTextAlignmentCenter;self.emptyLabel.textColor=HostSecondaryText();self.emptyLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];self.emptyLabel.adjustsFontForContentSizeCategory=YES;self.tableView.backgroundView=self.emptyLabel;
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(storeDidChange:) name:LocalMediaStoreDidChangeNotification object:self.store];[self updateFromStore];
 }
 - (void)dealloc {[NSNotificationCenter.defaultCenter removeObserver:self];}
 - (void)viewDidAppear:(BOOL)animated {[super viewDidAppear:animated];[self updateFromStore];}
-- (void)viewDidLayoutSubviews {[super viewDidLayoutSubviews];if(self.tableView.tableHeaderView==self.progressHeader)[self updateProgressHeaderSize];}
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    if(self.tableView.tableHeaderView==self.progressHeader)[self updateProgressHeaderSize];
+    else if(self.tableView.tableHeaderView==self.summaryHeaderContainer&&self.tableView.bounds.size.width>0&&fabs(self.summaryHeaderContainer.frame.size.width-self.tableView.bounds.size.width)>0.5){
+        CGRect f=self.summaryHeaderContainer.frame;f.size.width=self.tableView.bounds.size.width;self.summaryHeaderContainer.frame=f;self.tableView.tableHeaderView=self.summaryHeaderContainer;
+    }
+}
 - (void)updateProgressHeaderSize {CGFloat width=self.tableView.bounds.size.width;if(width<=0)return;CGRect frame=self.progressHeader.frame;frame.size.width=width;self.progressHeader.frame=frame;[self.progressHeader setNeedsLayout];[self.progressHeader layoutIfNeeded];CGSize fitting=[self.progressHeader systemLayoutSizeFittingSize:CGSizeMake(width,UILayoutFittingCompressedSize.height) withHorizontalFittingPriority:UILayoutPriorityRequired verticalFittingPriority:UILayoutPriorityFittingSizeLevel];CGFloat height=MAX(62,fitting.height);if(fabs(self.progressHeader.frame.size.height-height)>0.5){frame.size.height=height;self.progressHeader.frame=frame;self.tableView.tableHeaderView=self.progressHeader;}}
-- (void)reloadThemeAppearance {self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();if(!self.isViewLoaded)return;self.view.backgroundColor=HostBackground();self.view.tintColor=HostAccent();self.tableView.backgroundColor=HostBackground();self.progressHeader.backgroundColor=HostCard();self.progressLabel.textColor=HostText();self.emptyLabel.textColor=HostSecondaryText();[self.tableView reloadData];}
+- (void)reloadThemeAppearance {
+    self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
+    if(!self.isViewLoaded)return;
+    self.view.overrideUserInterfaceStyle=self.overrideUserInterfaceStyle;
+    self.view.backgroundColor=HostBackground();self.view.tintColor=HostAccent();self.tableView.backgroundColor=HostBackground();self.refreshControl.tintColor=HostAccent();
+    self.progressHeader.backgroundColor=HostCard();HostSetLayerBorderColor(self.progressHeader,HostBorder());self.progressLabel.textColor=HostText();
+    self.summaryCard.backgroundColor=HostCard();HostSetLayerBorderColor(self.summaryCard,HostBorder());
+    self.summaryTitleLabel.textColor=HostText();self.summaryDetailLabel.textColor=HostSecondaryText();
+    self.summaryImportButton.tintColor=HostAccent();self.summaryImportButton.backgroundColor=HostSelectedSurface();
+    self.emptyLabel.textColor=HostSecondaryText();[self.tableView reloadData];
+}
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+    [super traitCollectionDidChange:previousTraitCollection];
+    if([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection])[self reloadThemeAppearance];
+}
+- (void)refreshLocalMedia {
+    [self updateFromStore];
+    [self.refreshControl endRefreshing];
+}
 - (NSString *)displayNameForURL:(NSURL *)url {NSString *name=url.lastPathComponent?:@"媒体文件";if(name.length>37&&[name characterAtIndex:36]=='-')return [name substringFromIndex:37];return name;}
 - (void)updateFromStore {
-    self.files=[self.store filesSnapshot];NSDictionary *state=[self.store stateSnapshot];BOOL importing=[state[@"importing"] boolValue],stopping=[state[@"stopRequested"] boolValue];self.navigationItem.rightBarButtonItem.enabled=!importing;
+    self.allFiles=[self.store filesSnapshot];NSDictionary *state=[self.store stateSnapshot];BOOL importing=[state[@"importing"] boolValue],stopping=[state[@"stopRequested"] boolValue];self.navigationItem.rightBarButtonItem.enabled=!importing;
+    NSMutableDictionary<NSURL *, NSNumber *> *sizes=[NSMutableDictionary dictionaryWithCapacity:self.allFiles.count];
+    long long totalBytes=0;NSUInteger videoCount=0,audioCount=0;
+    for(NSURL *u in self.allFiles){
+        NSNumber *sz=nil;[u getResourceValue:&sz forKey:NSURLFileSizeKey error:nil];
+        NSNumber *safeSize=sz?:@0;sizes[u]=safeSize;totalBytes+=safeSize.longLongValue;
+        if([self isAudioURL:u])audioCount++;else videoCount++;
+    }
+    self.fileSizesByURL=sizes;
+    self.summaryTitleLabel.text=[NSString stringWithFormat:@"本机媒体库 · 共 %lu 项",(unsigned long)self.allFiles.count];
+    self.summaryDetailLabel.text=[NSString stringWithFormat:@"视频 %lu · 音频 %lu · 占用 %@",(unsigned long)videoCount,(unsigned long)audioCount,[NSByteCountFormatter stringFromByteCount:totalBytes countStyle:NSByteCountFormatterCountStyleFile]];
     if(importing){NSString *name=[state[@"currentFileName"] isKindOfClass:NSString.class]?state[@"currentFileName"]:@"";NSString *line=[NSString stringWithFormat:@"正在保存：%@\n已完成 %lu/%lu 个文件",name,(unsigned long)[state[@"completed"] unsignedIntegerValue],(unsigned long)[state[@"total"] unsignedIntegerValue]];self.progressLabel.text=line;self.stopButton.hidden=stopping;self.stopButton.enabled=!stopping;self.tableView.tableHeaderView=self.progressHeader;[self updateProgressHeaderSize];self.navigationItem.prompt=stopping?@"停止请求已收到 · 当前文件完成后结束":@"导入过程中仍可播放已完成文件";
-    }else{self.tableView.tableHeaderView=nil;NSUInteger failed=[state[@"failureCount"] unsignedIntegerValue];if(failed)self.navigationItem.prompt=[NSString stringWithFormat:@"%lu 个文件未能保存；请重新选择",(unsigned long)failed];else if(stopping)self.navigationItem.prompt=[NSString stringWithFormat:@"已停止后续导入 · 已完成 %lu/%lu 个文件",(unsigned long)[state[@"completed"] unsignedIntegerValue],(unsigned long)[state[@"total"] unsignedIntegerValue]];else self.navigationItem.prompt=self.files.count?@"点击播放 · 左滑删除本机副本":@"添加视频或音频；文件会复制到本机";}
+    }else{
+        self.tableView.tableHeaderView=self.allFiles.count?self.summaryHeaderContainer:nil;
+        NSUInteger failed=[state[@"failureCount"] unsignedIntegerValue];
+        if(failed)self.navigationItem.prompt=[NSString stringWithFormat:@"%lu 个文件未能保存；请重新选择",(unsigned long)failed];
+        else if(stopping)self.navigationItem.prompt=[NSString stringWithFormat:@"已停止后续导入 · 已完成 %lu/%lu 个文件",(unsigned long)[state[@"completed"] unsignedIntegerValue],(unsigned long)[state[@"total"] unsignedIntegerValue]];
+        else self.navigationItem.prompt=self.allFiles.count?@"点击播放 · 长按分享 · 左滑删除":@"添加视频或音频；文件会复制到本机";
+    }
+    [self applyFilterAndSort];
     self.emptyLabel.hidden=self.files.count>0||importing;self.tableView.backgroundView.hidden=self.emptyLabel.hidden;
-    [self.tableView reloadData];
 }
 - (void)storeDidChange:(NSNotification *)notification {if(!NSThread.isMainThread){__weak typeof(self) weakSelf=self;dispatch_async(dispatch_get_main_queue(),^{[weakSelf storeDidChange:notification];});return;}[self updateFromStore];}
 - (void)importMedia {
@@ -52,7 +223,29 @@
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {return self.files.count;}
 - (void)tableView:(UITableView *)tableView willDisplayHeaderView:(UIView *)view forSection:(NSInteger)section { (void)tableView;(void)section;HostStyleSectionHeaderView(view); }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)path {
-    UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:@"local"];if(!cell)cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"local"];if(path.row<0||path.row>=self.files.count)return cell;NSURL *url=self.files[path.row];NSString *name=[self displayNameForURL:url];NSNumber *size=nil;[url getResourceValue:&size forKey:NSURLFileSizeKey error:nil];BOOL isAudio=[url.pathExtension.lowercaseString isEqualToString:@"mp3"]||[url.pathExtension.lowercaseString isEqualToString:@"m4a"]||[url.pathExtension.lowercaseString isEqualToString:@"aac"]||[url.pathExtension.lowercaseString isEqualToString:@"flac"]||[url.pathExtension.lowercaseString isEqualToString:@"wav"];NSString *kind=isAudio?@"音频文件":@"视频文件";cell.textLabel.text=name;cell.detailTextLabel.text=[NSString stringWithFormat:@"%@ · %@",kind,[NSByteCountFormatter stringFromByteCount:size.longLongValue countStyle:NSByteCountFormatterCountStyleFile]];cell.imageView.image=[UIImage systemImageNamed:isAudio?@"waveform.circle.fill":@"film.fill"];cell.imageView.tintColor=HostAccent();cell.textLabel.numberOfLines=2;cell.textLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];cell.textLabel.adjustsFontForContentSizeCategory=YES;cell.detailTextLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];cell.detailTextLabel.adjustsFontForContentSizeCategory=YES;cell.backgroundColor=HostCard();cell.layer.cornerRadius=14;cell.layer.cornerCurve=kCACornerCurveContinuous;cell.clipsToBounds=YES;cell.layer.borderWidth=0.6;HostSetLayerBorderColor(cell,HostBorder());cell.textLabel.textColor=HostText();cell.detailTextLabel.textColor=HostSecondaryText();cell.accessoryType=UITableViewCellAccessoryDisclosureIndicator;cell.accessibilityIdentifier=[@"local-media:" stringByAppendingString:url.lastPathComponent];return cell;
+    UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:@"local"];if(!cell)cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"local"];if(path.row<0||path.row>=self.files.count)return cell;NSURL *url=self.files[path.row];NSString *name=[self displayNameForURL:url];NSNumber *size=self.fileSizesByURL[url];if(!size){[url getResourceValue:&size forKey:NSURLFileSizeKey error:nil];if(size)self.fileSizesByURL[url]=size;}BOOL isAudio=[self isAudioURL:url];NSString *kind=isAudio?@"音频文件":@"视频文件";NSString *ext=url.pathExtension.uppercaseString;if(!ext.length)ext=isAudio?@"AUDIO":@"VIDEO";
+    cell.textLabel.text=name;cell.detailTextLabel.text=[NSString stringWithFormat:@"%@ · %@",kind,[NSByteCountFormatter stringFromByteCount:size.longLongValue countStyle:NSByteCountFormatterCountStyleFile]];cell.imageView.image=[UIImage systemImageNamed:isAudio?@"waveform.circle.fill":@"film.fill"];cell.imageView.tintColor=isAudio?UIColor.systemPurpleColor:HostAccent();cell.textLabel.numberOfLines=2;cell.textLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];cell.textLabel.adjustsFontForContentSizeCategory=YES;cell.detailTextLabel.font=HostMonospacedDigitFont(12,UIFontWeightRegular,UIFontTextStyleCaption1);cell.detailTextLabel.adjustsFontForContentSizeCategory=YES;cell.backgroundColor=HostCard();cell.layer.cornerRadius=14;cell.layer.cornerCurve=kCACornerCurveContinuous;cell.clipsToBounds=YES;cell.layer.borderWidth=0.6;HostSetLayerBorderColor(cell,HostBorder());cell.textLabel.textColor=HostText();cell.detailTextLabel.textColor=HostSecondaryText();
+    UIView *accentBar=[cell.contentView viewWithTag:8801];
+    if(!accentBar){accentBar=[UIView new];accentBar.tag=8801;accentBar.translatesAutoresizingMaskIntoConstraints=NO;accentBar.layer.cornerRadius=1.5;[cell.contentView addSubview:accentBar];[NSLayoutConstraint activateConstraints:@[[accentBar.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:2],[accentBar.topAnchor constraintEqualToAnchor:cell.contentView.topAnchor constant:10],[accentBar.bottomAnchor constraintEqualToAnchor:cell.contentView.bottomAnchor constant:-10],[accentBar.widthAnchor constraintEqualToConstant:3]]];}
+    accentBar.backgroundColor=isAudio?UIColor.systemPurpleColor:HostAccent();
+    UILabel *extBadge=(UILabel *)cell.accessoryView;
+    if(![extBadge isKindOfClass:UILabel.class]||extBadge.tag!=8802){extBadge=[UILabel new];extBadge.tag=8802;extBadge.font=HostMonospacedDigitFont(10,UIFontWeightBold,UIFontTextStyleCaption2);extBadge.textAlignment=NSTextAlignmentCenter;extBadge.layer.cornerRadius=7;extBadge.layer.cornerCurve=kCACornerCurveContinuous;extBadge.clipsToBounds=YES;extBadge.accessibilityIdentifier=@"local.media.ext-badge";cell.accessoryView=extBadge;}
+    extBadge.text=[NSString stringWithFormat:@" %@ ",ext];
+    extBadge.textColor=isAudio?UIColor.systemPurpleColor:HostAccent();
+    extBadge.backgroundColor=isAudio?[UIColor.systemPurpleColor colorWithAlphaComponent:0.14]:HostSelectedSurface();
+    [extBadge sizeToFit];
+    CGRect bf=extBadge.frame;bf.size.width=MAX(42,bf.size.width+8);bf.size.height=MAX(22,bf.size.height+4);extBadge.frame=bf;
+    cell.accessibilityIdentifier=[@"local-media:" stringByAppendingString:url.lastPathComponent];return cell;
+}
+- (void)tableView:(UITableView *)tableView didHighlightRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell=[tableView cellForRowAtIndexPath:indexPath];
+    if(!cell||UIAccessibilityIsReduceMotionEnabled())return;
+    [UIView animateWithDuration:0.10 delay:0 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{cell.transform=CGAffineTransformMakeScale(0.985,0.985);} completion:nil];
+}
+- (void)tableView:(UITableView *)tableView didUnhighlightRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell=[tableView cellForRowAtIndexPath:indexPath];
+    if(!cell)return;
+    [UIView animateWithDuration:0.22 delay:0 usingSpringWithDamping:0.78 initialSpringVelocity:0.25 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{cell.transform=CGAffineTransformIdentity;} completion:nil];
 }
 - (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)path point:(CGPoint)point {
     (void)point;if(path.row<0||path.row>=(NSInteger)self.files.count)return nil;
@@ -68,7 +261,9 @@
         UIAction *copyName=[UIAction actionWithTitle:@"复制文件名称" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){UIPasteboard.generalPasteboard.string=name;}];
         UIAction *delAct=[UIAction actionWithTitle:@"删除本机副本" image:[UIImage systemImageNamed:@"trash"] identifier:nil handler:^(__unused UIAction *a){[weakSelf tableView:tableView commitEditingStyle:UITableViewCellEditingStyleDelete forRowAtIndexPath:path];}];
         delAct.attributes=UIMenuElementAttributesDestructive;
-        return [UIMenu menuWithTitle:name children:@[playAct,shareAct,copyName,delAct]];
+        UIMenu *primary=[UIMenu menuWithTitle:@"" image:nil identifier:@"local.media.ctx.primary" options:UIMenuOptionsDisplayInline children:@[playAct,shareAct,copyName]];
+        UIMenu *danger=[UIMenu menuWithTitle:@"" image:nil identifier:@"local.media.ctx.destructive" options:UIMenuOptionsDisplayInline children:@[delAct]];
+        return [UIMenu menuWithTitle:name children:@[primary,danger]];
     }];
 }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)path {

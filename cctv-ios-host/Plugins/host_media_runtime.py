@@ -1528,21 +1528,62 @@ class PythonSpider:
         return result
 
     def close(self):
-        with self.lock:
+        acquired = self.lock.acquire(timeout=0.5)
+        try:
+            for attr_val in list(vars(getattr(self, 'spider', object())).values()):
+                if hasattr(attr_val, 'close') and 'Session' in type(attr_val).__name__:
+                    try:
+                        attr_val.close()
+                    except Exception:
+                        pass
+            callback = getattr(self.spider, 'destroy', None)
+            if acquired and callable(callback):
+                callback()
+        finally:
             try:
-                callback = getattr(self.spider, 'destroy', None)
-                if callable(callback):
-                    callback()
-            finally:
                 self._capture_plugin_loopback_servers()
                 self._stop_plugin_loopback_servers()
                 self._remove_package_modules()
                 if self.added_path and self.root in sys.path:
                     sys.path.remove(self.root)
+            finally:
+                if acquired:
+                    self.lock.release()
 
 
 def _install_python_spider_compatibility():
     """Adapt common Android-TVBox Python parser imports to bundled pure Python."""
+    import warnings
+    warnings.filterwarnings('ignore', message='Unverified HTTPS request')
+    try:
+        import urllib3
+        urllib3.disable_warnings()
+    except Exception:
+        pass
+    try:
+        import requests
+        orig_req = requests.Session.request
+        if not getattr(orig_req, '_cctvhost_bounded_timeout', False):
+            def _bounded_session_request(session_self, method, url, **kwargs):
+                owner = getattr(threading.current_thread(), '_host_session', None)
+                if owner is not None and getattr(owner, 'stopping', None) is not None and owner.stopping.is_set():
+                    raise RuntimeError('service is stopping')
+                t = kwargs.get('timeout')
+                if t is None:
+                    kwargs['timeout'] = (4.0, 8.0)
+                elif isinstance(t, (int, float)) and t > 10.0:
+                    kwargs['timeout'] = (4.0, 10.0)
+                elif isinstance(t, tuple) and len(t) == 2:
+                    ct, rt = t
+                    kwargs['timeout'] = (
+                        min(float(ct), 5.0) if isinstance(ct, (int, float)) else 4.0,
+                        min(float(rt), 10.0) if isinstance(rt, (int, float)) else 10.0,
+                    )
+                return orig_req(session_self, method, url, **kwargs)
+            _bounded_session_request._cctvhost_bounded_timeout = True
+            requests.Session.request = _bounded_session_request
+    except Exception:
+        pass
     try:
         import bs4
     except ImportError:

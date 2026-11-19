@@ -24,6 +24,7 @@ static const NSUInteger MediaPlaybackSniffMaximumBytes=2*1024*1024;
     NSMutableURLRequest *safe=[request mutableCopy];safe.HTTPShouldHandleCookies=NO;safe.timeoutInterval=3.5;
     self.task=[self.session dataTaskWithRequest:safe];[self.task resume];
 }
+- (void)dealloc {[self cancel];}
 - (void)cancel {
     NSURLSessionDataTask *task=nil;NSURLSession *session=nil;
     @synchronized(self){

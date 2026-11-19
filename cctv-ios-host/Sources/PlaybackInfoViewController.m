@@ -8,10 +8,16 @@
 @property (nonatomic, strong) NSTimer *autoRefreshTimer;
 @property (nonatomic, strong) UIView *summaryHeaderContainer;
 @property (nonatomic, strong) UIView *summaryCardView;
+@property (nonatomic, strong) UIView *summarySpecularLine;
 @property (nonatomic, strong) UILabel *summaryChannelLabel;
 @property (nonatomic, strong) UILabel *summaryEngineBadge;
+@property (nonatomic, strong) UIButton *liveRefreshToggleButton;
+@property (nonatomic, assign) BOOL autoRefreshPausedByUser;
+@property (nonatomic, strong) NSArray<UIView *> *summaryMetricContainers;
 @property (nonatomic, strong) NSArray<UILabel *> *summaryMetricValueLabels;
 @property (nonatomic, strong) NSArray<UILabel *> *summaryMetricTitleLabels;
+- (void)toggleAutoRefreshPause;
+- (void)updateLiveRefreshToggleAppearance;
 - (void)refreshSnapshot;
 -  (void)stopAutoRefreshTimer;
 -  (void)buildSummaryHeaderView;
@@ -56,7 +62,10 @@
     UIBarButtonItem *copyItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"doc.on.doc"] style:UIBarButtonItemStylePlain target:self action:@selector(copyAllDiagnostics)];
     copyItem.accessibilityIdentifier = @"playback.info.copy";
     copyItem.accessibilityLabel = @"复制播放诊断信息";
-    self.navigationItem.rightBarButtonItem = copyItem;
+    UIBarButtonItem *refreshItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"arrow.clockwise"] style:UIBarButtonItemStylePlain target:self action:@selector(refreshSnapshot)];
+    refreshItem.accessibilityIdentifier = @"playback.info.refresh";
+    refreshItem.accessibilityLabel = @"立即刷新播放信息";
+    self.navigationItem.rightBarButtonItems = @[copyItem, refreshItem];
     UIRefreshControl *refresh = [UIRefreshControl new];
     [refresh addTarget:self action:@selector(refreshSnapshot) forControlEvents:UIControlEventValueChanged];
     self.refreshControl = refresh;
@@ -75,7 +84,31 @@
     card.layer.cornerCurve = kCACornerCurveContinuous;
     card.layer.borderWidth = 0.8;
     HostSetLayerBorderColor(card, HostBorder());
+    card.accessibilityIdentifier = @"playback.info.summary-card";
     [container addSubview:card];
+
+    UIView *specLine = [UIView new];
+    specLine.translatesAutoresizingMaskIntoConstraints = NO;
+    specLine.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.12];
+    specLine.userInteractionEnabled = NO;
+    [card addSubview:specLine];
+    self.summarySpecularLine = specLine;
+
+    UIButton *liveToggle = [UIButton buttonWithType:UIButtonTypeSystem];
+    liveToggle.translatesAutoresizingMaskIntoConstraints = NO;
+    liveToggle.titleLabel.font = HostMonospacedDigitFont(10.5, UIFontWeightSemibold, UIFontTextStyleCaption2);
+    liveToggle.contentEdgeInsets = UIEdgeInsetsMake(3, 8, 3, 8);
+    liveToggle.layer.cornerRadius = 8;
+    liveToggle.layer.cornerCurve = kCACornerCurveContinuous;
+    liveToggle.layer.borderWidth = 0.55;
+    liveToggle.accessibilityIdentifier = @"playback.info.live-toggle";
+    HostInstallPressFeedback(liveToggle);
+    [liveToggle addTarget:self action:@selector(toggleAutoRefreshPause) forControlEvents:UIControlEventTouchUpInside];
+    [liveToggle setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+    [liveToggle setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+    [card addSubview:liveToggle];
+    self.liveRefreshToggleButton = liveToggle;
+    [self updateLiveRefreshToggleAppearance];
 
     UILabel *channelLabel = [UILabel new];
     channelLabel.translatesAutoresizingMaskIntoConstraints = NO;
@@ -107,13 +140,17 @@
     [card addSubview:grid];
 
     NSArray<NSString *> *titles = @[@"分辨率", @"实时码率", @"帧率", @"编码"];
+    NSMutableArray<UIView *> *pillContainers = [NSMutableArray arrayWithCapacity:4];
     NSMutableArray<UILabel *> *valueLabels = [NSMutableArray arrayWithCapacity:4];
     NSMutableArray<UILabel *> *titleLabels = [NSMutableArray arrayWithCapacity:4];
     for (NSString *title in titles) {
         UIView *pill = [UIView new];
         pill.backgroundColor = HostRaisedSurface();
-        pill.layer.cornerRadius = 10;
+        pill.layer.cornerRadius = 11;
         pill.layer.cornerCurve = kCACornerCurveContinuous;
+        pill.layer.borderWidth = 0.55;
+        HostSetLayerBorderColor(pill, HostBorder());
+        [pillContainers addObject:pill];
 
         UILabel *val = [UILabel new];
         val.translatesAutoresizingMaskIntoConstraints = NO;
@@ -155,13 +192,21 @@
         [card.trailingAnchor constraintEqualToAnchor:container.trailingAnchor constant:-16],
         [card.bottomAnchor constraintEqualToAnchor:container.bottomAnchor constant:-4],
 
+        [specLine.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:14],
+        [specLine.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-14],
+        [specLine.topAnchor constraintEqualToAnchor:card.topAnchor],
+        [specLine.heightAnchor constraintEqualToConstant:0.5],
+
         [channelLabel.topAnchor constraintEqualToAnchor:card.topAnchor constant:12],
         [channelLabel.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:14],
+        [liveToggle.centerYAnchor constraintEqualToAnchor:channelLabel.centerYAnchor],
+        [liveToggle.leadingAnchor constraintGreaterThanOrEqualToAnchor:channelLabel.trailingAnchor constant:6],
+        [liveToggle.heightAnchor constraintEqualToConstant:22],
         [engineBadge.centerYAnchor constraintEqualToAnchor:channelLabel.centerYAnchor],
-        [engineBadge.leadingAnchor constraintGreaterThanOrEqualToAnchor:channelLabel.trailingAnchor constant:8],
+        [engineBadge.leadingAnchor constraintEqualToAnchor:liveToggle.trailingAnchor constant:6],
         [engineBadge.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-14],
         [engineBadge.heightAnchor constraintEqualToConstant:22],
-        [engineBadge.widthAnchor constraintGreaterThanOrEqualToConstant:64],
+        [engineBadge.widthAnchor constraintGreaterThanOrEqualToConstant:58],
 
         [grid.topAnchor constraintEqualToAnchor:channelLabel.bottomAnchor constant:10],
         [grid.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:12],
@@ -173,6 +218,7 @@
     self.summaryCardView = card;
     self.summaryChannelLabel = channelLabel;
     self.summaryEngineBadge = engineBadge;
+    self.summaryMetricContainers = pillContainers;
     self.summaryMetricValueLabels = valueLabels;
     self.summaryMetricTitleLabels = titleLabels;
 }
@@ -193,7 +239,12 @@
         [self.snapshotSummary[@"codec"] description] ?: @"—"
     ];
     for (NSUInteger i = 0; i < self.summaryMetricValueLabels.count && i < values.count; i++) {
-        self.summaryMetricValueLabels[i].text = values[i].length ? values[i] : @"—";
+        NSString *v = values[i].length ? values[i] : @"—";
+        UILabel *valLbl = self.summaryMetricValueLabels[i];
+        valLbl.text = v;
+        if (i == 0 && ([v containsString:@"2160"] || [v containsString:@"1080"] || [v containsString:@"4K"])) valLbl.textColor = HostAccent();
+        else if (i == 2 && ([v containsString:@"50"] || [v containsString:@"60"])) valLbl.textColor = UIColor.systemGreenColor;
+        else valLbl.textColor = HostText();
     }
     if (self.tableView.tableHeaderView != self.summaryHeaderContainer) {
         CGRect frame = self.summaryHeaderContainer.frame;
@@ -216,9 +267,18 @@
     self.summaryChannelLabel.textColor = HostText();
     self.summaryEngineBadge.textColor = HostAccent();
     self.summaryEngineBadge.backgroundColor = HostSelectedSurface();
+    for (UIView *pill in self.summaryMetricContainers) { pill.backgroundColor = HostRaisedSurface(); HostSetLayerBorderColor(pill, HostBorder()); }
     for (UILabel *lbl in self.summaryMetricValueLabels) lbl.textColor = HostText();
     for (UILabel *lbl in self.summaryMetricTitleLabels) lbl.textColor = HostSecondaryText();
+    [self updateLiveRefreshToggleAppearance];
     [self.tableView reloadData];
+}
+
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+    [super traitCollectionDidChange:previousTraitCollection];
+    if ([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection]) {
+        [self reloadThemeAppearance];
+    }
 }
 
 - (void)showTransientPrompt:(NSString *)prompt {
@@ -271,9 +331,31 @@
     [self stopAutoRefreshTimer];
 }
 
+- (void)toggleAutoRefreshPause {
+    self.autoRefreshPausedByUser = !self.autoRefreshPausedByUser;
+    if (self.autoRefreshPausedByUser) [self stopAutoRefreshTimer];
+    else { [self refreshSnapshot]; [self startAutoRefreshTimer]; }
+    [self updateLiveRefreshToggleAppearance];
+}
+
+- (void)updateLiveRefreshToggleAppearance {
+    if (!self.liveRefreshToggleButton) return;
+    if (self.autoRefreshPausedByUser) {
+        [self.liveRefreshToggleButton setTitle:@"⏸ 已暂停" forState:UIControlStateNormal];
+        self.liveRefreshToggleButton.tintColor = UIColor.systemOrangeColor;
+        self.liveRefreshToggleButton.backgroundColor = [UIColor.systemOrangeColor colorWithAlphaComponent:0.14];
+        HostSetLayerBorderColor(self.liveRefreshToggleButton, [UIColor.systemOrangeColor colorWithAlphaComponent:0.35]);
+    } else {
+        [self.liveRefreshToggleButton setTitle:@"● 实时" forState:UIControlStateNormal];
+        self.liveRefreshToggleButton.tintColor = UIColor.systemGreenColor;
+        self.liveRefreshToggleButton.backgroundColor = HostSuccessSurface();
+        HostSetLayerBorderColor(self.liveRefreshToggleButton, [UIColor.systemGreenColor colorWithAlphaComponent:0.35]);
+    }
+}
+
 - (void)startAutoRefreshTimer {
     [self stopAutoRefreshTimer];
-    if (self.autoRefreshInterval <= 0.1) return;
+    if (self.autoRefreshPausedByUser || self.autoRefreshInterval <= 0.1) return;
     __weak typeof(self) weakSelf = self;
     self.autoRefreshTimer = [NSTimer scheduledTimerWithTimeInterval:self.autoRefreshInterval repeats:YES block:^(NSTimer *timer) {
         PlaybackInfoViewController *owner = weakSelf;
@@ -392,10 +474,14 @@
         (([titleText containsString:@"引擎"] || [titleText containsString:@"解码"] || [titleText containsString:@"编码"]) ? @"cpu" :
         (([titleText containsString:@"首帧"] || [titleText containsString:@"耗时"] || [titleText containsString:@"缓冲"] || [titleText containsString:@"丢帧"] || [titleText containsString:@"卡顿"]) ? @"bolt.fill" :
         ([titleText containsString:@"版本"] ? @"app.badge.checkmark" : @"waveform.path.ecg")))))));
-    c.imageView.image = [UIImage systemImageNamed:symbol];
+    c.imageView.image = [UIImage systemImageNamed:symbol withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:15 weight:UIImageSymbolWeightSemibold]];
+    BOOL isAlertValue = ([valueText containsString:@"失败"] || [valueText containsString:@"错误"] || [valueText containsString:@"异常"] || [valueText containsString:@"超时"]);
     c.imageView.tintColor = HostAccent();
+    if (isAlertValue) c.imageView.tintColor = UIColor.systemOrangeColor;
+    else if ([titleText containsString:@"码率"] || [titleText containsString:@"速率"] || [titleText containsString:@"带宽"]) c.imageView.tintColor = UIColor.systemGreenColor;
     c.textLabel.textColor = HostText();
     c.detailTextLabel.textColor = HostSecondaryText();
+    if (isAlertValue) c.detailTextLabel.textColor = UIColor.systemOrangeColor;
     c.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];
     c.textLabel.adjustsFontForContentSizeCategory = YES;
     c.textLabel.numberOfLines = 0;

@@ -94,7 +94,11 @@
     NSString *key=[[ProfileStore epgIDForChannel:ch] lowercaseString];NSDictionary *matched=key.length?[self channelWithID:key]:nil;if(matched&&![matched[@"remoteURL"] length])return key;
     NSString *canonical=[ProfileStore canonicalStationIDForChannel:ch];
     if(canonical.length){NSDictionary *nativeMatch=[self channelWithID:canonical];if(nativeMatch&&![nativeMatch[@"remoteURL"] length])return canonical;}
-    for(NSDictionary *native in self.allChannels){if([native[@"remoteURL"] length])continue;if([native[@"name"] isEqualToString:ch[@"tvgName"]]||[native[@"name"] isEqualToString:ch[@"name"]])return native[@"id"];}
+    [self ensureChannelLookupIndexes];
+    NSString *tvgName=[ch[@"tvgName"] isKindOfClass:NSString.class]?ch[@"tvgName"]:@"";
+    if(tvgName.length&&self.nativeIDIndexByName[tvgName])return self.nativeIDIndexByName[tvgName];
+    NSString *chName=[ch[@"name"] isKindOfClass:NSString.class]?ch[@"name"]:@"";
+    if(chName.length&&self.nativeIDIndexByName[chName])return self.nativeIDIndexByName[chName];
     return nil;
 }
 - (void)openEPGforChannel:(NSString *)cid name:(NSString *)name {
@@ -233,6 +237,7 @@
         __weak typeof(self) weakSelf=self;
         page.onReplay=^(NSDictionary *program){
             RootViewController *owner=weakSelf;if(!owner||!cid.length)return;
+            owner.livePlaybackSuspendedForNavigation=NO;owner.nativeUserPaused=NO;owner.liveMiniPlayerBar.hidden=YES;
             [owner.navigationController popToViewController:owner animated:YES];
             owner.playerTabs.selectedSegmentIndex=1;[owner selectPlayerPanel];
             double start=[program[@"start"] doubleValue];
