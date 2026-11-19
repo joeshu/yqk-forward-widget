@@ -1013,7 +1013,8 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
     NSMutableDictionary *args=[@{@"id":episode[@"id"]?:@"",@"lineId":line[@"id"]?:@"",@"parserID":parserID?:@"",@"vodName":vodTitle?:@"",@"episodeName":[episode[@"name"] description]?:@"",@"episodeIndex":@(self.selectedEpisodeIndex)} mutableCopy];
     if(self.provider.length)args[@"provider"]=self.provider;
     [self.preResolveClient cancel];
-    self.preResolveClient=self.source?[[MediaAPIClient alloc] initWithSource:self.source]:nil;
+    NSString *preCatalogID=[self.source[@"catalogID"] isKindOfClass:NSString.class]?self.source[@"catalogID"]:([self.source[@"tvboxCatalogID"] isKindOfClass:NSString.class]?self.source[@"tvboxCatalogID"]:@"");
+    self.preResolveClient=self.source?(MediaSourceUsesNativeCatalogAPI(self.source)?[[MediaAPIClient alloc] initWithTVBoxSource:self.source]:[[MediaAPIClient alloc] initWithPort:[self.source[@"port"] integerValue] catalogID:preCatalogID]):nil;
     if(!self.preResolveClient)return;
     NSUInteger generation=self.generation;
     __weak typeof(self) weakSelf=self;
