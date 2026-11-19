@@ -15,8 +15,17 @@ static void MediaSearchLoadPosterWithRetry(NSString *url, UIImageView *view, NSU
     [HostImageLoader.shared loadPosterURL:url intoImageView:view completion:^(BOOL succeeded,NSTimeInterval retryAfter){if(succeeded||!retriesRemaining||retryAfter<=0)return;NSTimeInterval delay=MIN(120.0,MAX(1.0,retryAfter+0.25));dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(delay*NSEC_PER_SEC)),dispatch_get_main_queue(),^{UIImageView *current=weakView;if(current&&current.window&&[current.accessibilityIdentifier isEqualToString:url])MediaSearchLoadPosterWithRetry(url,current,retriesRemaining-1);});}];
 }
 
-static const NSUInteger MediaGlobalSearchMaximumResults = 100;
-static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
+static const NSUInteger MediaGlobalSearchMaximumResults = 240;
+static const NSUInteger MediaGlobalSearchMaximumResultsPerProvider = 20;
+static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 6;
+static const NSTimeInterval MediaGlobalSearchProviderCacheTTL = 600.0;
+
+static NSMutableDictionary<NSString *, NSDictionary *> *MediaGlobalSearchProviderCache(void) {
+    static NSMutableDictionary<NSString *, NSDictionary *> *cache = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{ cache = [NSMutableDictionary dictionary]; });
+    return cache;
+}
 
 @interface MediaGlobalSearchJob : NSObject
 @property(nonatomic) NSUInteger section;
@@ -560,6 +569,49 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
 }
 
 - (void)loadCapabilitiesForJob:(MediaGlobalSearchJob *)job {
+    NSString *sourceID = [job.source[@"id"] isKindOfClass:NSString.class] ? job.source[@"id"] : @"";
+    if (sourceID.length) {
+        NSDictionary *cachedEntry = nil;
+        @synchronized(MediaGlobalSearchProviderCache()) {
+            cachedEntry = MediaGlobalSearchProviderCache()[sourceID];
+        }
+        NSTimeInterval age = cachedEntry ? (CACurrentMediaTime() - [cachedEntry[@"at"] doubleValue]) : DBL_MAX;
+        NSArray *cachedProviders = [cachedEntry[@"providers"] isKindOfClass:NSArray.class] ? cachedEntry[@"providers"] : nil;
+        if (cachedProviders.count && age >= 0 && age < MediaGlobalSearchProviderCacheTTL) {
+            NSMutableArray *valid = [cachedProviders mutableCopy];
+            if (self.currentSiteScope) {
+                NSMutableArray *selected = [NSMutableArray array];
+                NSString *selectedProviderID = self.currentProviderID ?: @"";
+                for (NSDictionary *candidate in valid) {
+                    if ([candidate[@"id"] isEqual:selectedProviderID]) { [selected addObject:candidate]; break; }
+                }
+                if (!selected.count) {
+                    [self finishJob:job error:[NSError errorWithDomain:@"CCTVHostSearch" code:5 userInfo:@{NSLocalizedDescriptionKey:@"当前站点已不可用。请返回媒体页重新选择站点，或切换搜索范围。"}]];
+                    return;
+                }
+                valid = selected;
+            }
+            NSArray *retryTargets = [self.rows[job.section][@"retryProviders"] isKindOfClass:NSArray.class] ? self.rows[job.section][@"retryProviders"] : @[];
+            if (retryTargets.count) {
+                NSMutableArray *retry = [NSMutableArray array];
+                for (NSDictionary *target in retryTargets)
+                    for (NSDictionary *candidate in valid)
+                        if ([candidate[@"id"] isEqual:target[@"id"]]) { [retry addObject:candidate]; break; }
+                job.providers = retry.count ? retry : valid;
+            } else {
+                job.providers = valid;
+            }
+            job.failedProviders = @[];
+            self.rows[job.section][@"retryProviders"] = @[];
+            for (NSDictionary *station in job.providers) {
+                NSMutableDictionary *states = self.rows[job.section][@"providerStates"];
+                states[station[@"id"]] = @{@"name":station[@"name"], @"state":@"等待搜索"};
+            }
+            [self updateFilters];
+            [self searchNextProviderForJob:job];
+            return;
+        }
+    }
     __weak typeof(self) weakSelf = self;
     [job.client call:@"capabilities" arguments:@{} completion:^(id result, NSError *error) {
         MediaGlobalSearchViewController *owner = weakSelf;
@@ -572,7 +624,13 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
             return;
         }
         if (![capabilities containsObject:@"providers"]) {
-            job.providers = @[@{@"id":@"", @"name":job.source[@"name"]?:@"默认站点"}];
+            NSArray *single = @[@{@"id":@"", @"name":job.source[@"name"]?:@"默认站点"}];
+            if (sourceID.length) {
+                @synchronized(MediaGlobalSearchProviderCache()) {
+                    MediaGlobalSearchProviderCache()[sourceID] = @{@"providers":single, @"at":@(CACurrentMediaTime())};
+                }
+            }
+            job.providers = single;
             [owner searchNextProviderForJob:job];
             return;
         }
@@ -589,6 +647,11 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
                 if (name.length) [valid addObject:@{@"id":identifier, @"name":name}];
             }
             if (!valid.count) { [page finishJob:job error:[NSError errorWithDomain:@"CCTVHostSearch" code:3 userInfo:@{NSLocalizedDescriptionKey:@"资源没有可搜索的影视站点。"}]]; return; }
+            if (sourceID.length) {
+                @synchronized(MediaGlobalSearchProviderCache()) {
+                    MediaGlobalSearchProviderCache()[sourceID] = @{@"providers":[valid copy], @"at":@(CACurrentMediaTime())};
+                }
+            }
             if(page.currentSiteScope){
                 NSMutableArray *selected=[NSMutableArray array];NSString *selectedProviderID=page.currentProviderID?:@"";
                 for(NSDictionary *candidate in valid)if([candidate[@"id"] isEqual:selectedProviderID]){[selected addObject:candidate];break;}
@@ -639,7 +702,7 @@ static const NSUInteger MediaGlobalSearchMaximumConcurrentSources = 3;
         NSDictionary *searchPayload = [result isKindOfClass:NSDictionary.class] ? result : @{};
         NSArray *items = [searchPayload[@"items"] isKindOfClass:NSArray.class] ? searchPayload[@"items"] : @[];
         NSMutableArray *stored = owner.rows[job.section][@"results"];
-        NSUInteger remaining=owner.resultCount<MediaGlobalSearchMaximumResults?MediaGlobalSearchMaximumResults-owner.resultCount:0;
+        NSUInteger remaining=owner.resultCount<MediaGlobalSearchMaximumResults?MIN(MediaGlobalSearchMaximumResultsPerProvider,MediaGlobalSearchMaximumResults-owner.resultCount):0;
         owner.resultCount+=MediaSearchAppend(stored,items,providerID,providerName,remaining);
         owner.rows[job.section][@"providerStates"][providerID]=@{@"name":providerName,@"state":MediaSearchEntries(stored,providerID).count?@"搜索完成":@"无结果"};
         [owner reloadSection:job.section];

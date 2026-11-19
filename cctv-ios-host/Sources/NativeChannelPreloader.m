@@ -25,12 +25,14 @@
         if(protocol)class_addProtocol(self.class,protocol);
     }return self;
 }
+static const NSTimeInterval NativeChannelPreloaderTTLSeconds = 90.0;
+
 - (void)prepareChannel:(NSString *)channel title:(NSString *)title {
     [self cancel];if(!channel.length)return;
     id<CCTVMetadataPlayer> player=self.factory();
     for(NSString *selector in @[@"playLIVEWithChannelID:delegate:configOptions:",@"prepareRateItemToPlay_completionBlock:",@"setAutoPlay:",@"setDelegate:",@"reset"])
         if(![player respondsToSelector:NSSelectorFromString(selector)])return;
-    self.player=player;self.channel=channel;self.deadline=self.clock()+15;
+    self.player=player;self.channel=channel;self.deadline=self.clock()+NativeChannelPreloaderTTLSeconds;
     NSUInteger generation=self.generation;NSTimeInterval started=self.clock();
     @try {
         player.autoPlay=NO;
@@ -46,7 +48,7 @@
                 if(owner.onLog)owner.onLog([NSString stringWithFormat:@"原生预解析 %@ 完成 %.2fs（未启动视频）",channel,owner.clock()-started]);
             });
         }];
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,15*NSEC_PER_SEC),dispatch_get_main_queue(),^{
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(NativeChannelPreloaderTTLSeconds*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
             NativeChannelPreloader *owner=weakSelf;
             if(owner && generation==owner.generation)[owner cancel];
         });

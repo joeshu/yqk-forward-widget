@@ -259,8 +259,22 @@ static NSURL *M3UNormalizedLoopbackURL(NSURL *url, NSURL *baseURL) {
 
         NSURL *url = nil;
         @try {
-            url = [NSURL URLWithString:line];
-            if (url.scheme.length == 0 && baseURL) url = [NSURL URLWithString:line relativeToURL:baseURL];
+            NSString *candidateLine = line;
+            NSString *lowerLine = line.lowercaseString;
+            if ([lowerLine hasPrefix:@"rtp://"] || [lowerLine hasPrefix:@"udp://"]) {
+                NSString *udpxyBase = [[NSUserDefaults.standardUserDefaults stringForKey:@"cctv.udpxyBaseURL.v1"] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+                if (udpxyBase.length && ([udpxyBase hasPrefix:@"http://"] || [udpxyBase hasPrefix:@"https://"])) {
+                    while ([udpxyBase hasSuffix:@"/"]) udpxyBase = [udpxyBase substringToIndex:udpxyBase.length - 1];
+                    NSString *proto = [lowerLine hasPrefix:@"rtp://"] ? @"rtp" : @"udp";
+                    NSString *addr = [line substringFromIndex:6];
+                    if ([addr hasPrefix:@"@"]) addr = [addr substringFromIndex:1];
+                    if (addr.length) {
+                        candidateLine = [NSString stringWithFormat:@"%@/%@/%@", udpxyBase, proto, addr];
+                    }
+                }
+            }
+            url = [NSURL URLWithString:candidateLine];
+            if (url.scheme.length == 0 && baseURL) url = [NSURL URLWithString:candidateLine relativeToURL:baseURL];
             NSURLComponents *parts = url ? [NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:YES] : nil;
             NSString *scheme = parts.scheme.lowercaseString;
             if ((![MediaCapabilityNetworkTransports() containsObject:scheme]) || !parts.host.length) url = nil;

@@ -12,6 +12,17 @@ static BOOL MediaKeyURLIsValid(NSURL *url) {
     return url.host.length && !url.user.length && !url.password.length &&
         [@[@"http", @"https"] containsObject:url.scheme.lowercaseString];
 }
+static NSOperationQueue *MediaKeyRequestDelegateQueue(void) {
+    static NSOperationQueue *queue = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        queue = [[NSOperationQueue alloc] init];
+        queue.name = @"cctvhost.mediakey";
+        queue.maxConcurrentOperationCount = 1;
+        queue.qualityOfService = NSQualityOfServiceUserInitiated;
+    });
+    return queue;
+}
 @implementation MediaKeyRequest
 - (void)loadURL:(NSURL *)url headers:(NSDictionary *)headers completion:(void (^)(NSData *,NSError *))completion {
     if(!NSThread.isMainThread){dispatch_async(dispatch_get_main_queue(),^{[self loadURL:url headers:headers completion:completion];});return;}
@@ -21,11 +32,21 @@ static BOOL MediaKeyURLIsValid(NSURL *url) {
     self.completion=completion;self.data=[NSMutableData data];
     NSURLSessionConfiguration *config=NSURLSessionConfiguration.ephemeralSessionConfiguration;
     config.timeoutIntervalForRequest=6;config.timeoutIntervalForResource=8;config.HTTPCookieStorage=nil;
-    self.session=[NSURLSession sessionWithConfiguration:config delegate:self delegateQueue:NSOperationQueue.mainQueue];
-    NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:url];request.allHTTPHeaderFields=MediaPlaybackHeadersFromResult(@{@"headers":headers?:@{}});request.HTTPShouldHandleCookies=NO;request.cachePolicy=NSURLRequestReloadIgnoringLocalCacheData;
+    self.session=[NSURLSession sessionWithConfiguration:config delegate:self delegateQueue:MediaKeyRequestDelegateQueue()];
+    NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:url];
+    NSDictionary *sanitized=MediaPlaybackHeadersFromResult(@{@"headers":headers?:@{}});
+    request.allHTTPHeaderFields=sanitized;
+    request.HTTPShouldHandleCookies=NO;
+    request.cachePolicy=NSURLRequestReloadIgnoringLocalCacheData;
     [[self.session dataTaskWithRequest:request] resume];
 }
-- (void)cancel {if(!NSThread.isMainThread){dispatch_async(dispatch_get_main_queue(),^{[self cancel];});return;}[self.session invalidateAndCancel];}
+- (void)cancel {
+    [MediaKeyRequestDelegateQueue() addOperationWithBlock:^{
+        [self.session invalidateAndCancel];
+        self.session=nil;
+        self.completion=nil;
+    }];
+}
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task didReceiveResponse:(NSURLResponse *)response completionHandler:(void (^)(NSURLSessionResponseDisposition))completion {
     NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]?[(NSHTTPURLResponse *)response statusCode]:0;
     if(status<200||status>=300||response.expectedContentLength>4096){self.failure=[NSError errorWithDomain:@"CCTVHostKey" code:status?:1 userInfo:@{NSLocalizedDescriptionKey:@"密钥响应无效或超过 4 KiB"}];completion(NSURLSessionResponseCancel);}else completion(NSURLSessionResponseAllow);
@@ -47,7 +68,11 @@ static BOOL MediaKeyURLIsValid(NSURL *url) {
 }
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
     void (^completion)(NSData *,NSError *)=self.completion;self.completion=nil;
-    NSError *failure=self.failure?:error;if(completion)completion(failure?nil:self.data,failure);
+    NSError *failure=self.failure?:error;
+    NSData *payload=failure?nil:[self.data copy];
     [session finishTasksAndInvalidate];self.session=nil;self.data=nil;
+    if(completion){
+        dispatch_async(dispatch_get_main_queue(),^{ completion(payload,failure); });
+    }
 }
 @end

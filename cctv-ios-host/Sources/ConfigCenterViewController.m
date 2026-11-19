@@ -1031,6 +1031,10 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     NSMutableArray<HostGlassSheetAction *> *toolActions=[NSMutableArray arrayWithObject:[HostGlassSheetAction actionWithTitle:@"复制资源概览摘要" subtitle:@"复制当前合集、订阅与运行态统计" value:nil icon:@"doc.on.doc" tint:UIColor.systemTealColor destructive:NO selected:NO handler:^{
         [weakSelf copyResourceDiagnosticSummary];
     }]];
+    NSString *currentUdpxy=[[NSUserDefaults.standardUserDefaults stringForKey:@"cctv.udpxyBaseURL.v1"] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    [toolActions addObject:[HostGlassSheetAction actionWithTitle:@"局域网组播转单播代理 (udpxy)" subtitle:(currentUdpxy.length?[NSString stringWithFormat:@"已开启：%@",currentUdpxy]:@"将 rtp:// 与 udp://@ 组播流自动转换为 HTTP 单播流") value:(currentUdpxy.length?@"已配置":@"未配置") icon:@"antenna.radiowaves.left.and.right" tint:UIColor.systemIndigoColor destructive:NO selected:(currentUdpxy.length>0) handler:^{
+        [weakSelf promptUdpxyConfiguration];
+    }]];
     if(self.latencyResults.count){
         [toolActions addObject:[HostGlassSheetAction actionWithTitle:@"清除连接测速结果" subtitle:@"重置所有节点的响应延迟记录" value:nil icon:@"arrow.counterclockwise" tint:UIColor.systemOrangeColor destructive:NO selected:NO handler:^{
             ConfigCenterViewController *owner=weakSelf;if(!owner)return;
@@ -1043,6 +1047,36 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
         [HostGlassSheetSection sectionWithTitle:@"诊断与测速" actions:toolActions]
     ];
     [HostGlassActionSheetViewController presentOn:self title:@"筛选与排序" subtitle:[NSString stringWithFormat:@"当前筛选：%@ · 排序：%@",[self.selectedKind isEqual:@"all"]?@"全部来源":self.selectedKind,sortName] badgeText:sortName badgeColor:HostAccent() sections:sections sourceView:(self.topActionsStack?:self.view)];
+}
+- (void)promptUdpxyConfiguration {
+    NSString *current=[[NSUserDefaults.standardUserDefaults stringForKey:@"cctv.udpxyBaseURL.v1"] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]?:@"";
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"局域网组播代理 (udpxy)" message:@"输入局域网 udpxy 代理地址（如 http://192.168.1.1:4022），解析 M3U 订阅时将自动把 rtp:// 与 udp://@ 组播流转换为 HTTP 单播地址。留空则关闭。" preferredStyle:UIAlertControllerStyleAlert];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *tf){
+        tf.placeholder=@"http://192.168.1.1:4022";
+        tf.text=current;
+        tf.keyboardType=UIKeyboardTypeURL;
+        tf.autocapitalizationType=UITextAutocapitalizationTypeNone;
+        tf.autocorrectionType=UITextAutocorrectionTypeNo;
+        tf.clearButtonMode=UITextFieldViewModeWhileEditing;
+    }];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    __weak typeof(self) weakSelf=self;
+    [alert addAction:[UIAlertAction actionWithTitle:@"保存" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action){
+        ConfigCenterViewController *owner=weakSelf;if(!owner)return;
+        NSString *val=[alert.textFields.firstObject.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]?:@"";
+        if(val.length&&![val hasPrefix:@"http://"]&&![val hasPrefix:@"https://"]){
+            [owner showResourceToast:@"代理地址需以 http:// 或 https:// 开头"];
+            return;
+        }
+        if(val.length){
+            [NSUserDefaults.standardUserDefaults setObject:val forKey:@"cctv.udpxyBaseURL.v1"];
+            [owner showResourceToast:[NSString stringWithFormat:@"已保存组播代理：%@",val]];
+        }else{
+            [NSUserDefaults.standardUserDefaults removeObjectForKey:@"cctv.udpxyBaseURL.v1"];
+            [owner showResourceToast:@"已关闭局域网组播代理"];
+        }
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 - (void)selectKind:(UIButton *)sender {NSString *kind=[sender.accessibilityIdentifier stringByReplacingOccurrencesOfString:@"resource-filter-" withString:@""];if(!kind.length||[kind isEqual:self.selectedKind])return;self.selectedKind=kind;[self reloadProfiles];}
 - (BOOL)profile:(NSDictionary *)profile matchesSearchQuery:(NSString *)query {

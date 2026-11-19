@@ -2,10 +2,15 @@
 #import "HostSyncRequest.h"
 #import <JavaScriptCore/JavaScriptCore.h>
 #import <Security/Security.h>
+#import <TargetConditionals.h>
+#if TARGET_OS_IOS
+#import <UIKit/UIKit.h>
+#endif
 #include <math.h>
 
 static NSUInteger const JSMaxBody = 1024 * 1024;
 static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
+static NSTimeInterval const JSIdleEvictionSeconds = 120.0;
 @interface JSPluginRuntime () <NSURLSessionDataDelegate, NSURLSessionTaskDelegate>
 @property(nonatomic, strong) dispatch_queue_t queue;
 @property(nonatomic, strong) JSContext *context;
@@ -20,6 +25,7 @@ static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
 @property(nonatomic, copy) NSString *packageRoot;
 @property(nonatomic) BOOL genericMode;
 @property(atomic) BOOL stopRequested;
+@property(atomic) NSTimeInterval lastActiveAt;
 @property(nonatomic, strong) NSMutableSet<HostSyncRequest *> *syncRequests;
 @property(nonatomic) NSUInteger sequence;
 @property(nonatomic) NSUInteger generation;
@@ -36,10 +42,48 @@ static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
 -  (NSString *)encodedError:(NSString *)message;
 @end
 @implementation JSPluginRuntime
-+ (instancetype)shared { static JSPluginRuntime *r; static dispatch_once_t once; dispatch_once(&once, ^{ r=[self routerWithScriptURL:nil configuration:nil]; }); return r; }
++ (instancetype)shared {
+    static JSPluginRuntime *r;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        r=[self routerWithScriptURL:nil configuration:nil];
+#if TARGET_OS_IOS
+        [NSNotificationCenter.defaultCenter addObserver:r selector:@selector(handleMemoryWarning) name:UIApplicationDidReceiveMemoryWarningNotification object:nil];
+#endif
+    });
+    return r;
+}
 + (instancetype)routerWithScriptURL:(NSURL *)url configuration:(NSURLSessionConfiguration *)configuration { JSPluginRuntime *r=[[self alloc] initWithScriptURL:url configuration:configuration];r.router=YES;r.sessionRuntimes=[NSMutableDictionary dictionary];r.sessionLogHandlers=[NSMutableDictionary dictionary];return r; }
 - (instancetype)init { return [self initWithScriptURL:nil configuration:nil]; }
-- (instancetype)initWithScriptURL:(NSURL *)url configuration:(NSURLSessionConfiguration *)configuration { if((self=[super init])) { _scriptURL=url;_networkConfiguration=configuration; _queue=dispatch_queue_create("cctvhost.javascript", DISPATCH_QUEUE_SERIAL);_requests=[NSMutableDictionary dictionary];_syncRequests=[NSMutableSet set];_timers=[NSMutableDictionary dictionary];_calls=[NSMutableDictionary dictionary];_sessionLogHandlers=[NSMutableDictionary dictionary]; } return self; }
+- (instancetype)initWithScriptURL:(NSURL *)url configuration:(NSURLSessionConfiguration *)configuration { if((self=[super init])) { _scriptURL=url;_networkConfiguration=configuration; _queue=dispatch_queue_create("cctvhost.javascript", DISPATCH_QUEUE_SERIAL);_requests=[NSMutableDictionary dictionary];_syncRequests=[NSMutableSet set];_timers=[NSMutableDictionary dictionary];_calls=[NSMutableDictionary dictionary];_sessionLogHandlers=[NSMutableDictionary dictionary];_lastActiveAt=NSDate.date.timeIntervalSince1970; } return self; }
+- (void)handleMemoryWarning {
+    if (!self.router) return;
+    NSTimeInterval now = NSDate.date.timeIntervalSince1970;
+    NSMutableArray<JSPluginRuntime *> *idleRuntimes = [NSMutableArray array];
+    NSMutableArray<JSPluginRuntime *> *activeRuntimes = [NSMutableArray array];
+    @synchronized(self) {
+        for (JSPluginRuntime *runtime in self.sessionRuntimes.allValues) {
+            if (runtime.activeSession.length && (now - runtime.lastActiveAt) >= JSIdleEvictionSeconds) {
+                [idleRuntimes addObject:runtime];
+            } else {
+                [activeRuntimes addObject:runtime];
+            }
+        }
+    }
+    for (JSPluginRuntime *runtime in activeRuntimes) {
+        dispatch_async(runtime.queue, ^{
+            if (runtime.context) JSGarbageCollect(runtime.context.JSGlobalContextRef);
+        });
+    }
+    if (idleRuntimes.count) {
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+            for (JSPluginRuntime *runtime in idleRuntimes) {
+                NSString *sid = runtime.serviceIdentifier;
+                if (sid.length) [self stopSessionsForServiceIdentifier:sid error:NULL];
+            }
+        });
+    }
+}
 - (NSArray<NSString *> *)activeSessionIdentifiers { if(!self.router)return self.activeSession.length?@[(self.serviceIdentifier.length?self.serviceIdentifier:self.activeSession)]:@[];@synchronized(self){NSMutableOrderedSet *ids=[NSMutableOrderedSet orderedSet];for(JSPluginRuntime *runtime in self.sessionRuntimes.allValues)if(runtime.activeSession.length)[ids addObject:runtime.serviceIdentifier.length?runtime.serviceIdentifier:runtime.activeSession];return ids.array.copy?:@[];} }
 - (NSArray<NSString *> *)managedServiceIdentifiers {if(!self.router)return self.serviceIdentifier.length?@[self.serviceIdentifier]:@[];@synchronized(self){NSMutableOrderedSet *ids=[NSMutableOrderedSet orderedSet];for(JSPluginRuntime *runtime in self.sessionRuntimes.allValues)if(runtime.serviceIdentifier.length)[ids addObject:runtime.serviceIdentifier];return ids.array.copy?:@[];}}
 - (void)setLogHandler:(void (^)(NSString *))handler forServiceIdentifier:(NSString *)identifier {@synchronized(self){if(identifier.length&&handler)self.sessionLogHandlers[identifier]=[handler copy];else if(identifier.length)[self.sessionLogHandlers removeObjectForKey:identifier];}}
@@ -610,6 +654,7 @@ static NSUInteger const JSMaxGenericResponse = 4 * 1024 * 1024;
         return answer;
     }
     if(NSThread.isMainThread){if(error)*error=[NSError errorWithDomain:@"JSPlugin" code:1 userInfo:@{NSLocalizedDescriptionKey:@"JS 服务须从后台调用"}];return nil;}
+    self.lastActiveAt = NSDate.date.timeIntervalSince1970;
     if(self.unresponsive&&![operation isEqual:@"stop"]){if(error)*error=[NSError errorWithDomain:@"JSPlugin" code:7 userInfo:@{NSLocalizedDescriptionKey:@"此 JavaScript 会话有调用超时且仍占用运行队列；请先停止会话，其他服务不受影响。"}];return nil;}
     if([operation isEqual:@"stop"]){
         id payload=[NSJSONSerialization JSONObjectWithData:[json dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL];

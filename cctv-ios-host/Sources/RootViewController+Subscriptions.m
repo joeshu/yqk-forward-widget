@@ -593,8 +593,20 @@
             if(retiredManagedSources.count){[NSUserDefaults.standardUserDefaults setObject:[ProfileStore orderedSources:self.subscriptionURLs.allObjects] forKey:@"subscriptions"];[self logPluginLine:[NSString stringWithFormat:@"新订阅地址已验证，已替换 %lu 个旧服务地址",(unsigned long)retiredManagedSources.count] identifier:managedService[@"id"] name:managedService[@"name"]];}
             self.allChannels = merged;
             [self.altSources removeAllObjects];for(NSDictionary *c in merged){NSString *url=c[@"remoteURL"],*groupKey=CCTVRouteGroupKey(c);if(!url.length||!groupKey.length)continue;if(!self.altSources[groupKey])self.altSources[groupKey]=[NSMutableArray array];if(![self.altSources[groupKey] containsObject:url])[self.altSources[groupKey] addObject:url];}
-            [ProfileStore update:sourceKey values:@{@"cachedChannels":owned,@"status":@"已更新",@"updatedAt":@(NSDate.date.timeIntervalSince1970)}];
-            [NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:sourceKey];
+            NSArray *ownedSnapshot = [owned copy];
+            NSString *persistKey = [sourceKey copy];
+            NSTimeInterval updatedAt = NSDate.date.timeIntervalSince1970;
+            static dispatch_queue_t playlistPersistQueue = nil;
+            static dispatch_once_t playlistPersistOnce;
+            dispatch_once(&playlistPersistOnce, ^{
+                playlistPersistQueue = dispatch_queue_create("com.cctvhost.subscription.persist", DISPATCH_QUEUE_SERIAL);
+            });
+            dispatch_async(playlistPersistQueue, ^{
+                [ProfileStore update:persistKey values:@{@"cachedChannels":ownedSnapshot,@"status":@"已更新",@"updatedAt":@(updatedAt)}];
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:persistKey];
+                });
+            });
             [self applyFilter];
             [self refreshChannelPreviewSnapshotsForChannels:owned force:YES];
             if([self.tabPage isKindOfClass:ConfigCenterViewController.class])[(ConfigCenterViewController *)self.tabPage reloadProfiles];

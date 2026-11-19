@@ -365,12 +365,24 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
 - (void)updateBufferConfiguration {
     if(!self.config||!self.player)return;
     BOOL constrained=NSProcessInfo.processInfo.lowPowerModeEnabled;
-    double steady=MediaPlaybackForwardBuffer(YES,YES,self.pendingRate,self.stallCount,constrained);
-    int high=2500;
-    if(self.stallCount)high=MIN(8000,high+(int)MIN(self.stallCount,(NSUInteger)3)*1000);
-    CicadaCallVoidInt(self.config,NSSelectorFromString(@"setStartBufferDuration:"),300);
-    CicadaCallVoidInt(self.config,NSSelectorFromString(@"setHighBufferDuration:"),high);
-    CicadaCallVoidInt(self.config,NSSelectorFromString(@"setMaxBufferDuration:"),MAX(high*2,(int)llround(steady*1000)));
+    NSString *lowerURL=self.url.absoluteString.lowercaseString?:@"";
+    BOOL isLikelyLive=(self.duration<=0)||[lowerURL hasPrefix:@"rtmp://"]||[lowerURL hasPrefix:@"rtmps://"]||[lowerURL containsString:@".flv"]||[lowerURL containsString:@"/live/"];
+    if(isLikelyLive){
+        int liveHigh=1500+(int)MIN(self.stallCount,(NSUInteger)3)*700;
+        int liveMax=constrained?8000:12000;
+        CicadaCallVoidInt(self.config,NSSelectorFromString(@"setStartBufferDuration:"),300);
+        CicadaCallVoidInt(self.config,NSSelectorFromString(@"setHighBufferDuration:"),liveHigh);
+        CicadaCallVoidInt(self.config,NSSelectorFromString(@"setMaxBufferDuration:"),MAX(liveHigh*2,liveMax));
+        CicadaCallVoidInt(self.config,NSSelectorFromString(@"setMaxDelayTime:"),3000);
+    }else{
+        double steady=MediaPlaybackForwardBuffer(YES,YES,self.pendingRate,self.stallCount,constrained);
+        int high=3000;
+        if(self.stallCount)high=MIN(8000,high+(int)MIN(self.stallCount,(NSUInteger)3)*1000);
+        int vodMax=constrained?MAX(high*2,(int)llround(steady*1000)):MAX(45000,(int)llround(steady*1500));
+        CicadaCallVoidInt(self.config,NSSelectorFromString(@"setStartBufferDuration:"),500);
+        CicadaCallVoidInt(self.config,NSSelectorFromString(@"setHighBufferDuration:"),high);
+        CicadaCallVoidInt(self.config,NSSelectorFromString(@"setMaxBufferDuration:"),vodMax);
+    }
     CicadaCallVoidObject(self.player,NSSelectorFromString(@"setConfig:"),self.config);
 }
 - (void)start {

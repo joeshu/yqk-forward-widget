@@ -399,14 +399,28 @@
     UIFont *titleFont=[self catalogCardTitleFont];
     UIFont *subtitleFont=[self catalogCardSubtitleFont];
     NSDictionary *channel=ip.item>=0&&ip.item<self.shownChannels.count?self.shownChannels[ip.item]:@{};
-    NSString *name=[channel[@"name"] isKindOfClass:NSString.class]?channel[@"name"]:([channel[@"id"] isKindOfClass:NSString.class]?channel[@"id"]:@"");
-    if([self.favorites containsObject:channel[@"id"]])name=[@"♥ " stringByAppendingString:name];
+    NSString *cid=[channel[@"id"] isKindOfClass:NSString.class]?channel[@"id"]:@"";
+    NSString *name=[channel[@"name"] isKindOfClass:NSString.class]?channel[@"name"]:cid;
+    BOOL fav=[self.favorites containsObject:cid];
+    NSString *epgNow=self.epgCache[cid][@"now"];
+    static NSCache<NSString *, NSValue *> *sizeCache=nil;
+    static dispatch_once_t sizeCacheOnce;
+    dispatch_once(&sizeCacheOnce,^{
+        sizeCache=[NSCache new];
+        sizeCache.countLimit=4096;
+    });
+    NSString *cacheKey=[NSString stringWithFormat:@"%ld|%ld|%.1f|%.1f|%d|%@|%@",(long)itemWidth,(long)columns,titleFont.pointSize,subtitleFont.pointSize,fav?1:0,cid,epgNow?:@""];
+    NSValue *cached=[sizeCache objectForKey:cacheKey];
+    if(cached)return cached.CGSizeValue;
+    if(fav)name=[@"♥ " stringByAppendingString:name];
     CGFloat labelWidth=MAX(1,itemWidth-4);
     CGFloat titleHeight=[self catalogTextHeight:name font:titleFont width:labelWidth maximumLines:2];
     CGFloat subtitleHeight=[self catalogTextHeight:[self catalogSubtitleForChannel:channel] font:subtitleFont width:labelWidth maximumLines:2];
     CGFloat posterHeight=MIN(78,MAX(44,floor(itemWidth*.68)));
     CGFloat height=posterHeight+5+titleHeight+1+subtitleHeight+4;
-    return CGSizeMake(itemWidth,height);
+    CGSize result=CGSizeMake(itemWidth,height);
+    [sizeCache setObject:[NSValue valueWithCGSize:result] forKey:cacheKey];
+    return result;
 }
 - (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView cellForItemAtIndexPath:(NSIndexPath *)ip {
     UICollectionViewCell *cell=[collectionView dequeueReusableCellWithReuseIdentifier:@"channel.card" forIndexPath:ip];

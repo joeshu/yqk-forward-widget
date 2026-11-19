@@ -27,7 +27,7 @@ int main(void){@autoreleasepool{
     id taken=[p takeChannel:@"cctv2"];
     check(taken==first && first.resets==0 && first.delegate==nil,@"handoff keeps prepared item and detaches temporary delegate");
     check([p takeChannel:@"cctv2"]==nil,@"handoff can occur only once");
-    [p prepareChannel:@"cctv3" title:@"CCTV-3"];first=latest;first.completion(YES,nil);drain();now+=16;
+    [p prepareChannel:@"cctv3" title:@"CCTV-3"];first=latest;first.completion(YES,nil);drain();now+=91;
     check([p takeChannel:@"cctv3"]==nil && first.resets==1,@"expired metadata reset instead of played");
     [p prepareChannel:@"cctv2" title:@"CCTV-2"];first=latest;void (^stale)(BOOL,NSError *)=first.completion;
     [p prepareChannel:@"cctv3" title:@"CCTV-3"];MetadataPlayer *second=latest;stale(YES,nil);drain();

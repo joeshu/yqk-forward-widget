@@ -55,7 +55,20 @@
     if(data.length>2&&b[0]==0x1f&&b[1]==0x8b){z_stream stream={0};if(inflateInit2(&stream,15+32)!=Z_OK)goto invalid;stream.next_in=(Bytef *)data.bytes;stream.avail_in=(uInt)data.length;NSMutableData *out=[NSMutableData data];int rc;unsigned char buffer[32768];do{stream.next_out=buffer;stream.avail_out=sizeof(buffer);rc=inflate(&stream,Z_NO_FLUSH);[out appendBytes:buffer length:sizeof(buffer)-stream.avail_out];if(out.length>64*1024*1024){rc=Z_MEM_ERROR;break;}}while(rc==Z_OK);inflateEnd(&stream);if(rc!=Z_STREAM_END)goto invalid;data=out;}
     {@autoreleasepool{XMLTVReader *reader=[XMLTVReader new];NSXMLParser *p=[[NSXMLParser alloc] initWithData:data];p.shouldResolveExternalEntities=NO;p.delegate=reader;
         if(![p parse]||!reader.channels.count)goto invalid;
-        NSMutableDictionary *result=[NSMutableDictionary dictionary];for(NSString *cid in reader.channels){NSArray *rows=[reader.channels[cid] sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *a,NSDictionary *b){return [a[@"start"] compare:b[@"start"]];}];result[cid.lowercaseString]=rows;}
+        NSMutableDictionary *result=[NSMutableDictionary dictionary];
+        NSTimeInterval now=NSDate.date.timeIntervalSince1970;
+        NSTimeInterval windowStart=now-6*3600,windowEnd=now+48*3600;
+        for(NSString *cid in reader.channels){
+            NSArray *rawRows=reader.channels[cid];
+            NSMutableArray *windowed=[NSMutableArray array];
+            for(NSDictionary *row in rawRows){
+                NSTimeInterval s=[row[@"start"] doubleValue],e=[row[@"stop"] doubleValue];
+                if(e>=windowStart && s<=windowEnd)[windowed addObject:row];
+            }
+            NSArray *chosen=windowed.count?windowed:rawRows;
+            NSArray *rows=[chosen sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *a,NSDictionary *b){return [a[@"start"] compare:b[@"start"]];}];
+            result[cid.lowercaseString]=rows;
+        }
         for(NSString *alias in reader.aliases)if(!result[alias])result[alias]=result[[reader.aliases[alias] lowercaseString]];
         return result;}}
 invalid:

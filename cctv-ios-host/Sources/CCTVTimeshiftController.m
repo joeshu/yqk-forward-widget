@@ -188,7 +188,12 @@ static NSString *const CCTVTimeshiftErrorDomain = @"CCTVHostTimeshift";
             if (delivered) return;
             delivered = YES;
             if (!error) {
-                if (owner.copyrightCache.count >= 64) [owner.copyrightCache removeAllObjects];
+                if (owner.copyrightCache.count >= 64) {
+                    NSArray *sortedKeys = [owner.copyrightCache keysSortedByValueUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+                        return [a[@"at"] ?: @0 compare:b[@"at"] ?: @0];
+                    }];
+                    [owner.copyrightCache removeObjectsForKeys:[sortedKeys subarrayWithRange:NSMakeRange(0, MAX((NSUInteger)1, sortedKeys.count / 4))]];
+                }
                 owner.copyrightCache[key] = @{@"public": @(allowed), @"at": @(NSProcessInfo.processInfo.systemUptime)};
             }
         }

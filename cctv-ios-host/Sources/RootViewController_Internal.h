@@ -962,6 +962,7 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 - (void)hibernateExcessBackgroundVODServicesKeepingID:(NSString *)activeServiceID;
 - (void)completeServiceStopForIdentifier:(NSString *)serviceID;
 - (void)showServiceError:(NSString *)message;
+- (void)refreshVisibleChannelSelectionFromID:(NSString *)previousID toID:(NSString *)currentID;
 - (void)stopBuiltinPlugin;
 - (void)startBuiltinPlugin;
 @end

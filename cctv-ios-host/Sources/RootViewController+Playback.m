@@ -105,9 +105,10 @@
     self.currentRemoteHeaders = @{};
     self.playerExpanded=YES;
     [self.view setNeedsLayout];
+    NSString *previousChannelID = self.channelID;
     self.channelID = cid;
     self.channelName = ch[@"name"] ?: cid;
-    [self.channelGrid reloadData];[self.table reloadData];
+    [self refreshVisibleChannelSelectionFromID:previousChannelID toID:cid];
     self.routeName = route ? [NSString stringWithFormat:@"%@ · 自选地址", [route[@"provider"] uppercaseString]] : @"自动";
     if(self.playerTabs.selectedSegmentIndex!=3)self.playerTabs.selectedSegmentIndex=1;
     [self updatePlayerChannelLogoForChannel:ch];
@@ -126,7 +127,6 @@
     self.infoLabel.hidden = NO;
     self.infoLabel.text = @"";
     [self.spinner startAnimating];
-    [self reloadActiveCatalogView];
     [self log:@"起播 %@ (%@) 线路=%@ · Python %@ · variant %@",self.channelName,cid,self.routeName,PyHost.running?@"running":@"idle",[NSBundle.mainBundle objectForInfoDictionaryKey:@"CCTVHostBuildVariant"]?:@"full"];
 
     [self stopPlayback];
@@ -143,7 +143,13 @@
             if(!owner || generation!=owner.playbackGeneration || ![owner.channelID isEqual:cid] || ![owner.requestedNativeRoute isEqual:route])return;
             owner.nativeRouteProbe=nil;
             if(!owner.plainRouteCache)owner.plainRouteCache=[NSMutableDictionary dictionary];
-            if(owner.plainRouteCache.count>=64)[owner.plainRouteCache removeAllObjects];
+            if(owner.plainRouteCache.count>=64){
+                NSArray *sortedKeys=[owner.plainRouteCache keysSortedByValueUsingComparator:^NSComparisonResult(NSDictionary *a,NSDictionary *b){
+                    return [a[@"at"] compare:b[@"at"]];
+                }];
+                NSUInteger evictCount=MAX((NSUInteger)1,sortedKeys.count/4);
+                [owner.plainRouteCache removeObjectsForKeys:[sortedKeys subarrayWithRange:NSMakeRange(0,evictCount)]];
+            }
             owner.plainRouteCache[selectedURL]=@{@"plain":@(plain),@"at":@(CACurrentMediaTime())};
             if(plain){
                 [owner log:@"自选线路明文 HLS 清单可读，使用 AVPlayer；等待实际视频首帧"];
@@ -602,18 +608,22 @@
 - (void)startRemoteURL:(NSString *)url generation:(NSUInteger)generation {
     if(generation!=self.playbackGeneration)return;
     [[PlaybackCoordinator shared] acquireSession:(id<PlaybackSession>)self];
-    NSDictionary *descriptor=@{@"url":url?:@""};
-    if(MediaPlaybackDecodeRouteNextForResult(descriptor,0)==MediaPlaybackDecodeRouteCicadaPlayer&&[self startRemoteCicada:url generation:generation])return;
     NSDictionary *headers=self.nativePlainRouteActive?@{@"User-Agent":@"qqlive",@"Referer":@"https://live.cctv.cn/"}:(self.currentRemoteHeaders?:@{});
+    NSMutableDictionary *descriptor=[@{@"url":url?:@""} mutableCopy];
+    if(headers.count)descriptor[@"headers"]=headers;
+    NSDictionary *telemetry=self.channelID.length?self.channelTelemetryStore[self.channelID]:nil;
+    if([telemetry[@"contentType"] isKindOfClass:NSString.class]&&[telemetry[@"contentType"] length])descriptor[@"probedMIME"]=telemetry[@"contentType"];
+    if([telemetry[@"headerBytes"] isKindOfClass:NSData.class])descriptor[@"headerBytes"]=telemetry[@"headerBytes"];
+    if(MediaPlaybackDecodeRouteNextForResult(descriptor,0)==MediaPlaybackDecodeRouteCicadaPlayer&&[self startRemoteCicada:url generation:generation])return;
     AVURLAsset *asset=[AVURLAsset URLAssetWithURL:[NSURL URLWithString:url] options:headers.count?@{@"AVURLAssetHTTPHeaderFieldsKey":headers,@"AVURLAssetPreferPreciseDurationAndTimingKey":@NO}:@{@"AVURLAssetPreferPreciseDurationAndTimingKey":@NO}];
-    AVPlayerItem *item=[AVPlayerItem playerItemWithAsset:asset];item.preferredForwardBufferDuration=0;
+    AVPlayerItem *item=[AVPlayerItem playerItemWithAsset:asset];item.preferredForwardBufferDuration=1.0;
     // 直播 AVPlayer 回退路径也按默认清晰度偏好约束 HLS 自适应码率，
     // 与影视播放页的映射一致（smooth 1.5M / hd 4M / uhd 8M，auto 不限）。
     NSString *preferredQuality=[NSUserDefaults.standardUserDefaults stringForKey:@"cctv.mediaPreferredQuality.v1"]?:@"auto";
     if([preferredQuality isEqualToString:@"smooth"])item.preferredPeakBitRate=1500000;
     else if([preferredQuality isEqualToString:@"hd"])item.preferredPeakBitRate=4000000;
     else if([preferredQuality isEqualToString:@"uhd"])item.preferredPeakBitRate=8000000;
-    self.avPlayer=[AVPlayer playerWithPlayerItem:item];self.avPlayer.automaticallyWaitsToMinimizeStalling=YES;self.avPlayer.allowsExternalPlayback=YES;self.avPlayer.usesExternalPlaybackWhileExternalScreenIsActive=YES;self.remotePlaybackWanted=YES;
+    self.avPlayer=[AVPlayer playerWithPlayerItem:item];self.avPlayer.automaticallyWaitsToMinimizeStalling=NO;self.avPlayer.allowsExternalPlayback=YES;self.avPlayer.usesExternalPlaybackWhileExternalScreenIsActive=YES;self.remotePlaybackWanted=YES;
     self.avLayer=[AVPlayerLayer playerLayerWithPlayer:self.avPlayer];self.avLayer.frame=self.playerBox.bounds;self.avLayer.videoGravity=AVLayerVideoGravityResizeAspect;[self.playerBox.layer insertSublayer:self.avLayer atIndex:0];
     [item addObserver:self forKeyPath:@"status" options:NSKeyValueObservingOptionInitial|NSKeyValueObservingOptionNew context:kAVItemStatusContext];
     self.avKeepUpObserved=YES;
@@ -622,7 +632,14 @@
     [self.avLayer addObserver:self forKeyPath:@"readyForDisplay" options:NSKeyValueObservingOptionInitial|NSKeyValueObservingOptionNew context:kAVLayerFrameContext];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(avItemFailed:) name:AVPlayerItemFailedToPlayToEndTimeNotification object:item];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(avItemStalled:) name:AVPlayerItemPlaybackStalledNotification object:item];
-    [self recordStartupStage:@"prepareCall"];[self.avPlayer play];__weak typeof(self) w=self;
+    [self recordStartupStage:@"prepareCall"];
+    if(@available(iOS 10.0,*))[self.avPlayer playImmediatelyAtRate:1.0];
+    else [self.avPlayer play];
+    __weak typeof(self) w=self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC),dispatch_get_main_queue(),^{
+        if(generation!=w.playbackGeneration||item!=w.avPlayer.currentItem||!w.firstRender)return;
+        item.preferredForwardBufferDuration=4.0;
+    });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,12*NSEC_PER_SEC),dispatch_get_main_queue(), ^{
         // A terminal AVPlayerItem failure has its own recovery path. Do not let
         // the first-frame watchdog overwrite that result with a second, false
@@ -956,7 +973,7 @@
         else [self log:@"首帧渲染 %.2fs · %@", self.firstFrameSeconds,self.startupTrace.summary];
         [self log:@"SDK 报告节点 %@ · 请求线路 %@",[NativeCDNPreference observedCDNDescriptionForPlayer:self.currentPlayer],self.routeName?:@"自动"];
         [self updateNowPlaying];
-        [self.channelGrid reloadData];[self.table reloadData];
+        [self refreshVisibleChannelSelectionFromID:nil toID:self.channelID];
         [self refreshNowNext];
         [self restartEPGTimer];
         if([self.pendingNativeReplayProgram[@"channelID"] isEqualToString:self.channelID]){
@@ -970,7 +987,43 @@
             });
         }
         NSUInteger generation=self.playbackGeneration;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,3*NSEC_PER_SEC),dispatch_get_main_queue(),^{[self prepareNextNativeChannelForGeneration:generation];});
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(0.8*NSEC_PER_SEC)),dispatch_get_main_queue(),^{[self prepareNextNativeChannelForGeneration:generation];});
+    }
+}
+
+- (void)refreshVisibleChannelSelectionFromID:(NSString *)previousID toID:(NSString *)currentID {
+    if (!self.channelGrid && !self.table) return;
+    NSMutableArray<NSIndexPath *> *gridPaths = [NSMutableArray array];
+    for (NSIndexPath *ip in self.channelGrid.indexPathsForVisibleItems ?: @[]) {
+        if ((NSUInteger)ip.item < self.shownChannels.count) {
+            NSString *cid = self.shownChannels[ip.item][@"id"];
+            if ((previousID.length && [cid isEqualToString:previousID]) ||
+                (currentID.length && [cid isEqualToString:currentID])) {
+                [gridPaths addObject:ip];
+            }
+        }
+    }
+    if (gridPaths.count) {
+        [UIView performWithoutAnimation:^{
+            [self.channelGrid reloadItemsAtIndexPaths:gridPaths];
+        }];
+    } else if (self.channelGrid.window && self.shownChannels.count <= 40) {
+        [self.channelGrid reloadData];
+    }
+    NSMutableArray<NSIndexPath *> *tablePaths = [NSMutableArray array];
+    for (NSIndexPath *ip in self.table.indexPathsForVisibleRows ?: @[]) {
+        if ((NSUInteger)ip.row < self.shownChannels.count) {
+            NSString *cid = self.shownChannels[ip.row][@"id"];
+            if ((previousID.length && [cid isEqualToString:previousID]) ||
+                (currentID.length && [cid isEqualToString:currentID])) {
+                [tablePaths addObject:ip];
+            }
+        }
+    }
+    if (tablePaths.count) {
+        [UIView performWithoutAnimation:^{
+            [self.table reloadRowsAtIndexPaths:tablePaths withRowAnimation:UITableViewRowAnimationNone];
+        }];
     }
 }
 
@@ -993,8 +1046,13 @@
 
 - (void)prepareNextNativeChannelForGeneration:(NSUInteger)generation {
     if(generation!=self.playbackGeneration || !self.firstRender || self.nativeTimeShiftActive || !self.currentPlayer || self.avPlayer || self.directNativeRouteActive || !CCTVBoolPreference(@"preloadNativeChannel",YES) || UIApplication.sharedApplication.applicationState!=UIApplicationStateActive)return;
+    NSArray *sourceList=self.shownChannels.count>=2?self.shownChannels:self.allChannels;
     NSMutableArray *native=[NSMutableArray array];
-    for(NSDictionary *channel in self.allChannels)if(![channel[@"remoteURL"] length] && ![ProfileStore isHTTP:channel[@"id"]])[native addObject:channel];
+    for(NSDictionary *channel in sourceList)if(![channel[@"remoteURL"] length] && ![ProfileStore isHTTP:channel[@"id"]])[native addObject:channel];
+    if(native.count<2 && sourceList!=self.allChannels){
+        [native removeAllObjects];
+        for(NSDictionary *channel in self.allChannels)if(![channel[@"remoteURL"] length] && ![ProfileStore isHTTP:channel[@"id"]])[native addObject:channel];
+    }
     NSUInteger index=[native indexOfObjectPassingTest:^BOOL(NSDictionary *channel,NSUInteger i,BOOL *stop){return [channel[@"id"] isEqualToString:self.channelID];}];
     if(index==NSNotFound || native.count<2)return;
     NSDictionary *next=native[(index+1)%native.count];[self.nativePreloader prepareChannel:next[@"id"] title:next[@"name"]];

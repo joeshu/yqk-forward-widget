@@ -535,6 +535,17 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 -  (NSString *)prefetchIdentityForEpisode:(NSDictionary *)episode;
 @end
 
+@interface CCTVSnifferMessageProxy : NSObject <WKScriptMessageHandler>
+@property(nonatomic,copy) void (^onMessage)(NSString *url);
+@end
+@implementation CCTVSnifferMessageProxy
+- (void)userContentController:(WKUserContentController *)userContentController didReceiveScriptMessage:(WKScriptMessage *)message {
+    if([message.body isKindOfClass:NSString.class]&&[(NSString *)message.body length]&&self.onMessage){
+        self.onMessage((NSString *)message.body);
+    }
+}
+@end
+
 @implementation MediaPlaybackViewController
 @synthesize playbackWantsPlayback = _playbackWantsPlayback;
 @synthesize playbackSuspendedForVisibility = _playbackSuspendedForVisibility;
@@ -1574,6 +1585,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     if(web){
         [web stopLoading];
         [web evaluateJavaScript:@"try{document.querySelectorAll('video,audio').forEach(function(e){e.muted=true;e.pause();e.removeAttribute('src');e.load();});}catch(e){}" completionHandler:nil];
+        [web.configuration.userContentController removeScriptMessageHandlerForName:@"cctvStreamCaptured"];
         [web.configuration.userContentController removeAllUserScripts];
         [web loadHTMLString:@"" baseURL:nil];
         [web removeFromSuperview];
@@ -1789,6 +1801,23 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
     if(platformRef.length&&!headers[@"Referer"])headers[@"Referer"]=platformRef;
     __weak typeof(self) weakSelf=self;
     __block BOOL vipResolutionPending=NO;
+    __block BOOL sniffResolved=NO;
+    __block BOOL webSnifferStarted=NO;
+    void (^deliverSniffedURL)(NSString *) = ^(NSString *found) {
+        MediaPlaybackViewController *owner=weakSelf;
+        if(!owner||owner.playerGeneration!=playerGeneration||sniffResolved||!found.length)return;
+        if(![found hasPrefix:@"http://"]&&![found hasPrefix:@"https://"])return;
+        sniffResolved=YES;
+        [owner teardownHiddenStreamSniffer];
+        NSMutableDictionary *resolved=[result mutableCopy]?:[NSMutableDictionary dictionary];
+        resolved[@"url"]=found;resolved[@"originalURL"]=found;
+        resolved[@"_nativeSniffed"]=@YES;resolved[@"requiresWebPlayback"]=@NO;resolved[@"parse"]=@0;resolved[@"jx"]=@0;
+        resolved[@"directMedia"]=@YES;resolved[@"nativePlayable"]=@YES;
+        NSMutableDictionary *mergedHeaders=[headers mutableCopy]?:[NSMutableDictionary dictionary];
+        if(!mergedHeaders[@"Referer"]&&raw.length)mergedHeaders[@"Referer"]=raw;
+        if(mergedHeaders.count)resolved[@"headers"]=mergedHeaders.copy;
+        [owner playResult:resolved.copy];
+    };
     BOOL shouldAttemptNativeStreamResolver=MediaPlaybackIsCommercialVIPURL(raw)||[result[@"parse"] integerValue]>0||[result[@"requiresWebPlayback"] boolValue];
     if(shouldAttemptNativeStreamResolver){
         NSString *vodTitle=[self.context[@"detail"][@"name"] isKindOfClass:NSString.class]&&[self.context[@"detail"][@"name"] length]?self.context[@"detail"][@"name"]:([self.context[@"item"][@"name"] isKindOfClass:NSString.class]?self.context[@"item"][@"name"]:@"");
@@ -1797,28 +1826,76 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
         vipResolutionPending=YES;
         MediaPlaybackResolveVIPNativeStream(raw,vodTitle,self.episodeIndex,epName,^(NSString *vipStream){
             MediaPlaybackViewController *owner=weakSelf;
-            if(!owner||owner.playerGeneration!=playerGeneration)return;
+            if(!owner||owner.playerGeneration!=playerGeneration||sniffResolved)return;
             vipResolutionPending=NO;
             if(!vipStream.length){
                 if(!owner.streamSniffTask&&!owner.hiddenSnifferWebView)[owner finishNativeStreamSniffFailureForGeneration:playerGeneration];
                 return;
             }
-            [owner teardownHiddenStreamSniffer];
-            NSMutableDictionary *resolved=[result mutableCopy]?:[NSMutableDictionary dictionary];
-            resolved[@"url"]=vipStream;resolved[@"originalURL"]=vipStream;
-            resolved[@"_nativeSniffed"]=@YES;resolved[@"requiresWebPlayback"]=@NO;resolved[@"parse"]=@0;resolved[@"jx"]=@0;
-            resolved[@"directMedia"]=@YES;resolved[@"nativePlayable"]=@YES;
-            if(headers.count)resolved[@"headers"]=headers.copy;
-            [owner playResult:resolved.copy];
+            deliverSniffedURL(vipStream);
         });
     }
     NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:targetURL cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:3.5];
     for(NSString *k in headers)[req setValue:headers[k] forHTTPHeaderField:k];
     if(![req valueForHTTPHeaderField:@"User-Agent"])[req setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
+    void (^launchHiddenWebSniffer)(void) = ^{
+        MediaPlaybackViewController *owner=weakSelf;
+        if(!owner||owner.playerGeneration!=playerGeneration||sniffResolved||webSnifferStarted)return;
+        webSnifferStarted=YES;
+        WKWebViewConfiguration *cfg=[WKWebViewConfiguration new];
+        cfg.websiteDataStore=WKWebsiteDataStore.nonPersistentDataStore;
+        cfg.allowsInlineMediaPlayback=YES;
+        cfg.mediaTypesRequiringUserActionForPlayback=WKAudiovisualMediaTypeNone;
+        CCTVSnifferMessageProxy *proxy=[CCTVSnifferMessageProxy new];
+        proxy.onMessage=^(NSString *capturedURL){
+            deliverSniffedURL(capturedURL);
+        };
+        [cfg.userContentController addScriptMessageHandler:proxy name:@"cctvStreamCaptured"];
+        NSString *hookSource=@"(function(){if(window.__cctvHooked)return;window.__cctvHooked=true;window.__cctvCapturedStreamURL='';function muteAll(){try{document.querySelectorAll('video,audio').forEach(function(v){v.muted=true;v.defaultMuted=true;v.volume=0;});}catch(e){}}function isAdURL(u){return /(?:doubleclick|googlesyndication|adsystem|adservice|cnzz|hm\\.baidu|miaozhen|tanx)\\./i.test(u);}function emit(full){if(!full||isAdURL(full))return;if(window.__cctvCapturedStreamURL===full)return;window.__cctvCapturedStreamURL=full;try{if(window.webkit&&window.webkit.messageHandlers&&window.webkit.messageHandlers.cctvStreamCaptured)window.webkit.messageHandlers.cctvStreamCaptured.postMessage(full);}catch(e){}}function check(u){muteAll();if(typeof u==='string'&&/https?:\\/\\/[^\\s'\"]+\\.(?:m3u8|mp4|flv|mpd)(?:\\?[^\\s'\"]*)?/i.test(u)){try{emit(new URL(u,location.href).href);}catch(e){emit(u);}}}document.addEventListener('play',muteAll,true);const origOpen=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u){check(u);return origOpen.apply(this,arguments);};if(window.fetch){const origFetch=window.fetch;window.fetch=function(i){check(typeof i==='string'?i:(i&&i.url));return origFetch.apply(this,arguments);};}try{const d=Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype,'src');if(d&&d.set)Object.defineProperty(HTMLMediaElement.prototype,'src',{set:function(v){check(v);return d.set.call(this,v);}});const origSetAttr=Element.prototype.setAttribute;Element.prototype.setAttribute=function(k,v){if(typeof k==='string'&&/^(?:src|data-src)$/i.test(k))check(v);return origSetAttr.apply(this,arguments);};}catch(e){}})();";
+        WKUserScript *hookScript=[[WKUserScript alloc] initWithSource:hookSource injectionTime:WKUserScriptInjectionTimeAtDocumentStart forMainFrameOnly:NO];
+        [cfg.userContentController addUserScript:hookScript];
+        WKWebView *hiddenWeb=[[WKWebView alloc] initWithFrame:CGRectMake(0,0,1,1) configuration:cfg];
+        hiddenWeb.hidden=YES;hiddenWeb.alpha=0.0;hiddenWeb.userInteractionEnabled=NO;
+        if(headers[@"User-Agent"])hiddenWeb.customUserAgent=headers[@"User-Agent"];
+        [owner.view addSubview:hiddenWeb];
+        owner.hiddenSnifferWebView=hiddenWeb;
+        [hiddenWeb loadRequest:req];
+        NSString *js=@"(function scan(w){if(!w)return '';try{if(w.__cctvCapturedStreamURL&&/^https?:/i.test(w.__cctvCapturedStreamURL))return w.__cctvCapturedStreamURL;}catch(e){}let out=[];try{const v=w.document&&w.document.querySelector('video,source');if(v&&(v.currentSrc||v.src)&&/^https?:/i.test(v.currentSrc||v.src))return v.currentSrc||v.src;for(const k of Object.keys(w)){if(!/^player_[a-z0-9_]+$/i.test(k)&&!['videoInfo','playInfo','MacPlayerConfig','ConFig','art','dp'].includes(k))continue;const p=w[k];if(!p||typeof p!=='object')continue;let u=p.url||p.playUrl||(p.option&&p.option.url);if(typeof u!=='string')continue;try{if(+p.encrypt===1)u=decodeURIComponent(u);else if(+p.encrypt===2||+p.encrypt===3)u=decodeURIComponent(atob(u));u=new URL(u,w.location.href).href;}catch(e){continue;}if(/^https?:/i.test(u))out.push(u);}for(let i=0;w.frames&&i<w.frames.length;i++){try{const sub=scan(w.frames[i]);if(sub)return sub;}catch(e){}}}catch(e){}out=[...new Set(out)];return out.length>=1?out[0]:'';})(window)";
+        for(NSNumber *delayObj in @[@0.45,@1.2,@2.4]){
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(delayObj.doubleValue*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
+                MediaPlaybackViewController *inner=weakSelf;
+                if(!inner||inner.playerGeneration!=playerGeneration||sniffResolved||!inner.hiddenSnifferWebView)return;
+                [inner.hiddenSnifferWebView evaluateJavaScript:js completionHandler:^(id val,NSError *jsErr){
+                    NSString *found=[val isKindOfClass:NSString.class]?val:@"";
+                    if(found.length)deliverSniffedURL(found);
+                }];
+            });
+        }
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(3.2*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
+            MediaPlaybackViewController *inner=weakSelf;
+            if(!inner||inner.playerGeneration!=playerGeneration||sniffResolved||!inner.hiddenSnifferWebView)return;
+            [inner teardownHiddenStreamSniffer];
+            if(!vipResolutionPending)[inner finishNativeStreamSniffFailureForGeneration:playerGeneration];
+        });
+    };
     MediaPlaybackSniffFetch *sniffFetcher=[MediaPlaybackSniffFetch new];self.streamSniffTask=sniffFetcher;
+    // Hedged sniffing: if HTTP lightweight fetch takes > 800ms, race hidden WKWebView in parallel.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(0.8*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
+        MediaPlaybackViewController *owner=weakSelf;
+        if(!owner||owner.playerGeneration!=playerGeneration||sniffResolved||!owner.streamSniffTask)return;
+        launchHiddenWebSniffer();
+    });
     [sniffFetcher startWithRequest:req completion:^(NSData *data,NSURLResponse *response,NSError *err){
         NSString *extracted=@"";
-        if(err){dispatch_async(dispatch_get_main_queue(),^{MediaPlaybackViewController *owner=weakSelf;if(!owner||owner.playerGeneration!=playerGeneration)return;owner.streamSniffTask=nil;if(!vipResolutionPending)[owner finishNativeStreamSniffFailureForGeneration:playerGeneration];});return;}
+        if(err){
+            dispatch_async(dispatch_get_main_queue(),^{
+                MediaPlaybackViewController *owner=weakSelf;
+                if(!owner||owner.playerGeneration!=playerGeneration||sniffResolved)return;
+                owner.streamSniffTask=nil;
+                if(!webSnifferStarted&&!vipResolutionPending)[owner finishNativeStreamSniffFailureForGeneration:playerGeneration];
+            });
+            return;
+        }
         NSString *mime=response.MIMEType.lowercaseString?:@"";
         if([mime hasPrefix:@"video/"]||[mime hasPrefix:@"audio/"]||[mime containsString:@"mpegurl"]||[mime containsString:@"dash+xml"]){
             extracted=response.URL.absoluteString?:raw;
@@ -1832,62 +1909,13 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
         }
         dispatch_async(dispatch_get_main_queue(),^{
             MediaPlaybackViewController *owner=weakSelf;
-            if(!owner||owner.playerGeneration!=playerGeneration)return;
+            if(!owner||owner.playerGeneration!=playerGeneration||sniffResolved)return;
             owner.streamSniffTask=nil;
             if(extracted.length){
-                NSMutableDictionary *resolved=[result mutableCopy]?:[NSMutableDictionary dictionary];
-                resolved[@"url"]=extracted;resolved[@"originalURL"]=extracted;
-                resolved[@"_nativeSniffed"]=@YES;resolved[@"requiresWebPlayback"]=@NO;resolved[@"parse"]=@0;resolved[@"jx"]=@0;
-                resolved[@"directMedia"]=@YES;resolved[@"nativePlayable"]=@YES;
-                NSMutableDictionary *mergedHeaders=[headers mutableCopy]?:[NSMutableDictionary dictionary];
-                if(!mergedHeaders[@"Referer"]&&raw.length)mergedHeaders[@"Referer"]=raw;
-                if(mergedHeaders.count)resolved[@"headers"]=mergedHeaders.copy;
-                [owner playResult:resolved.copy];
+                deliverSniffedURL(extracted);
                 return;
             }
-            // Offscreen hidden WKWebView sniffer (never shown to user) for JS-rendered streams
-            WKWebViewConfiguration *cfg=[WKWebViewConfiguration new];
-            cfg.websiteDataStore=WKWebsiteDataStore.nonPersistentDataStore;
-            cfg.allowsInlineMediaPlayback=YES;
-            cfg.mediaTypesRequiringUserActionForPlayback=WKAudiovisualMediaTypeNone;
-            NSString *hookSource=@"(function(){if(window.__cctvHooked)return;window.__cctvHooked=true;window.__cctvCapturedStreamURL='';function muteAll(){try{document.querySelectorAll('video,audio').forEach(function(v){v.muted=true;v.defaultMuted=true;v.volume=0;});}catch(e){}}function isAdURL(u){return /(?:doubleclick|googlesyndication|adsystem|adservice|cnzz|hm\\.baidu|miaozhen|tanx)\\./i.test(u);}function check(u){muteAll();if(typeof u==='string'&&/https?:\\/\\/[^\\s'\"]+\\.(?:m3u8|mp4|flv|mpd)(?:\\?[^\\s'\"]*)?/i.test(u)){try{var full=new URL(u,location.href).href;if(!isAdURL(full))window.__cctvCapturedStreamURL=full;}catch(e){if(!isAdURL(u))window.__cctvCapturedStreamURL=u;}}}document.addEventListener('play',muteAll,true);const origOpen=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u){check(u);return origOpen.apply(this,arguments);};if(window.fetch){const origFetch=window.fetch;window.fetch=function(i){check(typeof i==='string'?i:(i&&i.url));return origFetch.apply(this,arguments);};}try{const d=Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype,'src');if(d&&d.set)Object.defineProperty(HTMLMediaElement.prototype,'src',{set:function(v){check(v);return d.set.call(this,v);}});const origSetAttr=Element.prototype.setAttribute;Element.prototype.setAttribute=function(k,v){if(typeof k==='string'&&/^(?:src|data-src)$/i.test(k))check(v);return origSetAttr.apply(this,arguments);};}catch(e){}})();";
-            WKUserScript *hookScript=[[WKUserScript alloc] initWithSource:hookSource injectionTime:WKUserScriptInjectionTimeAtDocumentStart forMainFrameOnly:NO];
-            [cfg.userContentController addUserScript:hookScript];
-            WKWebView *hiddenWeb=[[WKWebView alloc] initWithFrame:CGRectMake(0,0,1,1) configuration:cfg];
-            hiddenWeb.hidden=YES;hiddenWeb.alpha=0.0;hiddenWeb.userInteractionEnabled=NO;
-            if(headers[@"User-Agent"])hiddenWeb.customUserAgent=headers[@"User-Agent"];
-            [owner.view addSubview:hiddenWeb];
-            owner.hiddenSnifferWebView=hiddenWeb;
-            [hiddenWeb loadRequest:req];
-            NSString *js=@"(function scan(w){if(!w)return '';try{if(w.__cctvCapturedStreamURL&&/^https?:/i.test(w.__cctvCapturedStreamURL))return w.__cctvCapturedStreamURL;}catch(e){}let out=[];try{const v=w.document&&w.document.querySelector('video,source');if(v&&(v.currentSrc||v.src)&&/^https?:/i.test(v.currentSrc||v.src))return v.currentSrc||v.src;for(const k of Object.keys(w)){if(!/^player_[a-z0-9_]+$/i.test(k)&&!['videoInfo','playInfo','MacPlayerConfig','ConFig','art','dp'].includes(k))continue;const p=w[k];if(!p||typeof p!=='object')continue;let u=p.url||p.playUrl||(p.option&&p.option.url);if(typeof u!=='string')continue;try{if(+p.encrypt===1)u=decodeURIComponent(u);else if(+p.encrypt===2||+p.encrypt===3)u=decodeURIComponent(atob(u));u=new URL(u,w.location.href).href;}catch(e){continue;}if(/^https?:/i.test(u))out.push(u);}for(let i=0;w.frames&&i<w.frames.length;i++){try{const sub=scan(w.frames[i]);if(sub)return sub;}catch(e){}}}catch(e){}out=[...new Set(out)];return out.length>=1?out[0]:'';})(window)";
-            for(NSNumber *delayObj in @[@0.2,@0.45,@1.1,@2.0,@3.0]){
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(delayObj.doubleValue*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
-                    MediaPlaybackViewController *inner=weakSelf;
-                    if(!inner||inner.playerGeneration!=playerGeneration||!inner.hiddenSnifferWebView)return;
-                    [inner.hiddenSnifferWebView evaluateJavaScript:js completionHandler:^(id val,NSError *jsErr){
-                        MediaPlaybackViewController *strongInner=weakSelf;
-                        if(!strongInner||strongInner.playerGeneration!=playerGeneration||!strongInner.hiddenSnifferWebView)return;
-                        NSString *found=[val isKindOfClass:NSString.class]?val:@"";
-                        if(found.length&&([found hasPrefix:@"http://"]||[found hasPrefix:@"https://"])){
-                            [strongInner teardownHiddenStreamSniffer];
-                            NSMutableDictionary *resolved=[result mutableCopy]?:[NSMutableDictionary dictionary];
-                            resolved[@"url"]=found;resolved[@"originalURL"]=found;
-                            resolved[@"_nativeSniffed"]=@YES;resolved[@"requiresWebPlayback"]=@NO;resolved[@"parse"]=@0;resolved[@"jx"]=@0;
-                            resolved[@"directMedia"]=@YES;resolved[@"nativePlayable"]=@YES;
-                            NSMutableDictionary *mergedHeaders=[headers mutableCopy]?:[NSMutableDictionary dictionary];
-                            if(!mergedHeaders[@"Referer"]&&raw.length)mergedHeaders[@"Referer"]=raw;
-                            if(mergedHeaders.count)resolved[@"headers"]=mergedHeaders.copy;
-                            [strongInner playResult:resolved.copy];
-                        }
-                    }];
-                });
-            }
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(3.2*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
-                MediaPlaybackViewController *inner=weakSelf;
-                if(!inner||inner.playerGeneration!=playerGeneration||!inner.hiddenSnifferWebView)return;
-                [inner teardownHiddenStreamSniffer];
-                if(!vipResolutionPending)[inner finishNativeStreamSniffFailureForGeneration:playerGeneration];
-            });
+            launchHiddenWebSniffer();
         });
     }];
 }
@@ -2005,7 +2033,7 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
     [self activateBackgroundAudioSessionIfNeeded];
     if(!self.player){self.player=[AVPlayer playerWithPlayerItem:item];[self.player addObserver:self forKeyPath:@"timeControlStatus" options:NSKeyValueObservingOptionInitial|NSKeyValueObservingOptionNew context:CCTVPlayerTimeControlContext];self.observingPlayer=YES;}else[self.player replaceCurrentItemWithPlayerItem:item];
     if(@available(iOS 15.0,*))self.player.audiovisualBackgroundPlaybackPolicy=AVPlayerAudiovisualBackgroundPlaybackPolicyContinuesIfPossible;
-    self.observedItem=item;[item addObserver:self forKeyPath:@"status" options:NSKeyValueObservingOptionInitial|NSKeyValueObservingOptionNew context:CCTVPlayerItemStatusContext];self.player.automaticallyWaitsToMinimizeStalling=YES;MediaPlaybackSetDefaultRate(self.player,(float)([NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaPlaybackRate"]?[NSUserDefaults.standardUserDefaults doubleForKey:@"cctv.mediaPlaybackRate"]:1.0));self.playerController.videoGravity=[NSUserDefaults.standardUserDefaults stringForKey:@"cctv.mediaVideoGravity"]?:AVLayerVideoGravityResizeAspect;BOOL attachViewPlayer=(UIApplication.sharedApplication.applicationState!=UIApplicationStateBackground||self.pictureInPictureActive);self.playerController.player=attachViewPlayer?self.player:nil;self.playbackOptionsItem.menu=[self playbackOptionsMenu];[self updateEstimatedThroughput];[self installProgressObserverIfNeeded];[self updateEpisodeTitle];
+    self.observedItem=item;[item addObserver:self forKeyPath:@"status" options:NSKeyValueObservingOptionInitial|NSKeyValueObservingOptionNew context:CCTVPlayerItemStatusContext];self.player.automaticallyWaitsToMinimizeStalling=!fastStartup;MediaPlaybackSetDefaultRate(self.player,(float)([NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaPlaybackRate"]?[NSUserDefaults.standardUserDefaults doubleForKey:@"cctv.mediaPlaybackRate"]:1.0));self.playerController.videoGravity=[NSUserDefaults.standardUserDefaults stringForKey:@"cctv.mediaVideoGravity"]?:AVLayerVideoGravityResizeAspect;BOOL attachViewPlayer=(UIApplication.sharedApplication.applicationState!=UIApplicationStateBackground||self.pictureInPictureActive);self.playerController.player=attachViewPlayer?self.player:nil;self.playbackOptionsItem.menu=[self playbackOptionsMenu];[self updateEstimatedThroughput];[self installProgressObserverIfNeeded];[self updateEpisodeTitle];
     __weak typeof(self) weakSelf=self;dispatch_async(dispatch_get_main_queue(),^{MediaPlaybackViewController *owner=weakSelf;if(owner&&playerGeneration==owner.playerGeneration)[owner observePlayerLayerIfAvailable];});
     if(!self.resumePromptPending&&!self.pendingPlaybackSeekTime){if(!self.playbackSuspendedForVisibility&&self.playbackWantsPlayback)[self.player play];}[self watchAVPlayerFirstFrameForItem:item generation:playerGeneration url:url sourceURL:sourceURL];
 }

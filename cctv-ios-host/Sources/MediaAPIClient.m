@@ -811,10 +811,14 @@ static NSDictionary *MediaJARBridgeJSONDictionary(id raw) {
     }
     return @{};
 }
+static NSString * const MediaJARBridgeMirrorDefaultsKey = @"cctv.jarBridgeMirrorCache.v1";
 static NSMutableDictionary<NSString *,NSString *> *MediaJARBridgeMirrorCache(void) {
     static NSMutableDictionary<NSString *,NSString *> *cache=nil;
     static dispatch_once_t onceToken;
-    dispatch_once(&onceToken,^{cache=[NSMutableDictionary dictionary];});
+    dispatch_once(&onceToken,^{
+        NSDictionary *saved=[NSUserDefaults.standardUserDefaults dictionaryForKey:MediaJARBridgeMirrorDefaultsKey];
+        cache=[saved isKindOfClass:NSDictionary.class]?[saved mutableCopy]:[NSMutableDictionary dictionary];
+    });
     return cache;
 }
 static NSString *MediaJARBridgeLookupMirror(NSString *txtURL) {
@@ -825,9 +829,18 @@ static NSString *MediaJARBridgeLookupMirror(NSString *txtURL) {
 }
 static void MediaJARBridgeSaveMirror(NSString *txtURL,NSString *resolvedURL) {
     if(!txtURL.length||!resolvedURL.length)return;
+    NSDictionary *snapshot=nil;
     @synchronized(MediaJARBridgeMirrorCache()){
-        MediaJARBridgeMirrorCache()[txtURL]=resolvedURL;
+        NSMutableDictionary *cache=MediaJARBridgeMirrorCache();
+        if([cache[txtURL] isEqualToString:resolvedURL])return;
+        if(cache.count>=128){
+            NSArray *keys=cache.allKeys;
+            [cache removeObjectsForKeys:[keys subarrayWithRange:NSMakeRange(0,MAX((NSUInteger)1,keys.count/4))]];
+        }
+        cache[txtURL]=resolvedURL;
+        snapshot=[cache copy];
     }
+    if(snapshot)[NSUserDefaults.standardUserDefaults setObject:snapshot forKey:MediaJARBridgeMirrorDefaultsKey];
 }
 static NSString *MediaJARBridgeExtractTxtMirrorURL(id candidate) {
     if([candidate isKindOfClass:NSArray.class]){

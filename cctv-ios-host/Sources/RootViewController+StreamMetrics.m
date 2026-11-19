@@ -398,7 +398,12 @@ static BOOL CCTVPreviewImageHasValidVideoContent(UIImage *image) {
     if(path.length&&[NSFileManager.defaultManager fileExistsAtPath:path]){
         UIImage *diskImg=[UIImage imageWithContentsOfFile:path];
         if(diskImg&&CCTVPreviewImageHasValidVideoContent(diskImg)){
-            if(self.channelPreviewSnapshots.count>=128)[self.channelPreviewSnapshots removeAllObjects];
+            if(self.channelPreviewSnapshots.count>=128){
+                NSArray *keys=[self.channelPreviewSnapshots.allKeys sortedArrayUsingComparator:^NSComparisonResult(NSString *a,NSString *b){
+                    return [self.channelPreviewCapturedAt[a]?:@0 compare:self.channelPreviewCapturedAt[b]?:@0];
+                }];
+                [self.channelPreviewSnapshots removeObjectsForKeys:[keys subarrayWithRange:NSMakeRange(0,MAX((NSUInteger)1,keys.count/4))]];
+            }
             self.channelPreviewSnapshots[cid]=diskImg;
             return diskImg;
         }
@@ -410,7 +415,12 @@ static BOOL CCTVPreviewImageHasValidVideoContent(UIImage *image) {
     if(!image||!cid.length)return;
     if(!self.channelPreviewSnapshots)self.channelPreviewSnapshots=[NSMutableDictionary dictionary];
     if(!self.channelPreviewCapturedAt)self.channelPreviewCapturedAt=[NSMutableDictionary dictionary];
-    if(self.channelPreviewSnapshots.count>=128)[self.channelPreviewSnapshots removeAllObjects];
+    if(self.channelPreviewSnapshots.count>=128){
+        NSArray *keys=[self.channelPreviewSnapshots.allKeys sortedArrayUsingComparator:^NSComparisonResult(NSString *a,NSString *b){
+            return [self.channelPreviewCapturedAt[a]?:@0 compare:self.channelPreviewCapturedAt[b]?:@0];
+        }];
+        [self.channelPreviewSnapshots removeObjectsForKeys:[keys subarrayWithRange:NSMakeRange(0,MAX((NSUInteger)1,keys.count/4))]];
+    }
     self.channelPreviewSnapshots[cid]=image;
     self.channelPreviewCapturedAt[cid]=@(NSDate.date.timeIntervalSince1970);
     [self.channelPreviewRefreshPending removeObject:cid];
@@ -517,30 +527,7 @@ static BOOL CCTVPreviewImageHasValidVideoContent(UIImage *image) {
     if(!cid.length||!self.firstRender)return;
     NSDictionary *ch=[self channelWithID:cid];
     if(ch&&![ProfileStore isChannelPreviewEnabledForChannel:ch])return;
-    AVAsset *activeAsset=self.avPlayer.currentItem.asset;
-    if(activeAsset){
-        AVAssetImageGenerator *generator=[AVAssetImageGenerator assetImageGeneratorWithAsset:activeAsset];
-        generator.appliesPreferredTrackTransform=YES;
-        generator.maximumSize=CGSizeMake(320,180);
-        generator.requestedTimeToleranceBefore=kCMTimePositiveInfinity;
-        generator.requestedTimeToleranceAfter=kCMTimePositiveInfinity;
-        CMTime targetTime=CMTIME_IS_NUMERIC(self.avPlayer.currentItem.currentTime)?self.avPlayer.currentItem.currentTime:CMTimeMakeWithSeconds(0.1,600);
-        __weak typeof(self) weakSelf=self;
-        [generator generateCGImagesAsynchronouslyForTimes:@[[NSValue valueWithCMTime:targetTime]]
-                                        completionHandler:^(__unused CMTime requestedTime,CGImageRef imageRef,__unused CMTime actualTime,AVAssetImageGeneratorResult result,__unused NSError *error){
-            if(result==AVAssetImageGeneratorSucceeded&&imageRef!=NULL){
-                UIImage *realFrame=[UIImage imageWithCGImage:imageRef];
-                if(realFrame && CCTVPreviewImageHasValidVideoContent(realFrame)){
-                    dispatch_async(dispatch_get_main_queue(),^{
-                        RootViewController *owner=weakSelf;if(!owner)return;
-                        [owner storeRealPreviewImage:realFrame forChannelID:cid];
-                        [owner reloadVisibleCatalogItemForChannelID:cid];
-                    });
-                }
-            }
-        }];
-        return;
-    }
+    // Capture directly from rendered player surface (zero extra network/decoder contention during startup).
     UIView *videoSurface=self.playerBox;
     if(!videoSurface||CGRectIsEmpty(videoSurface.bounds))return;
     UIGraphicsImageRendererFormat *fmt=[UIGraphicsImageRendererFormat defaultFormat];
@@ -549,7 +536,10 @@ static BOOL CCTVPreviewImageHasValidVideoContent(UIImage *image) {
     UIImage *snap=[renderer imageWithActions:^(__unused UIGraphicsImageRendererContext *ctx){
         [videoSurface drawViewHierarchyInRect:CGRectMake(0,0,160,90) afterScreenUpdates:NO];
     }];
-    if(snap&&CCTVPreviewImageHasValidVideoContent(snap))[self storeRealPreviewImage:snap forChannelID:cid];
+    if(snap&&CCTVPreviewImageHasValidVideoContent(snap)){
+        [self storeRealPreviewImage:snap forChannelID:cid];
+        [self reloadVisibleCatalogItemForChannelID:cid];
+    }
 }
 - (NSString *)primaryProbeURLForChannel:(NSDictionary *)channel {
     if(![channel isKindOfClass:NSDictionary.class])return @"";
@@ -629,12 +619,18 @@ static BOOL CCTVPreviewImageHasValidVideoContent(UIImage *image) {
     if([self.channelTelemetryInflight containsObject:cid]||self.channelTelemetryInflight.count>=3)return;
     [self.channelTelemetryInflight addObject:cid];
     __weak typeof(self) weakSelf=self;
+    NSDictionary *rawHeaders=[channel[@"headers"] isKindOfClass:NSDictionary.class]?channel[@"headers"]:nil;
     MediaChannelProbe *probe=[MediaChannelProbe new];self.channelTelemetryTasks[cid]=probe;
-    [probe startWithURL:probeURL completion:^(NSDictionary<NSString *,id> *result){
+    [probe startWithURL:probeURL headers:rawHeaders completion:^(NSDictionary<NSString *,id> *result){
         dispatch_async(dispatch_get_main_queue(),^{
             RootViewController *owner=weakSelf;if(!owner)return;
             [owner.channelTelemetryInflight removeObject:cid];[owner.channelTelemetryTasks removeObjectForKey:cid];
-            if(owner.channelTelemetryStore.count>=256)[owner.channelTelemetryStore removeAllObjects];
+            if(owner.channelTelemetryStore.count>=256){
+                NSArray *keys=[owner.channelTelemetryStore keysSortedByValueUsingComparator:^NSComparisonResult(NSDictionary *a,NSDictionary *b){
+                    return [a[@"ts"]?:@0 compare:b[@"ts"]?:@0];
+                }];
+                [owner.channelTelemetryStore removeObjectsForKeys:[keys subarrayWithRange:NSMakeRange(0,MAX((NSUInteger)1,keys.count/4))]];
+            }
             NSMutableDictionary *entry=[result mutableCopy];entry[@"probeURL"]=probeURLStr;entry[@"ts"]=@(NSDate.date.timeIntervalSince1970);owner.channelTelemetryStore[cid]=entry;
             [owner reloadVisibleCatalogItemForChannelID:cid];
         });
