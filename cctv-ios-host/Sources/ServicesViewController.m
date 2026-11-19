@@ -64,7 +64,7 @@ static NSString *ServiceResolvedVersionText(NSDictionary *service){
                 static NSRegularExpression *verRe=nil;
                 static dispatch_once_t onceToken;
                 dispatch_once(&onceToken,^{
-                    verRe=[NSRegularExpression regularExpressionWithPattern:@"(?:__version__|VERSION|@version|version)\s*[:=]?\s*['\"]?([0-9]+(?:\.[0-9]+){1,3})['\"]?" options:NSRegularExpressionCaseInsensitive error:NULL];
+                    verRe=[NSRegularExpression regularExpressionWithPattern:@"(?:__version__|VERSION|@version|version)\\s*[:=]?\\s*['\"]?([0-9]+(?:\\.[0-9]+){1,3})['\"]?" options:NSRegularExpressionCaseInsensitive error:NULL];
                 });
                 NSTextCheckingResult *m=[verRe firstMatchInString:head options:0 range:NSMakeRange(0,head.length)];
                 if(m&&m.numberOfRanges>1){
@@ -731,8 +731,9 @@ static NSString *ServiceResolvedVersionText(NSDictionary *service){
         } else if (ip.row == 3) {
             if([self opensMedia]){if(self.onBrowseService)self.onBrowseService(self.service);return;}
             NSString *u = [ServiceStore subscriptionURLForService:self.service];
-            if (self.onSubscribe)
+            if (self.onSubscribe) {
                 if(u.length)self.onSubscribe(u);else{__weak typeof(self) weakSelf=self;UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"未配置直播列表" message:@"请编辑服务，填写或修复播放列表路径后再添加频道。" preferredStyle:UIAlertControllerStyleAlert];[alert addAction:[UIAlertAction actionWithTitle:@"编辑服务" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[weakSelf edit];}]];[alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[self presentViewController:alert animated:YES completion:nil];}
+            }
         } else if (ip.row == 4) {
             [self restart];
         }

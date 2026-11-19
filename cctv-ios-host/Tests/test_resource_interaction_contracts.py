@@ -157,7 +157,7 @@ class ResourceInteractionContracts(unittest.TestCase):
 
     def test_resource_rows_measure_and_keep_all_summary_fields_visible(self):
         self.assertIn('- (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:', self.catalog)
-        self.assertIn('return MAX(112,ceil(14+titleHeight+6+detailHeight+14+14));', self.catalog)
+        self.assertIn('CGFloat computedHeight=MAX(98,ceil(14+titleHeight+6+20+12+detailHeight+14+4));', self.catalog)
         self.assertIn('- (NSString *)resourceTitleForProfile:(NSDictionary *)profile', self.catalog)
         self.assertIn('- (NSString *)resourceDetailForProfile:(NSDictionary *)profile', self.catalog)
         self.assertIn('个缓存频道', self.catalog)
@@ -174,7 +174,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('self.bottomBar=self.hostTabController.stackView', self.root)
         self.assertIn('CGFloat contentY=y+6+segmentHeight+4;CGFloat contentBottom=height', self.root)
         self.assertIn('tabContentInset=MAX(8,height-tabY+8)', self.root)
-        self.assertIn('setBottomOverlayInset:tabContentInset', self.root)
+        self.assertIn('setBottomOverlayInset:pageBottomInset', self.root)
         self.assertIn('five-tab navigation stays fully transparent over content that extends behind it',
                       (ROOT / 'Tests/UISmoke/SmokeDriver.m').read_text())
 
@@ -784,7 +784,7 @@ class ResourceInteractionContracts(unittest.TestCase):
     def test_detail_and_portrait_player_extend_under_top_chrome_without_hiding_controls(self):
         detail_page = self.detail[self.detail.index('@implementation MediaDetailViewController'):
                                   self.detail.index('@interface MediaFavoritesViewController')]
-        self.assertIn('bar.standardAppearance=scrolled;bar.scrollEdgeAppearance=edge', detail_page)
+        self.assertIn('self.navigationItem.standardAppearance=scrolled;self.navigationItem.scrollEdgeAppearance=edge', detail_page)
         self.assertIn('compactScrollEdgeAppearance=edge', detail_page)
         self.assertIn('colorWithWhite:0 alpha:0.78', detail_page)
         self.assertIn('scrollView.topAnchor constraintEqualToAnchor:self.view.topAnchor', detail_page)

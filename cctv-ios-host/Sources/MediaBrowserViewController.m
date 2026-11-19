@@ -268,7 +268,7 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
     NSDictionary *titleAttributes=@{NSForegroundColorAttributeName:HostText(),NSFontAttributeName:[UIFont systemFontOfSize:17 weight:UIFontWeightSemibold]};
     UINavigationBarAppearance *scrolled=[UINavigationBarAppearance new];[scrolled configureWithDefaultBackground];scrolled.backgroundEffect=HostGlassBlur();scrolled.backgroundColor=HostGlassTint();scrolled.titleTextAttributes=titleAttributes;scrolled.largeTitleTextAttributes=titleAttributes;scrolled.shadowColor=UIColor.clearColor;
     UINavigationBarAppearance *edge=[UINavigationBarAppearance new];[edge configureWithTransparentBackground];edge.titleTextAttributes=titleAttributes;edge.largeTitleTextAttributes=titleAttributes;edge.backgroundColor=UIColor.clearColor;edge.shadowColor=UIColor.clearColor;
-    bar.standardAppearance=scrolled;bar.scrollEdgeAppearance=edge;bar.compactAppearance=scrolled;if(@available(iOS 15.0,*))bar.compactScrollEdgeAppearance=edge;bar.translucent=YES;bar.tintColor=HostAccent();bar.prefersLargeTitles=NO;
+    self.navigationItem.standardAppearance=scrolled;self.navigationItem.scrollEdgeAppearance=edge;self.navigationItem.compactAppearance=scrolled;if(@available(iOS 15.0,*))self.navigationItem.compactScrollEdgeAppearance=edge;self.navigationItem.largeTitleDisplayMode=UINavigationItemLargeTitleDisplayModeNever;bar.translucent=YES;bar.tintColor=HostAccent();
 }
 - (void)viewWillDisappear:(BOOL)animated {
     [super viewWillDisappear:animated];

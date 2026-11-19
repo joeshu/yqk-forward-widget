@@ -729,7 +729,7 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
     HostInstallPressFeedback(tile);
     [tile addTarget:self action:@selector(handleHeroQuickTileTap:) forControlEvents:UIControlEventTouchUpInside];
 
-    UIImageView *iconView=[[UIImageView alloc] initWithImage:[UIImage systemImageNamed:iconName withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:13 weight:UIImageSymbolWeightSemibold]]];
+    UIImageView *iconView=[[UIImageView alloc] initWithImage:[UIImage systemImageNamed:iconName withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:11.5 weight:UIImageSymbolWeightSemibold]]];
     iconView.translatesAutoresizingMaskIntoConstraints=NO;
     iconView.tintColor=tint;
     iconView.userInteractionEnabled=NO;
@@ -738,8 +738,11 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
     UILabel *titleLbl=[UILabel new];
     titleLbl.translatesAutoresizingMaskIntoConstraints=NO;
     titleLbl.text=title;
-    titleLbl.font=HostRoundedFont(11.0,UIFontWeightSemibold,UIFontTextStyleCaption2);
+    titleLbl.font=HostRoundedFont(10.5,UIFontWeightSemibold,UIFontTextStyleCaption2);
     titleLbl.textColor=HostSecondaryText();
+    titleLbl.adjustsFontSizeToFitWidth=YES;
+    titleLbl.minimumScaleFactor=0.72;
+    titleLbl.lineBreakMode=NSLineBreakByClipping;
     titleLbl.userInteractionEnabled=NO;
     [tile addSubview:titleLbl];
 
@@ -747,24 +750,26 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
     subLbl.translatesAutoresizingMaskIntoConstraints=NO;
     subLbl.tag=2002;
     subLbl.text=subtitle;
-    subLbl.font=HostRoundedFont(12.0,UIFontWeightBold,UIFontTextStyleCaption1);
+    subLbl.font=HostRoundedFont(11.5,UIFontWeightBold,UIFontTextStyleCaption1);
     subLbl.textColor=HostText();
+    subLbl.adjustsFontSizeToFitWidth=YES;
+    subLbl.minimumScaleFactor=0.78;
     subLbl.lineBreakMode=NSLineBreakByTruncatingTail;
     subLbl.userInteractionEnabled=NO;
     [tile addSubview:subLbl];
 
     [NSLayoutConstraint activateConstraints:@[
-        [iconView.leadingAnchor constraintEqualToAnchor:tile.leadingAnchor constant:9],
+        [iconView.leadingAnchor constraintEqualToAnchor:tile.leadingAnchor constant:6],
         [iconView.topAnchor constraintEqualToAnchor:tile.topAnchor constant:8],
-        [iconView.widthAnchor constraintEqualToConstant:14],
-        [iconView.heightAnchor constraintEqualToConstant:14],
+        [iconView.widthAnchor constraintEqualToConstant:12],
+        [iconView.heightAnchor constraintEqualToConstant:12],
 
-        [titleLbl.leadingAnchor constraintEqualToAnchor:iconView.trailingAnchor constant:4],
+        [titleLbl.leadingAnchor constraintEqualToAnchor:iconView.trailingAnchor constant:3],
         [titleLbl.centerYAnchor constraintEqualToAnchor:iconView.centerYAnchor],
-        [titleLbl.trailingAnchor constraintLessThanOrEqualToAnchor:tile.trailingAnchor constant:-6],
+        [titleLbl.trailingAnchor constraintLessThanOrEqualToAnchor:tile.trailingAnchor constant:-4],
 
-        [subLbl.leadingAnchor constraintEqualToAnchor:tile.leadingAnchor constant:9],
-        [subLbl.trailingAnchor constraintEqualToAnchor:tile.trailingAnchor constant:-6],
+        [subLbl.leadingAnchor constraintEqualToAnchor:tile.leadingAnchor constant:6],
+        [subLbl.trailingAnchor constraintEqualToAnchor:tile.trailingAnchor constant:-4],
         [subLbl.bottomAnchor constraintEqualToAnchor:tile.bottomAnchor constant:-7]
     ]];
     return tile;
@@ -812,6 +817,8 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
     subtitleLabel.text=@"Spatial Glass 2.0 · 全域视听与系统设置中心";
     subtitleLabel.textColor=HostSecondaryText();
     subtitleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
+    subtitleLabel.adjustsFontSizeToFitWidth=YES;
+    subtitleLabel.minimumScaleFactor=0.80;
     [card addSubview:subtitleLabel];
 
     UIButton *moreBtn=[UIButton buttonWithType:UIButtonTypeSystem];
@@ -868,7 +875,7 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
     UIStackView *quickTilesStack=[UIStackView new];
     quickTilesStack.translatesAutoresizingMaskIntoConstraints=NO;
     quickTilesStack.axis=UILayoutConstraintAxisHorizontal;
-    quickTilesStack.spacing=8;
+    quickTilesStack.spacing=6;
     quickTilesStack.distribution=UIStackViewDistributionFillEqually;
     quickTilesStack.accessibilityIdentifier=@"settings.hero.quickTiles";
     [card addSubview:quickTilesStack];

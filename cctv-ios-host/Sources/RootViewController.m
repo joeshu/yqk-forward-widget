@@ -409,6 +409,7 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
 }
 
 - (BOOL)shouldHideNavigationBarForVisibleController:(UIViewController *)visibleController {
+    if([visibleController isKindOfClass:NSClassFromString(@"MediaEpisodeSelectionViewController")])return YES;
     if(visibleController!=self)return NO;
     return self.fullscreen||[self hasVisibleExpandedLivePlayer]||self.activeTab==2||self.activeTab==3;
 }
@@ -468,8 +469,7 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
     // hides the navigation bar alongside the transition so the top safe area
     // never snaps by 44 pt after didShowViewController.
     BOOL shouldHide=[self shouldHideNavigationBarForVisibleController:viewController];
-    if(viewController!=self&&navigationController.navigationBarHidden)[navigationController setNavigationBarHidden:NO animated:animated];
-    else if(viewController==self&&navigationController.navigationBarHidden!=shouldHide)[navigationController setNavigationBarHidden:shouldHide animated:animated];
+    if(navigationController.navigationBarHidden!=shouldHide)[navigationController setNavigationBarHidden:shouldHide animated:animated];
     if(viewController==self)return;
     [navigationController setOverrideTraitCollection:[self fontSizeOverrideTraitCollection] forChildViewController:viewController];
     if(self.activeTab<2)[self suspendLivePlaybackForReason:@"left_live_navigation_page"];
@@ -1061,7 +1061,7 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
 
     UIVisualEffectView *catalogControls=[[UIVisualEffectView alloc] initWithEffect:HostGlassBlur()];
     HostRegisterGlassEffectView(catalogControls);
-    catalogControls.accessibilityIdentifier=@"channel.catalog.floating-controls";catalogControls.layer.cornerRadius=27;catalogControls.clipsToBounds=YES;catalogControls.layer.borderWidth=0.7;catalogControls.layer.borderColor=HostBorder().CGColor;
+    catalogControls.accessibilityIdentifier=@"channel.catalog.floating-controls";catalogControls.layer.cornerRadius=27;catalogControls.clipsToBounds=YES;catalogControls.layer.borderWidth=0.7;HostSetLayerBorderColor(catalogControls,HostBorder());
     UIView *catalogTint=[[UIView alloc] initWithFrame:catalogControls.contentView.bounds];catalogTint.backgroundColor=HostGlassTint();catalogTint.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;catalogTint.userInteractionEnabled=NO;[catalogControls.contentView addSubview:catalogTint];
     self.catalogFloatingControls=catalogControls;
     self.catalogLayoutButton=[UIButton buttonWithType:UIButtonTypeSystem];self.catalogLayoutButton.accessibilityIdentifier=@"channel.catalog.layout.toggle";self.catalogLayoutButton.accessibilityLabel=self.gridMode?@"切换列表布局":@"切换网格布局";
@@ -1297,7 +1297,7 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
         // Every tab page owns the full root bounds. Child controls use their
         // safe-area guides, while their backgrounds and scroll views can pass
         // behind the status and navigation bars.
-        BOOL resourcePage=[self.tabPage isKindOfClass:ConfigCenterViewController.class];CGFloat pageTop=0;self.tabPage.view.frame=CGRectMake(0,pageTop,w,MAX(0,contentBottom-pageTop));if(resourcePage){[(ConfigCenterViewController *)self.tabPage setTopSafeAreaInset:top];[(ConfigCenterViewController *)self.tabPage setBottomOverlayInset:tabContentInset];}else if([self.tabPage isKindOfClass:MediaBrowserViewController.class]){[(MediaBrowserViewController *)self.tabPage setTopSafeAreaInset:top];[(MediaBrowserViewController *)self.tabPage setBottomOverlayInset:tabContentInset];}else if([self.tabPage isKindOfClass:SettingsViewController.class])[(SettingsViewController *)self.tabPage setBottomOverlayInset:tabContentInset];
+        BOOL resourcePage=[self.tabPage isKindOfClass:ConfigCenterViewController.class];CGFloat pageTop=0;CGFloat pageBottomInset=tabContentInset+(showMiniBar?50:0);self.tabPage.view.frame=CGRectMake(0,pageTop,w,MAX(0,contentBottom-pageTop));if(resourcePage){[(ConfigCenterViewController *)self.tabPage setTopSafeAreaInset:top];[(ConfigCenterViewController *)self.tabPage setBottomOverlayInset:pageBottomInset];}else if([self.tabPage isKindOfClass:MediaBrowserViewController.class]){[(MediaBrowserViewController *)self.tabPage setTopSafeAreaInset:top];[(MediaBrowserViewController *)self.tabPage setBottomOverlayInset:pageBottomInset];}else if([self.tabPage isKindOfClass:SettingsViewController.class])[(SettingsViewController *)self.tabPage setBottomOverlayInset:pageBottomInset];
         self.catalogTopImmersiveScrim.hidden=!catalog||expandedLive;
         self.catalogGroupGlassCard.hidden=!catalog||expandedLive;
         if(!self.catalogTopImmersiveScrim.hidden){
@@ -1450,11 +1450,17 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
     }
 }
 - (void)reloadThemeAppearance {
+    UIUserInterfaceStyle targetStyle=HostSelectedInterfaceStyle();
+    self.overrideUserInterfaceStyle=targetStyle;
+    self.view.overrideUserInterfaceStyle=targetStyle;
+    self.navigationController.overrideUserInterfaceStyle=targetStyle;
+    self.navigationController.navigationBar.overrideUserInterfaceStyle=targetStyle;
     self.view.backgroundColor=HostBackground();
     self.view.tintColor=HostAccent();
     self.bottomBar.tintColor=HostAccent();
     self.bottomBarBackdrop.backgroundColor=UIColor.clearColor;
-    self.bottomDockFadeGradient.colors=@[(id)[HostBackground() colorWithAlphaComponent:0.0].CGColor,(id)[HostBackground() colorWithAlphaComponent:0.78].CGColor,(id)[HostBackground() colorWithAlphaComponent:0.96].CGColor];
+    UIColor *resolvedBg=[HostBackground() resolvedColorWithTraitCollection:[UITraitCollection traitCollectionWithUserInterfaceStyle:targetStyle]];
+    self.bottomDockFadeGradient.colors=@[(id)[resolvedBg colorWithAlphaComponent:0.0].CGColor,(id)[resolvedBg colorWithAlphaComponent:0.78].CGColor,(id)[resolvedBg colorWithAlphaComponent:0.96].CGColor];
     self.bottomDockGlass.effect=HostGlassBlur();
     self.bottomDockGlass.contentView.backgroundColor=UIAccessibilityIsReduceTransparencyEnabled()?HostCard():UIColor.clearColor;
     HostSetLayerBorderColor(self.bottomDockGlass,HostBorder());
@@ -1474,6 +1480,7 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
         b.configuration=cfg;
     }
     HostStyleNavigation(self.navigationController);
+    [self setNeedsStatusBarAppearanceUpdate];
     [self.table reloadData];
     [self.channelGrid reloadData];
     [self.view setNeedsLayout];

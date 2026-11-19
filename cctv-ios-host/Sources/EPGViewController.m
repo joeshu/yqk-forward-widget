@@ -648,7 +648,7 @@
     if (live) {
         float progress = (end > start) ? (float)MIN(1.0, MAX(0.05, (now - start) / (end - start))) : 0.5f;
         liveProgress.progress = progress;
-        liveProgress.frame = CGRectMake(16, MAX(0, CGRectGetHeight(cell.contentView.bounds) - 4), MAX(0, CGRectGetWidth(cell.contentView.bounds) - 32), 3);
+        liveProgress.frame = CGRectMake(16, MAX(0, CGRectGetHeight(cell.contentView.bounds) - 6), MAX(0, CGRectGetWidth(cell.contentView.bounds) - 32), 3);
         cell.textLabel.textColor = HostAccent();
         NSString *liveSuffix = activeReplayRow ? @"  ● 正在回看本节目" : (replayable ? @"  点按从头回看" : @"");
         cell.detailTextLabel.text = [range stringByAppendingFormat:@"  ● 正在播出 · %.0f%%%@", progress * 100.0, liveSuffix];

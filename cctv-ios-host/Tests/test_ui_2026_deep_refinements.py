@@ -103,7 +103,7 @@ class UI2026DeepRefinementsTests(unittest.TestCase):
         cc = (SOURCES / "ConfigCenterViewController.m").read_text(encoding="utf-8")
         self.assertIn("self.iconBadgeContainer=[UIView new];", cc)
         self.assertIn("[self.profileTitleLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-8]", cc)
-        self.assertIn("[self.latencyBadge.leadingAnchor constraintEqualToAnchor:self.protocolBadge.trailingAnchor constant:6]", cc)
+        self.assertIn("[self.latencyBadge.leadingAnchor constraintEqualToAnchor:self.protocolBadge.trailingAnchor constant:4]", cc)
         self.assertIn("[self.profileDetailLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-8]", cc)
         self.assertIn('@"共 %lu 项 · 合集 %lu · 订阅启用 %lu · 服务启用 %lu · 运行中 %lu"', cc)
 

@@ -2,12 +2,14 @@
 
 static NSOperationQueue *HLSRouteProbeQueue(void) {
     static NSOperationQueue *queue;
+    static dispatch_queue_t underlyingQueue;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         queue = [NSOperationQueue new];
         queue.name = @"cctvhost.hls.route.probe";
         queue.maxConcurrentOperationCount = 2;
-        queue.underlyingQueue = dispatch_queue_create("cctvhost.hls.route.probe", DISPATCH_QUEUE_SERIAL);
+        underlyingQueue = dispatch_queue_create("cctvhost.hls.route.probe", DISPATCH_QUEUE_SERIAL);
+        queue.underlyingQueue = underlyingQueue;
     });
     return queue;
 }

@@ -191,7 +191,7 @@ const fn = {fn_code};
         self.assertIn("syncStableTopHeaderLayout", browser)
         self.assertIn("prepareForNavigationTransition", browser)
         self.assertIn("refreshHeaderAfterNavigationTransition", browser)
-        self.assertIn("else if(viewController==self&&navigationController.navigationBarHidden!=shouldHide)[navigationController setNavigationBarHidden:shouldHide animated:animated];", root)
+        self.assertIn("if(navigationController.navigationBarHidden!=shouldHide)[navigationController setNavigationBarHidden:shouldHide animated:animated];", root)
         self.assertIn("catalogTopImmersiveScrim", root)
         self.assertIn("HostStatusBarSafeTop", config)
         self.assertIn("settingsTopImmersiveScrim", settings)

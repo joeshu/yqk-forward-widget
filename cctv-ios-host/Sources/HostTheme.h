@@ -174,16 +174,16 @@ static inline void HostStyleSurfaceCard(UIView *view, CGFloat radius) {
     view.clipsToBounds=YES;
 }
 
-static inline void HostInstallPressFeedback(UIButton *button) {
+static inline void HostInstallPressFeedback(UIControl *button) {
     if(!button||objc_getAssociatedObject(button,&HostPressFeedbackAssociationKey))return;
-    __weak UIButton *weakButton=button;
+    __weak UIControl *weakButton=button;
     UIAction *press=[UIAction actionWithHandler:^(UIAction *action){
-        UIButton *target=weakButton;
+        UIControl *target=weakButton;
         if(!target||UIAccessibilityIsReduceMotionEnabled())return;
         [UIView animateWithDuration:.10 delay:0 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{target.transform=CGAffineTransformMakeScale(.97,.97);} completion:nil];
     }];
     UIAction *releaseAction=[UIAction actionWithHandler:^(UIAction *action){
-        UIButton *target=weakButton;
+        UIControl *target=weakButton;
         if(!target||UIAccessibilityIsReduceMotionEnabled())return;
         [UIView animateWithDuration:.22 delay:0 usingSpringWithDamping:.78 initialSpringVelocity:.25 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{target.transform=CGAffineTransformIdentity;} completion:nil];
     }];
@@ -269,6 +269,9 @@ static inline void HostStylePillButton(UIButton *button, BOOL primary) {
 }
 static inline void HostStyleNavigation(UINavigationController *nav) {
     if (!nav) return;
+    UIUserInterfaceStyle targetStyle = HostSelectedInterfaceStyle();
+    nav.overrideUserInterfaceStyle = targetStyle;
+    nav.navigationBar.overrideUserInterfaceStyle = targetStyle;
     UINavigationBarAppearance *a = [UINavigationBarAppearance new];
     [a configureWithDefaultBackground];
     a.backgroundEffect = HostGlassBlur();
@@ -316,8 +319,10 @@ static inline void HostApplyThemeToWindow(UIWindow *window) {
         UIUserInterfaceStyle opposite=(target==UIUserInterfaceStyleDark)?UIUserInterfaceStyleLight:UIUserInterfaceStyleDark;
         [CATransaction begin];[CATransaction setDisableActions:YES];
         w.overrideUserInterfaceStyle=opposite;
+        if(w.rootViewController)w.rootViewController.overrideUserInterfaceStyle=opposite;
         [w layoutIfNeeded];
         w.overrideUserInterfaceStyle=target;
+        if(w.rootViewController)w.rootViewController.overrideUserInterfaceStyle=target;
         [CATransaction commit];
         [w layoutIfNeeded];
         HostRefreshAppearanceLayers(w);
