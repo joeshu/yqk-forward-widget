@@ -243,6 +243,14 @@ static void check(BOOL value, NSString *message) {
     if (!value)
         [failures addObject:message];
 }
+static NSArray<UIAction *> *SmokeFlattenMenuActions(UIMenu *menu) {
+    NSMutableArray<UIAction *> *flat=[NSMutableArray array];
+    for (id child in menu.children) {
+        if ([child isKindOfClass:UIAction.class]) [flat addObject:child];
+        else if ([child isKindOfClass:UIMenu.class]) [flat addObjectsFromArray:SmokeFlattenMenuActions((UIMenu *)child)];
+    }
+    return flat;
+}
 static void SmokePlaybackPrefetchReuse(void) {
     NSString *decodeKey=@"cctv.mediaDecodeMode.v1";id previousDecode=[NSUserDefaults.standardUserDefaults objectForKey:decodeKey];[NSUserDefaults.standardUserDefaults setObject:@"auto" forKey:decodeKey];
     NSArray *episodes=@[@{@"id":@"ep-0",@"name":@"第1集"},@{@"id":@"ep-1",@"name":@"第2集"}];
@@ -503,14 +511,14 @@ static void next(NSArray *steps, NSUInteger index) {
             CGRect floatingFrame=floating.frame;
             check(CGRectGetMaxX(floatingFrame)<=CGRectGetWidth(root.view.bounds)-root.view.safeAreaInsets.right-12&&CGRectGetMaxY(floatingFrame)<=CGRectGetMinY(tabs.frame)-8&&CGRectGetMinY(floatingFrame)>CGRectGetMinY(tabs.frame)-90,@"catalog action group floats at the lower right above the tab bar");
             check([layoutButton.accessibilityLabel isEqual:@"切换列表布局"],@"grid floating control clearly offers the live list-row layout");
-            UIAction *columnsAction=nil;for(id child in moreButton.menu.children)if([child isKindOfClass:UIAction.class]&&[((UIAction *)child).identifier isEqual:@"channel.grid.columns.toggle"]){columnsAction=child;break;}
+            UIAction *columnsAction=nil;for(UIAction *child in SmokeFlattenMenuActions(moreButton.menu))if([child.identifier isEqual:@"channel.grid.columns.toggle"]){columnsAction=child;break;}
             check(columnsAction!=nil&&[columnsAction.title containsString:@"每行 4 列"],@"catalog more menu exposes the current four-column density action");
             [root toggleCatalogColumns];
             NSInteger columns=[[root valueForKey:@"gridColumns"] integerValue];
             CGSize threeColumnSize=[(id<UICollectionViewDelegateFlowLayout>)root collectionView:grid layout:grid.collectionViewLayout sizeForItemAtIndexPath:[NSIndexPath indexPathForItem:0 inSection:0]];
             CGFloat expectedThreeColumnWidth=floor((grid.bounds.size.width-20-2*6)/3);
             check(columns==3&&[NSUserDefaults.standardUserDefaults integerForKey:@"cctv.channelGridColumns.v1"]==3&&fabs(threeColumnSize.width-expectedThreeColumnWidth)<1.0,@"density control switches to and persists exactly three compact columns");
-            moreButton=(id)[root valueForKey:@"catalogMoreButton"];columnsAction=nil;for(id child in moreButton.menu.children)if([child isKindOfClass:UIAction.class]&&[((UIAction *)child).identifier isEqual:@"channel.grid.columns.toggle"]){columnsAction=child;break;}
+            moreButton=(id)[root valueForKey:@"catalogMoreButton"];columnsAction=nil;for(UIAction *child in SmokeFlattenMenuActions(moreButton.menu))if([child.identifier isEqual:@"channel.grid.columns.toggle"]){columnsAction=child;break;}
             [root toggleCatalogColumns];
             CGSize fourColumnSize=[(id<UICollectionViewDelegateFlowLayout>)root collectionView:grid layout:grid.collectionViewLayout sizeForItemAtIndexPath:[NSIndexPath indexPathForItem:0 inSection:0]];
             CGFloat expectedFourColumnWidth=floor((grid.bounds.size.width-20-3*6)/4);
@@ -552,7 +560,7 @@ static void next(NSArray *steps, NSUInteger index) {
             capture(self.window, @"01b-subscription-channels");
             NSString *savedChannelID=[root valueForKey:@"channelID"],*savedRemoteURL=[root valueForKey:@"currentRemoteURL"];BOOL savedExpanded=[[root valueForKey:@"playerExpanded"] boolValue];
             [root setValue:@"remote-smoke" forKey:@"channelID"];[root setValue:@"https://example.com/live.m3u8" forKey:@"currentRemoteURL"];[root setValue:@YES forKey:@"playerExpanded"];[root configureCatalogNavigation];[root.view setNeedsLayout];[root.view layoutIfNeeded];
-            CGRect expandedSubscriptionPlayer=[(UIView *)[root valueForKey:@"playerBox"] frame];NSArray *expandedChannelActions=[((UIButton *)[root valueForKey:@"catalogMoreButton"]).menu.children valueForKey:@"identifier"];UIButton *liveResourceCapsule=(id)[root valueForKey:@"liveResourceCapsule"];NSArray *liveResourceChoices=[liveResourceCapsule.menu.children valueForKey:@"title"];
+            CGRect expandedSubscriptionPlayer=[(UIView *)[root valueForKey:@"playerBox"] frame];NSArray *expandedChannelActions=[SmokeFlattenMenuActions(((UIButton *)[root valueForKey:@"catalogMoreButton"]).menu) valueForKey:@"identifier"];UIButton *liveResourceCapsule=(id)[root valueForKey:@"liveResourceCapsule"];NSArray *liveResourceChoices=[SmokeFlattenMenuActions(liveResourceCapsule.menu) valueForKey:@"title"];
             check(nav.navigationBarHidden&&fabs(CGRectGetMinY(expandedSubscriptionPlayer)-root.view.safeAreaInsets.top-44)<1.5&&fabs(CGRectGetHeight(expandedSubscriptionPlayer)-CGRectGetWidth(expandedSubscriptionPlayer)*9.0/16.0)<1.5&&root.preferredStatusBarStyle==UIStatusBarStyleLightContent,@"expanded channel playback keeps the capsule row in the safe area above the 16:9 player");
             check(!liveResourceCapsule.hidden&&liveResourceCapsule.menu&&CGRectGetMaxY(liveResourceCapsule.frame)<CGRectGetMinY(expandedSubscriptionPlayer)&&[liveResourceChoices containsObject:@"UI Smoke Live Resource · 1"],@"channel player capsule lists the live resources from the Resources page");
             [root selectLiveResourceSource:source];check([[root valueForKey:@"activeSource"] isEqual:source]&&[[root valueForKey:@"shownChannels"] count]==1&&[liveResourceCapsule.configuration.title containsString:@"UI Smoke Live Resource"],@"selecting a resource capsule filters the channel page to that resource");[root selectLiveResourceSource:nil];
@@ -583,7 +591,7 @@ static void next(NSArray *steps, NSUInteger index) {
             [mediaHome.view layoutIfNeeded];UIStackView *homeSelectors=[mediaHome valueForKey:@"selectionRow"];UIButton *homeSource=[mediaHome valueForKey:@"sourceSelectButton"],*homeProvider=[mediaHome valueForKey:@"providerSelectButton"],*homeMenu=[mediaHome valueForKey:@"homeMenuButton"];MediaFeedView *feed=[mediaHome valueForKey:@"grid"];UIScrollView *home=[mediaHome valueForKey:@"homeScroll"];
             check(feed==home&&[feed isKindOfClass:MediaFeedView.class],@"media uses one reusable vertical feed for featured and category content");CGFloat safeTop=mediaHome.view.safeAreaInsets.top+4;
             check(fabs(CGRectGetMinY(homeSelectors.frame)-safeTop)<1.5&&fabs(homeSelectors.spacing-8)<.1,@"unified media selectors stay inside the safe area with stable spacing");
-            check(homeSource.isAccessibilityElement&&homeProvider.isAccessibilityElement&&homeMenu.menu.children.count==3&&[[(UIAction *)homeMenu.menu.children.lastObject identifier] isEqual:@"media.local"],@"unified media exposes resource, site and favorites/history/local media actions");
+            NSArray *homeMenuActionIDs=[SmokeFlattenMenuActions(homeMenu.menu) valueForKey:@"identifier"];check(homeSource.isAccessibilityElement&&homeProvider.isAccessibilityElement&&[homeMenuActionIDs containsObject:@"media.favorites"]&&[homeMenuActionIDs containsObject:@"media.history"]&&[homeMenuActionIDs containsObject:@"media.local"],@"unified media exposes resource, site and favorites/history/local media actions");
             check(SmokeViewWithAccessibilityIdentifier(mediaHome.view,@"media-home-browse-button")==nil&&SmokeViewWithAccessibilityIdentifier(mediaHome.view,@"media-home-search-button")==nil&&[mediaHome valueForKey:@"floatingHomeSearchButton"]!=nil,@"media keeps one floating search entry and removes the home-library toggle");
             check(homeSource.titleLabel.lineBreakMode==NSLineBreakByTruncatingTail&&home.contentInset.bottom>=actualMediaOverlayInset,@"media selector labels remain accessible and final posters can scroll above navigation");
             navigationProbe=[UIViewController new];navigationProbe.title=@"交互返回取消测试";[nav pushViewController:navigationProbe animated:NO];
@@ -820,7 +828,7 @@ static void next(NSArray *steps, NSUInteger index) {
             check([root.title isEqual:@"CCTV-1 综合"]&&nav.navigationBarHidden, @"expanded live playback retains its channel title while replacing the opaque navigation/search header with immersive video");UIView *livePlayerBox=[root valueForKey:@"playerBox"];UILabel *livePlayerTitle=[root valueForKey:@"titleLabel"];UIButton *cctvResourceCapsule=(id)[root valueForKey:@"liveResourceCapsule"];check(fabs(CGRectGetMinY(livePlayerBox.frame)-root.view.safeAreaInsets.top-44)<1.5&&fabs(CGRectGetHeight(livePlayerBox.frame)-CGRectGetWidth(livePlayerBox.frame)*9.0/16.0)<1.5&&fabs(CGRectGetMinY(livePlayerTitle.frame)-8)<1.5&&CGRectGetMaxY(cctvResourceCapsule.frame)<CGRectGetMinY(livePlayerBox.frame),@"expanded CCTV video has a distinct resource capsule row above the player with status-safe title controls");check(!cctvResourceCapsule.hidden&&[cctvResourceCapsule.configuration.title isEqual:@"央视直播"]&&!cctvResourceCapsule.menu,@"CCTV playback identifies its official live resource without offering unrelated playlist switching");
             NSArray *shown=[root valueForKey:@"shownChannels"];NSUInteger selectedIndex=NSNotFound;for(NSUInteger index=0;index<shown.count;index++)if([shown[index][@"id"] isEqual:@"cctv1"]){selectedIndex=index;break;}UICollectionView *grid=[root valueForKey:@"channelGrid"];NSIndexPath *selectedPath=selectedIndex==NSNotFound?nil:[NSIndexPath indexPathForItem:selectedIndex inSection:0];if(selectedPath){[grid scrollToItemAtIndexPath:selectedPath atScrollPosition:UICollectionViewScrollPositionCenteredVertically animated:NO];[grid layoutIfNeeded];}selectedLiveCard=selectedPath?[grid cellForItemAtIndexPath:selectedPath]:nil;selectedLiveMark=(id)[selectedLiveCard.contentView viewWithTag:4107];check(selectedLiveCard&&[selectedLiveCard.accessibilityValue containsString:@"正在播放"]&&selectedLiveMark&&!selectedLiveMark.hidden,[NSString stringWithFormat:@"selected channel remains marked in the compact grid while playing (index=%lu visible=%@)",(unsigned long)selectedIndex,selectedLiveMark&&!selectedLiveMark.hidden?@"yes":@"no"]);UITableView *selectionList=[root valueForKey:@"table"];UITableViewCell *selectedRow=selectedIndex==NSNotFound?nil:[root tableView:selectionList cellForRowAtIndexPath:[NSIndexPath indexPathForRow:selectedIndex inSection:0]];check([selectedRow.accessibilityValue containsString:@"正在播放"]&&selectedRow.accessoryView&&selectedRow.accessoryType==UITableViewCellAccessoryNone,@"selected channel keeps a persistent playing checkmark in list-row mode");
             UIButton *liveMore=(id)[root valueForKey:@"catalogMoreButton"];
-            NSArray *liveActionTitles=[liveMore.menu.children valueForKey:@"title"];
+            NSArray *liveActionTitles=[SmokeFlattenMenuActions(liveMore.menu) valueForKey:@"title"];
             BOOL hasCurrentFavoriteAction=[liveActionTitles containsObject:@"收藏当前频道"]||[liveActionTitles containsObject:@"取消收藏当前频道"];
             check(hasCurrentFavoriteAction&&[liveActionTitles containsObject:@"播放信息"]&&![(UIView *)[root valueForKey:@"catalogFloatingControls"] isHidden], @"expanded live player exposes favorite and playback info actions through the floating menu");
             retainedWrapper = [root valueForKey:@"currentPlayer"];
@@ -1157,7 +1165,7 @@ static void next(NSArray *steps, NSUInteger index) {
           @{ @"until":^BOOL{return mediaPage&&mediaPage.isHomeMode&&![[mediaPage valueForKey:@"loading"] boolValue]&&[[mediaPage valueForKey:@"items"] count]==4;},@"timeout":@100,@"run":^{
             MediaFeedView *feed=[mediaPage valueForKey:@"grid"];UIStackView *selectors=[mediaPage valueForKey:@"selectionRow"];UIButton *source=[mediaPage valueForKey:@"sourceSelectButton"],*provider=[mediaPage valueForKey:@"providerSelectButton"],*my=[mediaPage valueForKey:@"homeMenuButton"];[mediaPage.view layoutIfNeeded];
             check(feed==[mediaPage valueForKey:@"homeScroll"]&&feed.sections.count>0,@"media automatically loads only its selected site into one vertical feed");
-            check(!source.hidden&&!provider.hidden&&selectors.arrangedSubviews.count==3&&my.menu.children.count>=2&&[[(UIAction *)my.menu.children.lastObject identifier] isEqual:@"media.local"],@"unified media keeps independent resource/site selectors and exposes Local Media in its My menu");
+            check(!source.hidden&&!provider.hidden&&selectors.arrangedSubviews.count==3&&[[SmokeFlattenMenuActions(my.menu) valueForKey:@"identifier"] containsObject:@"media.local"],@"unified media keeps independent resource/site selectors and exposes Local Media in its My menu");
             check(CGRectGetMinY(feed.frame)<1.5&&[mediaPage valueForKey:@"homeTopImmersiveGradient"]!=nil,@"media content extends under a readable immersive status region");
             check(nav.topViewController==root&&[root valueForKey:@"tabPage"]==mediaPage&&nav.navigationBarHidden,@"media home screenshot uses the real root tab without a pushed page or overlapping navigation chrome");
             check(CGRectGetHeight(source.frame)>=44&&CGRectGetHeight(provider.frame)>=44&&feed.contentInset.bottom>=[[mediaPage valueForKey:@"bottomOverlayInset"] doubleValue],@"media selectors have 44 pt hit targets and safe bottom scrolling space");
