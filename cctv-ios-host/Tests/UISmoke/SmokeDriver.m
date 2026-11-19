@@ -253,7 +253,7 @@ static NSArray<UIAction *> *SmokeFlattenMenuActions(UIMenu *menu) {
     return flat;
 }
 static NSArray<NSString *> *SmokeActionSheetTitles(UIViewController *presented) {
-    if ([presented isKindOfClass:UIAlertController.class]) return [(UIAlertController *)presented.actions valueForKey:@"title"] ?: @[];
+    if ([presented isKindOfClass:UIAlertController.class]) return [((UIAlertController *)presented).actions valueForKey:@"title"] ?: @[];
     if ([presented isKindOfClass:HostGlassActionSheetViewController.class]) {
         NSMutableArray<NSString *> *titles=[NSMutableArray array];
         for (HostGlassSheetSection *section in ((HostGlassActionSheetViewController *)presented).sections)
