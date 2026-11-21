@@ -1,3 +1,5 @@
+#import "MediaEpisodeLayout.h"
+#import "MediaAdaptationMonitor.h"
 #import "HostBackup.h"
 #import "MediaPackageImporter.h"
 #import "RootViewController_Internal.h"
