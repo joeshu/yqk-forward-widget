@@ -671,6 +671,8 @@ BUILTIN_VIP_JSON_PARSERS = (
 
 def resolve_vip_url_via_parsers(url, flag='', headers=None):
     """Attempts to resolve a Youku/QQ/iQIYI/MGTV watch URL via built-in JSON/HTML parser endpoints."""
+    if not allow_public:
+        return "", {}
     target = unwrap_vip_watch_url(url)
     low = target.lower()
     if not target.startswith(('http://', 'https://')) or any(tok in low for tok in ('.test', '.example', '.invalid', 'fixture', '127.0.0.1', 'localhost')):
@@ -715,7 +717,7 @@ def resolve_vip_url_via_parsers(url, flag='', headers=None):
     return '', {}
 
 
-def resolve_vip_watch_url(url, title='', episode_index=0, episode_name='', flag='', headers=None):
+def resolve_vip_watch_url(url, title='', episode_index=0, episode_name='', flag='', headers=None, *, allow_public=False):
     """Resolves commercial video watch pages (Youku, Tencent, iQIYI, MangoTV) to direct in-app streams."""
     target = unwrap_vip_watch_url(url)
     low = target.lower()

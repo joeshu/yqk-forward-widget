@@ -60,7 +60,7 @@ class CatchupReplayEnhancementTests(unittest.TestCase):
         self.assertIn("- (NSDictionary *)catchupChannelForChannel:(NSDictionary *)channel {", catalog_m)
         self.assertIn("- (NSDictionary *)nativeFallbackChannelForChannel:(NSDictionary *)channel {", catalog_m)
         self.assertIn('if ([self catchupChannelForChannel:channel] != nil) return YES;', catalog_m)
-        self.assertIn('[tags addObject:@"时移回看"]', catalog_m)
+        self.assertIn('[tags insertObject:@"时移回看" atIndex:0]', catalog_m)
         self.assertIn('%@ · %lu 线路 · 时移回看', catalog_m)
         self.assertIn("NSDictionary *catchupRow=[self catchupChannelForChannel:channel];", epg_m)
         self.assertIn("NSDictionary *nativeFallback=[self nativeFallbackChannelForChannel:channel];", epg_m)

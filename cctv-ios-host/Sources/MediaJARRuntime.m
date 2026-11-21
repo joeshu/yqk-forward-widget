@@ -1,5 +1,9 @@
 #import "MediaJARRuntime.h"
 #import "MediaJARSource.h"
+#import <TargetConditionals.h>
+#if TARGET_OS_IOS
+#import "RuntimeDiagnostics.h"
+#endif
 #import <CommonCrypto/CommonDigest.h>
 #ifndef CCTV_JAR_ENABLED
 #define CCTV_JAR_ENABLED 0
@@ -103,6 +107,7 @@ static void JARThread(void (^work)(void)) {
 + (MediaJARRequest *)requestSource:(NSDictionary *)source operation:(NSString *)operation arguments:(NSDictionary *)arguments completion:(void (^)(id,NSError *))completion {
     MediaJARRequest *ticket=[MediaJARRequest new];ticket.requestID=NSUUID.UUID.UUIDString;
     static NSOperationQueue *queue;static dispatch_once_t once;
+    static NSUInteger activeBridgeCalls;
     dispatch_once(&once,^{queue=[NSOperationQueue new];queue.name=@"CCTVHost JAR requests";queue.maxConcurrentOperationCount=2;});
     if(queue.operationCount>=4){dispatch_async(dispatch_get_main_queue(),^{if(!ticket.cancelled&&completion)completion(nil,JARError(12,@"JAR 准备队列已满，请稍候重试"));});return ticket;}
     dispatch_source_t watchdog=dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER,0,0,dispatch_get_main_queue());
@@ -111,9 +116,25 @@ static void JARThread(void (^work)(void)) {
     __weak MediaJARRequest *weakTicket=ticket;
     dispatch_source_set_event_handler(watchdog,^{MediaJARRequest *active=weakTicket;if(!active||![active claimCompletion])return;[active cancel];if(completion)completion(nil,JARError(13,@"JAR 首次准备超过 15 分钟，已取消请求；已完成的转换缓存会保留"));});
     dispatch_resume(watchdog);
+    NSTimeInterval queuedAt=NSProcessInfo.processInfo.systemUptime;
     // Cancelled queued requests perform no download, initialization or plugin work.
     [queue addOperationWithBlock:^{
         if(ticket.cancelled)return;
+#if TARGET_OS_IOS && !defined(CCTV_JAR_SMOKE)
+        [RuntimeDiagnostics.shared recordEvent:@"jar_request_dequeued" category:@"media_api"
+            fields:@{@"operation":operation?:@"",@"correlation_id":ticket.requestID,
+            @"elapsed_ms":@((NSProcessInfo.processInfo.systemUptime-queuedAt)*1000)}];
+#endif
+        @synchronized(queue){
+            if(activeBridgeCalls>=2){
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    if(!ticket.cancelled&&[ticket claimCompletion]&&completion)completion(nil,JARError(12,@"JAR 正在结束此前的请求，请稍候重试"));
+                    [ticket cancel];
+                });
+                return;
+            }
+            activeBridgeCalls++;
+        }
         dispatch_semaphore_t finished=dispatch_semaphore_create(0);
         JARThread(^{@autoreleasepool {
             NSError *error=nil;id result=nil;
@@ -121,6 +142,7 @@ static void JARThread(void (^work)(void)) {
             @catch(NSException *exception){error=JARError(3,@"JAR 运行时请求失败，请查看诊断日志");}
             @finally {
                 dispatch_async(dispatch_get_main_queue(),^{if(ticket.watchdog){dispatch_source_cancel(ticket.watchdog);ticket.watchdog=nil;}if(!ticket.cancelled&&[ticket claimCompletion]&&completion)completion(result,error);});
+                @synchronized(queue){activeBridgeCalls--;}
                 dispatch_semaphore_signal(finished);
             }
         }});
@@ -128,6 +150,7 @@ static void JARThread(void (^work)(void)) {
             BOOL shouldNotifyTimeout=[ticket claimCompletion];
             [ticket cancel];
             if(shouldNotifyTimeout&&completion)dispatch_async(dispatch_get_main_queue(),^{completion(nil,JARError(14,@"JAR 请求执行超过 3 分钟，已超时取消"));});
+
         }
     }];
     return ticket;
@@ -152,6 +175,7 @@ static void JARThread(void (^work)(void)) {
     NSString *jar=[root stringByAppendingPathComponent:[digest stringByAppendingString:@".jar"]];
     NSData *data=digest.length?[NSData dataWithContentsOfFile:jar options:NSDataReadingMappedIfSafe error:NULL]:nil;
     BOOL cached=data.length&&[JARHash(data,NO) isEqual:digest]&&NSDate.date.timeIntervalSince1970-[record[@"time"] doubleValue]<300;
+    NSTimeInterval archiveStarted=NSProcessInfo.processInfo.systemUptime;
     if(!cached){
         NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:url] cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:45];
         for(id name in headers){id value=headers[name];if([name isKindOfClass:NSString.class]&&[value isKindOfClass:NSString.class]&&[name length]<=128&&[value length]<=4096&&[name rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location==NSNotFound&&[value rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location==NSNotFound&&![name isEqual:@"Host"])[request setValue:value forHTTPHeaderField:name];}
@@ -177,6 +201,11 @@ static void JARThread(void (^work)(void)) {
     if(md5.length&&![JARHash(data,YES) isEqual:md5.lowercaseString]){if(error)*error=JARError(8,@"JAR 的 MD5 与订阅不符，请刷新订阅");return nil;}
     if(!cached){if(![data writeToFile:jar options:NSDataWritingAtomic error:error])return nil;
         [[NSJSONSerialization dataWithJSONObject:@{@"digest":digest,@"time":@(NSDate.date.timeIntervalSince1970)} options:0 error:NULL] writeToFile:recordPath atomically:YES];}
+#if TARGET_OS_IOS && !defined(CCTV_JAR_SMOKE)
+    [RuntimeDiagnostics.shared recordEvent:@"jar_archive_ready" category:@"media_api"
+        fields:@{@"operation":operation?:@"",@"correlation_id":ticket.requestID,
+        @"cache_hit":@(cached),@"elapsed_ms":@((NSProcessInfo.processInfo.systemUptime-archiveStarted)*1000)}];
+#endif
     if(ticket.cancelled)return nil;
     NSData *profileData=[NSJSONSerialization dataWithJSONObject:@{@"api":source[@"api"]?:@"",@"ext":MediaJARExtension(source),@"key":source[@"tvboxSiteKey"]?:source[@"id"]?:@"",@"origin":source[@"subscriptionURL"]?:@"",@"headers":headers} options:NSJSONWritingSortedKeys error:NULL];
     // Avoid keeping another full 64 MiB download alive while Zero prepares the plugin.
@@ -186,7 +215,13 @@ static void JARThread(void (^work)(void)) {
     NSMutableDictionary *input=[@{@"request":ticket.requestID,@"session":sessionKey,@"runtime":digest,@"runtimeCache":[root stringByAppendingPathComponent:[@"Runtimes/" stringByAppendingString:digest]],@"jar":jar,@"cache":cache,@"profile":[root stringByAppendingPathComponent:[profile stringByAppendingString:@"/profile"]],@"conversionCache":[root stringByAppendingPathComponent:@"Converted"],@"api":source[@"api"],@"key":source[@"tvboxSiteKey"]?:@"",@"ext":MediaJARExtension(source),@"subscription":source[@"subscriptionURL"]?:@"",@"params":params,@"deadline":@([operation isEqual:@"play"]?90:([operation isEqual:@"search"]?60:150))} mutableCopy];
     ticket.executing=YES;
     if(ticket.cancelled){ticket.executing=NO;return nil;}
+    NSTimeInterval bridgeStarted=NSProcessInfo.processInfo.systemUptime;
     NSDictionary *envelope=JARInvoke(input);ticket.executing=NO;
+#if TARGET_OS_IOS && !defined(CCTV_JAR_SMOKE)
+    [RuntimeDiagnostics.shared recordEvent:@"jar_bridge_returned" category:@"media_api"
+        fields:@{@"operation":operation?:@"",@"correlation_id":ticket.requestID,
+        @"elapsed_ms":@((NSProcessInfo.processInfo.systemUptime-bridgeStarted)*1000)}];
+#endif
     if(envelope[@"error"]||envelope[@"errorCode"]){
         // Plugin errors may contain signed URLs or ext secrets. Export only a stable category.
         NSString *code=[envelope[@"errorCode"] isKindOfClass:NSString.class]?envelope[@"errorCode"]:@"plugin_failure";

@@ -53,3 +53,48 @@
     completion(allowed?redirect:nil);
 }
 @end
+
+@interface HostBoundedResponse : NSObject <NSURLSessionDataDelegate>
+@property(nonatomic) NSUInteger maximumBytes;
+@property(nonatomic,strong) NSMutableData *body;
+@property(nonatomic,strong) NSError *limitError;
+@property(nonatomic,copy) void (^completion)(NSData *, NSURLResponse *, NSError *);
+@end
+
+@implementation HostBoundedResponse
+- (void)setLimitReached {
+    self.limitError=[NSError errorWithDomain:@"CCTVHost.ResponseLimit" code:1
+        userInfo:@{NSLocalizedDescriptionKey:@"下载内容超过大小上限"}];
+}
+- (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task
+ didReceiveResponse:(NSURLResponse *)response completionHandler:(void (^)(NSURLSessionResponseDisposition))handler {
+    BOOL oversized=response.expectedContentLength>0 && (unsigned long long)response.expectedContentLength>self.maximumBytes;
+    if(oversized)[self setLimitReached];
+    handler(oversized?NSURLSessionResponseCancel:NSURLSessionResponseAllow);
+}
+- (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task didReceiveData:(NSData *)data {
+    if(self.limitError)return;
+    if(data.length>self.maximumBytes-self.body.length){
+        [self setLimitReached];
+        [task cancel];
+        return;
+    }
+    [self.body appendData:data];
+}
+- (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
+    NSError *failure=self.limitError?:error;
+    self.completion(failure?nil:self.body,task.response,failure);
+    [session finishTasksAndInvalidate];
+}
+@end
+
+NSURLSessionDataTask *HostBoundedDataTask(NSURLRequest *request, NSUInteger maximumBytes,
+                                         void (^completion)(NSData *, NSURLResponse *, NSError *)) {
+    HostBoundedResponse *delegate=[HostBoundedResponse new];
+    delegate.maximumBytes=maximumBytes;
+    delegate.body=[NSMutableData data];
+    delegate.completion=completion;
+    NSURLSession *session=[NSURLSession sessionWithConfiguration:NSURLSessionConfiguration.ephemeralSessionConfiguration
+                                                       delegate:delegate delegateQueue:nil];
+    return [session dataTaskWithRequest:request];
+}

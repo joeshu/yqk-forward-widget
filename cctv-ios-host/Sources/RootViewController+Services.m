@@ -1,3 +1,5 @@
+#import "HostBackup.h"
+#import "MediaPackageImporter.h"
 #import "RootViewController_Internal.h"
 
 @implementation RootViewController (Services)
@@ -228,11 +230,33 @@
             NSArray *keys=[existing[@"tvboxSiteKeys"] isKindOfClass:NSArray.class]?existing[@"tvboxSiteKeys"]:@[];
             BOOL matchesKey=siteKey.length&&([existing[@"tvboxSiteKey"] isEqual:siteKey]||[keys containsObject:siteKey]);
             BOOL matchesURL=api.length&&[existing[@"url"] isKindOfClass:NSString.class]&&[existing[@"url"] isEqual:api];
-            if(matchesKey||matchesURL){
+            if((matchesKey&&[existing[@"tvboxCatalogID"] isEqual:site[@"tvboxCatalogID"]])||(matchesURL&&!siteKey.length)){
                 [self usePluginService:existing kind:@"vod"];
                 return;
             }
         }
+    }
+    NSString *catalogID=[site[@"tvboxCatalogID"] isKindOfClass:NSString.class]?site[@"tvboxCatalogID"]:@"";
+    NSDictionary *catalog=catalogID.length?[TVBoxCatalogStore catalogForID:catalogID]:nil;
+    NSString *bundle=catalog[@"bundleMetadata"][@"bundleDirectory"];
+    NSString *local=[site[@"bundledScript"] isKindOfClass:NSString.class]?site[@"bundledScript"]:nil;
+    if(bundle.length&&local.length&&[catalog[@"bundleMetadata"][@"companionFiles"] containsObject:local]){
+        NSURL *file=[NSURL fileURLWithPath:[bundle stringByAppendingPathComponent:local]];
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0), ^{
+            NSError *error=nil;
+            NSDictionary *service=[MediaPackageImporter importFile:file error:&error];
+            NSMutableDictionary *updated=[service mutableCopy];
+            if(updated){
+                updated[@"tvboxCatalogID"]=catalogID;
+                updated[@"tvboxSiteKey"]=siteKey;
+                NSMutableDictionary *manifest=[updated[@"manifest"] mutableCopy]?:[NSMutableDictionary dictionary];
+                if([site[@"ext"] length])manifest[@"options"]=site[@"ext"];
+                if([site[@"name"] length]){manifest[@"name"]=site[@"name"];updated[@"name"]=site[@"name"];}
+                updated[@"manifest"]=manifest;
+            }
+            dispatch_async(dispatch_get_main_queue(), ^{[self acceptImportedMedia:updated error:error autoBrowse:browseAfterImport];});
+        });
+        return;
     }
     if([api containsString:CCTVTVBoxTokenPlaceholder]){
         NSString *token=CCTVTVBoxStoredSubscriptionToken();
@@ -536,6 +560,59 @@
         if(data.length>32*1024*1024){data=nil;readError=[NSError errorWithDomain:@"CCTVHostBackup" code:2 userInfo:@{NSLocalizedDescriptionKey:@"配置文件超过 32 MiB 上限"}];}
         dispatch_async(dispatch_get_main_queue(),^{RootViewController *owner=weakSelf;if(!owner)return;owner.navigationItem.prompt=nil;if(readError)[owner showServiceError:readError.localizedDescription];else[owner finishConfigurationImport:data];});
     });
+}
+
+- (void)shareResourceFileAtURL:(NSURL *)url {
+    UIViewController *presenter=self.navigationController.topViewController?:self;
+    UIAlertController *confirmation=[UIAlertController alertControllerWithTitle:@"分享原始资源"
+        message:@"文件可能包含完整地址、访问凭据或脚本。请先确认接收方。"
+        preferredStyle:UIAlertControllerStyleAlert];
+    [confirmation addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:^(UIAlertAction *action){
+        [NSFileManager.defaultManager removeItemAtURL:url error:NULL];
+    }]];
+    __weak typeof(self) weakSelf=self;
+    [confirmation addAction:[UIAlertAction actionWithTitle:@"继续分享" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+        dispatch_async(dispatch_get_main_queue(), ^{[weakSelf shareDiagnosticLogAtURL:url];});
+    }]];
+    [presenter presentViewController:confirmation animated:YES completion:nil];
+}
+
+- (void)exportLocalConfiguration {
+    UIAlertController *confirmation=[UIAlertController alertControllerWithTitle:@"导出可恢复备份"
+        message:@"备份可能含完整订阅地址、访问凭据、收藏和观看历史。请仅保存到你信任的位置。"
+        preferredStyle:UIAlertControllerStyleAlert];
+    [confirmation addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    __weak typeof(self) weakSelf=self;
+    [confirmation addAction:[UIAlertAction actionWithTitle:@"生成备份" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[weakSelf shareLocalConfigurationBackup];}]];
+    [self presentViewController:confirmation animated:YES completion:nil];
+}
+- (void)shareLocalConfigurationBackup {
+    NSError *error=nil;
+    NSData *data=[NSJSONSerialization dataWithJSONObject:[HostBackup snapshot] options:NSJSONWritingPrettyPrinted error:&error];
+    NSString *name=[NSString stringWithFormat:@"CCTVHost-configuration-%@.json",NSUUID.UUID.UUIDString];
+    NSString *path=[NSTemporaryDirectory() stringByAppendingPathComponent:name];
+    if(!data||![data writeToFile:path options:NSDataWritingAtomic error:&error]){[self showServiceError:error.localizedDescription?:@"备份写入失败"];return;}UIActivityViewController *v=[[UIActivityViewController alloc] initWithActivityItems:@[[NSURL fileURLWithPath:path]] applicationActivities:nil];v.popoverPresentationController.sourceView=self.bottomBar;v.popoverPresentationController.sourceRect=self.bottomBar.bounds;v.completionWithItemsHandler=^(__unused UIActivityType activity,__unused BOOL completed,__unused NSArray *items,__unused NSError *shareError){[NSFileManager.defaultManager removeItemAtPath:path error:NULL];};[self presentViewController:v animated:YES completion:nil];
+}
+- (void)importLocalConfiguration {UIDocumentPickerViewController *v=[[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeJSON] asCopy:YES];v.delegate=self;[self presentViewController:v animated:YES completion:nil];}
+- (void)finishConfigurationImport:(NSData *)data {
+    __weak typeof(self) weakSelf=self;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0), ^{
+        NSError *error=nil;
+        NSDictionary *backup=[HostBackup validatedBackup:data error:&error];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if(backup)[weakSelf confirmConfigurationRestore:backup];
+            else [weakSelf showServiceError:error.localizedDescription];
+        });
+    });
+}
+- (void)confirmConfigurationRestore:(NSDictionary *)backup {
+    UIAlertController *a=[UIAlertController alertControllerWithTitle:@"导入本机配置" message:@"将替换本机订阅、收藏和偏好。Python 服务代码单独导入，不受影响。" preferredStyle:UIAlertControllerStyleAlert];[a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];[a addAction:[UIAlertAction actionWithTitle:@"导入" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+        for(NSString *source in self.subscriptionURLs.allObjects){self.subscriptionRequestVersions[source]=@([self.subscriptionRequestVersions[source] unsignedIntegerValue]+1);[self.subscriptionTasks[source] cancel];[self.subscriptionTasks removeObjectForKey:source];[self.subscriptionEditTasks[source] cancel];[self.subscriptionEditTasks removeObjectForKey:source];[self removeSubscriptionSource:source];}
+        [HostBackup restore:backup];NSDictionary *versions=self.subscriptionRequestVersions.copy;[self loadChannels];[self.subscriptionRequestVersions addEntriesFromDictionary:versions];self.recents=[[NSUserDefaults.standardUserDefaults arrayForKey:@"recents"] mutableCopy]?:[NSMutableArray array];self.activeSource=nil;self.gridMode=CCTVBoolPreference(@"channelGridMode",YES);NSInteger restoredCols=[NSUserDefaults.standardUserDefaults integerForKey:@"cctv.channelGridColumns.v1"];self.gridColumns=(restoredCols==3)?3:4;self.channelSortMode=[NSUserDefaults.standardUserDefaults integerForKey:@"cctv.channelSortMode.v1"];if(self.channelSortMode<0||self.channelSortMode>2)self.channelSortMode=0;[RuntimeDiagnostics.shared setEnabled:CCTVBoolPreference(@"runtimeDiagnosticsEnabled",NO)];MediaAdaptationMonitor.shared.monitoringEnabled=CCTVBoolPreference(@"cctv.adaptationMonitor.enabled",YES);[self configureSDKLogging];for(NSString *source in self.subscriptionURLs)[self fetchSubscription:source silent:YES];[self activateAudioSession];[self configureCatalogNavigation];[self applyFilter];[self selectBottomTab:(UIButton *)self.bottomBar.arrangedSubviews.firstObject];
+        // 备份里的主题与字号刚恢复：立即应用到窗口并重刷可见页面，
+        // 否则要等下次启动才生效。
+        UIWindow *window=self.view.window;if(window){HostApplyThemeToWindow(window);HostStyleNavigation(self.navigationController);HostRefreshAppearanceLayers(window);}[self reloadThemeAppearance];[self applyFontSizeOverride];MediaBrowserViewController *browser=(MediaBrowserViewController *)self.tabPages[@2];if(browser)[browser reloadMediaDisplayConfigurationIfLoaded];[NSNotificationCenter.defaultCenter postNotificationName:CCTVMediaEpisodeLayoutStyleDidChangeNotification object:nil];[self.table reloadData];[self.view setNeedsLayout];
+    }]];[self presentViewController:a animated:YES completion:nil];
 }
 
 @end

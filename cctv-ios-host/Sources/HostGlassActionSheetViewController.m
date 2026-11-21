@@ -350,8 +350,11 @@
 - (UIView *)makeRowViewForAction:(HostGlassSheetAction *)action {
     UIControl *row = [UIControl new];
     row.translatesAutoresizingMaskIntoConstraints = NO;
+    row.isAccessibilityElement=YES;
     row.accessibilityLabel = action.title;
-    row.accessibilityTraits = UIAccessibilityTraitButton;
+    row.accessibilityTraits = UIAccessibilityTraitButton|(action.selected?UIAccessibilityTraitSelected:0);
+    row.accessibilityValue=action.value;
+    row.accessibilityHint=action.subtitle;
     if (action.selected) {
         row.backgroundColor = HostSelectedSurface();
     }

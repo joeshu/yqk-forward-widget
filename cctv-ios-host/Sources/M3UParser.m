@@ -90,7 +90,7 @@ static NSURL *M3UNormalizedLoopbackURL(NSURL *url, NSURL *baseURL) {
         @"{lutc}":nowSec,@"${lutc}":nowSec,@"{now}":nowSec,@"${now}":nowSec,
         @"{offset}":offsetSec,@"${offset}":offsetSec
     };
-    for(NSString *token in values)address=[address stringByReplacingOccurrencesOfString:token withString:values[token]];
+    for(NSString *token in [[values allKeys] sortedArrayUsingComparator:^NSComparisonResult(NSString *a,NSString *b){return [@(b.length) compare:@(a.length)];}])address=[address stringByReplacingOccurrencesOfString:token withString:values[token]];
     static NSCalendar *utcCalendar=nil;
     static dispatch_once_t calOnce;
     dispatch_once(&calOnce,^{
@@ -124,7 +124,7 @@ static NSURL *M3UNormalizedLoopbackURL(NSURL *url, NSURL *baseURL) {
         @"{M}":[NSString stringWithFormat:@"%02ld",(long)comps.minute],@"${M}":[NSString stringWithFormat:@"%02ld",(long)comps.minute],
         @"{S}":[NSString stringWithFormat:@"%02ld",(long)comps.second],@"${S}":[NSString stringWithFormat:@"%02ld",(long)comps.second]
     };
-    for(NSString *token in dateTokens){address=[address stringByReplacingOccurrencesOfString:token withString:dateTokens[token]];}
+    for(NSString *token in [[dateTokens allKeys] sortedArrayUsingComparator:^NSComparisonResult(NSString *a,NSString *b){return [@(b.length) compare:@(a.length)];}]){address=[address stringByReplacingOccurrencesOfString:token withString:dateTokens[token]];}
     if([address containsString:@"{"]||[address containsString:@"}"])return nil;
     NSString *mode=self.catchupMode.lowercaseString?:@"default";
     if([mode isEqual:@"append"]||[mode isEqual:@"shift"]||[mode isEqual:@"timeshift"]||[mode isEqual:@"flussonic"]){

@@ -1,4 +1,5 @@
 #import "ProfileStore.h"
+#import <CommonCrypto/CommonDigest.h>
 NSNotificationName const ProfileStoreMetadataDidChangeNotification = @"CCTVHostProfileStoreMetadataDidChange";
 
 static NSString *const CCTVNativeLogoSourceKey = @"__native_cctv__";
@@ -20,12 +21,21 @@ static NSString *const CCTVEnabledChannelTelemetrySourcesKey = @"enabledChannelT
     if([self isHTTP:source])return YES;
     return [source isKindOfClass:NSString.class]&&[source hasPrefix:@"local-playlist:"]&&[[NSUUID alloc] initWithUUIDString:[source substringFromIndex:15]]!=nil;
 }
-+ (NSString *)payloadFilePathForSource:(NSString *)source {
++ (NSString *)legacyPayloadFilePathForSource:(NSString *)source {
     NSString *dir=[NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory,NSUserDomainMask,YES).firstObject stringByAppendingPathComponent:@"ProfilePayloads"];
     [NSFileManager.defaultManager createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:NULL];
     NSString *safe=[[[source stringByReplacingOccurrencesOfString:@"://" withString:@"_"] stringByReplacingOccurrencesOfString:@"/" withString:@"_"] stringByReplacingOccurrencesOfString:@":" withString:@"_"];
     if(safe.length>120)safe=[NSString stringWithFormat:@"%@_%lu",[safe substringToIndex:96],(unsigned long)source.hash];
     return [dir stringByAppendingPathComponent:[safe stringByAppendingPathExtension:@"plist"]];
+}
++ (NSString *)payloadFilePathForSource:(NSString *)source {
+    NSString *directory=[[self legacyPayloadFilePathForSource:@"legacy"] stringByDeletingLastPathComponent];
+    NSData *data=[source dataUsingEncoding:NSUTF8StringEncoding];
+    unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+    CC_SHA256(data.bytes,(CC_LONG)data.length,digest);
+    NSMutableString *name=[NSMutableString stringWithString:@"v2-"];
+    for(NSUInteger i=0;i<sizeof(digest);i++)[name appendFormat:@"%02x",digest[i]];
+    return [directory stringByAppendingPathComponent:[name stringByAppendingPathExtension:@"plist"]];
 }
 + (NSDictionary *)metadata:(NSString *)source {
     if(![source isKindOfClass:NSString.class]||!source.length)return @{};
@@ -35,33 +45,36 @@ static NSString *const CCTVEnabledChannelTelemetrySourcesKey = @"enabledChannelT
         NSDictionary *dict=(NSDictionary *)value;
         if(![dict[@"_hasDiskPayload"] boolValue])return dict;
         NSMutableDictionary *merged=[dict mutableCopy];
-        [merged removeObjectForKey:@"_hasDiskPayload"];
         NSDictionary *disk=[NSDictionary dictionaryWithContentsOfFile:[self payloadFilePathForSource:source]];
-        if([disk isKindOfClass:NSDictionary.class])[merged addEntriesFromDictionary:disk];
+        if(!disk&&![dict[@"_hasDiskPayload"] isEqual:@2])disk=[NSDictionary dictionaryWithContentsOfFile:[self legacyPayloadFilePathForSource:source]];
+        [merged removeObjectForKey:@"_hasDiskPayload"];
+        for(NSString *key in @[@"text",@"cachedChannels"])if(!merged[key]&&disk[key])merged[key]=disk[key];
         return [merged copy];
     }
+}
++ (void)storeProfile:(NSMutableDictionary *)profile forSource:(NSString *)source inMetadata:(NSMutableDictionary *)all {
+    BOOL offload=([profile[@"text"] length]>65536)||([profile[@"cachedChannels"] count]>200);
+    NSString *path=[self payloadFilePathForSource:source];
+    if(offload){
+        NSMutableDictionary *payload=[NSMutableDictionary dictionary];
+        for(NSString *key in @[@"text",@"cachedChannels"])if(profile[key])payload[key]=profile[key];
+        if([payload writeToFile:path atomically:YES]){
+            [profile removeObjectsForKeys:payload.allKeys];
+            profile[@"_hasDiskPayload"]=@2;
+        }
+    }
+    if(!profile[@"_hasDiskPayload"])[NSFileManager.defaultManager removeItemAtPath:path error:NULL];
+    all[source]=profile;
+    [NSUserDefaults.standardUserDefaults setObject:all forKey:@"profileMetadata"];
 }
 + (void)update:(NSString *)source values:(NSDictionary *)values {
     @synchronized(self){
     if((source.length&&![self isSource:source])||![values isKindOfClass:NSDictionary.class])return;
     NSString *storageKey=source.length?source:CCTVNativeLogoSourceKey;
     NSMutableDictionary *all=[[NSUserDefaults.standardUserDefaults dictionaryForKey:@"profileMetadata"]?:@{} mutableCopy];
-    NSMutableDictionary *p=[[all[storageKey] isKindOfClass:NSDictionary.class]?all[storageKey]:@{} mutableCopy];
-    BOOL offload=([values[@"text"] isKindOfClass:NSString.class]&&[(NSString *)values[@"text"] length]>65536)||([values[@"cachedChannels"] isKindOfClass:NSArray.class]&&[(NSArray *)values[@"cachedChannels"] count]>200);
-    if(offload){
-        NSString *payloadPath=[self payloadFilePathForSource:storageKey];
-        NSMutableDictionary *disk=[[NSDictionary dictionaryWithContentsOfFile:payloadPath] mutableCopy]?:[NSMutableDictionary dictionary];
-        for(NSString *k in values){
-            if([k isEqualToString:@"text"]||[k isEqualToString:@"cachedChannels"]){disk[k]=values[k];[p removeObjectForKey:k];}
-            else p[k]=values[k];
-        }
-        if([disk writeToFile:payloadPath atomically:YES])p[@"_hasDiskPayload"]=@YES;
-        else [p addEntriesFromDictionary:values];
-    }else{
-        [p addEntriesFromDictionary:values];
-    }
-    all[storageKey]=p;
-    [NSUserDefaults.standardUserDefaults setObject:all forKey:@"profileMetadata"];
+    NSMutableDictionary *p=[[self metadata:storageKey] mutableCopy];
+    [p addEntriesFromDictionary:values];
+    [self storeProfile:p forSource:storageKey inMetadata:all];
     }
 }
 + (void)removeValueForKey:(NSString *)key source:(NSString *)source {
@@ -72,8 +85,8 @@ static NSString *const CCTVEnabledChannelTelemetrySourcesKey = @"enabledChannelT
     NSMutableDictionary *all=[[NSUserDefaults.standardUserDefaults dictionaryForKey:@"profileMetadata"]?:@{} mutableCopy];
     NSMutableDictionary *p=[[self metadata:source] mutableCopy];
     if(![p objectForKey:key])return;
-    [p removeObjectForKey:key];all[source]=p;
-    [NSUserDefaults.standardUserDefaults setObject:all forKey:@"profileMetadata"];
+    [p removeObjectForKey:key];
+    [self storeProfile:p forSource:source inMetadata:all];
 
     }
 }

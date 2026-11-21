@@ -746,10 +746,8 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     [self.dashboardCard addSubview:self.dashboardActionsStack];
 
     NSArray<NSDictionary *> *quickSpecs=@[
-        @{@"id":@"probe",@"title":@"⚡ 一键测速",@"sel":NSStringFromSelector(@selector(probeResources))},
-        @{@"id":@"services",@"title":@"🎛 脚本服务",@"sel":NSStringFromSelector(@selector(openServices))},
-        @{@"id":@"monitor",@"title":@"📈 适配监测",@"sel":NSStringFromSelector(@selector(openAdaptationMonitor))},
-        @{@"id":@"summary",@"title":@"📋 复制摘要",@"sel":NSStringFromSelector(@selector(copyResourceDiagnosticSummary))}
+        @{@"id":@"services",@"title":@"脚本服务",@"sel":NSStringFromSelector(@selector(openServices))},
+        @{@"id":@"probe",@"title":@"连接测速",@"sel":NSStringFromSelector(@selector(probeResources))}
     ];
     NSMutableArray<UIButton *> *qButtons=[NSMutableArray arrayWithCapacity:4];
     for(NSDictionary *qSpec in quickSpecs){
@@ -849,7 +847,7 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
         self.dashboardMetricValueLabels[i].textColor=active?HostAccent():(i==3&&attention>0?UIColor.systemOrangeColor:HostText());
     }
     if(self.dashboardQuickActionButtons.count>0){
-        UIButton *probeBtn=self.dashboardQuickActionButtons[0];
+        UIButton *probeBtn=self.dashboardQuickActionButtons.lastObject;
         [probeBtn setTitle:self.probingResources?@"⚡ 测速中…":@"⚡ 一键测速" forState:UIControlStateNormal];
     }
 }

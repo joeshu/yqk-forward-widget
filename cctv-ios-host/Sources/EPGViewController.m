@@ -1,3 +1,4 @@
+#import "HostSyncRequest.h"
 #import "EPGViewController.h"
 #import <UserNotifications/UserNotifications.h>
 #import "HostTheme.h"
@@ -146,7 +147,7 @@
     HostInstallGlassBackdrop(self.table);
     [self.view addSubview:self.table];
 
-    self.dates=[[UISegmentedControl alloc] initWithItems:@[]];self.dates.selectedSegmentTintColor=HostAccent();self.dates.apportionsSegmentWidthsByContent=YES;self.dates.accessibilityLabel=@"选择节目单日期";[self.dates setTitleTextAttributes:@{NSForegroundColorAttributeName:HostText(),NSFontAttributeName:[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:12]]} forState:UIControlStateNormal];[self.dates setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent(),NSFontAttributeName:[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold]]} forState:UIControlStateSelected];[self.dates addTarget:self action:@selector(filterDate) forControlEvents:UIControlEventValueChanged];[self.view addSubview:self.dates];
+    self.dates=[[UISegmentedControl alloc] initWithItems:@[]];self.dates.selectedSegmentTintColor=HostAccentFill();self.dates.apportionsSegmentWidthsByContent=YES;self.dates.accessibilityLabel=@"选择节目单日期";[self.dates setTitleTextAttributes:@{NSForegroundColorAttributeName:HostText(),NSFontAttributeName:[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:12]]} forState:UIControlStateNormal];[self.dates setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent(),NSFontAttributeName:[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold]]} forState:UIControlStateSelected];[self.dates addTarget:self action:@selector(filterDate) forControlEvents:UIControlEventValueChanged];[self.view addSubview:self.dates];
     self.reminders=[[NSUserDefaults.standardUserDefaults dictionaryForKey:@"cctv.epgReminders.v1"] mutableCopy]?:[NSMutableDictionary dictionary];
     [self pruneExpiredReminders];
     self.dateMenuButton=[UIButton buttonWithType:UIButtonTypeSystem];self.dateMenuButton.hidden=YES;self.dateMenuButton.accessibilityLabel=@"选择节目单日期";HostStylePillButton(self.dateMenuButton,NO);HostInstallPressFeedback(self.dateMenuButton);self.dateMenuButton.titleLabel.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleSubheadline] scaledFontForFont:[UIFont systemFontOfSize:15]];self.dateMenuButton.titleLabel.adjustsFontForContentSizeCategory=YES;self.dateMenuButton.showsMenuAsPrimaryAction=YES;[self.view addSubview:self.dateMenuButton];
@@ -167,7 +168,7 @@
     self.emptyLabel.textColor = HostSecondaryText();
     self.table.backgroundColor = HostBackground();
     self.table.separatorColor = HostSeparator();
-    self.dates.selectedSegmentTintColor = HostAccent();
+    self.dates.selectedSegmentTintColor = HostAccentFill();
     [self.dates setTitleTextAttributes:@{NSForegroundColorAttributeName:HostText(),NSFontAttributeName:[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:12]]} forState:UIControlStateNormal];
     [self.dates setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent(),NSFontAttributeName:[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold]]} forState:UIControlStateSelected];
     HostStylePillButton(self.dateMenuButton, NO);
@@ -276,7 +277,7 @@
 
     __weak typeof(self) weakSelf = self;NSUInteger generation=++self.requestGeneration;
     [self.task cancel];
-    self.task = [[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *err) {
+    self.task = HostBoundedDataTask(req, 2*1024*1024, ^(NSData *data, NSURLResponse *resp, NSError *err) {
         NSArray *rows = nil;
         // 官方 EPG 响应无大小限制：超过 4 MiB 按失败处理，避免后台线程解析超大 JSON。
         if (data.length&&data.length<=4*1024*1024) {
@@ -306,7 +307,7 @@
             }
             [weakSelf updateEmptyState];
         });
-    }];
+    });
     [self.task resume];
 }
 
@@ -504,8 +505,8 @@
 - (NSString *)safeSourceDescription {
     NSString *raw=self.xmlSource?:@"";NSURLComponents *components=[NSURLComponents componentsWithString:raw];
     if(!components.host.length)return self.sourceName?:@"央视官方 EPG";
-    BOOL hidden=components.user.length||components.password.length;
-    components.user=nil;components.password=nil;components.fragment=nil;
+    BOOL hidden=components.user.length||components.password.length||components.query.length||components.path.length>1;
+    components.user=nil;components.password=nil;components.fragment=nil;components.query=nil;components.path=@"";
     NSString *value=components.string?:@"XMLTV";return hidden?[value stringByAppendingString:@"（凭据已隐藏）"]:value;
 }
 - (void)showSourceInfo {

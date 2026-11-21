@@ -1,5 +1,24 @@
 #import "TVBoxCatalogDownloader.h"
 #import "TVBoxCatalogStore.h"
+#import "ResourceImportFetcher.h"
+static NSUInteger const TVBoxCatalogMaximumBytes = 8 * 1024 * 1024;
+static NSString *TVBoxCatalogConnectionFailure(NSError *error) {
+    if([error.domain isEqualToString:NSURLErrorDomain]){
+        switch(error.code){
+            case NSURLErrorTimedOut: return @"请求超时";
+            case NSURLErrorNotConnectedToInternet: return @"当前没有网络连接";
+            case NSURLErrorCannotFindHost:
+            case NSURLErrorDNSLookupFailed: return @"无法解析服务器地址";
+            case NSURLErrorCannotConnectToHost: return @"无法连接服务器";
+            case NSURLErrorNetworkConnectionLost: return @"网络连接中断";
+            case NSURLErrorSecureConnectionFailed:
+            case NSURLErrorServerCertificateUntrusted: return @"安全连接失败";
+            default: break;
+        }
+    }
+    return [NSString stringWithFormat:@"连接失败（%ld）",(long)error.code];
+}
+
 static NSData *TVBoxBundledWeBoxIndexForURL(NSString *sourceURL) {
     if(![sourceURL isKindOfClass:NSString.class]||!sourceURL.length)return nil;
     NSString *lower=(sourceURL.stringByRemovingPercentEncoding?:sourceURL).lowercaseString;
@@ -38,11 +57,10 @@ static NSData *TVBoxBundledWeBoxIndexForURL(NSString *sourceURL) {
 - (void)loadURL:(NSURL *)url completion:(void (^)(NSDictionary *,NSError *))completion {
     self.completion=completion;self.source=url.absoluteString;self.redirectCount=0;NSURLComponents *parts=[NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:NO];
     if(!parts||![@[@"https",@"http"] containsObject:parts.scheme.lowercaseString]||!parts.host.length||parts.user.length||parts.password.length){[self finish:nil error:[self failure:@"请输入有效的 HTTP/HTTPS TVBox JSON 地址"]];return;}
-    NSURLSessionConfiguration *config=NSURLSessionConfiguration.ephemeralSessionConfiguration;config.URLCache=nil;config.HTTPCookieStorage=nil;NSTimeInterval savedTimeout=[[NSUserDefaults standardUserDefaults] objectForKey:@"cctv.networkTimeout.v1"]?[[NSUserDefaults standardUserDefaults] doubleForKey:@"cctv.networkTimeout.v1"]:20;NSTimeInterval timeout=MIN(40,MAX(5,savedTimeout));config.timeoutIntervalForRequest=timeout;config.timeoutIntervalForResource=timeout+5;
+    NSURLSessionConfiguration *config=NSURLSessionConfiguration.ephemeralSessionConfiguration;config.URLCache=nil;config.HTTPCookieStorage=nil;config.HTTPShouldSetCookies=NO;NSTimeInterval savedTimeout=[[NSUserDefaults standardUserDefaults] objectForKey:@"cctv.networkTimeout.v1"]?[[NSUserDefaults standardUserDefaults] doubleForKey:@"cctv.networkTimeout.v1"]:20;NSTimeInterval timeout=MIN(40,MAX(5,savedTimeout));config.timeoutIntervalForRequest=timeout;config.timeoutIntervalForResource=timeout+5;
     NSOperationQueue *queue=[NSOperationQueue new];queue.maxConcurrentOperationCount=1;self.session=[NSURLSession sessionWithConfiguration:config delegate:self delegateQueue:queue];self.data=[NSMutableData data];
     NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:timeout];
-    [req setValue:@"okhttp/4.12.0" forHTTPHeaderField:@"User-Agent"];
-    [req setValue:@"application/json, text/plain, */*" forHTTPHeaderField:@"Accept"];
+    [req setValue:ResourceImportUserAgent() forHTTPHeaderField:@"User-Agent"];
     self.task=[self.session dataTaskWithRequest:req];[self.task resume];
 }
 - (void)cancel {[self finish:nil error:[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil]];}
@@ -60,26 +78,31 @@ static NSData *TVBoxBundledWeBoxIndexForURL(NSString *sourceURL) {
     if(completion)dispatch_async(dispatch_get_main_queue(),^{completion(catalog,error);});
 }
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task didReceiveResponse:(NSURLResponse *)response completionHandler:(void (^)(NSURLSessionResponseDisposition))completion {
-    BOOL valid=NO;
+    NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]?[(NSHTTPURLResponse *)response statusCode]:0;
+    BOOL oversized=response.expectedContentLength>(long long)TVBoxCatalogMaximumBytes;
+    BOOL success=status>=200&&status<300;
+    BOOL valid=success&&!oversized;
     @synchronized(self){
-        valid=!self.finished&&task==self.task&&[response isKindOfClass:NSHTTPURLResponse.class]&&((NSHTTPURLResponse *)response).statusCode==200&&response.expectedContentLength<=8*1024*1024;
+        if(self.finished||task!=self.task){completion(NSURLSessionResponseCancel);return;}
         if(valid&&response.URL.absoluteString.length)self.source=response.URL.absoluteString;
     }
     completion(valid?NSURLSessionResponseAllow:NSURLSessionResponseCancel);
     if(!valid){
+        if(oversized&&success){[self finish:nil error:[self failure:@"TVBox 配置超过 8 MiB 上限"]];return;}
         NSData *bundled=TVBoxBundledWeBoxIndexForURL(self.source);
         if(bundled.length){NSError *parseError=nil;NSDictionary *catalog=[TVBoxCatalogStore parseData:bundled sourceURL:self.source error:&parseError];if(catalog){[self finish:catalog error:nil];return;}}
-        [self finish:nil error:[self failure:@"配置请求失败、HTTP 状态异常或超过 8 MiB"]];
+        NSString *message=status?[NSString stringWithFormat:@"配置服务器返回 HTTP %ld",(long)status]:@"配置服务器未返回有效的 HTTP 响应";
+        [self finish:nil error:[self failure:message]];
     }
 }
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task didReceiveData:(NSData *)data {
     BOOL exceeded=NO;
     @synchronized(self){
         if(task!=self.task||self.finished||!self.data)return;
-        if(self.data.length+data.length>8*1024*1024)exceeded=YES;
+        if(data.length>TVBoxCatalogMaximumBytes-self.data.length)exceeded=YES;
         else[self.data appendData:data];
     }
-    if(exceeded){[task cancel];[self finish:nil error:[self failure:@"TVBox 配置超过 8 MiB 上限"]];}
+    if(exceeded)[self finish:nil error:[self failure:@"TVBox 配置超过 8 MiB 上限"]];
 }
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLRequest *)request completionHandler:(void (^)(NSURLRequest * _Nullable))completion {
     NSURLComponents *from=[NSURLComponents componentsWithURL:response.URL resolvingAgainstBaseURL:NO],*to=[NSURLComponents componentsWithURL:request.URL resolvingAgainstBaseURL:NO];
@@ -97,12 +120,16 @@ static NSData *TVBoxBundledWeBoxIndexForURL(NSString *sourceURL) {
         payload=[self.data copy];sourceURL=[self.source copy];
     }
     if(error){
-        if(error.code!=NSURLErrorCancelled){
+        if(![error.domain isEqualToString:NSURLErrorDomain]||error.code!=NSURLErrorCancelled){
             NSData *bundled=TVBoxBundledWeBoxIndexForURL(sourceURL);
             if(bundled.length){NSError *parseError=nil;NSDictionary *catalog=[TVBoxCatalogStore parseData:bundled sourceURL:sourceURL error:&parseError];if(catalog){[self finish:catalog error:nil];return;}}
         }
-        [self finish:nil error:error];return;
+        NSString *message=[NSString stringWithFormat:@"配置服务器 · %@",TVBoxCatalogConnectionFailure(error)];
+        if([error.domain isEqualToString:NSURLErrorDomain]&&error.code==NSURLErrorCancelled)[self finish:nil error:error];
+        else [self finish:nil error:[self failure:message]];
+        return;
     }
+    if(!payload.length){[self finish:nil error:[self failure:@"配置服务器返回了空文件"]];return;}
     NSError *parseError=nil;NSDictionary *catalog=[TVBoxCatalogStore parseData:payload sourceURL:sourceURL error:&parseError];
     if(!catalog){
         NSData *bundled=TVBoxBundledWeBoxIndexForURL(self.source);

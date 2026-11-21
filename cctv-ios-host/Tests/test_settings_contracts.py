@@ -224,7 +224,7 @@ class SettingsContracts(unittest.TestCase):
         # 导入备份后主题/字号要立即生效，不等下次启动。413 分支的导入
         # 入口叫 finishConfigurationImport:（main 叫 finishResourceImport:），
         # 方法体里已有同样的立即应用代码。
-        body = method_body(self.root, '- (void)finishConfigurationImport:(NSData *)data')
+        body = method_body((ROOT / 'Sources' / 'RootViewController+Services.m').read_text(encoding='utf-8'), '- (void)confirmConfigurationRestore:(NSDictionary *)backup')
         self.assertIn('HostApplyThemeToWindow', body)
         self.assertIn('applyFontSizeOverride', body)
         self.assertIn('[self.table reloadData]', body)

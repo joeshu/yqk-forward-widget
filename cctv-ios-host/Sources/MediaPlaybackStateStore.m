@@ -26,7 +26,15 @@ static NSDictionary *MediaPlaybackComponents(NSDictionary *context, NSInteger li
     NSDictionary *source = [context[@"source"] isKindOfClass:NSDictionary.class] ? context[@"source"] : @{};
     NSDictionary *item = [context[@"item"] isKindOfClass:NSDictionary.class] ? context[@"item"] : @{};
     NSDictionary *detail = [context[@"detail"] isKindOfClass:NSDictionary.class] ? context[@"detail"] : @{};
+    NSArray *seasons=[detail[@"seasons"] isKindOfClass:NSArray.class]?detail[@"seasons"]:@[];
+    NSInteger seasonIndex=[context[@"seasonIndex"] isKindOfClass:NSNumber.class]?[context[@"seasonIndex"] integerValue]:-1;
+    NSDictionary *season=seasonIndex>=0&&seasonIndex<seasons.count&&[seasons[(NSUInteger)seasonIndex] isKindOfClass:NSDictionary.class]?seasons[(NSUInteger)seasonIndex]:@{};
+    NSArray *seasonLines=[season[@"lines"] isKindOfClass:NSArray.class]?season[@"lines"]:@[];
+    NSString *seasonID=MediaPlaybackString(season[@"id"]);
+    if(MediaPlaybackIsWebURL(seasonID))seasonID=@"";
+    NSString *seasonKey=seasonID.length?seasonID:[NSString stringWithFormat:@"index:%ld",(long)seasonIndex];
     NSArray *lines = [detail[@"lines"] isKindOfClass:NSArray.class] ? detail[@"lines"] : @[];
+    if(seasonLines.count)lines=seasonLines;
     NSDictionary *line = lineIndex >= 0 && lineIndex < (NSInteger)lines.count && [lines[(NSUInteger)lineIndex] isKindOfClass:NSDictionary.class] ? lines[(NSUInteger)lineIndex] : @{};
     NSArray *episodes = [line[@"episodes"] isKindOfClass:NSArray.class] ? line[@"episodes"] : @[];
     NSDictionary *episode = episodeIndex >= 0 && episodeIndex < (NSInteger)episodes.count && [episodes[(NSUInteger)episodeIndex] isKindOfClass:NSDictionary.class] ? episodes[(NSUInteger)episodeIndex] : @{};
@@ -50,7 +58,8 @@ static NSDictionary *MediaPlaybackComponents(NSDictionary *context, NSInteger li
              @"provider": provider, @"itemID": itemID, @"lineID": lineID,
              @"episodeID": episodeID, @"episodeName": episodeName, @"lineName": MediaPlaybackString(line[@"name"]),
              @"item": historyItem, @"lineIndex": @(MAX(0, lineIndex)), @"episodeIndex": @(MAX(0, episodeIndex)),
-             @"key": MediaPlaybackCompositeKey(@[sourceID, provider, itemID, lineKey, episodeKey]),
+             @"seasonIndex":@(season.count?seasonIndex:-1), @"seasonID":seasonID,
+             @"key": MediaPlaybackCompositeKey(season.count?@[sourceID, provider, itemID, seasonKey, lineKey, episodeKey]:@[sourceID, provider, itemID, lineKey, episodeKey]),
              @"seriesKey": MediaPlaybackCompositeKey(@[sourceID, provider, itemID])};
 }
 
@@ -68,7 +77,14 @@ static NSDictionary *MediaPlaybackComponents(NSDictionary *context, NSInteger li
         if(MediaPlaybackIsWebURL(episodeID)){clean[@"episodeID"]=@"";episodeID=@"";migrated=YES;}
         NSString *lineKey=lineID.length?lineID:[NSString stringWithFormat:@"index:%ld",(long)[clean[@"lineIndex"] integerValue]];
         NSString *episodeKey=episodeID.length?episodeID:[NSString stringWithFormat:@"index:%ld",(long)[clean[@"episodeIndex"] integerValue]];
-        NSString *key=MediaPlaybackCompositeKey(@[MediaPlaybackString(clean[@"sourceID"]),MediaPlaybackString(clean[@"provider"]),MediaPlaybackString(clean[@"itemID"]),lineKey,episodeKey]);
+        NSMutableArray *parts=[NSMutableArray arrayWithArray:@[MediaPlaybackString(clean[@"sourceID"]),MediaPlaybackString(clean[@"provider"]),MediaPlaybackString(clean[@"itemID"])]];
+        NSNumber *seasonIndex=[clean[@"seasonIndex"] isKindOfClass:NSNumber.class]?clean[@"seasonIndex"]:nil;
+        NSString *seasonID=MediaPlaybackString(clean[@"seasonID"]);
+        if(seasonID.length||(seasonIndex&&seasonIndex.integerValue>=0)){
+            [parts addObject:seasonID.length?seasonID:[NSString stringWithFormat:@"index:%ld",(long)seasonIndex.integerValue]];
+        }
+        [parts addObjectsFromArray:@[lineKey,episodeKey]];
+        NSString *key=MediaPlaybackCompositeKey(parts);
         if(![clean[@"key"] isEqual:key]){clean[@"key"]=key;migrated=YES;}
         [valid addObject:clean];
     }

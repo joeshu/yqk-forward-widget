@@ -51,7 +51,16 @@ static NSString *TVBoxPackageSafeName(NSString *value) {
     return self;
 }
 - (NSString *)resolvedURL:(NSString *)raw {
-    if(![raw isKindOfClass:NSString.class])return @"";if(![raw containsString:TVBoxPackageTokenPlaceholder])return raw;if(!self.token.length)return @"";return [raw stringByReplacingOccurrencesOfString:TVBoxPackageTokenPlaceholder withString:self.token];
+    if(![raw isKindOfClass:NSString.class])return @"";if(![raw containsString:TVBoxPackageTokenPlaceholder])return raw;if(!self.token.length)return @"";
+    NSURLComponents *parts=[NSURLComponents componentsWithString:raw];
+    if(![parts.scheme.lowercaseString isEqual:@"https"]||![parts.host.lowercaseString isEqual:@"sub.lytvs.top"]||parts.user.length||parts.password.length||(parts.port&&parts.port.integerValue!=443))return @"";
+    NSMutableArray *items=[NSMutableArray array];
+    for(NSURLQueryItem *item in parts.queryItems){
+        NSString *value=[item.value stringByReplacingOccurrencesOfString:TVBoxPackageTokenPlaceholder withString:self.token];
+        [items addObject:[NSURLQueryItem queryItemWithName:item.name value:value]];
+    }
+    parts.queryItems=items;
+    return [parts.URL.absoluteString containsString:TVBoxPackageTokenPlaceholder]?@"":(parts.URL.absoluteString?:@"");
 }
 - (NSString *)fileExtensionForURL:(NSString *)value {
     NSURLComponents *parts=[NSURLComponents componentsWithString:value];
@@ -84,11 +93,17 @@ static NSString *TVBoxPackageSafeName(NSString *value) {
     NSNumber *identifier=@(task.taskIdentifier);BOOL isHTTP=[response isKindOfClass:NSHTTPURLResponse.class];NSInteger status=isHTTP?((NSHTTPURLResponse *)response).statusCode:0;BOOL valid=self.taskEntries[identifier]&&isHTTP&&status>=200&&status<300&&response.expectedContentLength<=8*1024*1024;completion(valid?NSURLSessionResponseAllow:NSURLSessionResponseCancel);if(!valid&&self.taskEntries[identifier]){NSMutableDictionary *record=[self recordForTask:identifier];record[@"status"]=@"HTTP 状态异常或文件超过 8 MiB";record[@"errorCode"]=@(status);}
 }
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task didReceiveData:(NSData *)data {
-    NSNumber *identifier=@(task.taskIdentifier);NSMutableData *buffer=self.taskData[identifier];if(!buffer)return;if(buffer.length+data.length>8*1024*1024||self.totalBytes+data.length>128*1024*1024){NSMutableDictionary *record=[self recordForTask:identifier];record[@"status"]=@"超过文件包大小上限";[task cancel];return;}[buffer appendData:data];self.totalBytes+=data.length;
+    NSNumber *identifier=@(task.taskIdentifier);NSMutableData *buffer=self.taskData[identifier];if(!buffer)return;if(buffer.length+data.length>8*1024*1024||self.totalBytes+data.length>28*1024*1024){NSMutableDictionary *record=[self recordForTask:identifier];record[@"status"]=@"超过文件包大小上限";[task cancel];return;}[buffer appendData:data];self.totalBytes+=data.length;
 }
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLRequest *)request completionHandler:(void (^)(NSURLRequest * _Nullable))completion {
     NSNumber *identifier=@(task.taskIdentifier);NSUInteger count=[self.redirectCounts[identifier] unsignedIntegerValue]+1;self.redirectCounts[identifier]=@(count);NSURLComponents *from=[NSURLComponents componentsWithURL:response.URL resolvingAgainstBaseURL:NO],*to=[NSURLComponents componentsWithURL:request.URL resolvingAgainstBaseURL:NO];BOOL valid=self.taskEntries[identifier]&&count<=5&&to.host.length&&!to.user.length&&!to.password.length&&[@[@"http",@"https"] containsObject:to.scheme.lowercaseString]&&!([from.scheme.lowercaseString isEqual:@"https"]&&[to.scheme.lowercaseString isEqual:@"http"]);
-    NSMutableURLRequest *safe=[request mutableCopy];BOOL sameOrigin=TVBoxPackageSameOrigin(response.URL,request.URL);if(!sameOrigin)for(NSString *name in @[@"Authorization",@"Cookie",@"Proxy-Authorization"])[safe setValue:nil forHTTPHeaderField:name];completion(valid?safe:nil);
+    NSMutableURLRequest *safe=[request mutableCopy];BOOL sameOrigin=TVBoxPackageSameOrigin(response.URL,request.URL);
+    NSDictionary *entry=self.taskEntries[identifier];
+    if(!sameOrigin){
+        if([entry[@"rawURL"] containsString:TVBoxPackageTokenPlaceholder])valid=NO;
+        for(NSString *name in entry[@"headers"])[safe setValue:nil forHTTPHeaderField:name];
+    }
+    completion(valid?safe:nil);
 }
 - (NSMutableDictionary *)recordForTask:(NSNumber *)identifier {
     NSDictionary *entry=self.taskEntries[identifier];NSUInteger index=[entry[@"recordIndex"] unsignedIntegerValue];if(index>=self.manifestEntries.count)return [NSMutableDictionary dictionary];NSMutableDictionary *record=[self.manifestEntries[index] mutableCopy];self.manifestEntries[index]=record;return record;
@@ -116,6 +131,13 @@ static NSString *TVBoxPackageSafeName(NSString *value) {
     NSString *readme=[NSString stringWithFormat:@"TVBox 资源合集%@\n\nconfig.json 是完整原始配置；scripts/ 内只包含成功获取的 PY/JS 文件；source-manifest.json 记录每个文件及未能获取的项目。\n\n内部脚本：已收集 %lu / %lu · 未能获取 %lu 个\n",state,(unsigned long)collected,(unsigned long)self.manifestEntries.count,(unsigned long)self.failedCount];
     self.archiveFiles[@"README.txt"]=[readme dataUsingEncoding:NSUTF8StringEncoding];
     NSURL *url=manifest?[TVBoxCatalogStore writeZIPArchiveForCatalogID:self.catalogID files:self.archiveFiles error:&error]:nil;
+    NSNumber *length=nil;
+    [url getResourceValue:&length forKey:NSURLFileSizeKey error:NULL];
+    if(length.unsignedLongLongValue>32*1024*1024){
+        [NSFileManager.defaultManager removeItemAtURL:url error:NULL];
+        url=nil;
+        error=TVBoxPackageError(@"合集 ZIP 超过 32 MiB，无法回导");
+    }
     if(!url&&!error)error=TVBoxPackageError(@"生成 ZIP 文件失败");
     [self finish:url error:error];
 }

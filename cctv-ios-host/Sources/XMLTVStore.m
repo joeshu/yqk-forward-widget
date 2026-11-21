@@ -1,3 +1,4 @@
+#import "HostSyncRequest.h"
 #import "XMLTVStore.h"
 #import "ProfileStore.h"
 #import <TargetConditionals.h>
@@ -62,7 +63,7 @@
             NSArray *rawRows=reader.channels[cid];
             NSMutableArray *windowed=[NSMutableArray array];
             for(NSDictionary *row in rawRows){
-                NSTimeInterval s=[row[@"start"] doubleValue],e=[row[@"stop"] doubleValue];
+                NSTimeInterval s=[row[@"start"] doubleValue],e=[row[@"end"] doubleValue];
                 if(e>=windowStart && s<=windowEnd)[windowed addObject:row];
             }
             NSArray *chosen=windowed.count?windowed:rawRows;
@@ -113,7 +114,7 @@ invalid:
         NSURL *requestURL=[NSURL URLWithString:source];
         if(!requestURL){[self complete:source cache:cached error:[NSError errorWithDomain:@"XMLTV" code:2 userInfo:@{NSLocalizedDescriptionKey:@"请先配置有效的 XMLTV 地址。"}]];return;}
         NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:requestURL];request.timeoutInterval=20;
-        NSURLSessionDataTask *task=[NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){
+        NSURLSessionDataTask *task=HostBoundedDataTask(request, 64*1024*1024, ^(NSData *data,NSURLResponse *response,NSError *error){
             dispatch_async(self.diskQueue,^{NSError *parseError=error;NSDictionary *rows=nil;
                 NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]?[(NSHTTPURLResponse *)response statusCode]:0;
                 if(!error&&status>=200&&status<300)rows=[XMLTVStore parseData:data error:&parseError];
@@ -121,7 +122,7 @@ invalid:
                 NSDictionary *entry=rows?@{@"rows":rows,@"ts":@(NSDate.date.timeIntervalSince1970)}:cached;
                 dispatch_async(dispatch_get_main_queue(),^{if(generation!=self.generation)return;if(entry){@synchronized(self){self.cache[source]=entry;}}[self complete:source cache:entry error:parseError];if(rows)dispatch_async(self.diskQueue,^{[entry writeToFile:path atomically:YES];});});
             });
-        }];@synchronized(self){self.tasks[source]=task;}[task resume];
+        });@synchronized(self){self.tasks[source]=task;}[task resume];
     });});
 }
 - (void)complete:(NSString *)source cache:(NSDictionary *)cache error:(NSError *)error {NSArray *blocks=nil;@synchronized(self){blocks=[self.callbacks[source] copy];[self.callbacks removeObjectForKey:source];[self.tasks removeObjectForKey:source];}for(void (^block)(NSDictionary *,NSError *) in blocks)block(cache,error);}

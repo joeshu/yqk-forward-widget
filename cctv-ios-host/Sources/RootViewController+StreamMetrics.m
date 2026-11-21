@@ -247,7 +247,7 @@
             @{@"title": @"应用版本", @"value": CCTVBuildTag()}
         ]];
         if (w.requestedNativeRoute[@"url"]) {
-            [routeRows insertObject:@{@"title": @"所选线路完整地址", @"value": [w displaySafeSourceURL:w.requestedNativeRoute[@"url"]]} atIndex:1];
+            [routeRows insertObject:@{@"title": @"所选线路来源", @"value": [w displaySafeSourceURL:w.requestedNativeRoute[@"url"]]} atIndex:1];
         } else if (w.currentRemoteURL.length) {
             [routeRows insertObject:@{@"title": @"当前流地址", @"value": [w displaySafeSourceURL:w.currentRemoteURL]} atIndex:1];
         }
@@ -271,8 +271,8 @@
 - (NSString *)displaySafeSourceURL:(NSString *)raw {
     NSURLComponents *components=[NSURLComponents componentsWithString:raw?:@""];
     if(!components.host.length||![@[@"http",@"https"] containsObject:components.scheme.lowercaseString])return @"播放地址已隐藏";
-    BOOL hidden=components.user.length||components.password.length;
-    components.user=nil;components.password=nil;components.fragment=nil;
+    BOOL hidden=components.user.length||components.password.length||components.query.length||components.path.length>1;
+    components.user=nil;components.password=nil;components.fragment=nil;components.query=nil;components.path=@"";
     NSString *value=components.string?:@"播放地址已隐藏";
     return hidden?[value stringByAppendingString:@" · 凭据已隐藏"]:value;
 }
@@ -389,26 +389,31 @@ static BOOL CCTVPreviewImageHasValidVideoContent(UIImage *image) {
 - (UIImage *)cachedRealPreviewImageForChannelID:(NSString *)cid {
     if(!cid.length)return nil;
     if(!self.channelPreviewSnapshots)self.channelPreviewSnapshots=[NSMutableDictionary dictionary];
-    UIImage *mem=self.channelPreviewSnapshots[cid];
-    if(mem){
-        if(CCTVPreviewImageHasValidVideoContent(mem))return mem;
-        [self.channelPreviewSnapshots removeObjectForKey:cid];
-    }
-    NSString *path=[self channelPreviewDiskPathForChannelID:cid];
-    if(path.length&&[NSFileManager.defaultManager fileExistsAtPath:path]){
-        UIImage *diskImg=[UIImage imageWithContentsOfFile:path];
-        if(diskImg&&CCTVPreviewImageHasValidVideoContent(diskImg)){
-            if(self.channelPreviewSnapshots.count>=128){
-                NSArray *keys=[self.channelPreviewSnapshots.allKeys sortedArrayUsingComparator:^NSComparisonResult(NSString *a,NSString *b){
-                    return [self.channelPreviewCapturedAt[a]?:@0 compare:self.channelPreviewCapturedAt[b]?:@0];
-                }];
-                [self.channelPreviewSnapshots removeObjectsForKeys:[keys subarrayWithRange:NSMakeRange(0,MAX((NSUInteger)1,keys.count/4))]];
-            }
-            self.channelPreviewSnapshots[cid]=diskImg;
-            return diskImg;
-        }
-        [NSFileManager.defaultManager removeItemAtPath:path error:NULL];
-    }
+    UIImage *image=self.channelPreviewSnapshots[cid];
+    if(image)return image;
+    static NSCache<NSString *,NSDate *> *attempts;
+    static dispatch_queue_t reader;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        attempts=[NSCache new];
+        attempts.countLimit=512;
+        reader=dispatch_queue_create("com.cctvhost.preview.disk", DISPATCH_QUEUE_SERIAL);
+    });
+    NSDate *last=[attempts objectForKey:cid];
+    if(last&&-last.timeIntervalSinceNow<60)return nil;
+    [attempts setObject:NSDate.date forKey:cid];
+    __weak typeof(self) weakSelf=self;
+    dispatch_async(reader, ^{
+        RootViewController *owner=weakSelf;
+        if(!owner)return;
+        UIImage *cached=[UIImage imageWithContentsOfFile:[owner channelPreviewDiskPathForChannelID:cid]];
+        if(!cached||!CCTVPreviewImageHasValidVideoContent(cached))return;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if(owner.channelPreviewSnapshots[cid]||owner.channelPreviewSnapshots.count>=128)return;
+            owner.channelPreviewSnapshots[cid]=cached;
+            [owner reloadVisibleCatalogItemForChannelID:cid];
+        });
+    });
     return nil;
 }
 - (void)storeRealPreviewImage:(UIImage *)image forChannelID:(NSString *)cid {

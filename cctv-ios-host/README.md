@@ -39,7 +39,7 @@ CCTVHost 本轮三阶段改造和协议能力边界见 [全面审查与实施记
 
 日志中 SDK 类可加载、配置对象构造、播放调用返回，只能说明对应初始化步骤已执行，不能证明鉴权通过或视频已解码。只有 SDK/AVPlayer 实际回调和画面可用于确认对应播放状态。
 
-CNPlayerSDK 是原生央视直播入口。CCTV 页按频道 ID 交给 SDK 自动调度；自选 WS/BD/KS/TX 地址会先做限时、限大小且可取消的 HLS 清单检查，确认明文时用 AVPlayer，其他所选地址继续交给 `playLIVEWithUrl:delegate:configOptions:`。明文自选播放留在 CCTV 页，保留线路选择及重试，不自动混入订阅来源。SDK 路径继续通过 CNPlayer，并传入当前可取得的 SDK 用户 ID、频道统计 ID和播放器回调；宿主没有关闭或改写授权配置。SDK 是否接受及完成特定地址的授权和解码，仍需真机确认。请求被拒或播放失败时会保留所选线路，不静默切回自动。播放信息展示所选完整来源地址（保留查询参数）和 SDK 返回节点（取不到时显示未知）。[节点故障调查](Docs/CCTV-NODE-ROUTING-DIAGNOSIS.md)与[IPA 自选线路落地记录](Docs/CCTV-IPA-SELF-ROUTES-RESEARCH.md)说明了现有路径、SDK 接口证据及验证边界。
+CNPlayerSDK 是原生央视直播入口。CCTV 页按频道 ID 交给 SDK 自动调度；自选 WS/BD/KS/TX 地址会先做限时、限大小且可取消的 HLS 清单检查，确认明文时用 AVPlayer，其他所选地址继续交给 `playLIVEWithUrl:delegate:configOptions:`。明文自选播放留在 CCTV 页，保留线路选择及重试，不自动混入订阅来源。SDK 路径继续通过 CNPlayer，并传入当前可取得的 SDK 用户 ID、频道统计 ID和播放器回调；宿主没有关闭或改写授权配置。SDK 是否接受及完成特定地址的授权和解码，仍需真机确认。请求被拒或播放失败时会保留所选线路，不静默切回自动。播放信息展示脱敏后的来源及 SDK 返回节点（取不到时显示未知）。[节点故障调查](Docs/CCTV-NODE-ROUTING-DIAGNOSIS.md)与[IPA 自选线路落地记录](Docs/CCTV-IPA-SELF-ROUTES-RESEARCH.md)说明了现有路径、SDK 接口证据及验证边界。
 
 [原 IPA 自选线路核实](Docs/CCTV-IPA-SELF-ROUTES-RESEARCH.md)记录了三个直播 URL 前端实际调用 CNPlayer 的证据，以及两组原始媒体普通解码异常。可运行 `python3 Scripts/audit_ipa_live_routes.py` 只读复核；这是静态审计，不是原生播放验收。
 

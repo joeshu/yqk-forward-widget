@@ -176,7 +176,7 @@ static NSString *CCTVTVBoxURLByResolvingToken(NSString *url,NSString *token) {
     }
     NSURL *baseU=CCTVURLFromPossiblyUnescapedString(url);
     NSURLComponents *parts=baseU?[NSURLComponents componentsWithURL:baseU resolvingAgainstBaseURL:NO]:[NSURLComponents componentsWithString:url];
-    if(!parts)return nil;BOOL replaced=NO;NSMutableArray *items=[NSMutableArray array];
+    if(![parts.scheme.lowercaseString isEqual:@"https"]||![parts.host.lowercaseString isEqual:@"sub.lytvs.top"]||parts.user.length||parts.password.length||(parts.port&&parts.port.integerValue!=443))return nil;BOOL replaced=NO;NSMutableArray *items=[NSMutableArray array];
     for(NSURLQueryItem *item in parts.queryItems){NSString *value=item.value?:@"";if([value containsString:CCTVTVBoxTokenPlaceholder]){value=[value stringByReplacingOccurrencesOfString:CCTVTVBoxTokenPlaceholder withString:token?:@""];replaced=YES;}[items addObject:[NSURLQueryItem queryItemWithName:item.name value:value]];}
     if(!replaced)return nil;parts.queryItems=items;return parts.URL.absoluteString;
 }
@@ -194,12 +194,20 @@ static NSString *CCTVImportProtocolLabel(NSString *protocol) {
     NSDictionary *labels=@{@"python-spider":@"Python Spider",@"python-http":@"Python HTTP 服务",@"catvod-js":@"CatVod / TVBox JS",@"catvod-spider":@"CatPaw JS Spider",@"drpy":@"DRPY",@"cctvhost.media/1":@"CCTVHost Media API",@"catpaw-http":@"CatPaw HTTP",@"iptv-extractor":@"IPTV Extractor",@"widget-extractor":@"Widget Extractor",@"nanotv-service-v2":@"NanoTV Service v2",@"hamo-source-v3":@"Hamo Source v3"};
     return labels[protocol]?: (protocol.length?protocol:@"未知协议");
 }
+static NSString *CCTVSubscriptionChannelID(NSString *source, NSString *url) {
+    NSData *data=[[NSString stringWithFormat:@"%@\n%@",source,url] dataUsingEncoding:NSUTF8StringEncoding];
+    unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+    CC_SHA256(data.bytes,(CC_LONG)data.length,digest);
+    NSMutableString *identifier=[NSMutableString stringWithString:@"subscription:"];
+    for(NSUInteger i=0;i<sizeof(digest);i++)[identifier appendFormat:@"%02x",digest[i]];
+    return identifier;
+}
 static NSArray<NSDictionary *> *CCTVPlaylistSnapshotRows(NSArray *channels,NSString *source) {
     NSMutableArray<NSDictionary *> *rows=[NSMutableArray arrayWithCapacity:channels.count];
     for(id value in channels){
         if([value isKindOfClass:NSDictionary.class]){if([NSPropertyListSerialization propertyList:value isValidForFormat:NSPropertyListBinaryFormat_v1_0])[rows addObject:[value copy]];continue;}
         if(![value isKindOfClass:M3UChannel.class])continue;
-        M3UChannel *channel=value;NSMutableDictionary *row=[@{@"name":channel.name?:@"未命名频道",@"group":channel.group?:@"订阅",@"verified":@NO,@"remoteURL":channel.url?:@"",@"subscriptionSources":source.length?@[source]:@[]} mutableCopy];
+        M3UChannel *channel=value;NSMutableDictionary *row=[@{@"name":channel.name?:@"未命名频道",@"group":channel.group?:@"订阅",@"verified":@NO,@"remoteURL":channel.url?:@"",@"id":CCTVSubscriptionChannelID(source,channel.url?:@""),@"subscriptionSources":source.length?@[source]:@[]} mutableCopy];
         if(channel.catchupSource.length){row[@"catchupSource"]=channel.catchupSource;row[@"catchupMode"]=channel.catchupMode?:@"default";row[@"catchupDays"]=@(channel.catchupDays);row[@"tvgShift"]=@(channel.tvgShift);}
         if(channel.epgID.length)row[@"epgID"]=channel.epgID;if(channel.tvgName.length)row[@"tvgName"]=channel.tvgName;if(channel.logo.length)row[@"logo"]=channel.logo;if(channel.headers.count)row[@"headers"]=channel.headers;
         if([NSPropertyListSerialization propertyList:row isValidForFormat:NSPropertyListBinaryFormat_v1_0])[rows addObject:row.copy];
@@ -696,6 +704,8 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 @interface RootViewController (Catalog)
 - (NSDictionary *)anyCatchupChannelForStation:(NSDictionary *)channel;
 - (void)loadChannels;
+- (void)confirmClearRecentChannels;
+- (NSDictionary *)alternateChannelForURL:(NSString *)url matching:(NSDictionary *)channel;
 - (UISwipeActionsConfiguration *)tableView:(UITableView *)t trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)ip;
 - (NSArray<NSString *> *)currentCatalogGroupTitles;
 - (void)syncGroupControlSegments;
@@ -914,7 +924,7 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 - (void)recheckProfileHealth:(NSString *)source;
 - (void)rematchEPGForProfile:(NSString *)source;
 - (void)refreshTVBoxCatalogProfile:(NSString *)source;
-- (void)installPlaylist:(NSArray<M3UChannel *> *)list source:(NSString *)sourceKey;
+- (BOOL)installPlaylist:(NSArray<M3UChannel *> *)list source:(NSString *)sourceKey;
 - (void)applyPlaylistText:(NSString *)text source:(NSString *)sourceKey;
 - (void)refreshConfigurationPage;
 - (void)importPlaylistData:(NSData *)data name:(NSString *)name;
@@ -931,6 +941,9 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 @end
 
 @interface RootViewController (Services)
+- (void)shareLocalConfigurationBackup;
+- (void)shareResourceFileAtURL:(NSURL *)url;
+- (void)confirmConfigurationRestore:(NSDictionary *)backup;
 - (void)openPluginResource:(NSString *)source;
 - (void)openServiceEditorForService:(NSDictionary *)service;
 - (void)applyServiceConfigurationFrom:(NSDictionary *)previous to:(NSDictionary *)updated completion:(void (^)(NSError * _Nullable))completion;

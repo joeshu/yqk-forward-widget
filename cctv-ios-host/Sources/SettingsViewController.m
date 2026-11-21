@@ -373,7 +373,7 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
         @{ @"title":@"内置央视频道速率与延迟", @"detail":@"在央视页与频道页展示实时网速与毫秒级响应延迟角标（默认关闭）", @"key":@"nativeChannelTelemetryEnabled", @"icon":@"speedometer", @"default":@NO, @"subgroup":@"内置央视" },
         @{ @"title":@"频道用网格显示", @"detail":@"切换频道列表为海报卡片网格或紧凑列表", @"key":@"channelGridMode", @"icon":@"square.grid.2x2", @"default":@YES, @"subgroup":@"频道布局" },
         @{ @"title":@"频道网格列数", @"detail":@"网格模式下的单行频道卡片数量", @"key":@"cctv.channelGridColumns.v1", @"segmented":@YES, @"options":@[@"3 列",@"4 列"], @"values":@[@3,@4], @"default":@4, @"icon":@"rectangle.grid.3x2", @"subgroup":@"频道布局" },
-        @{ @"title":@"频道排序方式", @"detail":@"按默认频道分组顺序或按频道名称排序", @"key":@"cctv.channelSortMode.v1", @"segmented":@YES, @"options":@[@"默认",@"名称"], @"values":@[@0,@1], @"default":@0, @"icon":@"arrow.up.arrow.down", @"subgroup":@"频道布局" },
+        @{ @"title":@"频道排序方式", @"detail":@"按默认顺序、频道名称或测速结果排序", @"key":@"cctv.channelSortMode.v1", @"segmented":@YES, @"options":@[@"默认",@"名称",@"延迟"], @"values":@[@0,@1,@2], @"default":@0, @"icon":@"arrow.up.arrow.down", @"subgroup":@"频道布局" },
         @{ @"title":@"播放时屏幕常亮", @"detail":@"直播与点播播放期间防止自动锁屏息屏", @"key":@"cctv.mediaKeepScreenAwake", @"icon":@"sun.max", @"default":@YES, @"subgroup":@"播放交互" },
         @{ @"title":@"允许后台音频播放", @"detail":@"切到后台或锁屏时保持直播声音输出", @"key":@"allowBackgroundAudio", @"icon":@"speaker.wave.2", @"default":@YES, @"subgroup":@"播放交互" },
         @{ @"title":@"订阅流自动画中画", @"detail":@"退回主屏幕时自动开启系统内联画中画", @"key":@"autoPiP", @"icon":@"pip", @"default":@NO, @"subgroup":@"播放交互" },

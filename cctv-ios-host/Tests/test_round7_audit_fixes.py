@@ -71,7 +71,7 @@ class Round7RuntimeForensicsAndAuditFixesTests(unittest.TestCase):
         play_m = (SOURCES / "RootViewController+Playback.m").read_text(encoding="utf-8")
         self.assertIn("- (void)completeNativeFirstRenderIfNeededForTrigger:(NSString *)trigger", play_m)
         self.assertIn("由时移/回看会话驱动，不重复调用 play", play_m)
-        self.assertIn('[weakSelf completeNativeFirstRenderIfNeededForTrigger:@"timeshift_seek_completed"]', play_m)
+        self.assertIn('[weakSelf ensureNativeTimeshiftPlayingForTrigger:@"timeshift_seek_completed"]', play_m)
 
     def test_iss58_user_selected_route_disables_live_public_check_and_guards_watchdog(self):
         play_m = (SOURCES / "RootViewController+Playback.m").read_text(encoding="utf-8")

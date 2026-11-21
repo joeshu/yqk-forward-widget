@@ -62,7 +62,17 @@
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (!CCTVBoolPreference(@"resumeLastChannel",NO)) { [self log:@"启动时自动续播已关闭，等待用户点选频道"]; return; }
         NSDictionary *last = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"lastChannel"];
-        if (![last[@"id"] length] || self.channelID.length) return;
+        if (![last[@"id"] length] || self.channelID.length || self.activeTab>=2 || !self.view.window) return;
+        NSDictionary *live=[self channelWithID:last[@"id"]];
+        if(!live)return;
+        NSArray *owners=CCTVStringArrayValue(live[@"subscriptionSources"]);
+        NSSet *disabled=[NSSet setWithArray:[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[]];
+        if([live[@"remoteURL"] length]){
+            BOOL available=NO;
+            for(NSString *source in owners)if([self.subscriptionURLs containsObject:source]&&![disabled containsObject:source]){available=YES;break;}
+            if(!available||self.activeTab!=1)return;
+        }else if(self.activeTab!=0||!CCTVBoolPreference(@"nativeChannelsEnabled",YES))return;
+        last=live;
         [self log:@"续播上次频道 %@", last[@"name"] ?: last[@"id"]];
         if ([last[@"remoteURL"] length]) [self playRemote:last];
         else [self playChannel:last route:nil];
@@ -579,7 +589,7 @@
 - (BOOL)startRemoteCicada:(NSString *)address generation:(NSUInteger)generation {
     if(generation!=self.playbackGeneration||self.remoteTriedCicada||![MediaPlaybackCicadaAdapter isAvailable])return NO;
     [self stopPlayback];self.remoteTriedCicada=YES;self.remotePlaybackWanted=YES;
-    MediaPlaybackCicadaAdapter *adapter=[[MediaPlaybackCicadaAdapter alloc] initWithURL:[NSURL URLWithString:address] headers:self.currentRemoteHeaders networkTimeout:12];
+    MediaPlaybackCicadaAdapter *adapter=[[MediaPlaybackCicadaAdapter alloc] initWithURL:[NSURL URLWithString:address] headers:(self.nativePlainRouteActive?@{@"User-Agent":@"qqlive",@"Referer":@"https://live.cctv.cn/"}:self.currentRemoteHeaders) networkTimeout:12];
     self.remoteAdapter=adapter;adapter.delegate=self;adapter.playerView.frame=self.playerBox.bounds;adapter.playerView.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;[self.playerBox insertSubview:adapter.playerView atIndex:0];
     [adapter prepare];[adapter start];[self updateLiveScreenAwakeState];return YES;
 }
@@ -603,6 +613,16 @@
     if(adapter!=self.remoteAdapter)return;[RuntimeDiagnostics.shared recordEvent:@"playback_failed" category:@"playback" fields:@{@"player":@"CicadaPlayer",@"playback_attempt_id":self.currentRemotePlaybackAttemptID?:@"",@"error_domain":error.domain?:@"",@"error_code":@(error.code)}];self.remotePlaybackFailed=YES;self.remotePlaybackWanted=NO;[self.spinner stopAnimating];
     self.titleLabel.hidden=NO;self.titleLabel.text=@"播放失败 · 可重试或切换线路";self.infoLabel.hidden=NO;self.infoLabel.text=error.localizedDescription;self.playPauseBtn.enabled=YES;[self.playPauseBtn setTitle:@"重试" forState:UIControlStateNormal];
     self.remoteAdapter.delegate=nil;[self.remoteAdapter destroy];self.remoteAdapter=nil;[self setLiveOverlayHidden:NO];[self endPlaybackPriority];
+    if(self.remoteRetryCount==0&&CCTVRemotePlaybackErrorCanRetrySameURL(error)){
+        self.remoteRetryCount++;
+        NSDictionary *retry=@{@"id":self.channelID?:@"",@"name":self.channelName?:@"直播",
+                              @"remoteURL":self.currentRemoteURL?:@"",@"headers":self.currentRemoteHeaders?:@{},
+                              @"nativePlainRoute":@(self.nativePlainRouteActive)};
+        [self startRemoteChannel:retry];
+        return;
+    }
+    NSDictionary *alternate=[self nextUntriedAlternateChannel];
+    if(alternate)[self startRemoteChannel:alternate];
 }
 - (void)cicadaAdapterDidComplete:(id)adapter {if(adapter!=self.remoteAdapter)return;self.remotePlaybackWanted=NO;[self.playPauseBtn setTitle:@"重播" forState:UIControlStateNormal];self.infoLabel.text=@"播放已结束 · 可重新连接";[self setLiveOverlayHidden:NO];[self updateNowPlaying];}
 - (void)startRemoteURL:(NSString *)url generation:(NSUInteger)generation {
@@ -612,6 +632,8 @@
     NSMutableDictionary *descriptor=[@{@"url":url?:@""} mutableCopy];
     if(headers.count)descriptor[@"headers"]=headers;
     NSDictionary *telemetry=self.channelID.length?self.channelTelemetryStore[self.channelID]:nil;
+    NSTimeInterval probeAge=NSDate.date.timeIntervalSince1970-[telemetry[@"ts"] doubleValue];
+    if(![telemetry[@"probeURL"] isEqual:url]||probeAge<0||probeAge>60)telemetry=nil;
     if([telemetry[@"contentType"] isKindOfClass:NSString.class]&&[telemetry[@"contentType"] length])descriptor[@"probedMIME"]=telemetry[@"contentType"];
     if([telemetry[@"headerBytes"] isKindOfClass:NSData.class])descriptor[@"headerBytes"]=telemetry[@"headerBytes"];
     if(MediaPlaybackDecodeRouteNextForResult(descriptor,0)==MediaPlaybackDecodeRouteCicadaPlayer&&[self startRemoteCicada:url generation:generation])return;
@@ -646,6 +668,7 @@
         // timeout after retry/alternate-source recovery has already stopped.
         if(generation!=w.playbackGeneration||item!=w.avPlayer.currentItem||
            item.status==AVPlayerItemStatusFailed||!w.remotePlaybackWanted||w.firstRender)return;
+        if([w startRemoteCicada:w.currentRemoteURL generation:generation])return;
         NSMutableDictionary *timeoutFields=[@{@"player":@"AVPlayer", @"timeout_seconds":@12, @"playback_generation":@(generation), @"playback_attempt_id":w.currentRemotePlaybackAttemptID?:@"", @"correlation_id":w.currentPlaybackTraceID?:@""} mutableCopy];[timeoutFields addEntriesFromDictionary:MediaPlaybackDiagnosticHeaderFields(w.currentRemoteHeaders)];[timeoutFields addEntriesFromDictionary:CCTVDiagnosticURLFields([NSURL URLWithString:w.currentRemoteURL])];CCTVAddAVPlayerFailureFields(timeoutFields,item,w.avPlayer,item.error);[RuntimeDiagnostics.shared recordEvent:@"playback_first_frame_timeout" category:@"playback" fields:timeoutFields];
         [w.spinner stopAnimating];w.remotePlaybackFailed=YES;w.titleLabel.hidden=NO;w.titleLabel.text=[NSString stringWithFormat:@"%@ · 等待视频首帧",w.channelName];w.infoLabel.hidden=NO;w.infoLabel.text=@"仍可等待，或点按“重试”重新连接";[w.playPauseBtn setTitle:@"重试" forState:UIControlStateNormal];w.playPauseBtn.enabled=YES;NSDictionary *service=[w localServiceForURL:[NSURL URLWithString:w.currentRemoteURL?:@""]];if(service)[w logPluginLine:@"接口已请求，但 12 秒内未收到视频首帧" identifier:service[@"id"] name:service[@"name"]];[w log:@"订阅 12 秒未渲染首帧（并非播放器就绪时间）"];
     });
@@ -694,12 +717,12 @@
 - (NSDictionary *)nextUntriedAlternateChannel {
     // SDK 播放失败耗尽重试后也可复用：按同名找一条未试过、且订阅源未被禁用的远端地址。
     // 自选明文线路不自动换源；单频道最多试 4 条。
-    if(self.nativePlainRouteActive || self.remoteAttemptedURLs.count>=4)return nil;
+    if(self.nativePlainRouteActive || self.requestedNativeRoute || self.remoteAttemptedURLs.count>=4)return nil;
     NSSet *disabled=[NSSet setWithArray:[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[]];
-    NSString *activeCanonical=[ProfileStore canonicalStationIDForChannel:@{@"id":self.channelID?:@"",@"name":self.channelName?:@""}];
+    NSString *activeCanonical=CCTVRouteGroupKey([self channelWithID:self.channelID]?:@{@"id":self.channelID?:@""});
     for (NSDictionary *channel in self.allChannels) {
-        NSString *candCanonical=[ProfileStore canonicalStationIDForChannel:channel];
-        BOOL sameStation=[channel[@"name"] isEqualToString:self.channelName]||(activeCanonical.length&&[activeCanonical isEqualToString:candCanonical]);
+        NSString *candCanonical=CCTVRouteGroupKey(channel);
+        BOOL sameStation=activeCanonical.length&&[activeCanonical isEqualToString:candCanonical];
         if(!sameStation)continue;
         NSString *url=[self stableURLKey:channel[@"remoteURL"]];
         if(!url.length || [self.remoteAttemptedURLs containsObject:url])continue;
@@ -946,8 +969,7 @@
             [self log:@"%@",tuner.summary];if(applied)[self recordStartupStage:@"bufferTuned"];
         });
     }
-    BOOL timeshiftSwitchReady = (event == 19) || ((event == 6 || event == 7 || event == 8) && self.startupTrace.stages[@"prepared"] != nil);
-    if ((event == 3 || ((self.nativeTransitionKind.length || self.nativeTimeShiftActive) && timeshiftSwitchReady)) && !self.firstRender) {
+    if (event == 3 && !self.firstRender) {
         self.firstFrameSeconds = CACurrentMediaTime() - self.playStartedAt;
         self.firstRender = YES;self.nativePlaybackFailed=NO;self.nativeSafeStartupActive=NO;
         [self.watchdog invalidate];self.watchdog=nil;
@@ -1041,9 +1063,7 @@
 
 - (void)completeNativeFirstRenderIfNeededForTrigger:(NSString *)trigger {
     [self ensureNativeTimeshiftPlayingForTrigger:trigger];
-    if (self.firstRender || !self.currentPlayer) return;
-    [self log:@"原生过渡首帧确认（%@）", trigger ?: @"timeshift"];
-    [self player:self.currentPlayer statEvent:3 value:nil];
+
 }
 
 - (void)prepareNextNativeChannelForGeneration:(NSUInteger)generation {
@@ -1087,9 +1107,7 @@
     if(self.nativeTransitionKind.length || self.nativeTimeShiftActive){self.nativeTransitionKind=nil;[self.nativeTimeshift cancel];[self log:@"时移操作失败，请返回直播或重新选台"];[self displayNativePlaybackFailure:@"时移 / 回看失败" error:error];return;}
     if(self.directNativeRouteActive && self.requestedNativeRoute && CCTVRouteRequiresSDK(self.requestedNativeRoute) && error.code == -12909 && self.channelID.length && !self.nativeStartupRecoveryUsed){
         self.nativeStartupRecoveryUsed=YES;
-        [self.nativeCDNPreference applyRoute:self.requestedNativeRoute error:NULL];
-        [self log:@"自选 UDRM 地址直连内核错误 (%ld)，已应用所选节点偏好并回退 SDK 频道调度", (long)error.code];
-        [self playViaSDK:self.channelID title:self.channelName ?: self.channelID];
+        [self displayNativePlaybackFailure:@"自选线路失败 · 可重试或手动换线" error:error];
         return;
     }
     if (error.code >= 4000 && error.code < 5000) {
@@ -1322,14 +1340,7 @@
         } else {
             [weakSelf log:@"原生时移请求已完成，等待/确认首帧"];
             [weakSelf ensureNativeTimeshiftPlayingForTrigger:@"timeshift_seek_completed"];
-            if (weakSelf.startupTrace.stages[@"prepared"] != nil || weakSelf.timeshiftController.state == CCTVTimeshiftStatePlayingReplay || weakSelf.timeshiftController.seekLatency > 0) {
-                [weakSelf completeNativeFirstRenderIfNeededForTrigger:@"timeshift_seek_completed"];
-            }
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                if (!weakSelf || generation != weakSelf.playbackGeneration || player != weakSelf.currentPlayer || !weakSelf.nativeTimeShiftActive || weakSelf.nativeUserPaused) return;
-                [weakSelf ensureNativeTimeshiftPlayingForTrigger:@"timeshift_post_settle"];
-                [weakSelf completeNativeFirstRenderIfNeededForTrigger:@"timeshift_post_settle"];
-            });
+
         }
     }];
 }
@@ -1346,13 +1357,7 @@
     self.activeCatchupStart = 0;
     self.activeCatchupEnd = 0;
     [self.timeshiftController returnToLive];
-    NSUInteger generation = self.playbackGeneration;
-    __weak typeof(self) weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (!weakSelf || generation != weakSelf.playbackGeneration || weakSelf.nativeTimeShiftActive) return;
-        [weakSelf.timeshiftController noteReturnedToLive];
-        [weakSelf completeNativeFirstRenderIfNeededForTrigger:@"back_to_live_completed"];
-    });
+
 }
 
 - (NSString *)activeAirPlayDeviceName {
@@ -1563,10 +1568,7 @@
         if(intent==self.playbackIntentVersion && self.playbackPriorityUntil>0){[self log:@"起播优先窗口结束，恢复订阅刷新"];[self endPlaybackPriority];}
     });
     [self stopPreview];[[XMLTVStore shared] setPaused:YES];self.subscriptionParseGeneration++;
-    for(NSString *source in self.subscriptionTasks.allKeys){[self.subscriptionTasks[source] cancel];[self.deferredLocalSubscriptions addObject:source];self.subscriptionRequestVersions[source]=@([self.subscriptionRequestVersions[source] unsignedIntegerValue]+1);}
-    [self.subscriptionTasks removeAllObjects];
-    for(NSString *source in self.subscriptionReadiness.allKeys){[self.subscriptionReadiness[source] cancel];[self.deferredLocalSubscriptions addObject:source];self.subscriptionRequestVersions[source]=@([self.subscriptionRequestVersions[source] unsignedIntegerValue]+1);}[self.subscriptionReadiness removeAllObjects];
-    [[HostImageLoader shared] cancelPending];
+
 }
 - (void)endPlaybackPriority {
     self.playbackPriorityUntil=0;BOOL background=UIApplication.sharedApplication.applicationState!=UIApplicationStateActive;[[XMLTVStore shared] setPaused:background];if(!background&&self.epgRefreshDesired){[self restartEPGTimer];[self refreshNowNext];}NSUInteger generation=self.playbackGeneration;

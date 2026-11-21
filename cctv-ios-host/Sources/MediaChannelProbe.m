@@ -6,6 +6,7 @@ static const NSUInteger MediaChannelProbeByteLimit = 8192;
 static const NSUInteger MediaChannelProbeSegmentByteLimit = 65536;
 
 @interface MediaChannelProbe () <NSURLSessionDataDelegate, NSURLSessionTaskDelegate>
+@property(nonatomic,strong) NSURL *credentialOrigin;
 @property(nonatomic,strong) NSURLSession *session;
 @property(nonatomic,strong) NSURLSessionDataTask *task;
 @property(nonatomic,copy) void (^completion)(NSDictionary<NSString *,id> *);
@@ -67,6 +68,7 @@ static NSURL *MediaChannelProbeExtractFirstHLSSegment(NSString *playlist, NSURL 
     configuration.HTTPCookieStorage=nil;
     configuration.HTTPShouldSetCookies=NO;
     self.session=[NSURLSession sessionWithConfiguration:configuration delegate:self delegateQueue:nil];
+    self.credentialOrigin=url;
     [self startRequestForURL:url rangeLimit:self.byteLimit];
 }
 
@@ -74,8 +76,9 @@ static NSURL *MediaChannelProbeExtractFirstHLSSegment(NSString *playlist, NSURL 
     NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:3.0];
     request.HTTPMethod=@"GET";
     request.HTTPShouldHandleCookies=NO;
-    for(NSString *key in self.customHeaders){
-        [request setValue:self.customHeaders[key] forHTTPHeaderField:key];
+    NSDictionary *scoped=MediaPlaybackHeadersScopedToURL(self.customHeaders,self.credentialOrigin,url);
+    for(NSString *key in scoped){
+        [request setValue:scoped[key] forHTTPHeaderField:key];
     }
     if(![request valueForHTTPHeaderField:@"User-Agent"])[request setValue:@"CCTVHost/1" forHTTPHeaderField:@"User-Agent"];
     [request setValue:[NSString stringWithFormat:@"bytes=0-%lu",(unsigned long)(limit-1)] forHTTPHeaderField:@"Range"];
@@ -194,8 +197,8 @@ static NSURL *MediaChannelProbeExtractFirstHLSSegment(NSString *playlist, NSURL 
     safe.HTTPMethod=@"GET";
     safe.HTTPBody=nil;
     safe.HTTPShouldHandleCookies=NO;
-    NSDictionary *scoped=MediaPlaybackHeadersScopedToURL(self.customHeaders?:@{},response.URL,target);
-    for(NSString *header in @[@"Authorization",@"Proxy-Authorization",@"Cookie",@"Referer",@"Origin",@"X-API-Key",@"X-Auth",@"X-Session"])[safe setValue:nil forHTTPHeaderField:header];
+    NSDictionary *scoped=MediaPlaybackHeadersScopedToURL(self.customHeaders?:@{},self.credentialOrigin,target);
+    for(NSString *header in self.customHeaders)[safe setValue:nil forHTTPHeaderField:header];
     for(NSString *k in scoped)[safe setValue:scoped[k] forHTTPHeaderField:k];
     if(![safe valueForHTTPHeaderField:@"User-Agent"])[safe setValue:@"CCTVHost/1" forHTTPHeaderField:@"User-Agent"];
     [safe setValue:@"identity" forHTTPHeaderField:@"Accept-Encoding"];

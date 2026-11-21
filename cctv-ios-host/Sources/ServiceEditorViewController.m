@@ -682,7 +682,7 @@
 }
 - (UITextField *)field:(NSString *)placeholder value:(NSString *)value {
     UITextField *f = [UITextField new];
-    f.placeholder = placeholder;
+    f.attributedPlaceholder = [[NSAttributedString alloc] initWithString:placeholder?:@"" attributes:@{NSForegroundColorAttributeName:HostSecondaryText()}];
     f.text = value;
     f.textColor = HostText();
     f.tintColor = HostAccent();
@@ -777,7 +777,7 @@
     [self.lanSwitch addTarget:self action:@selector(draftChanged) forControlEvents:UIControlEventValueChanged];
     self.sourceControl = [[UISegmentedControl alloc] initWithItems:@[ @"文件", @"链接", @"代码" ]];
     self.sourceControl.accessibilityLabel=@"服务代码来源";
-    self.sourceControl.selectedSegmentTintColor=HostAccent();
+    self.sourceControl.selectedSegmentTintColor=HostAccentFill();
     [self updateSourceControlFont];
     self.sourceControl.selectedSegmentIndex = 1;
     [self.sourceControl addTarget:self
@@ -803,7 +803,7 @@
         f.textColor=HostText();f.tintColor=HostAccent();
     }
     self.lanSwitch.onTintColor=HostAccent();
-    self.sourceControl.selectedSegmentTintColor=HostAccent();
+    self.sourceControl.selectedSegmentTintColor=HostAccentFill();
     [self.tableView reloadData];
 }
 - (void)dealloc {

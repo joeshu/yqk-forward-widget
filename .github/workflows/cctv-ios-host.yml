@@ -296,6 +296,7 @@ jobs:
             cctv-ios-host/build/CCTVHost-unsigned.ipa
             cctv-ios-host/build/CCTVHost-unsigned.ipa.sha256
             cctv-ios-host/build/validation.json
+            cctv-ios-host/build/CCTVHost.app.dSYM
           if-no-files-found: error
           retention-days: 30
 

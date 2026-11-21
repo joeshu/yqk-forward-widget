@@ -18,6 +18,16 @@ class NativeProfiles(unittest.TestCase):
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
                 requests.append(self.path)
+                if self.path == "/tvbox-start" and "CCTVHost/1.0" not in self.headers.get("User-Agent", ""):
+                    self.send_response(403)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                if self.path in ("/tvbox-denied", "/tvbox-too-large", "/tvbox-empty"):
+                    self.send_response(403 if self.path.endswith("denied") else 200)
+                    self.send_header("Content-Length", str(8 * 1024 * 1024 + 1 if self.path.endswith("large") else 0))
+                    self.end_headers()
+                    return
                 if self.path == "/tvbox-start":
                     self.send_response(302)
                     self.send_header("Location", "/configs/easytv.jpg")
@@ -75,7 +85,7 @@ class NativeProfiles(unittest.TestCase):
                 exe = str(pathlib.Path(tmp) / "native-profiles")
                 command = ["xcrun", "clang", "-fobjc-arc", "-framework", "Foundation", "-lz", "-I", str(root / "Sources")]
                 command += [str(root / "Tests/native_profile_tests.m")]
-                command += [str(root / "Sources" / f) for f in ("M3UParser.m", "ProfileStore.m", "HostBackup.m", "XMLTVStore.m", "TVBoxCatalogStore.m", "TVBoxCatalogDownloader.m", "TVBoxCatalogPackageExporter.m")]
+                command += [str(root / "Sources" / f) for f in ("M3UParser.m", "ProfileStore.m", "HostBackup.m", "HostSyncRequest.m", "XMLTVStore.m", "TVBoxCatalogStore.m", "TVBoxCatalogDownloader.m", "TVBoxCatalogPackageExporter.m")]
                 command += ["-o", exe]
                 result = subprocess.run(command, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

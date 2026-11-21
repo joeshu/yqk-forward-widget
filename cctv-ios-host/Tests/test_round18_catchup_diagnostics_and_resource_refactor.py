@@ -23,9 +23,8 @@ class Round18CatchupDiagnosticsAndResourceRefactorTests(unittest.TestCase):
         self.assertIn('[self ensureNativeTimeshiftPlayingForTrigger:@"timeshift_prepared"];', play_m)
         self.assertIn('[self ensureNativeTimeshiftPlayingForTrigger:@"seek_succeed"];', play_m)
         self.assertIn('[weakSelf ensureNativeTimeshiftPlayingForTrigger:@"timeshift_seek_completed"];', play_m)
-        self.assertIn('[weakSelf ensureNativeTimeshiftPlayingForTrigger:@"timeshift_post_settle"];', play_m)
         self.assertIn('[self ensureNativeTimeshiftPlayingForTrigger:@"playback_paused_during_timeshift"];', play_m)
-        self.assertIn('BOOL timeshiftSwitchReady = (event == 19) || ((event == 6 || event == 7 || event == 8) && self.startupTrace.stages[@"prepared"] != nil);', play_m)
+        self.assertIn('if (event == 3 && !self.firstRender)', play_m)
         self.assertIn("owner.livePlaybackSuspendedForNavigation=NO;owner.nativeUserPaused=NO;owner.liveMiniPlayerBar.hidden=YES;", epg_m)
 
     def test_02_diagnostic_log_fixes_playback_storm_loopback_backoff_and_spider_timeouts(self):
@@ -44,7 +43,7 @@ class Round18CatchupDiagnosticsAndResourceRefactorTests(unittest.TestCase):
         self.assertIn("self.nativeSessionDelegate=nil;self.nativeSessionID++;", failed_body)
         self.assertIn('if(player!=self.avPlayer)[self call:player sel:@"stop"];', failed_body)
         self.assertIn("error.code == -12909", failed_body)
-        self.assertIn("[self.nativeCDNPreference applyRoute:self.requestedNativeRoute error:NULL];", failed_body)
+        self.assertNotIn("[self.nativeCDNPreference applyRoute:self.requestedNativeRoute error:NULL];", failed_body)
 
         # 2. Loopback 127.0.0.1 / localhost / ::1 exempt from 60s image domain backoff
         self.assertIn('BOOL isLoopbackHost=([recordHost isEqualToString:@"127.0.0.1"]||[recordHost isEqualToString:@"localhost"]||[recordHost isEqualToString:@"::1"]);', hil_m)

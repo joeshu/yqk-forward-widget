@@ -8,7 +8,7 @@ RUNTIME="${CCTV_JAR_CACHE:-$PWD/.jar-runtime}/iphonesimulator"
 mkdir -p "$APP"
 cp -R "$RUNTIME/Resources/" "$APP/"
 SDK="$(xcrun --sdk iphonesimulator --show-sdk-path)"
-xcrun clang -target arm64-apple-ios17.0-simulator -isysroot "$SDK" -fobjc-arc -DCCTV_JAR_ENABLED=1 \
+xcrun clang -target arm64-apple-ios17.0-simulator -isysroot "$SDK" -fobjc-arc -DCCTV_JAR_ENABLED=1 -DCCTV_JAR_SMOKE=1 \
   -I Sources -I Sources/Include -I "$RUNTIME/include" \
   Tests/JARSmoke/main.m Tests/JARSmoke/CicadaAdapterProbe.m Sources/MediaJARRuntime.m Sources/MediaPlaybackCicadaAdapter.m "$RUNTIME/AppleRuntime.m" \
   -Wl,-force_load,"$RUNTIME/lib/libTVAppleRuntime.a" -Wl,-export_dynamic \

@@ -7,3 +7,8 @@
 - (NSDictionary *)performRequest:(NSURLRequest *)request;
 - (void)cancel;
 @end
+
+// The caller owns resuming or cancelling the returned task.
+FOUNDATION_EXPORT NSURLSessionDataTask *HostBoundedDataTask(
+    NSURLRequest *request, NSUInteger maximumBytes,
+    void (^completion)(NSData *, NSURLResponse *, NSError *));

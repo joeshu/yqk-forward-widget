@@ -82,7 +82,7 @@ class MediaPlaybackRouteFallbackTests(unittest.TestCase):
 
     def test_manual_line_episode_and_retry_choices_reset_auto_attempts(self):
         for anchor in (
-            "[self resetAutomaticFallbackLines];self.pendingResolutionReason=@\"manual_retry\"",
+            "self.pendingResolutionReason=@\"manual_retry\"",
             "[self resetAutomaticFallbackLines];",
         ):
             self.assertIn(anchor, SOURCE)

@@ -151,7 +151,7 @@ static id ResourceImportSnapshotBlobs(id value,BOOL storing,NSMutableSet *refere
         *byteCount+=[value length];if(*byteCount>80*1024*1024){if(error)*error=[NSError errorWithDomain:@"ImportSnapshot" code:1 userInfo:nil];return nil;}
         if(!storing||[value length]<=256*1024)return value;
         unsigned char digest[CC_SHA256_DIGEST_LENGTH];CC_SHA256([value bytes],(CC_LONG)[value length],digest);NSMutableString *name=[NSMutableString string];for(NSUInteger i=0;i<sizeof(digest);i++)[name appendFormat:@"%02x",digest[i]];[name appendString:@".blob"];
-        NSURL *file=[ResourceImportBlobDirectory() URLByAppendingPathComponent:name];if(![NSFileManager.defaultManager fileExistsAtPath:file.path]&&![value writeToURL:file options:NSDataWritingAtomic error:error])return nil;
+        NSURL *file=[ResourceImportBlobDirectory() URLByAppendingPathComponent:name];if(![NSFileManager.defaultManager fileExistsAtPath:file.path]&&![value writeToURL:file options:NSDataWritingAtomic|NSDataWritingFileProtectionCompleteUntilFirstUserAuthentication error:error])return nil;
         [referenced addObject:name];return @{@"__cctvhostBlob":name};
     }
     if([value isKindOfClass:NSDictionary.class]){
@@ -185,7 +185,7 @@ static BOOL ResourceImportWriteSnapshot(NSDictionary *snapshot,NSError **writeEr
         NSData *data=external&&!error?[NSPropertyListSerialization dataWithPropertyList:external format:NSPropertyListBinaryFormat_v1_0 options:0 error:&error]:nil;
         NSUInteger total=data.length;
         if(data.length){for(NSString *name in references){NSNumber *size=nil;NSURL *blob=[blobDirectory URLByAppendingPathComponent:name];[blob getResourceValue:&size forKey:NSURLFileSizeKey error:&error];if(error||NSUIntegerMax-total<size.unsignedIntegerValue){total=NSUIntegerMax;break;}total+=size.unsignedIntegerValue;}}
-        if(!error&&data.length&&total<=maximumBytes)success=[data writeToURL:url options:NSDataWritingAtomic error:&error];
+        if(!error&&data.length&&total<=maximumBytes)success=[data writeToURL:url options:NSDataWritingAtomic|NSDataWritingFileProtectionCompleteUntilFirstUserAuthentication error:&error];
         else if(!error)error=[NSError errorWithDomain:@"ImportSnapshot" code:3 userInfo:@{NSLocalizedDescriptionKey:@"Import snapshot exceeds the combined 80 MiB limit"}];
     }
     if(success){for(NSURL *file in [NSFileManager.defaultManager contentsOfDirectoryAtURL:blobDirectory includingPropertiesForKeys:nil options:0 error:NULL])if([file.pathExtension isEqual:@"blob"]&&![references containsObject:file.lastPathComponent])[NSFileManager.defaultManager removeItemAtURL:file error:NULL];}
@@ -387,33 +387,9 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
 - (void)refreshSmartClipboardAndPresets {
     [self rebuildQuickPresetsBar];
     if(!self.smartClipboardButton)return;
-    NSString *clip=[UIPasteboard.generalPasteboard.string stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    NSString *current=[self.address.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    if(!clip.length||[clip isEqualToString:current]){
-        self.detectedClipboardPayload=nil;
-        self.smartClipboardButton.hidden=YES;
-        return;
-    }
-    NSArray<NSString *> *urls=ResourceImportExtractURLStrings(clip);
-    BOOL looksLikeCode=([clip hasPrefix:@"{"]&&[clip hasSuffix:@"}"])||[clip hasPrefix:@"#EXTM3U"]||[clip containsString:@"WeBox.define("]||[clip containsString:@"class Spider"];
-    if(!urls.count&&!looksLikeCode){
-        self.detectedClipboardPayload=nil;
-        self.smartClipboardButton.hidden=YES;
-        return;
-    }
-    self.detectedClipboardPayload=clip;
-    NSString *bannerTitle=nil;
-    if(urls.count>1){
-        bannerTitle=[NSString stringWithFormat:@"✨ 剪贴板检测到 %lu 个资源链接 · 点按一键批量识别",(unsigned long)urls.count];
-    }else if(urls.count==1){
-        NSURL *u=[NSURL URLWithString:urls.firstObject];
-        NSString *host=u.host?:@"资源链接";
-        bannerTitle=[NSString stringWithFormat:@"✨ 检测到剪贴板链接 (%@) · 点按一键识别",host];
-    }else{
-        bannerTitle=@"✨ 检测到剪贴板中有配置/脚本源码 · 点按一键识别";
-    }
-    [self.smartClipboardButton setTitle:bannerTitle forState:UIControlStateNormal];
-    self.smartClipboardButton.hidden=NO;
+    self.detectedClipboardPayload=nil;
+    [self.smartClipboardButton setTitle:@"粘贴并识别资源" forState:UIControlStateNormal];
+    self.smartClipboardButton.hidden=YES;
 }
 
 - (void)applySmartClipboardAndRecognize {

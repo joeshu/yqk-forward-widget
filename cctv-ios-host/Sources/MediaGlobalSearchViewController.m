@@ -185,7 +185,7 @@ static NSMutableDictionary<NSString *, NSDictionary *> *MediaGlobalSearchProvide
     self.scopeControl.translatesAutoresizingMaskIntoConstraints=NO;
     self.scopeControl.selectedSegmentIndex=self.currentSiteScope?0:1;
     [self.scopeControl setEnabled:self.currentSiteSource!=nil forSegmentAtIndex:0];
-    self.scopeControl.selectedSegmentTintColor=HostAccent();
+    self.scopeControl.selectedSegmentTintColor=HostAccentFill();
     [self.scopeControl setTitleTextAttributes:@{NSForegroundColorAttributeName:HostText()} forState:UIControlStateNormal];
     [self.scopeControl setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent()} forState:UIControlStateSelected];
     self.scopeControl.accessibilityIdentifier=@"media-search-scope";
@@ -369,11 +369,11 @@ static NSMutableDictionary<NSString *, NSDictionary *> *MediaGlobalSearchProvide
 }
 - (void)searchBar:(UISearchBar *)searchBar textDidChange:(NSString *)searchText {
     NSString *query=[searchText stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    if([query isEqual:self.keyword])return;
+    if([query isEqual:self.keyword]){[self updateProgress];return;}
     if(self.searching)[self cancelSearch];else [self cancelJobsAndAdvanceGeneration];
     self.navigationItem.rightBarButtonItem.title=@"搜索";self.navigationItem.rightBarButtonItem.action=@selector(submitSearch);
     if(!query.length){self.keyword=@"";self.resultCount=0;[self.rows removeAllObjects];self.selectedSourceSection=-1;self.selectedProvider=nil;[self.filterOffsets removeAllObjects];[self updateFilters];[self.tableView reloadData];}
-    self.progressLabel.text=query.length?@"关键词已修改 · 按搜索开始；当前保留上次结果":@"请输入影片名称搜索";
+    self.progressLabel.text=query.length?@"关键词已修改 · 按搜索开始；下方为上次查询结果":@"请输入影片名称搜索";
 }
 
 - (BOOL)sourceAvailableForSearch:(NSDictionary *)source {
@@ -751,8 +751,8 @@ static NSMutableDictionary<NSString *, NSDictionary *> *MediaGlobalSearchProvide
     [self.jobs removeAllObjects];
     for (NSNumber *number in self.pendingSections) if(number.unsignedIntegerValue<self.rows.count)self.rows[number.unsignedIntegerValue][@"state"] = @"未搜索 · 已达结果上限";
     [self.pendingSections removeAllObjects];
-    self.navigationItem.rightBarButtonItem.title = @"重试失败";
-    self.navigationItem.rightBarButtonItem.action = @selector(retryFailedSources);
+    self.navigationItem.rightBarButtonItem.title = @"搜索";
+    self.navigationItem.rightBarButtonItem.action = @selector(submitSearch);
     self.progressLabel.text = [NSString stringWithFormat:@"结果达到 %lu 条上限 · 可滚动查看已找到的结果。", (unsigned long)MediaGlobalSearchMaximumResults];
     if(self.resultsVisible){[self updateFilters];[self.tableView reloadData];}
 }
@@ -943,8 +943,8 @@ static NSMutableDictionary<NSString *, NSDictionary *> *MediaGlobalSearchProvide
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     if (indexPath.section >= self.searchSources.count || indexPath.section >= self.rows.count) return;
+    if(![self hasSubmittedSearchInput]){self.progressLabel.text=@"请先搜索当前关键词，再打开结果";return;}
     if (indexPath.row == 0) {
-        if(![self hasSubmittedSearchInput]){self.progressLabel.text=@"请先搜索当前关键词，再启动或重试来源";return;}
         NSDictionary *row = self.rows[indexPath.section];
         if ([[row[@"state"] description] containsString:@"未运行"]) { [self startStoppedSourceAtSection:indexPath.section]; return; }
         if ([row[@"state"] isEqual:@"搜索失败"] || [row[@"state"] isEqual:@"部分完成"] || [row[@"state"] isEqual:@"启动失败"]) {
@@ -1008,7 +1008,7 @@ static NSMutableDictionary<NSString *, NSDictionary *> *MediaGlobalSearchProvide
     HostStylePillButton(self.historyButton, NO);
     self.historyButton.titleLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];
     self.historyButton.titleLabel.adjustsFontForContentSizeCategory = YES;
-    self.scopeControl.selectedSegmentTintColor = HostAccent();
+    self.scopeControl.selectedSegmentTintColor = HostAccentFill();
     [self.scopeControl setTitleTextAttributes:@{NSForegroundColorAttributeName:HostText()} forState:UIControlStateNormal];
     [self.scopeControl setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent()} forState:UIControlStateSelected];
     self.renderedFilterKey = nil;

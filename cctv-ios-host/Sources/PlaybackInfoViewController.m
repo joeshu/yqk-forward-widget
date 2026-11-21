@@ -1,3 +1,4 @@
+#import "HostLogRedactor.h"
 #import "PlaybackInfoViewController.h"
 #import "HostTheme.h"
 
@@ -309,7 +310,10 @@
     NSMutableArray<NSString *> *lines = [NSMutableArray arrayWithCapacity:allRows.count];
     for (NSDictionary *row in allRows) {
         if (![row isKindOfClass:NSDictionary.class]) continue;
-        [lines addObject:[NSString stringWithFormat:@"%@：%@", [(row[@"title"]?:@"") description], [(row[@"value"]?:@"") description]]];
+        NSString *value=[(row[@"value"]?:@"") description];
+        NSRegularExpression *urls=[NSRegularExpression regularExpressionWithPattern:@"https?://[^\\s]+" options:NSRegularExpressionCaseInsensitive error:NULL];
+        value=[urls stringByReplacingMatchesInString:value options:0 range:NSMakeRange(0,value.length) withTemplate:@"[地址已隐藏]"];
+        [lines addObject:[NSString stringWithFormat:@"%@：%@", [(row[@"title"]?:@"") description], [HostLogRedactor redactText:value]]];
     }
     UIPasteboard.generalPasteboard.string = [lines componentsJoinedByString:@"\n"];
     [self showTransientPrompt:@"已复制全部播放诊断信息"];

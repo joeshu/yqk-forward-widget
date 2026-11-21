@@ -281,8 +281,8 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('channel[@"subscriptionSources"]', lookup)
 
     def test_service_status_and_successful_port_migration_reach_all_resource_views(self):
-        install = self.root[self.root.index('- (void)installPlaylist:'):
-                            self.root.index('- (void)applyPlaylistText:', self.root.index('- (void)installPlaylist:'))]
+        install = self.root[self.root.index('- (BOOL)installPlaylist:'):
+                            self.root.index('- (void)applyPlaylistText:', self.root.index('- (BOOL)installPlaylist:'))]
         self.assertIn('managedSubscriptionSourcesForService', install)
         self.assertIn('retiredSourceSet', install)
         self.assertLess(install.index('snapshot.length>4*1024*1024'), install.index('[ProfileStore remove:retiredSource]'))
@@ -1234,7 +1234,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('source-manifest.json', exporter)
         self.assertIn('部分导出 · 内部脚本未收齐', exporter)
         self.assertIn('已收集 %lu / %lu', exporter)
-        self.assertIn('128*1024*1024', exporter)
+        self.assertIn('28*1024*1024', exporter)
         native = (ROOT / 'Tests/native_profile_tests.m').read_text()
         self.assertIn('complete collection JSON and single-site JSON preserve original provider fields', native)
 
@@ -1345,7 +1345,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('installCookieHeader:cookie forURL:url completion:startLoading', initial_load)
         self.assertIn('dispatch_after(dispatch_time(DISPATCH_TIME_NOW,1200*NSEC_PER_MSEC)', initial_load)
         self.assertIn('if(!owner||owner.didClose||started)return', initial_load)
-        self.assertIn('allHTTPHeaderFields=MediaPlaybackHeadersFromResult(self.result)', webview)
+        self.assertIn('allHTTPHeaderFields=MediaPlaybackHeadersScopedToURL(MediaPlaybackHeadersFromResult(self.result),initialURL,targetURL)', webview)
 
     def test_parser_marked_source_plays_inside_the_app_without_external_handoff(self):
         route = self.playback[self.playback.index('MediaPlaybackDecodeRoute initialRoute='):
@@ -1625,7 +1625,7 @@ class ResourceInteractionContracts(unittest.TestCase):
     def test_resource_page_catalog_refresh_preserves_existing_id(self):
         # 合集刷新用新解析结果覆盖旧行：先把解析出的新 id 换回原合集 id，
         # saveCatalog 按 id 合并才不会把同一合集存成两行。
-        body = self.root.split('- (void)refreshTVBoxCatalogProfile:(NSString *)source {', 1)[1].split('- (void)installPlaylist:', 1)[0]
+        body = self.root.split('- (void)refreshTVBoxCatalogProfile:(NSString *)source {', 1)[1].split('- (BOOL)installPlaylist:', 1)[0]
         self.assertIn('catalogForID:identifier', body)
         self.assertIn('loadURL:url completion:', body)
         self.assertIn('updated[@"id"]=identifier', body)
@@ -1649,7 +1649,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         # 永远显示“已配置”；失败路径不碰它，旧地址留待下次成功刷新再推导。
         self.assertIn('removeValueForKey:@"detectedEPGURL"', self.root)
         self.assertIn('+ (void)removeValueForKey:', self.profile_store)
-        fetch = self.root.split('- (void)fetchSubscription:', 1)[1].split('- (void)installPlaylist:', 1)[0]
+        fetch = self.root.split('- (void)fetchSubscription:', 1)[1].split('- (BOOL)installPlaylist:', 1)[0]
         self.assertIn('removeValueForKey:@"detectedEPGURL"', fetch)
         self.assertIn('新订阅清单未提供节目单', fetch)
 

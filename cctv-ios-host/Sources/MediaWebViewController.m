@@ -132,9 +132,10 @@ static BOOL MediaWebIsOfficialWatchPageURL(NSURL *url) {
 - (void)refresh {
     if(self.didClose)return;[self invalidateMediaResolution];
     NSString *urlString=[self.result[@"url"] isKindOfClass:NSString.class]?self.result[@"url"]:nil;
-    NSURL *targetURL=urlString.length?[NSURL URLWithString:urlString]:nil;
+    NSURL *initialURL=urlString.length?[NSURL URLWithString:urlString]:nil;
+    NSURL *targetURL=self.web.URL?:initialURL;
     if(!targetURL||!targetURL.scheme.length){[self.spinner stopAnimating];self.navigationItem.prompt=@"网页地址无效";[self showStatusMessage:@"网页地址无效，无法打开此页面"];return;}
-    NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:targetURL cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:25];request.allHTTPHeaderFields=MediaPlaybackHeadersFromResult(self.result);
+    NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:targetURL cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:25];request.allHTTPHeaderFields=MediaPlaybackHeadersScopedToURL(MediaPlaybackHeadersFromResult(self.result),initialURL,targetURL);
     self.navigationItem.prompt=self.configurationPage?@"源配置 · 账号数据由此资源管理":@"网页播放 · 由当前来源提供";[self.spinner startAnimating];[self showStatusMessage:nil];[self.web loadRequest:request];
 }
 - (void)recordMediaEvent:(NSString *)event fields:(NSDictionary *)extra {

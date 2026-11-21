@@ -1,3 +1,4 @@
+#import "HostSyncRequest.h"
 #import "RootViewController_Internal.h"
 #import "HostGlassActionSheetViewController.h"
 
@@ -271,13 +272,33 @@
             if(browser)[browser refreshSources];
         }
     }else if([kind isEqual:@"playlist"]){
-        NSString *origin=[self stableURLKey:candidate[@"origin"]],*text=candidate[@"text"]?:@"";NSString *targetID=update&&[candidate[@"existingResourceKind"] isEqual:@"playlist"]?candidate[@"existingResourceID"]:@"";NSURL *base=origin.length?[NSURL URLWithString:candidate[@"resolvedURL"]?:origin]:nil;NSArray *parsed=[M3UParser parse:text baseURL:base];
+        NSString *origin=[self stableURLKey:candidate[@"origin"]];
+        NSString *text=[candidate[@"text"] isKindOfClass:NSString.class]?candidate[@"text"]:@"";
+        NSString *targetID=update&&[candidate[@"existingResourceKind"] isEqual:@"playlist"]?candidate[@"existingResourceID"]:@"";
         NSString *savedPlaylistSource=nil;
-        if(!parsed.count)failure=[NSError errorWithDomain:@"ResourceImport" code:6 userInfo:@{NSLocalizedDescriptionKey:@"新播放列表没有有效 HTTP/HTTPS 频道，旧资源保持不变"}];
-        else if(targetID.length){if([targetID hasPrefix:@"local-playlist:"]&&[self.subscriptionURLs containsObject:targetID]){NSMutableDictionary *values=[@{@"name":candidate[@"name"]?:@"本地播放列表",@"text":text,@"cachedChannels":CCTVPlaylistSnapshotRows(parsed,targetID)} mutableCopy];if(candidate[@"importFingerprint"])values[@"importFingerprint"]=candidate[@"importFingerprint"];if(sourceFilename.length)values[@"importSourceFilename"]=sourceFilename;[ProfileStore update:targetID values:values];[self installPlaylist:parsed source:targetID];savedPlaylistSource=targetID;}else if([self.subscriptionURLs containsObject:targetID]){[ProfileStore update:targetID values:@{@"name":candidate[@"name"]?:@"直播订阅",@"text":text,@"cachedChannels":CCTVPlaylistSnapshotRows(parsed,targetID)}];[self installPlaylist:parsed source:targetID];savedPlaylistSource=targetID;}else failure=[NSError errorWithDomain:@"ResourceImport" code:9 userInfo:@{NSLocalizedDescriptionKey:@"匹配到的旧直播资源已被移除，请重新识别后再保存"}];}
-        else if(origin.length&&[self.subscriptionURLs containsObject:origin]&&!update)failure=[NSError errorWithDomain:@"ResourceImport" code:4 userInfo:@{NSLocalizedDescriptionKey:@"相同在线订阅只能更新；如需独立副本，请导出后作为本地文件导入"}];
-        else if(origin.length){NSMutableDictionary *values=[@{@"name":candidate[@"name"]?:@"直播订阅",@"text":text,@"cachedChannels":CCTVPlaylistSnapshotRows(parsed,origin)} mutableCopy];if(candidate[@"importFingerprint"])values[@"importFingerprint"]=candidate[@"importFingerprint"];if(sourceFilename.length)values[@"importSourceFilename"]=sourceFilename;[ProfileStore update:origin values:values];[self.subscriptionURLs addObject:origin];[NSUserDefaults.standardUserDefaults setObject:[ProfileStore orderedSources:self.subscriptionURLs.allObjects] forKey:@"subscriptions"];NSString *detected=[M3UParser epgURL:text baseURL:base];if(detected.length)[ProfileStore update:origin values:@{@"detectedEPGURL":detected}];[self installPlaylist:parsed source:origin];savedPlaylistSource=origin;}
-        else {NSMutableDictionary *metadata=[NSMutableDictionary dictionary];if(sourceFilename.length)metadata[@"importSourceFilename"]=sourceFilename;if(candidate[@"importFingerprint"])metadata[@"importFingerprint"]=candidate[@"importFingerprint"];savedPlaylistSource=[self importPlaylistData:[text dataUsingEncoding:NSUTF8StringEncoding] name:candidate[@"name"]?:@"本地播放列表" metadata:metadata];}
+        NSString *message=nil;
+        if([text lengthOfBytesUsingEncoding:NSUTF8StringEncoding]>10*1024*1024)message=@"播放列表超过 10 MiB";
+        else if(targetID.length&&![self.subscriptionURLs containsObject:targetID])message=@"旧直播资源已被移除，请重新识别";
+        else if(origin.length&&[self.subscriptionURLs containsObject:origin]&&!update)message=@"相同在线订阅只能更新";
+        else{
+            NSURL *base=origin.length?[NSURL URLWithString:candidate[@"resolvedURL"]?:origin]:nil;
+            NSArray *parsed=[M3UParser parse:text baseURL:base];
+            NSString *source=targetID.length?targetID:(origin.length?origin:[@"local-playlist:" stringByAppendingString:NSUUID.UUID.UUIDString]);
+            if(!parsed.count)message=@"播放列表没有有效频道";
+            else if(![self installPlaylist:parsed source:source])message=@"频道清单超过容量限制，已保留原资源";
+            else{
+                NSMutableDictionary *values=[@{@"name":candidate[@"name"]?:@"播放列表",@"text":text} mutableCopy];
+                if(candidate[@"importFingerprint"])values[@"importFingerprint"]=candidate[@"importFingerprint"];
+                if(sourceFilename.length)values[@"importSourceFilename"]=sourceFilename;
+                NSString *detected=[M3UParser epgURL:text baseURL:base];
+                if(detected.length)values[@"detectedEPGURL"]=detected;
+                [ProfileStore update:source values:values];
+                [self.subscriptionURLs addObject:source];
+                [NSUserDefaults.standardUserDefaults setObject:[ProfileStore orderedSources:self.subscriptionURLs.allObjects] forKey:@"subscriptions"];
+                savedPlaylistSource=source;
+            }
+        }
+        if(message)failure=[NSError errorWithDomain:@"ResourceImport" code:10 userInfo:@{NSLocalizedDescriptionKey:message}];
         if(!failure&&activateAfterSave&&savedPlaylistSource.length){
             NSMutableArray *disabled=[[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[] mutableCopy];
             [disabled removeObject:savedPlaylistSource];
@@ -369,6 +390,7 @@
             }];return;
         }
     }
+    if(silent&&self.subscriptionTasks.count>=3){[self.deferredLocalSubscriptions addObject:sourceKey];return;}
     NSUInteger requestVersion = [self.subscriptionRequestVersions[sourceKey] unsignedIntegerValue] + 1;
     self.subscriptionRequestVersions[sourceKey] = @(requestVersion);
     NSURL *url = [NSURL URLWithString:urlString];
@@ -381,7 +403,7 @@
     __weak typeof(self) weakSelf = self;NSTimeInterval requestStartedAt=CACurrentMediaTime();
     NSMutableDictionary *subscriptionFields=[@{@"source_type":@"http", @"correlation_id":traceID?:@"", @"trigger":silent?@"automatic":@"user", @"timeout_seconds":@12} mutableCopy];[subscriptionFields addEntriesFromDictionary:CCTVDiagnosticURLFields(url)];
     [RuntimeDiagnostics.shared recordEvent:@"subscription_refresh_started" category:@"subscription" fields:subscriptionFields];
-    NSURLSessionDataTask *subscriptionTask=[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *err) {
+    NSURLSessionDataTask *subscriptionTask=HostBoundedDataTask(req, 10*1024*1024, ^(NSData *data, NSURLResponse *resp, NSError *err) {
         NSInteger status=[resp isKindOfClass:NSHTTPURLResponse.class]?[(NSHTTPURLResponse *)resp statusCode]:0;
         NSUInteger receivedBytes=data.length;NSString *mimeType=resp.MIMEType?:@"";
         if(status<200||status>=300||data.length>10*1024*1024)data=nil;
@@ -391,6 +413,7 @@
         dispatch_async(dispatch_get_main_queue(), ^{
             if ([weakSelf.subscriptionRequestVersions[sourceKey] unsignedIntegerValue] != requestVersion) return;
             [weakSelf.subscriptionTasks removeObjectForKey:sourceKey];
+            [weakSelf refreshSubscriptionsWhenIdle];
             if (!list.count) {
                 NSString *failureStage=err?@"network_or_timeout":(parseError?@"parse_limit":((status<200||status>=300)?@"http_status":(receivedBytes>10*1024*1024?@"response_too_large":(receivedBytes==0?@"empty_response":(text.length?@"no_valid_channels":@"invalid_utf8")))));
                 NSMutableDictionary *fields=[@{@"source_type":@"http", @"correlation_id":traceID?:@"", @"trigger":silent?@"automatic":@"user", @"http_status":@(status), @"response_mime_type":mimeType, @"elapsed_ms":@((NSInteger)((CACurrentMediaTime()-requestStartedAt)*1000)), @"error_domain":err.domain?:@"", @"error_code":@(err.code), @"error_message":err.localizedDescription?:@"", @"received_bytes":@(receivedBytes), @"failure_stage":failureStage} mutableCopy];
@@ -415,7 +438,7 @@
             if(localService)[weakSelf logPluginLine:[NSString stringWithFormat:@"订阅清单可读取 · %lu 个频道",(unsigned long)list.count] identifier:localService[@"id"] name:localService[@"name"]];
             [weakSelf installPlaylist:list source:sourceKey];
         });
-    }];self.subscriptionTasks[sourceKey]=subscriptionTask;[subscriptionTask resume];
+    });self.subscriptionTasks[sourceKey]=subscriptionTask;[subscriptionTask resume];
 }
 // 资源页单条目刷新：行里的 source 可能是订阅 URL，也可能是 plugin:<id>。
 // 插件行先解析到它自己的订阅清单地址，再走同一条刷新链路。
@@ -489,22 +512,34 @@
     if([[catalog[@"catalogKind"] isKindOfClass:NSString.class]?catalog[@"catalogKind"]:@"" isEqual:@"maccms"]){[self showServiceError:@"MacCMS 影视接口按接口配置使用，无需下载刷新"];return;}
     NSURL *url=[NSURL URLWithString:[catalog[@"url"] isKindOfClass:NSString.class]?catalog[@"url"]:@""];
     if(!url||![@[@"http",@"https"] containsObject:url.scheme.lowercaseString]){[self showServiceError:@"此合集没有可重新下载的配置地址"];return;}
-    [self.tvboxCatalogDownloader cancel];self.tvboxCatalogDownloader=[TVBoxCatalogDownloader new];
+    [self.tvboxCatalogDownloader cancel];
+    TVBoxCatalogDownloader *downloader=[TVBoxCatalogDownloader new];
+    self.tvboxCatalogDownloader=downloader;
     self.navigationItem.prompt=@"正在重新下载资源合集…";
     __weak typeof(self) weakSelf=self;
-    [self.tvboxCatalogDownloader loadURL:url completion:^(NSDictionary *fresh,NSError *error){
-        RootViewController *owner=weakSelf;if(!owner)return;owner.navigationItem.prompt=nil;
-        if(error||!fresh){[owner showServiceError:error.localizedDescription?:@"资源合集下载失败"];return;}
+    __weak TVBoxCatalogDownloader *weakDownloader=downloader;
+    [downloader loadURL:url completion:^(NSDictionary *fresh,NSError *error){
+        RootViewController *owner=weakSelf;
+        TVBoxCatalogDownloader *completedDownloader=weakDownloader;
+        if(!owner||!completedDownloader||owner.tvboxCatalogDownloader!=completedDownloader)return;
+        owner.tvboxCatalogDownloader=nil;
+        owner.navigationItem.prompt=nil;
+        if([error.domain isEqualToString:NSURLErrorDomain]&&error.code==NSURLErrorCancelled)return;
+        if(error||!fresh){[owner showServiceError:[NSString stringWithFormat:@"刷新失败 · %@。已保留原合集。",error.localizedDescription?:@"未取得有效配置"]];return;}
         NSArray *sites=[fresh[@"sites"] isKindOfClass:NSArray.class]?fresh[@"sites"]:@[];
         NSArray *lives=[fresh[@"lives"] isKindOfClass:NSArray.class]?fresh[@"lives"]:@[];
         if(!sites.count&&!lives.count){[owner showServiceError:@"重新下载的合集为空，已保留原合集"];return;}
+        if(![TVBoxCatalogStore catalogForID:identifier])return;
         NSMutableDictionary *updated=[fresh mutableCopy];updated[@"id"]=identifier;
+        // The downloader uses the effective URL to resolve relative entries.
+        // Keep the configured address for the next refresh, including after short-lived redirects.
+        updated[@"url"]=catalog[@"url"];
         [TVBoxCatalogStore saveCatalog:updated];
         [owner refreshConfigurationPage];
         [owner log:@"资源合集已刷新 · %@ · %lu 个站点",(fresh[@"name"]?:catalog[@"name"]?:@"资源合集"),(unsigned long)sites.count];
     }];
 }
-- (void)installPlaylist:(NSArray<M3UChannel *> *)list source:(NSString *)sourceKey {
+- (BOOL)installPlaylist:(NSArray<M3UChannel *> *)list source:(NSString *)sourceKey {
             NSDictionary *managedService=[self localServiceForURL:[NSURL URLWithString:sourceKey]];
             NSArray<NSString *> *retiredManagedSources=managedService?[self managedSubscriptionSourcesForService:managedService excludingURL:sourceKey]:@[];
             NSSet<NSString *> *retiredSourceSet=[NSSet setWithArray:retiredManagedSources];
@@ -530,10 +565,6 @@
                 }
             }
             NSMutableDictionary<NSString *, NSNumber *> *urlIndexes = [NSMutableDictionary dictionary];
-            for (NSUInteger i = 0; i < merged.count; i++) {
-                NSString *stable = [self stableURLKey:merged[i][@"remoteURL"]];
-                if (stable.length) urlIndexes[stable] = @(i);
-            }
             NSUInteger added = 0;
             NSUInteger skippedInvalidURLs = 0;
             for (M3UChannel *c in list) {
@@ -558,7 +589,7 @@
                     if(c.epgID.length)entry[@"epgID"]=c.epgID;else[entry removeObjectForKey:@"epgID"];
                     merged[existingIndex.unsignedIntegerValue] = entry;
                 } else {
-                    NSMutableDictionary *entry = [@{@"id": stable,
+                    NSMutableDictionary *entry = [@{@"id": CCTVSubscriptionChannelID(sourceKey,stable),
                                                     @"name": c.name,
                                                     @"group": c.group ?: @"订阅",
                                                     @"verified": @NO,
@@ -574,10 +605,10 @@
                     added++;
                 }
             }
-            if(merged.count>20000){NSString *message=@"合并后频道数量超过 20000 条安全上限，已保留上次有效订阅";[ProfileStore update:sourceKey values:@{@"status":message}];[NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:sourceKey];[RuntimeDiagnostics.shared recordEvent:@"subscription_refresh_failed" category:@"subscription" fields:@{@"source_type":@"playlist",@"failure_stage":@"merged_channel_limit",@"channel_count":@(merged.count)}];[self refreshConfigurationPage];[self log:@"%@",message];return;}
+            if(merged.count>20000){NSString *message=@"合并后频道数量超过 20000 条安全上限，已保留上次有效订阅";[ProfileStore update:sourceKey values:@{@"status":message}];[NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:sourceKey];[RuntimeDiagnostics.shared recordEvent:@"subscription_refresh_failed" category:@"subscription" fields:@{@"source_type":@"playlist",@"failure_stage":@"merged_channel_limit",@"channel_count":@(merged.count)}];[self refreshConfigurationPage];[self log:@"%@",message];return NO;}
             NSArray *owned=[merged filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *c,NSDictionary *b){return [CCTVStringArrayValue(c[@"subscriptionSources"]) containsObject:sourceKey];}]];
             NSData *snapshot=[NSJSONSerialization dataWithJSONObject:owned options:0 error:NULL];
-            if(!snapshot.length||snapshot.length>4*1024*1024){NSString *message=@"频道快照超过 4 MiB 安全上限，已保留上次有效订阅";[ProfileStore update:sourceKey values:@{@"status":message}];[NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:sourceKey];[RuntimeDiagnostics.shared recordEvent:@"subscription_refresh_failed" category:@"subscription" fields:@{@"source_type":@"playlist",@"failure_stage":@"snapshot_size_limit",@"snapshot_bytes":@(snapshot.length)}];[self refreshConfigurationPage];[self log:@"%@",message];return;}
+            if(!snapshot.length||snapshot.length>4*1024*1024){NSString *message=@"频道快照超过 4 MiB 安全上限，已保留上次有效订阅";[ProfileStore update:sourceKey values:@{@"status":message}];[NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:sourceKey];[RuntimeDiagnostics.shared recordEvent:@"subscription_refresh_failed" category:@"subscription" fields:@{@"source_type":@"playlist",@"failure_stage":@"snapshot_size_limit",@"snapshot_bytes":@(snapshot.length)}];[self refreshConfigurationPage];[self log:@"%@",message];return NO;}
             NSArray *disabledBefore=[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[];BOOL migratedDisabled=NO;NSMutableArray *profileOrder=[[NSUserDefaults.standardUserDefaults arrayForKey:@"profileOrder"]?:@[] mutableCopy];NSUInteger replacementOrderIndex=NSNotFound;
             for(NSString *retiredSource in retiredManagedSources){if([disabledBefore containsObject:retiredSource])migratedDisabled=YES;NSUInteger position=[profileOrder indexOfObject:retiredSource];if(position!=NSNotFound&&position<replacementOrderIndex)replacementOrderIndex=position;[profileOrder removeObject:retiredSource];}
             if(replacementOrderIndex!=NSNotFound){[profileOrder removeObject:sourceKey];[profileOrder insertObject:sourceKey atIndex:MIN(replacementOrderIndex,profileOrder.count)];[NSUserDefaults.standardUserDefaults setObject:profileOrder forKey:@"profileOrder"];}
@@ -596,14 +627,16 @@
             NSArray *ownedSnapshot = [owned copy];
             NSString *persistKey = [sourceKey copy];
             NSTimeInterval updatedAt = NSDate.date.timeIntervalSince1970;
+            [ProfileStore update:persistKey values:@{@"updatedAt":@(updatedAt)}];
             static dispatch_queue_t playlistPersistQueue = nil;
             static dispatch_once_t playlistPersistOnce;
             dispatch_once(&playlistPersistOnce, ^{
                 playlistPersistQueue = dispatch_queue_create("com.cctvhost.subscription.persist", DISPATCH_QUEUE_SERIAL);
             });
             dispatch_async(playlistPersistQueue, ^{
-                [ProfileStore update:persistKey values:@{@"cachedChannels":ownedSnapshot,@"status":@"已更新",@"updatedAt":@(updatedAt)}];
                 dispatch_async(dispatch_get_main_queue(), ^{
+                    if(![self.subscriptionURLs containsObject:persistKey]||![[ProfileStore metadata:persistKey][@"updatedAt"] isEqual:@(updatedAt)])return;
+                    [ProfileStore update:persistKey values:@{@"cachedChannels":ownedSnapshot,@"status":@"已更新",@"updatedAt":@(updatedAt)}];
                     [NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:persistKey];
                 });
             });
@@ -612,6 +645,7 @@
             if([self.tabPage isKindOfClass:ConfigCenterViewController.class])[(ConfigCenterViewController *)self.tabPage reloadProfiles];
             if (skippedInvalidURLs) [self log:@"订阅跳过 %lu 条无效地址（仅允许有效 HTTP/HTTPS URL）", (unsigned long)skippedInvalidURLs];
             [self log:@"订阅 %@ 新增 %lu 个频道（共 %lu）", CCTVServiceLogAddress(sourceKey), (unsigned long)added, (unsigned long)list.count];
+    return YES;
 }
 - (void)applyPlaylistText:(NSString *)text source:(NSString *)sourceKey {
     NSString *traceID=NSUUID.UUID.UUIDString.lowercaseString;
@@ -637,7 +671,16 @@
 }
 - (NSString *)importPlaylistData:(NSData *)data name:(NSString *)name metadata:(NSDictionary *)metadata {
     NSString *text=data.length<=10*1024*1024?[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]:nil;if(!text.length)return nil;NSArray *channels=[M3UParser parse:text baseURL:nil];if(!channels.count)return nil;
-    NSString *source=[@"local-playlist:" stringByAppendingString:NSUUID.UUID.UUIDString];NSArray *snapshot=CCTVPlaylistSnapshotRows(channels,source);NSMutableDictionary *values=[@{@"name":name?:@"本地播放列表",@"text":text,@"cachedChannels":snapshot} mutableCopy];if([metadata isKindOfClass:NSDictionary.class])[values addEntriesFromDictionary:metadata];[ProfileStore update:source values:values];[self.subscriptionURLs addObject:source];[NSUserDefaults.standardUserDefaults setObject:[ProfileStore orderedSources:self.subscriptionURLs.allObjects] forKey:@"subscriptions"];[self applyPlaylistText:text source:source];return source;
+    NSString *source=[@"local-playlist:" stringByAppendingString:NSUUID.UUID.UUIDString];
+    if(![self installPlaylist:channels source:source])return nil;
+    NSMutableDictionary *values=[@{@"name":name?:@"本地播放列表",@"text":text} mutableCopy];
+    if([metadata isKindOfClass:NSDictionary.class])[values addEntriesFromDictionary:metadata];
+    NSString *epg=[M3UParser epgURL:text baseURL:nil];
+    if(epg.length)values[@"detectedEPGURL"]=epg;
+    [ProfileStore update:source values:values];
+    [self.subscriptionURLs addObject:source];
+    [NSUserDefaults.standardUserDefaults setObject:[ProfileStore orderedSources:self.subscriptionURLs.allObjects] forKey:@"subscriptions"];
+    return source;
 }
 - (void)replaceSubscription:(NSString *)source URL:(NSString *)url values:(NSDictionary *)values disabled:(BOOL)disabled completion:(void (^)(NSError *error))completion {
     if([self.subscriptionURLs containsObject:url]){completion([NSError errorWithDomain:@"SubscriptionEdit" code:1 userInfo:@{NSLocalizedDescriptionKey:@"该地址已存在，请编辑已有订阅"}]);return;}
@@ -659,10 +702,16 @@
                 NSArray *ordered=[ProfileStore orderedSources:owner.subscriptionURLs.allObjects];NSMutableArray *replacement=[ordered mutableCopy];NSUInteger index=[replacement indexOfObject:source];if(index!=NSNotFound)replacement[index]=url;
                 BOOL selected=[owner.activeSource isEqual:source];NSMutableDictionary *metadata=[values mutableCopy];[metadata removeObjectForKey:@"cachedChannels"];[metadata removeObjectForKey:@"detectedEPGURL"];
                 NSString *epg=[M3UParser epgURL:text baseURL:response.URL?:[NSURL URLWithString:url]];if(epg.length)metadata[@"detectedEPGURL"]=epg;
-                [ProfileStore migrateResourceDisplaySettingsFromSource:source toSource:url];[owner deleteSubscription:source];[owner.subscriptionURLs addObject:url];[ProfileStore update:url values:metadata];
+                if(![owner installPlaylist:channels source:url]){
+                    completion([NSError errorWithDomain:@"SubscriptionEdit" code:4 userInfo:@{NSLocalizedDescriptionKey:@"新订阅超过频道容量限制，原订阅已保留"}]);
+                    return;
+                }
+                [ProfileStore migrateResourceDisplaySettingsFromSource:source toSource:url];
+                if([owner.subscriptionURLs containsObject:source])[owner deleteSubscription:source];
+                [owner.subscriptionURLs addObject:url];[ProfileStore update:url values:metadata];
                 NSMutableArray *disabledSources=[[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[] mutableCopy];[disabledSources removeObject:source];[disabledSources removeObject:url];if(disabled)[disabledSources addObject:url];[NSUserDefaults.standardUserDefaults setObject:disabledSources forKey:@"disabledSubscriptions"];
                 [NSUserDefaults.standardUserDefaults setObject:replacement forKey:@"subscriptions"];
-                if(selected)owner.activeSource=url;[owner.epgCache removeAllObjects];[owner installPlaylist:channels source:url];[owner refreshConfigurationPage];completion(nil);
+                if(selected)owner.activeSource=url;[owner.epgCache removeAllObjects];[owner refreshConfigurationPage];completion(nil);
             }];
         });
     }];
@@ -740,7 +789,7 @@
         NSString *host = [NSURL URLWithString:url].host ?: @"备用源";
         NSString *proto = [url.lowercaseString containsString:@".m3u8"] ? @"HLS" : @"直链";
         NSString *altTitle = [NSString stringWithFormat:@"备用源 %lu · %@ (%@)", (unsigned long)altIdx, host, proto];
-        [altRows addObject:[HostGlassSheetAction actionWithTitle:altTitle subtitle:nil value:proto icon:@"antenna.radiowaves.left.and.right" tint:UIColor.systemBlueColor destructive:NO selected:NO handler:^{NSMutableDictionary *other=[ch mutableCopy];other[@"remoteURL"]=url;[weakSelf routePlayback:other];}]];
+        [altRows addObject:[HostGlassSheetAction actionWithTitle:altTitle subtitle:nil value:proto icon:@"antenna.radiowaves.left.and.right" tint:UIColor.systemBlueColor destructive:NO selected:NO handler:^{NSDictionary *other=[weakSelf alternateChannelForURL:url matching:ch];if(other)[weakSelf routePlayback:other];}]];
     }
     if(altRows.count)[sections addObject:[HostGlassSheetSection sectionWithTitle:@"备用信号源" actions:altRows]];
     NSMutableArray<HostGlassSheetAction *> *epgRows=[NSMutableArray array];
@@ -794,7 +843,7 @@
     if(rows.count)[sections addObject:[HostGlassSheetSection sectionWithTitle:@"最近续播" actions:rows]];
     if(self.recents.count){
         [sections addObject:[HostGlassSheetSection sectionWithTitle:@"管理" actions:@[
-            [HostGlassSheetAction actionWithTitle:@"清空历史" subtitle:@"移除全部最近观看记录" value:nil icon:@"trash" tint:UIColor.systemRedColor destructive:YES selected:NO handler:^{[weakSelf.recents removeAllObjects];[NSUserDefaults.standardUserDefaults setObject:@[] forKey:@"recents"];[weakSelf applyFilter];}]
+            [HostGlassSheetAction actionWithTitle:@"清空历史" subtitle:@"移除全部最近观看记录" value:nil icon:@"trash" tint:UIColor.systemRedColor destructive:YES selected:NO handler:^{[weakSelf confirmClearRecentChannels];}]
         ]]];
     }
     [HostGlassActionSheetViewController presentOn:self

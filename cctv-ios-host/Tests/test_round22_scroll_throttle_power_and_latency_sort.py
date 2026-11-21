@@ -35,7 +35,7 @@ class Round22ScrollThrottlePowerAndLatencySortTests(unittest.TestCase):
         self.assertIn("if(self.channelSortMode==2)", cat)
         self.assertIn('@"channel.catalog.sort"', cat)
         self.assertIn("w.channelSortMode=(w.channelSortMode+1)%3;", cat)
-        self.assertIn("if(self.channelSortMode<0||self.channelSortMode>2)self.channelSortMode=0;", root)
+        self.assertIn("channelSortMode=MIN(2,MAX(0,value))", root)
         self.assertIn("当前分组下暂无支持回看的频道", cat)
 
 

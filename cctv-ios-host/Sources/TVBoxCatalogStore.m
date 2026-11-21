@@ -763,6 +763,27 @@ static void TVBoxNotifyAdaptationMonitorCatalog(NSString *name, NSString *source
     NSMutableDictionary *catalog=[[self parseData:mergedData sourceURL:effectiveOrigin error:error] mutableCopy];
     if(!catalog)return nil;
     catalog[@"id"]=catalogID;
+    NSData *manifestData=normalizedEntries[@"source-manifest.json"];
+    id manifest=manifestData.length?[NSJSONSerialization JSONObjectWithData:manifestData options:0 error:NULL]:nil;
+    if([manifest isKindOfClass:NSDictionary.class]&&[manifest[@"format"] isEqual:@"CCTVHostTVBoxPackage"]&&[manifest[@"files"] isKindOfClass:NSArray.class]){
+        NSMutableDictionary *localByKey=[NSMutableDictionary dictionary];
+        for(id entry in manifest[@"files"]){
+            if(![entry isKindOfClass:NSDictionary.class])continue;
+            NSString *key=entry[@"key"],*file=entry[@"file"];
+            if(![key isKindOfClass:NSString.class]||![file isKindOfClass:NSString.class]||![savedFiles containsObject:file]||![file hasPrefix:@"scripts/"])continue;
+            if(![@[@"py",@"js",@"hjs",@"cjs",@"mjs"] containsObject:file.pathExtension.lowercaseString])continue;
+            if(localByKey[key]){localByKey[key]=NSNull.null;continue;}
+            localByKey[key]=file;
+        }
+        NSMutableArray *sites=[NSMutableArray array];
+        for(NSDictionary *rawSite in catalog[@"sites"]){
+            NSMutableDictionary *site=[rawSite mutableCopy];
+            id file=localByKey[site[@"key"]];
+            if([file isKindOfClass:NSString.class]&&[site[@"apiKind"] isEqual:@"script"])site[@"bundledScript"]=file;
+            [sites addObject:site];
+        }
+        catalog[@"sites"]=sites;
+    }
     catalog[@"_sourceConfigData"]=mainSanitizedData;
     if(!mergedJSON[@"name"]&&!mergedJSON[@"title"]){
         NSString *inferredPrefix=TVBoxInferredCatalogPrefixName(mergedJSON[@"sites"]);

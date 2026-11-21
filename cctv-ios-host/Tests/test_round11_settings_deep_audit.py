@@ -65,9 +65,10 @@ class Round11SettingsDeepAuditTests(unittest.TestCase):
         self.assertIn('@"cctv.mediaHome.modules.v1"', self.backup_m)
         for key in ["recents", "vodFavorites", "watchHistory", "skipPoints", "epgReminders"]:
             self.assertIn(f'@"{key}"', self.backup_m)
+        restore = (SOURCES / "RootViewController+Services.m").read_text(encoding="utf-8")
         # RootViewController finishConfigurationImport: must sync gridColumns, channelSortMode, and reloadThemeAppearance
-        self.assertIn('restoredCols=[NSUserDefaults.standardUserDefaults integerForKey:@"cctv.channelGridColumns.v1"]', self.root_m)
-        self.assertIn('self.channelSortMode=[NSUserDefaults.standardUserDefaults integerForKey:@"cctv.channelSortMode.v1"]', self.root_m)
+        self.assertIn('restoredCols=[NSUserDefaults.standardUserDefaults integerForKey:@"cctv.channelGridColumns.v1"]', restore)
+        self.assertIn('self.channelSortMode=[NSUserDefaults.standardUserDefaults integerForKey:@"cctv.channelSortMode.v1"]', restore)
 
     def test_iss89_update_check_presentation_and_https_guards_and_quality_picker_in_place_refresh(self):
         # checkForUpdateFromIndexPath: must verify window attachment, presentedViewController, and https scheme
@@ -139,7 +140,7 @@ class Round11SettingsDeepAuditTests(unittest.TestCase):
             "if (!self.currentPlayer || self.avPlayer || (!self.firstRender && !self.nativeTimeShiftActive && !self.nativeTransitionKind.length))",
             self.playback_m,
         )
-        self.assertIn("weakSelf.timeshiftController.seekLatency > 0", self.playback_m)
+        self.assertIn("if (event == 3 && !self.firstRender)", self.playback_m)
         self.assertIn("else if (self.onFailure) self.onFailure(error);", self.timeshift_m)
         # ISS-97: playViaSDK passes TimeshiftingChannelID & LivePublicCheck
         sdk_body = self.playback_m.split("- (void)playViaSDK:(NSString *)cid title:(NSString *)title {", 1)[1].split(

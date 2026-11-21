@@ -71,7 +71,7 @@ class CCTVHostQualityFollowupContracts(unittest.TestCase):
         root = "\n".join((p.read_text(encoding="utf-8").split("\n- (BOOL)sessionHasContent;", 1)[0] if p.name.endswith(".h") else p.read_text(encoding="utf-8")) for p in ([ROOT / "Sources" / "RootViewController_Internal.h", *sorted((ROOT / "Sources").glob("RootViewController*.m"))]))
         self.assertIn('togglePlayPauseCommand addTarget:self', coordinator)
         self.assertIn('MPRemoteCommandHandlerStatus)togglePlayPause', coordinator)
-        self.assertIn('configuration.title=accessibilitySize?@"":titles[button.tag]', root)
+        self.assertIn('configuration.title=titles[button.tag]', root)
         self.assertIn('b.accessibilityLabel=titles[i]', root)
 
     def test_ui_matrix_and_release_freshness_are_configured(self):

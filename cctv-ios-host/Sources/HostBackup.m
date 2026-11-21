@@ -19,7 +19,16 @@ static NSArray<NSString *> *stringPreferenceKeys(void){return @[@"cctv.mediaVide
     NSDictionary *vodFavorites=[d dictionaryForKey:@"cctv.mediaFavorites.v1"];
     if([vodFavorites isKindOfClass:NSDictionary.class]&&[NSJSONSerialization isValidJSONObject:vodFavorites])snap[@"vodFavorites"]=vodFavorites;
     NSArray *watchHistory=[d arrayForKey:@"cctv.mediaWatchHistory.v1"];
-    if([watchHistory isKindOfClass:NSArray.class]&&[NSJSONSerialization isValidJSONObject:watchHistory])snap[@"watchHistory"]=watchHistory;
+    if([watchHistory isKindOfClass:NSArray.class]){
+        NSMutableArray *rows=[NSMutableArray array];
+        for(id value in watchHistory){
+            if(![value isKindOfClass:NSDictionary.class])continue;
+            NSMutableDictionary *row=[value mutableCopy];
+            if([row[@"updatedAt"] isKindOfClass:NSDate.class])row[@"updatedAt"]=@([row[@"updatedAt"] timeIntervalSince1970]);
+            if([NSJSONSerialization isValidJSONObject:row])[rows addObject:row];
+        }
+        snap[@"watchHistory"]=rows;
+    }
     NSDictionary *skipPoints=[d dictionaryForKey:@"cctv.mediaSkipPoints.v1"];
     if([skipPoints isKindOfClass:NSDictionary.class]&&[NSJSONSerialization isValidJSONObject:skipPoints])snap[@"skipPoints"]=skipPoints;
     NSDictionary *epgReminders=[d dictionaryForKey:@"cctv.epgReminders.v1"];
@@ -29,15 +38,17 @@ static NSArray<NSString *> *stringPreferenceKeys(void){return @[@"cctv.mediaVide
 + (NSDictionary *)validatedBackup:(NSData *)data error:(NSError **)error {
     id root=nil;
     NSInteger version=0;
-    if(!data.length)goto invalid;
+    if(!data.length||data.length>32*1024*1024)goto invalid;
     root=[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
     if(![root isKindOfClass:NSDictionary.class])goto invalid;
+    if(![root[@"version"] isKindOfClass:NSNumber.class])goto invalid;
     version=[root[@"version"] integerValue];
+    if([root[@"version"] doubleValue]!=(double)version)goto invalid;
     if(![root[@"format"] isEqual:@"CCTVHost"]||(version!=1&&version!=2))goto invalid;
     if(![root[@"subscriptions"] isKindOfClass:NSArray.class]||![root[@"favorites"] isKindOfClass:NSArray.class]||![root[@"preferences"] isKindOfClass:NSDictionary.class])goto invalid;
     for(id u in root[@"subscriptions"])if(![ProfileStore isSource:u])goto invalid;
     for(id f in root[@"favorites"])if(![f isKindOfClass:NSString.class]||![f length]||[f length]>512)goto invalid;
-    if(root[@"profiles"]){if(![root[@"profiles"] isKindOfClass:NSDictionary.class])goto invalid;for(id k in root[@"profiles"]){id v=root[@"profiles"][k];if(![ProfileStore isSource:k]||![v isKindOfClass:NSDictionary.class])goto invalid;for(id mk in v){id mv=v[mk];if((![mk isEqual:@"name"]&&![mk isEqual:@"epgURL"]&&![mk isEqual:@"detectedEPGURL"]&&![mk isEqual:@"text"]&&![mk isEqual:@"status"]&&![mk isEqual:@"updatedAt"]&&![mk isEqual:@"cachedChannels"]&&![mk isEqual:@"unsupportedProtocols"]&&![mk isEqual:@"managedServiceID"]&&![mk isEqual:@"tvboxCatalogID"]&&![mk isEqual:@"tvboxLiveEntryName"]&&![mk isEqual:@"userAgent"]&&![mk isEqual:@"inlinePlaylist"])||([mk isEqual:@"updatedAt"]?![mv isKindOfClass:NSNumber.class]:([mk isEqual:@"cachedChannels"]?![mv isKindOfClass:NSArray.class]:([mk isEqual:@"unsupportedProtocols"]?![mv isKindOfClass:NSDictionary.class]:![mv isKindOfClass:NSString.class]))))goto invalid;if(([mk isEqual:@"epgURL"]||[mk isEqual:@"detectedEPGURL"])&&[mv length]&&![ProfileStore isHTTP:mv])goto invalid;}}}
+    if(root[@"profiles"]){if(![root[@"profiles"] isKindOfClass:NSDictionary.class])goto invalid;for(id k in root[@"profiles"]){id v=root[@"profiles"][k];if(![ProfileStore isSource:k]||![v isKindOfClass:NSDictionary.class])goto invalid;for(id mk in v){id mv=v[mk];if((![mk isEqual:@"name"]&&![mk isEqual:@"epgURL"]&&![mk isEqual:@"detectedEPGURL"]&&![mk isEqual:@"text"]&&![mk isEqual:@"status"]&&![mk isEqual:@"updatedAt"]&&![mk isEqual:@"cachedChannels"]&&![mk isEqual:@"unsupportedProtocols"]&&![mk isEqual:@"managedServiceID"]&&![mk isEqual:@"tvboxCatalogID"]&&![mk isEqual:@"tvboxLiveEntryName"]&&![mk isEqual:@"userAgent"]&&![mk isEqual:@"inlinePlaylist"]&&![mk isEqual:@"importFingerprint"]&&![mk isEqual:@"importSourceFilename"]&&![mk isEqual:@"count"])||(([mk isEqual:@"updatedAt"]||[mk isEqual:@"count"])?![mv isKindOfClass:NSNumber.class]:([mk isEqual:@"cachedChannels"]?![mv isKindOfClass:NSArray.class]:([mk isEqual:@"unsupportedProtocols"]?![mv isKindOfClass:NSDictionary.class]:![mv isKindOfClass:NSString.class]))))goto invalid;if(([mk isEqual:@"epgURL"]||[mk isEqual:@"detectedEPGURL"])&&[mv length]&&![ProfileStore isHTTP:mv])goto invalid;}}}
     for(NSString *k in @[@"profileOrder",@"disabledSubscriptions"])if(root[k]){if(![root[k] isKindOfClass:NSArray.class])goto invalid;for(id s in root[k])if(![ProfileStore isSource:s])goto invalid;}
     if(root[@"epgMappings"]){if(![root[@"epgMappings"] isKindOfClass:NSDictionary.class])goto invalid;for(id k in root[@"epgMappings"])if(![k isKindOfClass:NSString.class]||![root[@"epgMappings"][k] isKindOfClass:NSString.class])goto invalid;}
     if(root[@"recents"]){if(![root[@"recents"] isKindOfClass:NSArray.class])goto invalid;for(id r in root[@"recents"])if(![r isKindOfClass:NSDictionary.class])goto invalid;}
@@ -58,7 +69,7 @@ static NSArray<NSString *> *stringPreferenceKeys(void){return @[@"cctv.mediaVide
                 if(![value isKindOfClass:NSNumber.class]||strcmp([value objCType],@encode(BOOL))==0)goto invalid;
                 if([k isEqual:@"cctv.mediaPlaybackRate"]&&([value doubleValue]<0.5||[value doubleValue]>2.0))goto invalid;
                 if([k isEqual:@"cctv.channelGridColumns.v1"]&&[value integerValue]!=3&&[value integerValue]!=4)goto invalid;
-                if([k isEqual:@"cctv.channelSortMode.v1"]&&[value integerValue]!=0&&[value integerValue]!=1)goto invalid;
+                if([k isEqual:@"cctv.channelSortMode.v1"]&&([value integerValue]<0||[value integerValue]>2))goto invalid;
                 if([k isEqual:@"cctv.mediaGridColumns.v1"]&&[value integerValue]!=2&&[value integerValue]!=3&&[value integerValue]!=4)goto invalid;
                 if([k isEqual:@"cctv.mediaEpisodeLayoutStyle.v1"]&&([value integerValue]<0||[value integerValue]>3))goto invalid;
                 if([k isEqual:@"cctv.networkTimeout.v1"]&&([value doubleValue]<5||[value doubleValue]>40))goto invalid;
@@ -75,6 +86,7 @@ static NSArray<NSString *> *stringPreferenceKeys(void){return @[@"cctv.mediaVide
             }else goto invalid;
         }
     }
+    if(![NSPropertyListSerialization propertyList:root isValidForFormat:NSPropertyListBinaryFormat_v1_0])goto invalid;
     return root;
 invalid:
     if(error)*error=[NSError errorWithDomain:@"HostBackup" code:1 userInfo:@{NSLocalizedDescriptionKey:@"备份文件格式无效，未修改现有配置。"}];
@@ -85,7 +97,15 @@ invalid:
     [d setObject:backup[@"profiles"]?:@{} forKey:@"profileMetadata"];[d setObject:backup[@"profileOrder"]?:@[] forKey:@"profileOrder"];[d setObject:backup[@"disabledSubscriptions"]?:@[] forKey:@"disabledSubscriptions"];[d setObject:backup[@"epgMappings"]?:@{} forKey:@"epgMappings"];
     if([backup[@"recents"] isKindOfClass:NSArray.class])[d setObject:backup[@"recents"] forKey:@"recents"];
     if([backup[@"vodFavorites"] isKindOfClass:NSDictionary.class])[d setObject:backup[@"vodFavorites"] forKey:@"cctv.mediaFavorites.v1"];
-    if([backup[@"watchHistory"] isKindOfClass:NSArray.class])[d setObject:backup[@"watchHistory"] forKey:@"cctv.mediaWatchHistory.v1"];
+    if([backup[@"watchHistory"] isKindOfClass:NSArray.class]){
+        NSMutableArray *rows=[NSMutableArray array];
+        for(NSDictionary *entry in backup[@"watchHistory"]){
+            NSMutableDictionary *row=[entry mutableCopy];
+            if([row[@"updatedAt"] isKindOfClass:NSNumber.class])row[@"updatedAt"]=[NSDate dateWithTimeIntervalSince1970:[row[@"updatedAt"] doubleValue]];
+            [rows addObject:row];
+        }
+        [d setObject:rows forKey:@"cctv.mediaWatchHistory.v1"];
+    }
     if([backup[@"skipPoints"] isKindOfClass:NSDictionary.class])[d setObject:backup[@"skipPoints"] forKey:@"cctv.mediaSkipPoints.v1"];
     if([backup[@"epgReminders"] isKindOfClass:NSDictionary.class])[d setObject:backup[@"epgReminders"] forKey:@"cctv.epgReminders.v1"];
     NSDictionary *p=backup[@"preferences"];

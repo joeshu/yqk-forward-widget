@@ -22,12 +22,43 @@
     self.subscriptionURLs = [NSMutableSet set];
     self.subscriptionRequestVersions = [NSMutableDictionary dictionary];
     NSArray *saved = [[NSUserDefaults standardUserDefaults] arrayForKey:@"subscriptions"];
+    NSMutableDictionary<NSString *,NSString *> *migratedIDs=[NSMutableDictionary dictionary];
     for (NSString *u in saved) {
         NSString *key=[ProfileStore isHTTP:u]?[self stableURLKey:u]:([ProfileStore isSource:u]?u:nil);
         if(!key.length)continue;[self.subscriptionURLs addObject:key];
         NSArray *cache=[ProfileStore metadata:key][@"cachedChannels"];
-        if([cache isKindOfClass:NSArray.class])self.allChannels=[self.allChannels arrayByAddingObjectsFromArray:cache];
+        if([cache isKindOfClass:NSArray.class]){
+            NSMutableArray *scoped=[NSMutableArray arrayWithCapacity:cache.count];
+            for(id value in cache){
+                if(![value isKindOfClass:NSDictionary.class])continue;
+                NSString *url=[self stableURLKey:value[@"remoteURL"]];
+                if(!url.length)continue;
+                NSMutableDictionary *channel=[value mutableCopy];
+                NSString *newID=CCTVSubscriptionChannelID(key,url);
+                if([self.favorites containsObject:url]&&![self.favorites containsObject:newID])[self.favorites addObject:newID];
+                NSString *oldID=[value[@"id"] isKindOfClass:NSString.class]?value[@"id"]:url;
+                if(![oldID isEqual:newID]&&!migratedIDs[oldID])migratedIDs[oldID]=newID;
+                channel[@"id"]=newID;
+                channel[@"subscriptionSources"]=@[key];
+                [scoped addObject:channel];
+            }
+            self.allChannels=[self.allChannels arrayByAddingObjectsFromArray:scoped];
+        }
         [self.deferredLocalSubscriptions addObject:key];
+    }
+    for(NSUInteger i=0;i<self.recents.count;i++){
+        NSDictionary *recent=self.recents[i];
+        NSString *identifier=migratedIDs[recent[@"id"]?:@""];
+        if(identifier){NSMutableDictionary *updated=[recent mutableCopy];updated[@"id"]=identifier;self.recents[i]=updated;}
+    }
+    if(migratedIDs.count){
+        NSUserDefaults *defaults=NSUserDefaults.standardUserDefaults;
+        [defaults setObject:self.recents forKey:@"recents"];
+        [self.favorites removeObjectsInArray:migratedIDs.allKeys];
+        [defaults setObject:self.favorites forKey:@"favorites"];
+        NSDictionary *last=[defaults dictionaryForKey:@"lastChannel"];
+        NSString *identifier=migratedIDs[last[@"id"]?:@""];
+        if(identifier){NSMutableDictionary *updated=[last mutableCopy];updated[@"id"]=identifier;[defaults setObject:updated forKey:@"lastChannel"];}
     }
     NSMutableDictionary *unique=[NSMutableDictionary dictionary];NSMutableArray *dedup=[NSMutableArray array];for(id rawChannel in self.allChannels){if(![rawChannel isKindOfClass:NSDictionary.class])continue;NSDictionary *c=rawChannel;NSString *cid=[c[@"id"] isKindOfClass:NSString.class]?c[@"id"]:nil;if(!cid.length){[dedup addObject:c];continue;}NSNumber *index=unique[cid];if(index){NSMutableDictionary *existing=[dedup[index.unsignedIntegerValue] mutableCopy];NSMutableSet *owners=[NSMutableSet setWithArray:CCTVStringArrayValue(existing[@"subscriptionSources"])];[owners addObjectsFromArray:CCTVStringArrayValue(c[@"subscriptionSources"])];if(owners.count)existing[@"subscriptionSources"]=owners.allObjects;dedup[index.unsignedIntegerValue]=existing;}else{unique[cid]=@(dedup.count);[dedup addObject:c];}}self.allChannels=dedup;
     [self.altSources removeAllObjects];
@@ -258,9 +289,21 @@
     [sections addObject:[UIMenu menuWithTitle:@"" image:nil identifier:@"channel.catalog.section.browse" options:UIMenuOptionsDisplayInline children:browseActions]];
     [sections addObject:[UIMenu menuWithTitle:@"" image:nil identifier:@"channel.catalog.section.library" options:UIMenuOptionsDisplayInline children:@[castCenter,favorites,history,manage]]];
     NSMutableArray<UIAction *> *maintActions=[NSMutableArray arrayWithObjects:refresh,nil];
-    if(self.recentsOnly&&self.recents.count){UIAction *clearRecents=[UIAction actionWithTitle:@"清空最近观看记录" image:[UIImage systemImageNamed:@"trash"] identifier:@"channel.catalog.recents.clear" handler:^(UIAction *a){[w.recents removeAllObjects];[NSUserDefaults.standardUserDefaults setObject:@[] forKey:@"recents"];[w applyFilter];}];clearRecents.attributes=UIMenuElementAttributesDestructive;[maintActions addObject:clearRecents];}
+    if(self.recentsOnly&&self.recents.count){UIAction *clearRecents=[UIAction actionWithTitle:@"清空最近观看记录" image:[UIImage systemImageNamed:@"trash"] identifier:@"channel.catalog.recents.clear" handler:^(UIAction *a){[w confirmClearRecentChannels];}];clearRecents.attributes=UIMenuElementAttributesDestructive;[maintActions addObject:clearRecents];}
     [sections addObject:[UIMenu menuWithTitle:@"" image:nil identifier:@"channel.catalog.section.maintenance" options:UIMenuOptionsDisplayInline children:maintActions]];
     return [UIMenu menuWithTitle:@"" children:sections];
+}
+- (void)confirmClearRecentChannels {
+    UIAlertController *confirmation=[UIAlertController alertControllerWithTitle:@"清空最近观看"
+        message:@"这会移除本机的全部直播观看记录。" preferredStyle:UIAlertControllerStyleAlert];
+    [confirmation addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    __weak typeof(self) weakSelf=self;
+    [confirmation addAction:[UIAlertAction actionWithTitle:@"清空" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action){
+        [weakSelf.recents removeAllObjects];
+        [NSUserDefaults.standardUserDefaults setObject:@[] forKey:@"recents"];
+        [weakSelf applyFilter];
+    }]];
+    [self presentViewController:confirmation animated:YES completion:nil];
 }
 - (void)showCatalogSearch {
     NSString *message=self.subscriptionCatalog?@"按频道名称或编号筛选订阅频道。":@"按频道名称或编号筛选 CCTV。";
@@ -386,13 +429,15 @@
     if(base.length)[tags addObject:base];
     NSUInteger sourceCount=[self sourceCountForChannel:channel];
     if(sourceCount>1)[tags addObject:[NSString stringWithFormat:@"%lu源",(unsigned long)sourceCount]];
-    if([channel[@"remoteURL"] length] && [self channelSupportsCatchup:channel])[tags addObject:@"回看"];
-    else if(![channel[@"remoteURL"] length] && [self channelSupportsCatchup:channel])[tags addObject:@"时移回看"];
+    if([channel[@"remoteURL"] length] && [self channelSupportsCatchup:channel])[tags insertObject:@"回看" atIndex:0];
+    else if(![channel[@"remoteURL"] length] && [self channelSupportsCatchup:channel])[tags insertObject:@"时移回看" atIndex:0];
     return [tags componentsJoinedByString:@" · "];
 }
 - (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout sizeForItemAtIndexPath:(NSIndexPath *)ip {
     UICollectionViewFlowLayout *flow=[layout isKindOfClass:UICollectionViewFlowLayout.class]?(id)layout:nil;
-    NSInteger columns=self.gridColumns==3?3:4;
+    NSInteger preferred=self.gridColumns==3?3:4;
+    CGFloat minimumWidth=MAX(96,[self catalogCardSubtitleFont].pointSize*8);
+    NSInteger columns=MAX(1,MIN(preferred,(NSInteger)(collectionView.bounds.size.width/minimumWidth)));
     UIEdgeInsets inset=flow?flow.sectionInset:UIEdgeInsetsZero;
     CGFloat spacing=flow?flow.minimumInteritemSpacing:6;
     CGFloat itemWidth=floor(MAX(1,(collectionView.bounds.size.width-inset.left-inset.right-(columns-1)*spacing)/columns));
@@ -883,9 +928,20 @@
     CCTVPlaybackListPanelController *panel=[CCTVPlaybackListPanelController new];panel.items=[self playerCategoryRows];panel.emptyMessage=@"当前没有可显示的频道分组";__weak typeof(self) weakSelf=self;
     panel.selectionHandler=^(NSDictionary *item){RootViewController *owner=weakSelf;if(!owner)return;owner.groupControl.selectedSegmentIndex=[item[@"index"] integerValue];[owner onGroupChanged];owner.playerTabs.selectedSegmentIndex=1;[owner selectPlayerPanel];};return panel;
 }
+- (NSDictionary *)alternateChannelForURL:(NSString *)url matching:(NSDictionary *)channel {
+    NSString *group=CCTVRouteGroupKey(channel);
+    NSSet *disabled=[NSSet setWithArray:[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[]];
+    for(NSDictionary *candidate in self.allChannels){
+        if(![[self stableURLKey:candidate[@"remoteURL"]] isEqual:[self stableURLKey:url]]||![CCTVRouteGroupKey(candidate) isEqual:group])continue;
+        for(NSString *source in CCTVStringArrayValue(candidate[@"subscriptionSources"])){
+            if([self.subscriptionURLs containsObject:source]&&![disabled containsObject:source])return candidate;
+        }
+    }
+    return nil;
+}
 - (CCTVPlaybackListPanelController *)routesPanel {
     CCTVPlaybackListPanelController *panel=[CCTVPlaybackListPanelController new];NSMutableArray *rows=[NSMutableArray array];NSDictionary *channel=[self channelWithID:self.channelID];
-    if(self.currentRemoteURL.length){
+    if(self.currentRemoteURL.length&&!self.nativePlainRouteActive){
         NSString *name=channel[@"name"]?:self.channelName?:@"订阅频道";NSArray *alternates=self.altSources[CCTVRouteGroupKey(channel)]?:@[self.currentRemoteURL];NSMutableSet *seen=[NSMutableSet set];NSUInteger index=0;
         for(NSString *url in alternates){NSString *stable=[self stableURLKey:url];if(!stable.length||[seen containsObject:stable])continue;[seen addObject:stable];index++;BOOL selected=[stable isEqualToString:self.currentRemoteURL];NSURL *target=[NSURL URLWithString:url];NSString *host=target.host?:@"播放源";NSString *title=alternates.count>1?[NSString stringWithFormat:@"播放源 %lu · %@",(unsigned long)index,host]:name;NSString *detail=[NSString stringWithFormat:@"%@\n%@",selected?@"当前播放中":@"点按切换至此源",[self displaySafeSourceURL:url]];[rows addObject:@{@"kind":@"remote",@"url":url,@"title":title,@"detail":detail,@"badge":selected?@"● 当前":@"切换",@"selected":@(selected),@"symbol":@"dot.radiowaves.left.and.right"}];}
     }else if(channel){
@@ -895,7 +951,7 @@
     }
     panel.items=rows;panel.emptyMessage=self.channelID.length?@"此频道没有可用的线路信息。可以使用顶部线路菜单或检查频道来源。":@"请先选择频道";__weak typeof(self) weakSelf=self;
     NSString *panelChannelID=self.channelID.copy;
-    panel.selectionHandler=^(NSDictionary *item){RootViewController *owner=weakSelf;if(!owner||![owner.channelID isEqual:panelChannelID])return;NSDictionary *active=[owner channelWithID:owner.channelID];if([item[@"kind"] isEqual:@"remote"]){NSMutableDictionary *next=[(active?:@{@"id":owner.channelID?:@"",@"name":owner.channelName?:@"直播"}) mutableCopy];next[@"remoteURL"]=item[@"url"];[owner routePlayback:next];[owner configureCatalogNavigation];return;}if(!active)return;[owner playChannel:active route:[item[@"kind"] isEqual:@"native"]?item[@"route"]:nil];[owner configureCatalogNavigation];};return panel;
+    panel.selectionHandler=^(NSDictionary *item){RootViewController *owner=weakSelf;if(!owner||![owner.channelID isEqual:panelChannelID])return;NSDictionary *active=[owner channelWithID:owner.channelID];if([item[@"kind"] isEqual:@"remote"]){NSDictionary *next=[owner alternateChannelForURL:item[@"url"] matching:active];if(next)[owner routePlayback:next];[owner configureCatalogNavigation];return;}if(!active)return;[owner playChannel:active route:[item[@"kind"] isEqual:@"native"]?item[@"route"]:nil];[owner configureCatalogNavigation];};return panel;
 }
 - (void)selectPlayerPanel {
     if(self.playbackPanel){[self.playbackPanel willMoveToParentViewController:nil];[self.playbackPanel.view removeFromSuperview];[self.playbackPanel removeFromParentViewController];self.playbackPanel=nil;}

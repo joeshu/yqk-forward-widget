@@ -47,7 +47,7 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertLess(startup.index("takeChannel:cid"), startup.index("[self.nativePreloader cancel]"))
 
     def test_subscription_refresh_is_source_owned_and_replaces_stale_entries(self):
-        body = method_body("- (void)installPlaylist:")
+        body = method_body("- (BOOL)installPlaylist:")
         self.assertIn("stableURLKey:", body)
         self.assertIn('existing[@"subscriptionSources"]', body)
         self.assertIn("[owners removeObject:sourceKey]", body)
@@ -413,7 +413,7 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('urlString.length > 8192', body)
         self.assertIn('isEqualToString:@"http"', body)
         self.assertIn('isEqualToString:@"https"', body)
-        self.assertIn('skippedInvalidURLs++', method_body('- (void)installPlaylist:'))
+        self.assertIn('skippedInvalidURLs++', method_body('- (BOOL)installPlaylist:'))
 
     def test_channel_search_and_route_fallback_use_safe_identity(self):
         self.assertIn('containsString:query', TEXT)
@@ -555,7 +555,7 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('w-safe.right-60),overlayTop+8,48,27', TEXT)
         self.assertNotIn('playbackPriorityUntil', body)
 
-    def test_epg_debug_info_reports_subscription_match_fields_and_preserves_source_query(self):
+    def test_epg_debug_info_reports_subscription_match_fields_without_credentials(self):
         epg=(SOURCE.parent / "EPGViewController.m").read_text(encoding="utf-8")
         profile=(SOURCE.parent / "ProfileStore.m").read_text(encoding="utf-8")
         self.assertIn('M3U tvg-id', epg)
@@ -564,10 +564,10 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('匹配依据', epg)
         self.assertIn('所选日期', epg)
         safe = epg[epg.index('- (NSString *)safeSourceDescription'):epg.index('- (void)showSourceInfo')]
-        self.assertNotIn('components.query=nil', safe)
+        self.assertIn('components.query=nil', safe)
         self.assertIn('components.password=nil', safe)
         route_url = method_body('- (NSString *)displaySafeSourceURL:')
-        self.assertNotIn('components.query=nil', route_url)
+        self.assertIn('components.query=nil', route_url)
         self.assertIn('components.password=nil', route_url)
 
     def test_catalog_supports_grid_and_list_and_routes_remain_long_press(self):
