@@ -1063,7 +1063,7 @@ static void next(NSArray *steps, NSUInteger index) {
             NSArray *arguments=NSProcessInfo.processInfo.arguments;NSUInteger at=[arguments indexOfObject:@"--smoke-port"];
             NSString *base=[NSString stringWithFormat:@"http://127.0.0.1:%@",arguments[at+1]];
             NSArray *original=[root valueForKey:@"allChannels"];NSMutableArray *channels=[original mutableCopy];
-            for(NSUInteger i=0;i<6;i++){NSString *url=[@"http://127.0.0.1:1" stringByAppendingFormat:@"/failure%lu.m3u8",(unsigned long)i];[channels addObject:@{@"id":url,@"remoteURL":url,@"name":@"Fallback fixture",@"subscriptionSources":@[i==1?@"disabled-fallback":@"enabled-fallback"]}];}
+            for(NSUInteger i=0;i<6;i++){NSString *url=[@"http://127.0.0.1:1" stringByAppendingFormat:@"/failure%lu.m3u8",(unsigned long)i];[channels addObject:@{@"id":url,@"remoteURL":url,@"name":@"Fallback fixture",@"epgID":i==5?@"other-station":@"fallback-fixture",@"subscriptionSources":@[i==1?@"disabled-fallback":@"enabled-fallback"]}];}
             [NSUserDefaults.standardUserDefaults setObject:@[@"disabled-fallback"] forKey:@"disabledSubscriptions"];
             [root setValue:channels forKey:@"allChannels"];
             [root playRemote:channels[original.count]];
