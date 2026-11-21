@@ -27,6 +27,11 @@ class NativeProfiles(unittest.TestCase):
                     self.send_response(403 if self.path.endswith("denied") else 200)
                     self.send_header("Content-Length", str(8 * 1024 * 1024 + 1 if self.path.endswith("large") else 0))
                     self.end_headers()
+                    if self.path.endswith("large"):
+                        try:
+                            self.wfile.write(b"x" * (8 * 1024 * 1024 + 1))
+                        except (BrokenPipeError, ConnectionResetError):
+                            pass
                     return
                 if self.path == "/tvbox-start":
                     self.send_response(302)

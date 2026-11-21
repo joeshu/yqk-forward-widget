@@ -79,7 +79,7 @@ int main(int argc,const char **argv){@autoreleasepool{
                 done=YES;
             }];
             check(waitUntil(^BOOL{return done;},5),@"TVBox failure completes");
-            check([downloadError.localizedDescription containsString:expected[path]],@"TVBox failure identifies the actual condition");
+            check([downloadError.localizedDescription containsString:expected[path]],[NSString stringWithFormat:@"TVBox %@ expected %@, got %@",path,expected[path],downloadError.localizedDescription]);
         }
     }
     if(argc>3){NSString *base=[NSString stringWithUTF8String:argv[3]];NSDictionary *exportConfig=@{@"name":@"Exporter fixture",@"sites":@[@{@"key":@"py-fixture",@"name":@"Python fixture",@"api":[base stringByAppendingString:@"/site.py"],@"type":@3},@{@"key":@"js-fixture",@"name":@"JavaScript fixture",@"api":[base stringByAppendingString:@"/site.js.md5"],@"type":@3}]};NSDictionary *exportCatalog=[TVBoxCatalogStore parseData:encode(exportConfig) sourceURL:nil error:NULL];[TVBoxCatalogStore saveCatalog:exportCatalog];__block BOOL exportDone=NO;__block NSURL *archiveURL=nil;__block NSError *exportError=nil;TVBoxCatalogPackageExporter *exporter=[[TVBoxCatalogPackageExporter alloc] initWithCatalogID:exportCatalog[@"id"] token:nil];[exporter startWithCompletion:^(NSURL *url,NSUInteger failed,NSError *error){archiveURL=url;exportError=error;check(failed==0,@"all fixture scripts were collected");exportDone=YES;}];check(waitUntil(^BOOL{return exportDone;},10)&&archiveURL&&!exportError,@"full collection export downloads internal scripts and completes a ZIP");NSLog(@"TVBOX_EXPORTER_ZIP=%@",archiveURL.path);}

@@ -79,9 +79,10 @@ class Round41FullOptimizationContractsTests(unittest.TestCase):
         api = self.read("MediaAPIClient.m")
         self.assertIn("cctv.jarBridgeMirrorCache.v1", api)
 
-    def test_p1_async_playlist_persistence_and_js_runtime_idle_eviction(self):
+    def test_p1_playlist_save_acknowledgement_and_js_runtime_idle_eviction(self):
         subs = self.read("RootViewController+Subscriptions.m")
-        self.assertIn("com.cctvhost.subscription.persist", subs)
+        installer = subs.split("- (BOOL)installPlaylist:", 1)[1].split("- (void)applyPlaylistText:", 1)[0]
+        self.assertLess(installer.index('@"cachedChannels":[owned copy]'), installer.index("return YES;"))
 
         js = self.read("JSPluginRuntime.m")
         self.assertIn("JSIdleEvictionSeconds = 120.0;", js)
