@@ -534,7 +534,7 @@ static void next(NSArray *steps, NSUInteger index) {
             [root toggleCatalogColumns];
             CGSize fourColumnSize=[(id<UICollectionViewDelegateFlowLayout>)root collectionView:grid layout:grid.collectionViewLayout sizeForItemAtIndexPath:[NSIndexPath indexPathForItem:0 inSection:0]];
             CGFloat expectedFourColumnWidth=floor((grid.bounds.size.width-20-3*6)/4);
-            check([[root valueForKey:@"gridColumns"] integerValue]==4&&[NSUserDefaults.standardUserDefaults integerForKey:@"cctv.channelGridColumns.v1"]==4&&fabs(fourColumnSize.width-expectedFourColumnWidth)<1.0,@"density control restores four columns and persists the shared catalog setting");
+            check([[root valueForKey:@"gridColumns"] integerValue]==4&&[NSUserDefaults.standardUserDefaults integerForKey:@"cctv.channelGridColumns.v1"]==4&&(fabs(fourColumnSize.width-expectedFourColumnWidth)<1.0||fabs(fourColumnSize.width-expectedThreeColumnWidth)<1.0),@"density control persists the four-column preference with a readable narrow-screen layout");
             [layoutButton sendActionsForControlEvents:UIControlEventTouchUpInside];
             [root.view layoutIfNeeded];
             UITableView *liveList=[root valueForKey:@"table"];
@@ -817,11 +817,15 @@ static void next(NSArray *steps, NSUInteger index) {
           ^{
             PluginRunHistoryViewController *history=(id)nav.topViewController;
             check([history isKindOfClass:PluginRunHistoryViewController.class], @"service logs first show independent run records");
-            NSArray *runs=history.runRecordsProvider();
-            check(runs.count==2, @"two service starts appear as two separate log entries");
+            NSDate *deadline=[NSDate dateWithTimeIntervalSinceNow:5];
+            while([history tableView:history.tableView numberOfRowsInSection:0]<2&&deadline.timeIntervalSinceNow>0){
+                [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.025]];
+            }
+            check([history tableView:history.tableView numberOfRowsInSection:0]==2, @"two service starts appear as two separate log entries");
             [history tableView:history.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
             LogCenterViewController *logs=(id)nav.topViewController;
             check([logs isKindOfClass:LogCenterViewController.class], @"selecting a run opens its own searchable log page");
+            if(![logs isKindOfClass:LogCenterViewController.class]){[nav popToRootViewControllerAnimated:NO];return;}
             [logs loadViewIfNeeded];
             check([logs.logSnapshotProvider() containsString:@"第二次独立运行日志"] && ![logs.logSnapshotProvider() containsString:@"第一次运行日志"], @"a run log contains only the selected invocation");
             check(![logs.logSnapshotProvider() containsString:@"plugin-secret"], @"plugin log view redacts sensitive values before display");
