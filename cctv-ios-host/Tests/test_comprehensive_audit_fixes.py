@@ -174,9 +174,23 @@ class ComprehensiveAuditRegressionTests(unittest.TestCase):
                 ("https://www.iqiyi.com/v_19rr7p.html", "qiyi"),
                 ("https://www.mgtv.com/b/600123/20123456.html", "mgtv"),
             ):
-                stream, hdrs = csp_adapter.resolve_vip_watch_url(url, title="庆余年第二季", episode_index=0, episode_name="第1集", flag=flag)
+                stream, hdrs = csp_adapter.resolve_vip_watch_url(url, title="庆余年第二季", episode_index=0, episode_name="第1集", flag=flag, allow_public=True)
                 self.assertEqual(stream, "https://cdn.example/vip/ep1.m3u8")
                 self.assertIn("Referer", hdrs)
+
+    def test_public_vip_resolvers_require_explicit_opt_in(self):
+        from unittest import mock
+        import csp_adapter
+
+        url = "https://v.youku.com/v_show/id_XNjU4.html"
+        with mock.patch.object(csp_adapter, "resolve_maccms_stream_by_title") as catalog, \
+             mock.patch.object(csp_adapter, "resolve_vip_url_via_parsers") as parser:
+            self.assertEqual(csp_adapter.resolve_vip_watch_url(url, title="藏海传"), ("", {}))
+            catalog.assert_not_called()
+            parser.assert_not_called()
+        with mock.patch("csp_adapter.requests.get") as request:
+            self.assertEqual(csp_adapter.resolve_maccms_stream_by_title("藏海传"), "")
+            request.assert_not_called()
 
     def test_14_extract_title_from_vip_url_preserves_book_titles_and_episodes(self):
         from unittest import mock

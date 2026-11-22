@@ -1493,6 +1493,7 @@ class PythonSpider:
                         episode_name=ep_name,
                         flag=str(req_args.get('lineId') or ''),
                         headers=base_hdrs,
+                        allow_public=bool(req_args.get('allowPublicMediaResolvers', False)),
                     )
                     if vip_stream:
                         return {
@@ -1866,6 +1867,7 @@ class MediaRuntime:
                                 episode_name=ep_name,
                                 flag=str(args.get('lineId') or ''),
                                 headers=base_hdrs,
+                                allow_public=bool(args.get('allowPublicMediaResolvers', False)),
                             )
                             if vip_stream:
                                 value = playback({

@@ -352,6 +352,7 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
         @{@"id":@"vod", @"title":@"影视与点播", @"icon":@"film.stack"},
         @{@"id":@"engine", @"title":@"引擎与网络", @"icon":@"bolt.horizontal.fill"},
         @{@"id":@"diagnostics", @"title":@"运行诊断", @"icon":@"waveform.path.ecg"},
+        @{@"id":@"privacy", @"title":@"隐私与授权", @"icon":@"hand.raised.fill"},
         @{@"id":@"storage", @"title":@"数据与缓存", @"icon":@"externaldrive.fill.badge.checkmark"},
         @{@"id":@"about", @"title":@"服务与关于", @"icon":@"info.circle.fill"}
     ];
@@ -407,6 +408,9 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
         @{ @"title":@"运行诊断模式", @"detail":@"先开启再复现；若闪退，重开 App 后导出", @"key":@"runtimeDiagnosticsEnabled", @"icon":@"waveform.path.ecg", @"default":@NO, @"subgroup":@"会话追踪" },
         @{ @"title":@"运行诊断记录", @"detail":@"按 App 运行分开查看 · 可单次导出、删除或清空", @"action":@"runtimeDiagnostics", @"icon":@"list.bullet.rectangle", @"subgroup":@"会话追踪", @"badge":@"按次归档" },
         @{ @"title":@"日志中心", @"action":@"logs", @"detail":@"总日志与各插件独立日志", @"icon":@"doc.text.magnifyingglass", @"subgroup":@"插件日志", @"badge":@"实时日志" }
+      ]},
+      @{ @"category":@"privacy", @"icon":@"hand.raised.fill", @"subtitle":@"外部解析授权 · 本机隐私边界", @"title":@"隐私与外部服务授权", @"footer":@"默认关闭第三方公共解析。开启后，自动解析可能把商业视频网页地址发送给外部解析站点，并把片名和分集信息发送给公共影视目录。合集配置中由你选择的解析接口不受此开关影响；关闭后，网页仍可在应用内打开。此授权仅保存在本机，不随配置备份迁移。", @"rows":@[
+        @{ @"title":@"允许第三方公共视频解析", @"detail":@"仅在自动解析网页播放地址时使用；可能向外部服务发送网页地址、片名和分集信息。默认关闭", @"key":@"cctv.allowPublicMediaResolvers", @"icon":@"arrow.up.forward.app", @"default":@NO, @"subgroup":@"影视来源授权" }
       ]},
       @{ @"category":@"storage", @"icon":@"externaldrive.fill.badge.checkmark", @"subtitle":@"配置与合集索引备份 · 缓存与记录管理", @"title":@"数据备份与存储管理", @"footer":@"目录、分类和搜索结果可保存；影片详情仅短时缓存在内存中，播放地址不持久化。清理缓存或恢复默认偏好时，收藏、观看历史、订阅和插件数据会保留。", @"rows":@[
         @{ @"title":@"导出本机配置", @"detail":@"包含订阅、收藏、历史、偏好及合集索引；脚本、服务配置和钥匙串凭据需另行迁移", @"action":@"export", @"icon":@"square.and.arrow.up", @"subgroup":@"配置迁移", @"badge":@"JSON 备份" },
@@ -2095,7 +2099,7 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
             @"cctv.mediaGridColumns.v1", @"cctv.mediaHome.modules.v1", @"cctv.mediaAutoPlayNext", @"cctv.mediaAutoSkipIntroOutro",
             @"cctv.mediaPlaybackRate", @"cctv.mediaVideoGravity", @"media.globalSearchHistoryEnabled.v1",
             @"fastNativeStartup", @"preloadNativeChannel", @"legacyNativePlayback",
-            @"cctv.networkTimeout.v1", @"nativeSDKVerboseLogs", @"runtimeDiagnosticsEnabled", @"cctv.adaptationMonitor.enabled"
+            @"cctv.networkTimeout.v1", @"nativeSDKVerboseLogs", @"runtimeDiagnosticsEnabled", @"cctv.adaptationMonitor.enabled", @"cctv.allowPublicMediaResolvers"
         ];
         for(NSString *k in keysToReset)[d removeObjectForKey:k];
         MediaAdaptationMonitor.shared.monitoringEnabled=YES;
@@ -2212,7 +2216,7 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
 }
 
 - (void)showPrivacyStatement {
-    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"隐私说明" message:@"收藏、观看历史和偏好保存在本机。订阅、节目单、播放和插件会按配置访问对应的网络来源，来源可能收到请求中的地址和认证信息。诊断记录保存在本机，可导出或清空；导出前请检查内容，备份和原始资源可能包含完整地址及凭据。" preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"隐私说明" message:@"收藏、观看历史和偏好保存在本机。订阅、节目单、播放和插件会按配置访问对应的网络来源，来源可能收到请求中的地址和认证信息。第三方公共视频解析默认关闭；开启后，商业视频网页地址、片名或分集信息可能发送给外部解析服务。合集内由你选择的解析接口仍只使用对应合集声明的地址。诊断记录保存在本机，可导出或清空；导出前请检查内容，备份和原始资源可能包含完整地址及凭据。" preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
     [self presentViewController:alert animated:YES completion:nil];
 }

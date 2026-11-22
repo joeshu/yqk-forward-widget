@@ -95,6 +95,26 @@ class SettingsContracts(unittest.TestCase):
         self.assertIn('备份和原始资源可能包含完整地址及凭据', self.settings)
         self.assertIn('CFBundleVersion', self.settings)
 
+    def test_public_video_resolvers_are_explicitly_opt_in_and_device_local(self):
+        self.assertIn('@\"id\":@\"privacy\"', self.settings)
+        self.assertIn('@\"key\":@\"cctv.allowPublicMediaResolvers\"', self.settings)
+        row = next(line for line in self.settings.splitlines() if 'cctv.allowPublicMediaResolvers' in line)
+        self.assertIn('@\"default\":@NO', row)
+        self.assertIn('第三方公共视频解析默认关闭', self.settings)
+        self.assertIn('cctv.allowPublicMediaResolvers', self.settings.split('NSArray<NSString *> *keysToReset=', 1)[1])
+        self.assertNotIn('cctv.allowPublicMediaResolvers', self.backup)
+        runtime = (ROOT / 'Plugins/host_media_runtime.py').read_text()
+        self.assertIn("allow_public=bool(req_args.get('allowPublicMediaResolvers', False))", runtime)
+        self.assertIn("allow_public=bool(args.get('allowPublicMediaResolvers', False))", runtime)
+        for relative, minimum in (
+            ('Sources/MediaEpisodeSelectionViewController.m', 1),
+            ('Sources/MediaBrowserViewController.m', 2),
+            ('Sources/MediaPlaybackViewController.m', 3),
+        ):
+            source = (ROOT / relative).read_text()
+            self.assertGreaterEqual(source.count('@"allowPublicMediaResolvers"'), minimum, relative)
+        self.assertIn('boolForKey:@"cctv.allowPublicMediaResolvers"', (ROOT / 'Sources/MediaPlaybackViewController.m').read_text())
+
     def test_settings_restore_last_tab_is_opt_out(self):
         # 启动恢复上次 Tab 没有开关；关闭后应从央视直播开始，且默认保持恢复。
         self.assertIn('@\"key\":@\"cctv.restoreLastTab.v1\"', self.settings)

@@ -244,13 +244,13 @@ const fn = {fn_code};
         det = rt.call("detail", {"id": "yk1"})
         self.assertEqual(det["name"], "藏海传")
         with mock.patch.object(adapter_mod, "resolve_maccms_stream_by_title", return_value="https://cdn.example/canghai/ep1.m3u8") as rescue:
-            play_yk = rt.call("play", {"id": "https://v.youku.com/v_show/id_XNjU.html", "lineId": "youku"})
+            play_yk = rt.call("play", {"id": "https://v.youku.com/v_show/id_XNjU.html", "lineId": "youku", "allowPublicMediaResolvers": True})
             self.assertEqual(play_yk["url"], "https://cdn.example/canghai/ep1.m3u8")
             self.assertEqual(play_yk["parse"], 0)
             self.assertFalse(play_yk["requiresWebPlayback"])
             self.assertTrue(play_yk["nativePlayable"])
 
-            play_qq = rt.call("play", {"id": "https://v.qq.com/x/cover/mzc00200/v001.html", "lineId": "qq", "vodName": "藏海传"})
+            play_qq = rt.call("play", {"id": "https://v.qq.com/x/cover/mzc00200/v001.html", "lineId": "qq", "vodName": "藏海传", "allowPublicMediaResolvers": True})
             self.assertEqual(play_qq["url"], "https://cdn.example/canghai/ep1.m3u8")
             self.assertEqual(play_qq["parse"], 0)
             self.assertFalse(play_qq["requiresWebPlayback"])

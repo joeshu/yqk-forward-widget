@@ -2548,7 +2548,7 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
         if(chosenEpisode>=(NSInteger)targetEpisodes.count)return;
         NSDictionary *targetEpisode=targetEpisodes[(NSUInteger)chosenEpisode];
         NSString *vodTitle=[owner.context[@"detail"][@"name"] isKindOfClass:NSString.class]&&[owner.context[@"detail"][@"name"] length]?owner.context[@"detail"][@"name"]:([owner.context[@"item"][@"name"] isKindOfClass:NSString.class]?owner.context[@"item"][@"name"]:@"");
-        NSMutableDictionary *hedgeArgs=[@{@"id":targetEpisode[@"id"]?:@"",@"lineId":targetLine[@"id"]?:@"",@"parserID":MediaPlaybackSelectedParserID(owner.context),@"vodName":vodTitle,@"episodeName":[targetEpisode[@"name"] description]?:@"",@"episodeIndex":@(chosenEpisode),@"detailId":owner.context[@"detail"][@"id"]?:owner.context[@"item"][@"id"]?:@""} mutableCopy];
+        NSMutableDictionary *hedgeArgs=[@{@"id":targetEpisode[@"id"]?:@"",@"lineId":targetLine[@"id"]?:@"",@"parserID":MediaPlaybackSelectedParserID(owner.context),@"vodName":vodTitle,@"episodeName":[targetEpisode[@"name"] description]?:@"",@"episodeIndex":@(chosenEpisode),@"allowPublicMediaResolvers":@([NSUserDefaults.standardUserDefaults boolForKey:@"cctv.allowPublicMediaResolvers"]),@"detailId":owner.context[@"detail"][@"id"]?:owner.context[@"item"][@"id"]?:@""} mutableCopy];
         NSString *provider=owner.context[@"provider"];if(provider.length)hedgeArgs[@"provider"]=provider;
         [owner.hedgedClient cancel];
         owner.hedgedClient=MediaPlaybackClientForSource(owner.context[@"source"]?:@{});
@@ -2730,7 +2730,7 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
         self.status.text=@"";[self playResult:cachedResult];
         return;
     }
-    NSString *vodTitle=[self.context[@"detail"][@"name"] isKindOfClass:NSString.class]&&[self.context[@"detail"][@"name"] length]?self.context[@"detail"][@"name"]:([self.context[@"item"][@"name"] isKindOfClass:NSString.class]?self.context[@"item"][@"name"]:@"");NSMutableDictionary *args=[@{@"id":episode[@"id"]?:@"",@"lineId":line[@"id"]?:@"",@"parserID":MediaPlaybackSelectedParserID(self.context),@"vodName":vodTitle,@"episodeName":[episode[@"name"] description]?:@"",@"episodeIndex":@(self.episodeIndex),@"detailId":self.context[@"detail"][@"id"]?:self.context[@"item"][@"id"]?:@""} mutableCopy];
+    NSString *vodTitle=[self.context[@"detail"][@"name"] isKindOfClass:NSString.class]&&[self.context[@"detail"][@"name"] length]?self.context[@"detail"][@"name"]:([self.context[@"item"][@"name"] isKindOfClass:NSString.class]?self.context[@"item"][@"name"]:@"");NSMutableDictionary *args=[@{@"id":episode[@"id"]?:@"",@"lineId":line[@"id"]?:@"",@"parserID":MediaPlaybackSelectedParserID(self.context),@"vodName":vodTitle,@"episodeName":[episode[@"name"] description]?:@"",@"episodeIndex":@(self.episodeIndex),@"allowPublicMediaResolvers":@([NSUserDefaults.standardUserDefaults boolForKey:@"cctv.allowPublicMediaResolvers"]),@"detailId":self.context[@"detail"][@"id"]?:self.context[@"item"][@"id"]?:@""} mutableCopy];
     NSString *provider=self.context[@"provider"];if(provider.length)args[@"provider"]=provider;
     __weak typeof(self) weakSelf=self;
     [self.client cancel];
@@ -2877,7 +2877,7 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
     NSString *targetIdentity=[self prefetchIdentityForEpisode:episode];
     self.prefetchRequestedIdentity=targetIdentity;self.prefetchRequestedLineIndex=targetLine;self.prefetchRequestedEpisodeIndex=nextEpIndex;
     NSString *vodTitle=[self.context[@"detail"][@"name"] isKindOfClass:NSString.class]&&[self.context[@"detail"][@"name"] length]?self.context[@"detail"][@"name"]:([self.context[@"item"][@"name"] isKindOfClass:NSString.class]?self.context[@"item"][@"name"]:@"");
-    NSMutableDictionary *args=[@{@"id":epID,@"lineId":line[@"id"]?:@"",@"parserID":MediaPlaybackSelectedParserID(self.context),@"vodName":vodTitle,@"episodeName":[episode[@"name"] description]?:@"",@"episodeIndex":@(nextEpIndex),@"detailId":self.context[@"detail"][@"id"]?:self.context[@"item"][@"id"]?:@""} mutableCopy];
+    NSMutableDictionary *args=[@{@"id":epID,@"lineId":line[@"id"]?:@"",@"parserID":MediaPlaybackSelectedParserID(self.context),@"vodName":vodTitle,@"episodeName":[episode[@"name"] description]?:@"",@"episodeIndex":@(nextEpIndex),@"allowPublicMediaResolvers":@([NSUserDefaults.standardUserDefaults boolForKey:@"cctv.allowPublicMediaResolvers"]),@"detailId":self.context[@"detail"][@"id"]?:self.context[@"item"][@"id"]?:@""} mutableCopy];
     NSString *provider=self.context[@"provider"];if([provider isKindOfClass:NSString.class]&&provider.length)args[@"provider"]=provider;
     __weak typeof(self) weakSelf=self;
     [self.prefetchClient call:@"play" arguments:args correlationID:self.diagnosticTraceID completion:^(id result,NSError *error){

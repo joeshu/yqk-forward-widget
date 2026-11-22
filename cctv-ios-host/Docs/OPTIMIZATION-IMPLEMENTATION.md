@@ -124,6 +124,13 @@
 - 全屏网页嗅探超限时停止提取；直播底部玻璃层、频道悬浮控件、通用工具栏和资源头部统一注册 Reduce Transparency 实色刷新；大字号标签栏改为图标显示并保留完整 VoiceOver 标签，频道网格维持 4 列。
 - UI-only smoke 改为经 RootViewController 的真实影视库标签打开测试页面，并覆盖 iPhone SE/常规 iPhone、默认/AX XXXL 字号、浅色/深色组合。Xcode workflow 对同一 ref 的构建串行，新 main 提交会取消旧运行；release job 发布前再核对 main HEAD，跳过过期构建。
 
+## 第三批：公共视频解析授权边界
+
+- 在“设置 → 隐私与授权”增加“允许第三方公共视频解析”，默认关闭。开启后，自动回退解析可能把商业视频网页地址发给公共解析站，并把片名、分集信息发给公共影视目录；设置文案与隐私说明明确披露了这类数据流。
+- 原生播放器解析和 Python 媒体运行时都读取同一个设备本地授权偏好。Python `resolve_vip_watch_url`、`resolve_vip_url_via_parsers` 与 `resolve_maccms_stream_by_title` 默认拒绝外部解析；调用端只有在用户显式开启后才传入授权。
+- 用户选择的资源合集解析接口仍由该合集配置声明并正常工作；授权不随配置备份迁移，恢复默认偏好会将其关闭。
+- 回归覆盖默认关闭时不触发公共 CMS/解析请求、设置默认值与重置行为、备份边界和播放参数传递。此项关闭了默认外发；用户主动启用时，第三方服务的数据接收及片名匹配风险仍需由用户承担。
+
 ## 本轮回归修复补充
 
 - 播放会话以用户播放意图作为状态来源：解析期间暂停不会被结果回调或缓冲启动逻辑重新播放；AVPlayer 原生暂停/恢复会同步会话意图，延迟状态回调会核对当前播放器状态；Now Playing 只由当前所有者更新，画质切换会替换对应的格式和编码能力信息，自动切集保持播放状态。
@@ -145,7 +152,7 @@ python3 Scripts/generate_media_capabilities.py --check
 git diff --check
 ```
 
-本轮最终复跑结果记录为：Python **936 项，869 通过、67 跳过、0 失败**；JavaScript 插件测试 3 个 suite 全通过；能力表生成检查、Python 语法检查、shell 语法、工作流 YAML 解析、全量源清单审计（664 个文件、0 错误）与 `git diff --check` 通过。67 项跳过包括 macOS Foundation 原生密钥测试、原生/IPA 检查及原有附件样本。Python loopback 测试覆盖 Emby/Jellyfin、Xtream、WebDAV、HTTP 重定向、认证、分页和运行时归一化，不访问公共真实服务。
+阶段一/二原回归记录为 Python **936 项，869 通过、67 跳过、0 失败**；Python loopback 测试覆盖 Emby/Jellyfin、Xtream、WebDAV、HTTP 重定向、认证、分页和运行时归一化，不访问公共真实服务。第三批于 2026-11-22 复跑 Python **1168 项，1100 通过、68 跳过、0 失败**；JavaScript 插件测试 3 个 suite 全通过；本批 Python 语法检查、能力表生成检查与 `git diff --check` 通过。
 
 Linux 环境没有 `xcodebuild`、`xcrun` 或 iOS SDK，未编译任何 Objective-C/UIKit/AVFoundation 源，也未运行 `Tests/UISmoke`。静态源契约通过不是 Objective-C 编译证明。
 

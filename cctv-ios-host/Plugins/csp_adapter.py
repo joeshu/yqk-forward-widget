@@ -513,8 +513,10 @@ def extract_title_from_vip_url(url):
         return '', ''
 
 
-def resolve_maccms_stream_by_title(title, episode_index=0, episode_name=''):
+def resolve_maccms_stream_by_title(title, episode_index=0, episode_name='', *, allow_public=False):
     """Resolves a direct .m3u8/.mp4 stream from public MacCMS APIs by VOD title and episode."""
+    if not allow_public:
+        return ''
     clean_title = re.sub(r'<[^>]+>', '', str(title or '')).strip()
     clean_title = re.sub(r'^[《【\[]|[》】\]]$', '', clean_title).strip()
     if not clean_title or clean_title in ('影片', '未知', '影视播放'):
@@ -669,7 +671,7 @@ BUILTIN_VIP_JSON_PARSERS = (
 )
 
 
-def resolve_vip_url_via_parsers(url, flag='', headers=None):
+def resolve_vip_url_via_parsers(url, flag='', headers=None, *, allow_public=False):
     """Attempts to resolve a Youku/QQ/iQIYI/MGTV watch URL via built-in JSON/HTML parser endpoints."""
     if not allow_public:
         return "", {}
@@ -719,6 +721,8 @@ def resolve_vip_url_via_parsers(url, flag='', headers=None):
 
 def resolve_vip_watch_url(url, title='', episode_index=0, episode_name='', flag='', headers=None, *, allow_public=False):
     """Resolves commercial video watch pages (Youku, Tencent, iQIYI, MangoTV) to direct in-app streams."""
+    if not allow_public:
+        return '', {}
     target = unwrap_vip_watch_url(url)
     low = target.lower()
     if not target.startswith(('http://', 'https://')) or any(tok in low for tok in ('.test', '.example', '.invalid', 'fixture')):
@@ -734,11 +738,11 @@ def resolve_vip_watch_url(url, title='', episode_index=0, episode_name='', flag=
         if not eff_ep_name and page_ep:
             eff_ep_name = page_ep
     if eff_title:
-        rescued = resolve_maccms_stream_by_title(eff_title, episode_index=episode_index, episode_name=eff_ep_name)
+        rescued = resolve_maccms_stream_by_title(eff_title, episode_index=episode_index, episode_name=eff_ep_name, allow_public=True)
         if rescued and rescued.startswith(('http://', 'https://')):
             return rescued, out_hdrs
     if is_vip_watch_url(target) or target != str(url or '').strip():
-        parsed_stream, parsed_hdrs = resolve_vip_url_via_parsers(target, flag=flag, headers=out_hdrs)
+        parsed_stream, parsed_hdrs = resolve_vip_url_via_parsers(target, flag=flag, headers=out_hdrs, allow_public=True)
         if parsed_stream:
             return parsed_stream, parsed_hdrs
     return '', {}
