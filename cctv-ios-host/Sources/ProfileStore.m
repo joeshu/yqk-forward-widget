@@ -45,14 +45,57 @@ static NSString *const CCTVEnabledChannelTelemetrySourcesKey = @"enabledChannelT
         NSDictionary *dict=(NSDictionary *)value;
         if(![dict[@"_hasDiskPayload"] boolValue])return dict;
         NSMutableDictionary *merged=[dict mutableCopy];
-        NSDictionary *disk=[NSDictionary dictionaryWithContentsOfFile:[self payloadFilePathForSource:source]];
+        NSString *payloadName=[dict[@"_payloadFile"] isKindOfClass:NSString.class]?dict[@"_payloadFile"]:nil;
+        NSString *payloadPath=(payloadName.length && [payloadName.lastPathComponent isEqual:payloadName])?[[[self payloadFilePathForSource:source] stringByDeletingLastPathComponent] stringByAppendingPathComponent:payloadName]:[self payloadFilePathForSource:source];
+        NSDictionary *disk=[NSDictionary dictionaryWithContentsOfFile:payloadPath];
         if(!disk&&![dict[@"_hasDiskPayload"] isEqual:@2])disk=[NSDictionary dictionaryWithContentsOfFile:[self legacyPayloadFilePathForSource:source]];
         [merged removeObjectForKey:@"_hasDiskPayload"];
+        [merged removeObjectForKey:@"_payloadFile"];
         for(NSString *key in @[@"text",@"cachedChannels"])if(!merged[key]&&disk[key])merged[key]=disk[key];
         return [merged copy];
     }
 }
++ (BOOL)replaceBackupMetadata:(NSDictionary *)profiles error:(NSError **)error {
+    @synchronized(self) {
+        NSMutableDictionary *replacement=[NSMutableDictionary dictionary];
+        NSMutableArray<NSString *> *created=[NSMutableArray array];
+        NSString *directory=[[self payloadFilePathForSource:@"backup"] stringByDeletingLastPathComponent];
+        for(NSString *source in profiles) {
+            if(![self isSource:source] || ![profiles[source] isKindOfClass:NSDictionary.class]) goto failed;
+            NSMutableDictionary *profile=[profiles[source] mutableCopy];
+            [profile removeObjectForKey:@"_payloadFile"];
+            [profile removeObjectForKey:@"_hasDiskPayload"];
+            BOOL offload=([profile[@"text"] length]>65536)||([profile[@"cachedChannels"] count]>200);
+            if(offload) {
+                NSMutableDictionary *payload=[NSMutableDictionary dictionary];
+                for(NSString *key in @[@"text",@"cachedChannels"])if(profile[key])payload[key]=profile[key];
+                NSString *name=[NSString stringWithFormat:@"backup-%@.plist",NSUUID.UUID.UUIDString];
+                NSString *path=[directory stringByAppendingPathComponent:name];
+                if(![payload writeToFile:path atomically:YES]) goto failed;
+                [created addObject:path];
+                [profile removeObjectsForKeys:payload.allKeys];
+                profile[@"_hasDiskPayload"]=@2;
+                profile[@"_payloadFile"]=name;
+            }
+            replacement[source]=profile;
+        }
+        NSDictionary *previous=[NSUserDefaults.standardUserDefaults dictionaryForKey:@"profileMetadata"]?:@{};
+        [NSUserDefaults.standardUserDefaults setObject:replacement forKey:@"profileMetadata"];
+        for(NSString *source in previous) {
+            NSDictionary *old=[previous[source] isKindOfClass:NSDictionary.class]?previous[source]:@{};
+            NSString *name=[old[@"_payloadFile"] isKindOfClass:NSString.class]?old[@"_payloadFile"]:nil;
+            if(name.length&&[name.lastPathComponent isEqual:name])[NSFileManager.defaultManager removeItemAtPath:[directory stringByAppendingPathComponent:name] error:NULL];
+            else if([old[@"_hasDiskPayload"] boolValue])[NSFileManager.defaultManager removeItemAtPath:[self payloadFilePathForSource:source] error:NULL];
+        }
+        return YES;
+    failed:
+        for(NSString *path in created)[NSFileManager.defaultManager removeItemAtPath:path error:NULL];
+        if(error)*error=[NSError errorWithDomain:@"ProfileStore" code:1 userInfo:@{NSLocalizedDescriptionKey:@"保存订阅缓存失败，原有配置未修改。"}];
+        return NO;
+    }
+}
 + (void)storeProfile:(NSMutableDictionary *)profile forSource:(NSString *)source inMetadata:(NSMutableDictionary *)all {
+    NSString *oldName=[all[source][@"_payloadFile"] isKindOfClass:NSString.class]?all[source][@"_payloadFile"]:nil;
     BOOL offload=([profile[@"text"] length]>65536)||([profile[@"cachedChannels"] count]>200);
     NSString *path=[self payloadFilePathForSource:source];
     if(offload){
@@ -66,6 +109,7 @@ static NSString *const CCTVEnabledChannelTelemetrySourcesKey = @"enabledChannelT
     if(!profile[@"_hasDiskPayload"])[NSFileManager.defaultManager removeItemAtPath:path error:NULL];
     all[source]=profile;
     [NSUserDefaults.standardUserDefaults setObject:all forKey:@"profileMetadata"];
+    if(oldName.length&&[oldName.lastPathComponent isEqual:oldName])[NSFileManager.defaultManager removeItemAtPath:[[path stringByDeletingLastPathComponent] stringByAppendingPathComponent:oldName] error:NULL];
 }
 + (void)update:(NSString *)source values:(NSDictionary *)values {
     @synchronized(self){
@@ -92,6 +136,8 @@ static NSString *const CCTVEnabledChannelTelemetrySourcesKey = @"enabledChannelT
 }
 + (void)remove:(NSString *)source {
     @synchronized(self){
+    NSString *name=[NSUserDefaults.standardUserDefaults dictionaryForKey:@"profileMetadata"][source][@"_payloadFile"];
+    if([name isKindOfClass:NSString.class]&&name.length&&[name.lastPathComponent isEqual:name]){NSString *directory=[[self payloadFilePathForSource:source] stringByDeletingLastPathComponent];[NSFileManager.defaultManager removeItemAtPath:[directory stringByAppendingPathComponent:name] error:NULL];}
     if([source isKindOfClass:NSString.class]&&source.length)[NSFileManager.defaultManager removeItemAtPath:[self payloadFilePathForSource:source] error:NULL];
     NSMutableDictionary *all=[[NSUserDefaults.standardUserDefaults dictionaryForKey:@"profileMetadata"]?:@{} mutableCopy];[all removeObjectForKey:source];[NSUserDefaults.standardUserDefaults setObject:all forKey:@"profileMetadata"];
     for(NSString *key in @[@"profileOrder",@"disabledSubscriptions",CCTVDisabledChannelLogoSourcesKey,CCTVDisabledPlayerCornerLogoSourcesKey,CCTVDisabledChannelPreviewSourcesKey,CCTVDisabledChannelTelemetrySourcesKey,CCTVEnabledChannelLogoSourcesKey,CCTVEnabledPlayerCornerLogoSourcesKey,CCTVEnabledChannelPreviewSourcesKey,CCTVEnabledChannelTelemetrySourcesKey]){NSMutableArray *a=[[NSUserDefaults.standardUserDefaults arrayForKey:key]?:@[] mutableCopy];[a removeObject:source];[NSUserDefaults.standardUserDefaults setObject:a forKey:key];}

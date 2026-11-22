@@ -1,4 +1,7 @@
 #import "RootViewController_Internal.h"
+#import "HostSyncRequest.h"
+
+static const NSUInteger CCTVOfficialEPGMaximumBytes = 2 * 1024 * 1024;
 
 @implementation RootViewController (EPG)
 
@@ -51,15 +54,16 @@
     req.timeoutInterval = 8;
     NSUInteger listGeneration=self.epgListGeneration;
     __weak typeof(self) weakSelf = self;
-    NSURLSessionDataTask *task=[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *r, NSError *e) {
+    __block __weak NSURLSessionDataTask *weakTask = nil;
+    NSURLSessionDataTask *task = HostBoundedDataTask(req, CCTVOfficialEPGMaximumBytes, ^(NSData *data, NSURLResponse *r, NSError *e) {
         dispatch_async(dispatch_get_main_queue(), ^{
-            // 先清理在途标记再判代次：代次不匹配时若直接 return，该频道会永久
-            // 留在 epgInflight 里，此后 loadEPGForChannel 每次都因
-            // containsObject: 提前返回，EPG 再也加载不出来。
+            // An old cancelled request must not remove a newer task for the same channel.
+            if (weakSelf.epgListTasks[cid] != weakTask) return;
             [weakSelf.epgListTasks removeObjectForKey:cid];
             [weakSelf.epgInflight removeObject:cid];
             if(listGeneration!=weakSelf.epgListGeneration)return;
-            if (!data.length) return;
+            NSInteger status = [r isKindOfClass:NSHTTPURLResponse.class] ? ((NSHTTPURLResponse *)r).statusCode : 0;
+            if (e || status < 200 || status >= 300 || !data.length) return;
             id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
             NSArray *rows = [json isKindOfClass:NSDictionary.class] ? [(NSDictionary *)json objectForKey:@"EPG"] : nil;
             if (![rows isKindOfClass:NSArray.class]) return;
@@ -67,7 +71,10 @@
             NSString *cur = nil, *nxt = nil;
             for (NSDictionary *row in rows) {
                 if (![row isKindOfClass:NSDictionary.class]) continue;
-                double s0 = [row[@"startTime"] doubleValue], e0 = [row[@"endTime"] doubleValue];
+                id startValue = row[@"startTime"], endValue = row[@"endTime"];
+                if (![startValue respondsToSelector:@selector(doubleValue)] || ![endValue respondsToSelector:@selector(doubleValue)]) continue;
+                double s0 = [startValue doubleValue], e0 = [endValue doubleValue];
+                if (!isfinite(s0) || !isfinite(e0) || s0 <= 0 || e0 <= s0) continue;
                 if (s0 > 1e11) s0 /= 1000; if (e0 > 1e11) e0 /= 1000;
                 NSString *title=[row[@"title"] isKindOfClass:NSString.class]?row[@"title"]:nil;
                 if (now >= s0 && now < e0) cur = title;
@@ -79,7 +86,10 @@
                 [weakSelf reloadVisibleCatalogItemForChannelID:cid];
             }
         });
-    }];self.epgListTasks[cid]=task;[task resume];
+    });
+    weakTask = task;
+    self.epgListTasks[cid] = task;
+    [task resume];
 }
 
 #pragma mark - 节目单
@@ -151,8 +161,9 @@
 
     __weak typeof(self) weakSelf = self;
     [self.epgTask cancel];
-    self.epgTask = [[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *r, NSError *e) {
-        if (!data.length) return;
+    self.epgTask = HostBoundedDataTask(req, CCTVOfficialEPGMaximumBytes, ^(NSData *data, NSURLResponse *r, NSError *e) {
+        NSInteger status = [r isKindOfClass:NSHTTPURLResponse.class] ? ((NSHTTPURLResponse *)r).statusCode : 0;
+        if (e || status < 200 || status >= 300 || !data.length) return;
         id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
         if (![json isKindOfClass:NSDictionary.class]) return;
         NSArray *rows = [(NSDictionary *)json objectForKey:@"EPG"];
@@ -161,7 +172,10 @@
         NSString *cur = nil, *next = nil;
         for (NSDictionary *row in rows) {
             if (![row isKindOfClass:NSDictionary.class]) continue;
-            double s0 = [row[@"startTime"] doubleValue], e0 = [row[@"endTime"] doubleValue];
+            id startValue = row[@"startTime"], endValue = row[@"endTime"];
+            if (![startValue respondsToSelector:@selector(doubleValue)] || ![endValue respondsToSelector:@selector(doubleValue)]) continue;
+            double s0 = [startValue doubleValue], e0 = [endValue doubleValue];
+            if (!isfinite(s0) || !isfinite(e0) || s0 <= 0 || e0 <= s0) continue;
             if (s0 > 1e11) s0 /= 1000; if (e0 > 1e11) e0 /= 1000;
             NSString *title=[row[@"title"] isKindOfClass:NSString.class]?row[@"title"]:nil;
             if (now >= s0 && now < e0) cur = title;
@@ -183,7 +197,7 @@
                 if (parts.count) weakSelf.infoLabel.text = [parts componentsJoinedByString:@"  "];
             }
         });
-    }];
+    });
     [self.epgTask resume];
 }
 

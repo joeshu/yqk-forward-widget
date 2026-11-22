@@ -1,6 +1,7 @@
 #import "HostSyncRequest.h"
 #import "EPGViewController.h"
 #import <UserNotifications/UserNotifications.h>
+#import <math.h>
 #import "HostTheme.h"
 #import "ProfileStore.h"
 #import "XMLTVStore.h"
@@ -18,6 +19,7 @@
 @property (nonatomic, strong) UIActivityIndicatorView *spinner;
 @property (nonatomic, strong) NSArray<NSDictionary *> *rows;
 @property (nonatomic, strong) NSURLSessionDataTask *task;
+@property(nonatomic,strong) NSMutableArray<NSURLSessionDataTask *> *lookbackTasks;
 @property (nonatomic, strong) NSArray<NSDictionary *> *allRows;
 @property (nonatomic, strong) UISegmentedControl *dates;
 @property (nonatomic, strong) NSArray<NSString *> *dateKeys;
@@ -239,8 +241,13 @@
     if(!self.pageVisible||UIApplication.sharedApplication.applicationState!=UIApplicationStateActive)return;
     __weak typeof(self) w=self;self.refreshTimer=[NSTimer scheduledTimerWithTimeInterval:60 repeats:YES block:^(NSTimer *t){EPGViewController *owner=w;if(!owner){[t invalidate];return;}[owner fetch];}];
 }
+- (void)cancelLookbackTasks {
+    for (NSURLSessionDataTask *task in self.lookbackTasks) [task cancel];
+    self.lookbackTasks = nil;
+}
 - (void)cancelPageRequest {
     self.requestGeneration++;[self.task cancel];self.task=nil;
+    [self cancelLookbackTasks];
     [self.spinner stopAnimating];[self.table.refreshControl endRefreshing];
 }
 - (void)applicationDidEnterBackground {
@@ -255,9 +262,12 @@
     [NSNotificationCenter.defaultCenter removeObserver:self];
     [self.refreshTimer invalidate];
     [self.task cancel];
+    [self cancelLookbackTasks];
 }
 
 - (void)fetch {
+    self.requestGeneration++;
+    [self cancelLookbackTasks];
     if(self.xmlSource.length){NSUInteger request=++self.requestGeneration;BOOL force=self.table.refreshControl.refreshing;__weak typeof(self) w=self;
         [[XMLTVStore shared] loadSource:self.xmlSource channel:[ProfileStore epgIDForChannel:self.channel] force:force completion:^(NSArray *rows,NSError *error){if(!w||request!=w.requestGeneration)return;[w.spinner stopAnimating];[w.table.refreshControl endRefreshing];
             if(rows.count){w.allRows=rows;w.sourceName=w.xmlSource;[w rebuildDates];w.hint.text=error?@"使用上次缓存，刷新暂不可用":[NSString stringWithFormat:@"XMLTV · %lu 个节目",(unsigned long)rows.count];}
@@ -279,8 +289,8 @@
     [self.task cancel];
     self.task = HostBoundedDataTask(req, 2*1024*1024, ^(NSData *data, NSURLResponse *resp, NSError *err) {
         NSArray *rows = nil;
-        // 官方 EPG 响应无大小限制：超过 4 MiB 按失败处理，避免后台线程解析超大 JSON。
-        if (data.length&&data.length<=4*1024*1024) {
+        NSInteger status = [resp isKindOfClass:NSHTTPURLResponse.class] ? ((NSHTTPURLResponse *)resp).statusCode : 0;
+        if (!err && status >= 200 && status < 300 && data.length) {
             id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
             if ([json isKindOfClass:NSDictionary.class]) {
                 NSDictionary *dict = json;
@@ -387,6 +397,10 @@
     if (!self.channelID.length) return;
     NSString *encoded = [self.channelID stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet] ?: @"";
     if (!encoded.length) return;
+    [self.task cancel];
+    self.task = nil;
+    [self cancelLookbackTasks];
+    self.lookbackTasks = [NSMutableArray array];
     self.hint.text = @"正在同步近 7 天央视官方回看节目单…";
     [self.spinner startAnimating];
     NSDateFormatter *compactFmt = [NSDateFormatter new];
@@ -406,13 +420,14 @@
         dispatch_group_enter(group);
         NSString *u = [NSString stringWithFormat:@"https://api.cntv.cn/epg/epginfo3?serviceId=cbox&c=%@&d=%@", encoded, dayStr];
         NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:u] cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:8];
-        [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *err) {
+        NSURLSessionDataTask *task = HostBoundedDataTask(req, 2 * 1024 * 1024, ^(NSData *data, NSURLResponse *resp, NSError *err) {
             EPGViewController *owner = weakSelf;
             if (!owner || generation != owner.requestGeneration) {
                 dispatch_group_leave(group);
                 return;
             }
-            if (!err && data.length > 0 && data.length <= 4 * 1024 * 1024) {
+            NSInteger status = [resp isKindOfClass:NSHTTPURLResponse.class] ? ((NSHTTPURLResponse *)resp).statusCode : 0;
+            if (!err && status >= 200 && status < 300 && data.length > 0) {
                 id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
                 if ([json isKindOfClass:NSDictionary.class]) {
                     NSString *cid = owner.channelID ?: @"";
@@ -425,11 +440,14 @@
                 }
             }
             dispatch_group_leave(group);
-        }] resume];
+        });
+        [self.lookbackTasks addObject:task];
+        [task resume];
     }
     dispatch_group_notify(group, dispatch_get_main_queue(), ^{
         EPGViewController *owner = weakSelf;
         if (!owner || generation != owner.requestGeneration) return;
+        owner.lookbackTasks = nil;
         [owner.spinner stopAnimating];
         if (collected.count) {
             NSMutableDictionary<NSNumber *, NSDictionary *> *dedup = [NSMutableDictionary dictionary];
@@ -526,8 +544,11 @@
     for (id item in rows) {
         if (![item isKindOfClass:NSDictionary.class]) continue;
         NSDictionary *row = item;
-        double start = [row[@"startTime"] doubleValue];
-        double end = [row[@"endTime"] doubleValue];
+        id startValue = row[@"startTime"], endValue = row[@"endTime"];
+        if (![startValue respondsToSelector:@selector(doubleValue)] || ![endValue respondsToSelector:@selector(doubleValue)]) continue;
+        double start = [startValue doubleValue];
+        double end = [endValue doubleValue];
+        if (!isfinite(start) || !isfinite(end)) continue;
         if (start > 1e11) start /= 1000.0;
         if (end > 1e11) end /= 1000.0;
         NSString *title = row[@"title"];

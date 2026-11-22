@@ -27,6 +27,15 @@ static NSMutableDictionary<NSString *, NSDictionary *> *MediaGlobalSearchProvide
     return cache;
 }
 
+static NSDictionary *MediaSearchPageState(NSString *name, NSArray *items, NSDictionary *payload, NSUInteger page, NSUInteger consumed) {
+    NSArray *buffer=consumed<items.count?[items subarrayWithRange:NSMakeRange(consumed,items.count-consumed)]:@[];
+    id more=payload[@"hasMore"];
+    BOOL hasNext=[more respondsToSelector:@selector(boolValue)]?[more boolValue]:(items.count>=MediaGlobalSearchMaximumResultsPerProvider);
+    BOOL available=buffer.count>0||hasNext;
+    return @{@"name":name?:@"", @"state":available?@"首批结果 · 可加载更多":(items.count?@"搜索完成":@"无结果"),
+             @"buffer":buffer, @"hasNext":@(hasNext), @"nextPage":@(page+1), @"canLoadMore":@(available)};
+}
+
 @interface MediaGlobalSearchJob : NSObject
 @property(nonatomic) NSUInteger section;
 @property(nonatomic) NSUInteger generation;
@@ -497,7 +506,7 @@ static NSMutableDictionary<NSString *, NSDictionary *> *MediaGlobalSearchProvide
     if (!self.searching) return;
     [self cancelJobsAndAdvanceGeneration];
     for (NSMutableDictionary *row in self.rows) {
-        NSMutableDictionary *states=row[@"providerStates"];for(NSString *key in states.allKeys){NSDictionary *state=states[key];if([@[@"搜索中",@"等待搜索"] containsObject:state[@"state"]])states[key]=@{@"name":state[@"name"],@"state":@"已取消"};}
+        NSMutableDictionary *states=row[@"providerStates"];for(NSString *key in states.allKeys){NSDictionary *state=states[key];if([state[@"state"] isEqual:@"正在加载更多"]){NSMutableDictionary *restored=[state mutableCopy];restored[@"state"]=@"已取消加载 · 点按重试";states[key]=restored;}else if([@[@"搜索中",@"等待搜索"] containsObject:state[@"state"]])states[key]=@{@"name":state[@"name"],@"state":@"已取消"};}
         if ([@[@"搜索中",@"等待搜索",@"等待重试",@"等待健康检查"] containsObject:row[@"state"]]) row[@"state"] = @"已取消";
         else if ([[row[@"state"] description] containsString:@"正在请求启动"]) row[@"state"] = @"启动请求仍在处理 · 点按此来源继续检查";
     }
@@ -703,8 +712,10 @@ static NSMutableDictionary<NSString *, NSDictionary *> *MediaGlobalSearchProvide
         NSArray *items = [searchPayload[@"items"] isKindOfClass:NSArray.class] ? searchPayload[@"items"] : @[];
         NSMutableArray *stored = owner.rows[job.section][@"results"];
         NSUInteger remaining=owner.resultCount<MediaGlobalSearchMaximumResults?MIN(MediaGlobalSearchMaximumResultsPerProvider,MediaGlobalSearchMaximumResults-owner.resultCount):0;
-        owner.resultCount+=MediaSearchAppend(stored,items,providerID,providerName,remaining);
-        owner.rows[job.section][@"providerStates"][providerID]=@{@"name":providerName,@"state":MediaSearchEntries(stored,providerID).count?@"搜索完成":@"无结果"};
+        NSUInteger consumed=MIN(items.count,remaining);
+        NSArray *firstBatch=consumed?[items subarrayWithRange:NSMakeRange(0,consumed)]:@[];
+        owner.resultCount+=MediaSearchAppend(stored,firstBatch,providerID,providerName,remaining);
+        owner.rows[job.section][@"providerStates"][providerID]=MediaSearchPageState(providerName,items,searchPayload,1,consumed);
         [owner reloadSection:job.section];
         [owner updateProgress];
         if (owner.resultCount >= MediaGlobalSearchMaximumResults) { [owner stopAtResultLimit]; return; }
@@ -855,7 +866,7 @@ static NSMutableDictionary<NSString *, NSDictionary *> *MediaGlobalSearchProvide
     NSUInteger active = self.jobs.count;
     NSUInteger queued = self.pendingSections.count;
     NSUInteger stations=0,finishedStations=0;
-    for(NSDictionary *row in self.rows)for(NSDictionary *station in [row[@"providerStates"] allValues]){stations++;if([@[@"搜索完成",@"无结果",@"来源失败"] containsObject:station[@"state"]])finishedStations++;}
+    for(NSDictionary *row in self.rows)for(NSDictionary *station in [row[@"providerStates"] allValues]){stations++;if([@[@"搜索完成",@"无结果",@"来源失败",@"首批结果 · 可加载更多"] containsObject:station[@"state"]])finishedStations++;}
     NSString *mode = self.retrySections.count ? @"重试失败来源 · " : @"";
     self.progressLabel.text = [NSString stringWithFormat:@"%@已完成 %lu / %lu 个资源 · 同时搜索 %lu 个 · 排队 %lu 个 · 找到 %lu 条", mode, (unsigned long)self.completedCount, (unsigned long)denominator, (unsigned long)active, (unsigned long)queued, (unsigned long)self.resultCount];
     if(stations)self.progressLabel.text=[self.progressLabel.text stringByAppendingFormat:@" · 站点 %lu / %lu",(unsigned long)finishedStations,(unsigned long)stations];
@@ -868,6 +879,74 @@ static NSMutableDictionary<NSString *, NSDictionary *> *MediaGlobalSearchProvide
     NSDictionary *position=[self readingPosition];
     [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:section] withRowAnimation:UITableViewRowAnimationNone];
     [self.tableView layoutIfNeeded];[self restoreReadingPosition:position];
+}
+
+- (NSString *)loadMoreProviderForSection:(NSUInteger)section {
+    if(section>=self.rows.count)return nil;
+    NSDictionary *states=self.rows[section][@"providerStates"];
+    if(self.selectedProvider!=nil)return states[self.selectedProvider]?self.selectedProvider:nil;
+    // A resource with one provider can be paged without an extra filter tap.
+    if(states.count==1)return states.allKeys.firstObject;
+    return nil;
+}
+
+- (void)loadMoreForSection:(NSUInteger)section provider:(NSString *)providerID {
+    if(self.searching||section>=self.rows.count||self.resultCount>=MediaGlobalSearchMaximumResults)return;
+    NSMutableDictionary *row=self.rows[section];
+    NSDictionary *state=row[@"providerStates"][providerID];
+    if(![state[@"canLoadMore"] boolValue])return;
+    NSString *name=state[@"name"]?:@"影视站点";
+    NSArray *buffer=[state[@"buffer"] isKindOfClass:NSArray.class]?state[@"buffer"]:@[];
+    NSUInteger budget=MIN(MediaGlobalSearchMaximumResultsPerProvider,MediaGlobalSearchMaximumResults-self.resultCount);
+    if(buffer.count){
+        NSUInteger consumed=MIN(buffer.count,budget);
+        self.resultCount+=MediaSearchAppend(row[@"results"],[buffer subarrayWithRange:NSMakeRange(0,consumed)],providerID,name,budget);
+        NSMutableDictionary *next=[state mutableCopy];
+        next[@"buffer"]=[buffer subarrayWithRange:NSMakeRange(consumed,buffer.count-consumed)];
+        BOOL more=[next[@"buffer"] count]>0||[next[@"hasNext"] boolValue];
+        next[@"canLoadMore"]=@(more);next[@"state"]=more?@"还有更多结果":@"搜索完成";
+        row[@"providerStates"][providerID]=next;
+        [self reloadSection:section];[self updateProgress];
+        if(self.resultCount>=MediaGlobalSearchMaximumResults)[self stopAtResultLimit];
+        return;
+    }
+    NSDictionary *source=self.searchSources[section];
+    MediaGlobalSearchJob *job=[MediaGlobalSearchJob new];
+    job.section=section;job.generation=self.generation;job.source=source;
+    job.client=MediaSourceUsesNativeCatalogAPI(source)?[[MediaAPIClient alloc] initWithTVBoxSource:source]:[[MediaAPIClient alloc] initWithPort:[source[@"port"] integerValue]];
+    self.jobs[@(section)]=job;self.searching=YES;
+    NSMutableDictionary *loading=[state mutableCopy];loading[@"state"]=@"正在加载更多";row[@"providerStates"][providerID]=loading;
+    self.navigationItem.rightBarButtonItem.title=@"停止";self.navigationItem.rightBarButtonItem.action=@selector(cancelSearch);
+    [self reloadSection:section];
+    NSUInteger page=MAX(2,[state[@"nextPage"] unsignedIntegerValue]);
+    NSMutableDictionary *arguments=[@{@"keyword":self.keyword?:@"",@"page":@(page)} mutableCopy];
+    if(providerID.length)arguments[@"provider"]=providerID;
+    __weak typeof(self) weakSelf=self;
+    [job.client call:@"search" arguments:arguments completion:^(id result,NSError *error){
+        MediaGlobalSearchViewController *owner=weakSelf;
+        if(!owner||![owner isCurrentJob:job])return;
+        NSMutableDictionary *currentRow=owner.rows[section];
+        if(error){
+            NSMutableDictionary *failed=[state mutableCopy];failed[@"state"]=@"加载更多失败 · 点按重试";failed[@"error"]=error.localizedDescription?:@"请求失败";
+            currentRow[@"providerStates"][providerID]=failed;
+        }else{
+            NSDictionary *payload=[result isKindOfClass:NSDictionary.class]?result:@{};
+            NSArray *items=[payload[@"items"] isKindOfClass:NSArray.class]?payload[@"items"]:@[];
+            NSUInteger remaining=MIN(MediaGlobalSearchMaximumResultsPerProvider,MediaGlobalSearchMaximumResults-owner.resultCount);
+            NSUInteger consumed=MIN(items.count,remaining);
+            NSUInteger added=MediaSearchAppend(currentRow[@"results"],consumed?[items subarrayWithRange:NSMakeRange(0,consumed)]:@[],providerID,name,remaining);
+            owner.resultCount+=added;
+            NSMutableDictionary *next=[MediaSearchPageState(name,items,payload,page,consumed) mutableCopy];
+            // Broken providers sometimes return the same page forever. Stop when
+            // a complete response contains no new entries.
+            if(!added&&consumed==items.count){next[@"hasNext"]=@NO;next[@"canLoadMore"]=@NO;next[@"state"]=@"没有更多结果";}
+            currentRow[@"providerStates"][providerID]=next;
+        }
+        [owner.jobs removeObjectForKey:@(section)];owner.searching=NO;
+        owner.navigationItem.rightBarButtonItem.title=@"重试失败";owner.navigationItem.rightBarButtonItem.action=@selector(retryFailedSources);
+        [owner reloadSection:section];[owner updateProgress];
+        if(owner.resultCount>=MediaGlobalSearchMaximumResults)[owner stopAtResultLimit];
+    }];
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return self.searchSources.count; }
@@ -902,16 +981,24 @@ static NSMutableDictionary<NSString *, NSDictionary *> *MediaGlobalSearchProvide
         cell.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];
         cell.textLabel.adjustsFontForContentSizeCategory = YES;
         BOOL sourceFailed=[@[@"搜索失败",@"启动失败"] containsObject:row[@"state"]?:@""];
-        NSDictionary *station=self.selectedProvider&&!sourceFailed?row[@"providerStates"][self.selectedProvider]:nil;
+        NSString *moreProvider=[self loadMoreProviderForSection:indexPath.section];
+        NSDictionary *station=moreProvider!=nil&&!sourceFailed?row[@"providerStates"][moreProvider]:nil;
+        BOOL canLoadMore=[station[@"canLoadMore"] boolValue]&&!self.searching&&!self.resultLimitReached;
         cell.textLabel.text = station?station[@"state"]:(row[@"state"] ?: @"待搜索");
         NSString *error = station?MediaSearchText(station[@"error"]):([row[@"error"] isKindOfClass:NSString.class] ? row[@"error"] : @"");
         NSString *providerError = station?@"":([row[@"providerError"] isKindOfClass:NSString.class] ? row[@"providerError"] : @"");
         cell.detailTextLabel.text = error.length&&providerError.length?[NSString stringWithFormat:@"%@\n最近失败：%@",error,providerError]:(error.length?error:(providerError.length?providerError:([row[@"provider"] length]?[NSString stringWithFormat:@"当前站点：%@",row[@"provider"]]:@"")));
+        if(!station&&!sourceFailed){
+            BOOL hasMore=NO;for(NSDictionary *value in [row[@"providerStates"] allValues])if([value[@"canLoadMore"] boolValue]){hasMore=YES;break;}
+            if(hasMore)cell.detailTextLabel.text=@"仅显示各站首批结果 · 选择上方站点后可加载更多";
+        }else if(canLoadMore&&!error.length){
+            cell.detailTextLabel.text=@"点按加载此站点更多结果";
+        }
         BOOL stopped = [[row[@"state"] description] containsString:@"未运行"];
         BOOL failed = [row[@"state"] isEqual:@"搜索失败"] || [row[@"state"] isEqual:@"部分完成"] || [row[@"state"] isEqual:@"启动失败"];
-        cell.accessoryType = (stopped || failed) ? UITableViewCellAccessoryDisclosureIndicator : UITableViewCellAccessoryNone;
-        cell.selectionStyle = (stopped || failed) ? UITableViewCellSelectionStyleDefault : UITableViewCellSelectionStyleNone;
-        cell.accessibilityHint = stopped ? @"点按后只启动此插件，然后检查健康状态和影视接口" : (failed ? ([row[@"state"] isEqual:@"部分完成"]?@"点按只重试失败站点":@"点按重试此来源") : nil);
+        cell.accessoryType = (stopped || failed || canLoadMore) ? UITableViewCellAccessoryDisclosureIndicator : UITableViewCellAccessoryNone;
+        cell.selectionStyle = (stopped || failed || canLoadMore) ? UITableViewCellSelectionStyleDefault : UITableViewCellSelectionStyleNone;
+        cell.accessibilityHint = stopped ? @"点按后只启动此插件，然后检查健康状态和影视接口" : (failed ? ([row[@"state"] isEqual:@"部分完成"]?@"点按只重试失败站点":@"点按重试此来源") : (canLoadMore ? @"点按加载此站点更多结果" : nil));
     } else {
         NSArray *entries=[self visibleEntriesForSection:indexPath.section];
         if((NSUInteger)(indexPath.row-1)>=entries.count){MediaSearchResultCell *stale=(MediaSearchResultCell *)cell;stale.nameLabel.text=@"";stale.metadataLabel.text=@"";stale.sourceLabel.text=@"";stale.poster.image=nil;stale.searchEntry=nil;cell.accessibilityLabel=nil;return cell;}
@@ -946,6 +1033,8 @@ static NSMutableDictionary<NSString *, NSDictionary *> *MediaGlobalSearchProvide
     if(![self hasSubmittedSearchInput]){self.progressLabel.text=@"请先搜索当前关键词，再打开结果";return;}
     if (indexPath.row == 0) {
         NSDictionary *row = self.rows[indexPath.section];
+        NSString *moreProvider=[self loadMoreProviderForSection:indexPath.section];
+        if(moreProvider!=nil&&[row[@"providerStates"][moreProvider][@"canLoadMore"] boolValue]&&!self.searching&&!self.resultLimitReached){[self loadMoreForSection:indexPath.section provider:moreProvider];return;}
         if ([[row[@"state"] description] containsString:@"未运行"]) { [self startStoppedSourceAtSection:indexPath.section]; return; }
         if ([row[@"state"] isEqual:@"搜索失败"] || [row[@"state"] isEqual:@"部分完成"] || [row[@"state"] isEqual:@"启动失败"]) {
             if (self.searching) { self.progressLabel.text = @"其他来源仍在搜索；当前失败来源可在本轮结束后重试。"; return; }

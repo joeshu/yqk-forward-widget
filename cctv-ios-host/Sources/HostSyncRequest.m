@@ -1,4 +1,5 @@
 #import "HostSyncRequest.h"
+#import "HostRedirectHeaders.h"
 
 @interface HostSyncRequest () <NSURLSessionDataDelegate>
 @property(nonatomic, strong) NSURLSession *session;
@@ -48,8 +49,15 @@
 }
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error { [self finish:error.localizedDescription]; }
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLRequest *)request completionHandler:(void (^)(NSURLRequest *))completion {
-    BOOL allowed=[@[@"http",@"https"] containsObject:request.URL.scheme.lowercaseString] && !request.URL.user.length && !request.URL.password.length;
-    NSMutableURLRequest *redirect=[request mutableCopy];if(![request.URL.host.lowercaseString isEqualToString:response.URL.host.lowercaseString] || ![request.URL.scheme.lowercaseString isEqual:response.URL.scheme.lowercaseString] || ![(request.URL.port?:@0) isEqual:(response.URL.port?:@0)]){[redirect setValue:nil forHTTPHeaderField:@"Authorization"];[redirect setValue:nil forHTTPHeaderField:@"Cookie"];}
+    BOOL downgrade=[response.URL.scheme.lowercaseString isEqual:@"https"] && ![request.URL.scheme.lowercaseString isEqual:@"https"];
+    BOOL allowed=[@[@"http",@"https"] containsObject:request.URL.scheme.lowercaseString] && request.URL.host.length && !request.URL.user.length && !request.URL.password.length && !downgrade;
+    NSMutableURLRequest *redirect=[request mutableCopy];
+    BOOL trusted=HostRedirectHeaders(@{@"X-CCTVHost-Origin-Probe":@"1"},response.URL,request.URL).count>0;
+    NSString *method=redirect.HTTPMethod.uppercaseString?:@"GET";
+    // A 307/308 may retain an authentication-bearing POST body. Header
+    // filtering alone cannot make such a cross-origin redirect safe.
+    if(!trusted && (![@[@"GET",@"HEAD"] containsObject:method] || redirect.HTTPBody.length || redirect.HTTPBodyStream))allowed=NO;
+    redirect.allHTTPHeaderFields=HostRedirectHeaders(request.allHTTPHeaderFields?:@{},response.URL,request.URL);
     completion(allowed?redirect:nil);
 }
 @end

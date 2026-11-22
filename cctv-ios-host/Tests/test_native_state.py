@@ -12,7 +12,7 @@ class NativeStateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             executable = str(pathlib.Path(tmp) / "cctvhost-native-state-tests")
             subprocess.run([
-                "xcrun", "clang", "-fobjc-arc", "-framework", "Foundation",
+                "xcrun", "clang", "-fobjc-arc", "-framework", "Foundation", "-framework", "Security",
                 "-I", str(root / "Sources"),
                 str(root / "Tests" / "native_state_tests.m"),
                 str(root / "Sources" / "HostBackup.m"),

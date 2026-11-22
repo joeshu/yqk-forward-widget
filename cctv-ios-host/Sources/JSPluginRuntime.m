@@ -1,5 +1,7 @@
 #import "JSPluginRuntime.h"
 #import "HostSyncRequest.h"
+#import "HostRedirectHeaders.h"
+#import "HostSecureStore.h"
 #import <JavaScriptCore/JavaScriptCore.h>
 #import <Security/Security.h>
 #import <TargetConditionals.h>
@@ -199,9 +201,15 @@ static NSTimeInterval const JSIdleEvictionSeconds = 120.0;
 }
 
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLRequest *)request completionHandler:(void (^)(NSURLRequest *))completion {
-    BOOL allowed=[self allowedURL:request.URL] && task.countOfBytesReceived<JSMaxBody;
+    BOOL downgrade=[response.URL.scheme.lowercaseString isEqual:@"https"] && ![request.URL.scheme.lowercaseString isEqual:@"https"];
+    BOOL allowed=[self allowedURL:request.URL] && !downgrade && task.countOfBytesReceived<JSMaxBody;
     NSMutableURLRequest *redirect=[request mutableCopy];
-    if(![request.URL.host.lowercaseString isEqual:response.URL.host.lowercaseString] || ![request.URL.scheme.lowercaseString isEqual:response.URL.scheme.lowercaseString] || ![(request.URL.port?:@0) isEqual:(response.URL.port?:@0)]){[redirect setValue:nil forHTTPHeaderField:@"Authorization"];[redirect setValue:nil forHTTPHeaderField:@"Cookie"];}
+    BOOL trusted=HostRedirectHeaders(@{@"X-CCTVHost-Origin-Probe":@"1"},response.URL,request.URL).count>0;
+    NSString *method=redirect.HTTPMethod.uppercaseString?:@"GET";
+    // A 307/308 may retain an authentication-bearing POST body. Header
+    // filtering alone cannot make such a cross-origin redirect safe.
+    if(!trusted && (![@[@"GET",@"HEAD"] containsObject:method] || redirect.HTTPBody.length || redirect.HTTPBodyStream))allowed=NO;
+    redirect.allHTTPHeaderFields=HostRedirectHeaders(request.allHTTPHeaderFields?:@{},response.URL,request.URL);
     completion(allowed?redirect:nil);
 }
 - (NSString *)initializeContext {
@@ -282,12 +290,34 @@ static NSTimeInterval const JSIdleEvictionSeconds = 120.0;
         NSArray *parts=s.packageRoot.pathComponents;NSUInteger index=[parts indexOfObject:@"Services"];
         NSString *identifier=index!=NSNotFound && index+1<parts.count?parts[index+1]:s.packageRoot.lastPathComponent;
         NSString *name=[@"CCTVJSStorage:" stringByAppendingString:identifier];NSUserDefaults *defaults=NSUserDefaults.standardUserDefaults;
-        NSMutableDictionary *store=[[defaults dictionaryForKey:name]?:@{} mutableCopy];
+        OSStatus status=errSecSuccess;
+        NSData *saved=HostSecureStoreRead(@"js-storage",identifier,&status);
+        if(status!=errSecSuccess && status!=errSecItemNotFound){
+            JSContext.currentContext.exception=[JSValue valueWithNewErrorFromMessage:@"插件安全存储不可用，请解锁设备后重试" inContext:JSContext.currentContext];return nil;
+        }
+        id decoded=saved?[NSJSONSerialization JSONObjectWithData:saved options:NSJSONReadingMutableContainers error:NULL]:nil;
+        if(saved && ![decoded isKindOfClass:NSDictionary.class]){
+            JSContext.currentContext.exception=[JSValue valueWithNewErrorFromMessage:@"插件安全存储数据无效" inContext:JSContext.currentContext];return nil;
+        }
+        NSDictionary *legacy=[defaults dictionaryForKey:name];
+        NSMutableDictionary *store=[(decoded?:legacy?:@{}) mutableCopy];
+        // Keep the old copy until keychain persistence succeeds, including when
+        // the first operation is a read after upgrading the app.
+        if(!saved && legacy){
+            NSData *migration=[NSJSONSerialization dataWithJSONObject:store options:0 error:NULL];
+            if(!migration || !HostSecureStoreWrite(@"js-storage",identifier,migration)){
+                JSContext.currentContext.exception=[JSValue valueWithNewErrorFromMessage:@"插件存储迁移失败，请解锁设备后重试" inContext:JSContext.currentContext];return nil;
+            }
+            [defaults removeObjectForKey:name];
+        }
         if([action isEqual:@"get"])return store[key];
         if([action isEqual:@"remove"])[store removeObjectForKey:key];else if([action isEqual:@"set"] && value)store[key]=value;else return nil;
         NSData *bytes=[NSJSONSerialization dataWithJSONObject:store options:0 error:NULL];
-        if(store.count>256 || bytes.length>1024*1024){JSContext.currentContext.exception=[JSValue valueWithNewErrorFromMessage:@"插件存储超过限制" inContext:JSContext.currentContext];return nil;}
-        [defaults setObject:store forKey:name];return value;
+        if(!bytes || store.count>256 || bytes.length>1024*1024){JSContext.currentContext.exception=[JSValue valueWithNewErrorFromMessage:@"插件存储超过限制" inContext:JSContext.currentContext];return nil;}
+        if(!HostSecureStoreWrite(@"js-storage",identifier,bytes)){
+            JSContext.currentContext.exception=[JSValue valueWithNewErrorFromMessage:@"插件安全存储写入失败" inContext:JSContext.currentContext];return nil;
+        }
+        return value;
     };
     self.context[@"__hostLog"]=^(NSString *line){[weak log:line];};
     self.context[@"__hostFetch"]=^NSNumber *(NSString *url,NSString *options,JSValue *callback){return [weak fetch:url options:options callback:callback];};

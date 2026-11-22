@@ -643,6 +643,11 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('importFingerprint', self.import_workflow)
         self.assertIn('filename.lastPathComponent', self.import_workflow)
 
+    def test_import_snapshot_does_not_persist_retry_payloads_or_companion_secrets(self):
+        self.assertIn('ResourceImportSnapshotCandidates(self.candidates)', self.import_workflow)
+        for transient in ('retryData', 'retryCompanions', 'retryBookmark', 'retryOrigin'):
+            self.assertIn(f'@"{transient}"', self.import_workflow)
+
     def test_categorized_import_remains_inside_advanced_options_and_reuses_preview(self):
         self.assertIn('advancedOptionsExpanded?7:5', self.import_workflow)
         self.assertIn('按类型选择导入方式', self.import_workflow)
@@ -739,12 +744,14 @@ class ResourceInteractionContracts(unittest.TestCase):
             '\n}', 1)[0]
         playback_state = (ROOT / 'Sources/MediaPlaybackStateStore.m').read_text()
 
-        self.assertLess(restore.index('lineID.length'), restore.index('lineName.length'))
-        self.assertLess(restore.index('lineName.length'), restore.index('lineIndex<0||lineIndex>=self.lines.count'))
-        self.assertLess(restore.index('episodeID.length'), restore.index('episodeName.length'))
-        self.assertLess(restore.index('episodeName.length'), restore.index('episodeIndex<0||episodeIndex>=episodes.count'))
-        self.assertIn('resumeLineName', route_view)
-        self.assertIn('resumeEpisodeName', route_view)
+        identity = self.detail.split('static NSInteger MediaBrowserUniqueIdentityIndex', 1)[1].split(
+            '\n}', 1)[0]
+        self.assertLess(identity.index('if(identifier.length)'), identity.index('if(!name.length)'))
+        self.assertIn('count==1', identity)
+        self.assertIn('MediaBrowserUniqueIdentityIndex', restore)
+        self.assertIn('historyEntryForContext:context', restore)
+        self.assertIn('无法确认上次观看的分集，请手动选择', restore)
+        self.assertIn('BOOL resumeSelected=self.resumeEntry!=nil', route_view)
         self.assertIn('value isKindOfClass:NSString.class', name_matcher)
         self.assertIn('saved.length', name_matcher)
         self.assertIn('@"lineName"', playback_state)
@@ -1251,7 +1258,9 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('media-search-station-filters', search)
         self.assertIn('[self.renderedFilterKey isEqual:self.filterPositionKey]', search)
         self.assertIn('MediaSearchEntries(entries,provider).count', search)
-        self.assertIn('MediaSearchAppend(stored,items,providerID,providerName,remaining)', search)
+        self.assertIn('MediaSearchAppend(stored,firstBatch,providerID,providerName,remaining)', search)
+        self.assertIn('loadMoreForSection:', search)
+        self.assertIn('MediaSearchPageState', search)
         self.assertIn('HostImageLoader.shared loadPosterURL:url intoImageView:view completion:', search)
         self.assertIn('暂无影片信息', search)
         self.assertIn('@"无结果"', search)
@@ -1264,7 +1273,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('[self restoreReadingPosition:self.savedReadingPosition]', search)
         self.assertIn('if(!self.resultsVisible){return;}', search)
         self.assertIn('hasSubmittedSearchInput', search)
-        self.assertIn('self.selectedProvider&&!sourceFailed', search)
+        self.assertIn('moreProvider!=nil&&!sourceFailed', search)
         self.assertIn('job.generation == self.generation', search)
         self.assertIn('self.jobs[@(job.section)] == job', search)
 

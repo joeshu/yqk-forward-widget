@@ -1,9 +1,25 @@
 #import "MediaPackageImporter.h"
 #import "ServiceStore.h"
 #import "MediaPackageDownloader.h"
+#import "HostSecureStore.h"
 #import <Foundation/Foundation.h>
 #include <string.h>
 int main(int argc,const char **argv){@autoreleasepool{
+    if(argc==3 && strcmp(argv[1],"--secure-server")==0){
+        NSError *error=nil;NSDictionary *service=[MediaPackageImporter importFile:[NSURL fileURLWithPath:[NSString stringWithUTF8String:argv[2]]] error:&error];
+        if(!service){fprintf(stderr,"%s",error.localizedDescription.UTF8String?:"import failed");return 5;}
+        NSString *identifier=service[@"id"];NSDictionary *options=service[@"manifest"][@"options"];
+        OSStatus status=errSecSuccess;NSData *secret=HostSecureStoreRead(@"media-server",identifier,&status);
+        NSDictionary *credentials=secret?[NSJSONSerialization JSONObjectWithData:secret options:0 error:NULL]:nil;
+        NSString *manifestPath=[service[@"packageRoot"] stringByAppendingPathComponent:@"cctvhost.json"];
+        NSDictionary *savedManifest=[NSJSONSerialization JSONObjectWithData:[NSData dataWithContentsOfFile:manifestPath] options:0 error:NULL];
+        NSDictionary *savedOptions=savedManifest[@"options"];
+        NSDictionary *result=@{@"ok":@YES,@"secretInMemoryManifest":@([options[@"username"] length]||[options[@"password"] length]||[options[@"apiKey"] length]||[options[@"userId"] length]),@"secretInSavedManifest":@([savedOptions[@"username"] length]||[savedOptions[@"password"] length]||[savedOptions[@"apiKey"] length]||[savedOptions[@"userId"] length]),@"keychainCredentialCount":@([credentials isKindOfClass:NSDictionary.class]?credentials.count:0),@"credentialReference":@([options[@"credentialRef"] boolValue]),@"archiveExists":@([service[@"archivePath"] length]&&[NSFileManager.defaultManager fileExistsAtPath:service[@"archivePath"]])};
+        NSData *json=[NSJSONSerialization dataWithJSONObject:result options:0 error:NULL];fwrite(json.bytes,1,json.length,stdout);
+        [ServiceStore remove:identifier];OSStatus removedStatus=errSecSuccess;HostSecureStoreRead(@"media-server",identifier,&removedStatus);
+        if(removedStatus!=errSecItemNotFound)return 6;
+        return 0;
+    }
     if(argc==4 && (strcmp(argv[1],"--update")==0||strcmp(argv[1],"--update-manual")==0)){
         BOOL manual=strcmp(argv[1],"--update-manual")==0;
         NSError *error=nil;NSMutableDictionary *old=[[MediaPackageImporter importFile:[NSURL fileURLWithPath:[NSString stringWithUTF8String:argv[2]]] error:&error] mutableCopy];

@@ -44,6 +44,7 @@
 #import <objc/runtime.h>
 
 extern BOOL PlaybackCoordinatorRunSmokeChecks(void);
+extern BOOL LiveCatalogRunSmokeChecks(void);
 extern BOOL PlaybackGestureRunSmokeChecks(void);
 extern void ImportSnapshotRunSmokeChecksAsync(void (^completion)(BOOL passed));
 extern BOOL CicadaBudgetRunSmokeChecks(void);
@@ -78,6 +79,7 @@ extern BOOL CicadaBudgetRunSmokeChecks(void);
 - (void)beginPlaybackPriority;
 - (void)togglePlayPause;
 - (void)avItemStalled:(NSNotification *)notification;
+- (void)checkRemotePlaybackProgressForItem:(AVPlayerItem *)item generation:(NSUInteger)generation;
 - (void)playRemote:(NSDictionary *)channel;
 - (void)tryAlternateSource;
 - (void)stopPlayback;
@@ -444,6 +446,7 @@ static void next(NSArray *steps, NSUInteger index) {
       [UIView setAnimationsEnabled:NO];
       failures = [NSMutableArray array];
       check(PlaybackCoordinatorRunSmokeChecks(),@"playback coordinator ownership, commands and interruptions");
+      check(LiveCatalogRunSmokeChecks(),@"live catchup identity, disabled sources and catalog sizing");
       check(PlaybackGestureRunSmokeChecks(),@"live volume displacement is independent of gesture event frequency");
       check(CicadaBudgetRunSmokeChecks(),@"Cicada first-frame budget excludes paused time");
       check([CNPlayerCrashGuard install], @"CNPlayer thumbnail exception guard installs");
@@ -1014,10 +1017,29 @@ static void next(NSArray *steps, NSUInteger index) {
           }},
           ^{
             check(![[root valueForKey:@"remotePlaybackWanted"] boolValue] && hlsPlayer.rate==0,@"buffer recovery cannot undo user pause");
+            NSUInteger generation=[[root valueForKey:@"playbackGeneration"] unsignedIntegerValue];
+            [root setValue:@(CACurrentMediaTime()) forKey:@"remoteProgressSampleTime"];
+            [root setValue:@(CACurrentMediaTime()-30) forKey:@"remoteProgressLastAdvanceTime"];
+            [root setValue:@(CMTimeGetSeconds(hlsPlayer.currentTime)) forKey:@"remoteProgressPosition"];
+            [root checkRemotePlaybackProgressForItem:hlsPlayer.currentItem generation:generation];
+            check([root valueForKey:@"avPlayer"]==hlsPlayer && [[root valueForKey:@"remoteProgressLastAdvanceTime"] doubleValue]==0,@"progress watchdog clears its baseline while paused");
             [root togglePlayPause];
           },
           ^{
             check([[root valueForKey:@"remotePlaybackWanted"] boolValue],@"user can resume same item after buffering");
+            NSUInteger generation=[[root valueForKey:@"playbackGeneration"] unsignedIntegerValue];
+            [root setValue:@(CACurrentMediaTime()) forKey:@"remoteProgressSampleTime"];
+            [root setValue:@(CACurrentMediaTime()-30) forKey:@"remoteProgressLastAdvanceTime"];
+            [root setValue:@(CMTimeGetSeconds(hlsPlayer.currentTime)-1) forKey:@"remoteProgressPosition"];
+            [root checkRemotePlaybackProgressForItem:hlsPlayer.currentItem generation:generation];
+            check([root valueForKey:@"avPlayer"]==hlsPlayer && CACurrentMediaTime()-[[root valueForKey:@"remoteProgressLastAdvanceTime"] doubleValue]<2,@"media clock advancement resets the stall budget");
+            [root setValue:@(CACurrentMediaTime()) forKey:@"remoteProgressSampleTime"];
+            [root setValue:@(CACurrentMediaTime()-30) forKey:@"remoteProgressLastAdvanceTime"];
+            [root setValue:@(CMTimeGetSeconds(hlsPlayer.currentTime)) forKey:@"remoteProgressPosition"];
+            [root checkRemotePlaybackProgressForItem:hlsPlayer.currentItem generation:generation-1];
+            check([root valueForKey:@"avPlayer"]==hlsPlayer,@"stale playback generations cannot initiate recovery");
+            [root checkRemotePlaybackProgressForItem:hlsPlayer.currentItem generation:generation];
+            check([root valueForKey:@"avPlayer"]!=hlsPlayer && [[root valueForKey:@"remoteRetryCount"] integerValue]==1,@"progress watchdog performs one same-source reconnect after a sustained stall");
             [root performSelector:NSSelectorFromString(@"stopPlayback")];
             check(hlsPlayer.currentItem==nil,@"switch/stop detaches HLS observers and item");
             NSArray *arguments=NSProcessInfo.processInfo.arguments;NSUInteger at=[arguments indexOfObject:@"--smoke-port"];NSString *port=arguments[at+1];NSString *url=[NSString stringWithFormat:@"http://127.0.0.1:%@/video.mp4",port];

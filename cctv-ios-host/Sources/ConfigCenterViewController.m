@@ -158,6 +158,7 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
 
 @interface ConfigCenterViewController () <UITextFieldDelegate, UITableViewDragDelegate, UITableViewDropDelegate>
 - (void)promptUdpxyConfiguration;
+- (NSURL *)probeURLForProfile:(NSDictionary *)profile;
 @property(nonatomic, strong) NSArray<NSDictionary *> *profiles;
 @property(nonatomic, strong) NSArray<NSDictionary *> *allProfiles;
 @property(nonatomic, strong) UIScrollView *kindScroll;
@@ -657,6 +658,8 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     self.dashboardSummaryLabel=[UILabel new];
     self.dashboardSummaryLabel.translatesAutoresizingMaskIntoConstraints=NO;
     self.dashboardSummaryLabel.font=HostRoundedFont(13,UIFontWeightSemibold,UIFontTextStyleSubheadline);
+    self.dashboardSummaryLabel.numberOfLines=0;
+    self.dashboardSummaryLabel.adjustsFontForContentSizeCategory=YES;
     self.dashboardSummaryLabel.textColor=HostText();
     self.dashboardSummaryLabel.text=@"资源架构总览";
     [self.dashboardCard addSubview:self.dashboardSummaryLabel];
@@ -699,6 +702,7 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
         tile.layer.borderWidth=0.55;
         HostSetLayerBorderColor(tile,HostBorder());
         tile.accessibilityIdentifier=[@"resource-metric-" stringByAppendingString:spec[@"id"]];
+        tile.accessibilityLabel=spec[@"title"];
         HostInstallPressFeedback(tile);
         [tile addTarget:self action:@selector(handleDashboardMetricTap:) forControlEvents:UIControlEventTouchUpInside];
 
@@ -765,7 +769,7 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
         qBtn.accessibilityIdentifier=[@"resource-quick." stringByAppendingString:qSpec[@"id"]];
         HostInstallPressFeedback(qBtn);
         [qBtn addTarget:self action:NSSelectorFromString(qSpec[@"sel"]) forControlEvents:UIControlEventTouchUpInside];
-        [qBtn.heightAnchor constraintEqualToConstant:31].active=YES;
+        [qBtn.heightAnchor constraintGreaterThanOrEqualToConstant:44].active=YES;
         [self.dashboardActionsStack addArrangedSubview:qBtn];
         [qButtons addObject:qBtn];
     }
@@ -799,9 +803,17 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
 
 - (void)updateDashboardCard {
     if(!self.dashboardCard)return;
-    NSUInteger total=self.allProfiles.count,enabledSubs=0,totalServices=0,runningServices=0,catalogs=0,attention=0;
+    NSUInteger total=self.allProfiles.count,enabledSubs=0,totalServices=0,runningServices=0,catalogs=0,attention=0,unprobed=0,failed=0;
+    NSTimeInterval latestCheck=0;
     for(NSDictionary *p in self.allProfiles){
         if([self profile:p matchesKind:@"attention"])attention++;
+        NSString *source=[p[@"source"] isKindOfClass:NSString.class]?p[@"source"]:@"";
+        if([self probeURLForProfile:p]){
+            NSDictionary *result=self.latencyResults[source];
+            latestCheck=MAX(latestCheck,[result[@"checkedAt"] doubleValue]);
+            if(!result)unprobed++;
+            else if(![result[@"probing"] boolValue] && ![result[@"notProbeable"] boolValue] && ![result[@"ok"] boolValue])failed++;
+        }
         if([p[@"type"] isEqual:@"plugin"]){
             totalServices++;
             NSString *source=[p[@"source"] isKindOfClass:NSString.class]?p[@"source"]:@"";
@@ -813,7 +825,10 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
             enabledSubs++;
         }
     }
-    self.dashboardSummaryLabel.text=[NSString stringWithFormat:@"资源架构总览 · 订阅启用 %lu 项",(unsigned long)enabledSubs];
+    NSString *lastChecked=@"尚无检测记录";
+    if(latestCheck>0){NSDateFormatter *formatter=CCTVResourceListDateFormatter();lastChecked=[NSString stringWithFormat:@"最近检测 %@",[formatter stringFromDate:[NSDate dateWithTimeIntervalSince1970:latestCheck]]];}
+    self.dashboardSummaryLabel.text=[NSString stringWithFormat:@"资源架构总览\n未检测 %lu · 检测失败 %lu\n%@",(unsigned long)unprobed,(unsigned long)failed,lastChecked];
+    self.dashboardSummaryLabel.accessibilityLabel=[NSString stringWithFormat:@"资源架构总览，订阅启用 %lu 项，未检测 %lu 项，检测失败 %lu 项。检测结果仅表示连接状态。",(unsigned long)enabledSubs,(unsigned long)unprobed,(unsigned long)failed];
     if(self.probingResources){
         self.dashboardHealthBadge.text=@"  ⚡ 测速中…  ";
         self.dashboardHealthBadge.textColor=UIColor.systemOrangeColor;
@@ -825,7 +840,7 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
         self.dashboardHealthBadge.backgroundColor=[UIColor.systemOrangeColor colorWithAlphaComponent:0.14];
         HostSetLayerBorderColor(self.dashboardHealthBadge,[UIColor.systemOrangeColor colorWithAlphaComponent:0.35]);
     }else{
-        self.dashboardHealthBadge.text=@"  ● 状态良好  ";
+        self.dashboardHealthBadge.text=@"  ● 无待处理项  ";
         UIColor *okColor=[UIColor colorWithRed:0.19 green:0.82 blue:0.35 alpha:1.0];
         self.dashboardHealthBadge.textColor=okColor;
         self.dashboardHealthBadge.backgroundColor=HostSuccessSurface();
@@ -842,6 +857,8 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
         self.dashboardMetricValueLabels[i].text=values[i];
         BOOL active=[self.selectedKind isEqualToString:kinds[i]];
         UIButton *tile=self.dashboardMetricButtons[i];
+        tile.accessibilityValue=values[i];
+        tile.accessibilityTraits=UIAccessibilityTraitButton | (active?UIAccessibilityTraitSelected:0);
         tile.backgroundColor=active?HostSelectedSurface():HostCard();
         HostSetLayerBorderColor(tile,active?[HostAccent() colorWithAlphaComponent:0.45]:HostBorder());
         self.dashboardMetricValueLabels[i].textColor=active?HostAccent():(i==3&&attention>0?UIColor.systemOrangeColor:HostText());
@@ -1280,7 +1297,7 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
         [session finishTasksAndInvalidate];
         dispatch_async(dispatch_get_main_queue(),^{
             ConfigCenterViewController *owner=weakSelf;if(!owner)return;
-            owner.latencyResults[source]=result;
+            NSMutableDictionary *dated=[result mutableCopy];dated[@"checkedAt"]=@(NSDate.date.timeIntervalSince1970);owner.latencyResults[source]=dated;
             [owner updateDashboardCard];
             if([owner.sortMode isEqual:@"latency"])[owner reloadProfiles];
             else [owner reloadVisibleRowForSource:source];
@@ -1338,7 +1355,7 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
         NSDate *start=[NSDate date];
         void (^recordResult)(NSDictionary *) = ^(NSDictionary *result){
             dispatch_async(dispatch_get_main_queue(),^{
-                ConfigCenterViewController *owner=weakSelf;if(!owner||!source.length)return;owner.latencyResults[source]=result;
+                ConfigCenterViewController *owner=weakSelf;if(!owner||!source.length)return;NSMutableDictionary *dated=[result mutableCopy];dated[@"checkedAt"]=@(NSDate.date.timeIntervalSince1970);owner.latencyResults[source]=dated;
                 [owner reloadVisibleRowForSource:source];
             });
             dispatch_group_leave(group);

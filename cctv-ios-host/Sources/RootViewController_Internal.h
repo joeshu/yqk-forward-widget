@@ -459,6 +459,10 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 @property (nonatomic, assign) BOOL avLayerObserved;
 @property (nonatomic) BOOL avKeepUpObserved;
 @property (nonatomic) BOOL remotePlaybackWanted;
+@property (nonatomic, strong) NSTimer *remoteProgressWatchdog;
+@property (nonatomic) NSTimeInterval remoteProgressSampleTime;
+@property (nonatomic) NSTimeInterval remoteProgressLastAdvanceTime;
+@property (nonatomic) double remoteProgressPosition;
 @property (nonatomic) NSTimeInterval playbackPriorityUntil;
 @property (nonatomic, strong) AVPlayer *avPlayer;
 @property (nonatomic, strong) AVPlayerLayer *avLayer;
@@ -517,8 +521,9 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 @property (nonatomic, strong) NSArray<NSDictionary *> *shownChannels;
 @property (nonatomic, strong) NSArray<NSDictionary *> *channelIndexSourceArray;
 @property (nonatomic, strong) NSDictionary<NSString *, NSDictionary *> *channelIndexByID;
-@property (nonatomic, strong) NSDictionary<NSString *, NSDictionary *> *catchupIndexByGroupKey;
-@property (nonatomic, strong) NSDictionary<NSString *, NSDictionary *> *catchupIndexByCanonical;
+@property (nonatomic, strong) NSDictionary<NSString *, NSArray<NSDictionary *> *> *channelIndexByGroupKey;
+@property (nonatomic, strong) NSDictionary<NSString *, NSArray<NSDictionary *> *> *catchupIndexByGroupKey;
+@property (nonatomic, strong) NSDictionary<NSString *, NSArray<NSDictionary *> *> *catchupIndexByCanonical;
 @property (nonatomic, strong) NSDictionary<NSString *, NSString *> *nativeIDIndexByName;
 @property (nonatomic, assign) BOOL catchupOnlyFilter;
 @property (nonatomic, copy) NSString *cachedCatalogFontCategory;
@@ -699,6 +704,7 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller;
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls;
 - (void)finishConfigurationImport:(NSData *)data;
+- (void)restoreEPGNotifications:(NSDictionary *)reminders replacing:(NSDictionary *)oldReminders;
 @end
 
 @interface RootViewController (Catalog)
@@ -807,6 +813,7 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 - (void)cicadaAdapterDidComplete:(id)adapter;
 - (void)startRemoteURL:(NSString *)url generation:(NSUInteger)generation;
 - (void)avItemStalled:(NSNotification *)n;
+- (void)checkRemotePlaybackProgressForItem:(AVPlayerItem *)item generation:(NSUInteger)generation;
 - (void)recoverRemoteFailureForItem:(AVPlayerItem *)item error:(NSError *)error;
 - (void)avItemFailed:(NSNotification *)n;
 - (NSDictionary *)nextUntriedAlternateChannel;
@@ -857,6 +864,9 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 @end
 
 @interface RootViewController (StreamMetrics)
+- (void)startRemoteProgressWatchdogForItem:(AVPlayerItem *)item generation:(NSUInteger)generation;
+- (void)stopRemoteProgressWatchdog;
+- (void)checkRemotePlaybackProgressForItem:(AVPlayerItem *)item generation:(NSUInteger)generation;
 - (NSString *)formatBitrateMbps:(double)bps;
 - (NSString *)resolutionTierTagForSize:(CGSize)size;
 - (NSString *)codecNameFromFourCC:(FourCharCode)subType;

@@ -22,6 +22,36 @@ static BOOL MediaPlaybackIsWebURL(NSString *value) {
     return [@[@"http",@"https"] containsObject:parts.scheme.lowercaseString]&&parts.host.length>0;
 }
 
+// Never use signed URLs or array positions as durable identities. A name is
+// usable only if it uniquely identifies the entry within the current list.
+static NSString *MediaPlaybackNameKey(NSDictionary *entry, NSArray *siblings) {
+    NSString *name=[[MediaPlaybackString(entry[@"name"]) stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] lowercaseString];
+    if(!name.length)return @"";
+    NSUInteger matches=0;
+    for(id raw in siblings){
+        if(![raw isKindOfClass:NSDictionary.class])continue;
+        NSString *other=[[MediaPlaybackString(raw[@"name"]) stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] lowercaseString];
+        if([other isEqual:name])matches++;
+    }
+    return matches==1?[@"name:" stringByAppendingString:name]:@"";
+}
+
+static NSString *MediaPlaybackStableKey(NSDictionary *entry, NSArray *siblings) {
+    NSString *identifier=MediaPlaybackString(entry[@"id"]);
+    if(identifier.length&&!MediaPlaybackIsWebURL(identifier)){
+        NSUInteger matches=0;
+        for(id raw in siblings)if([raw isKindOfClass:NSDictionary.class]&&[MediaPlaybackString(raw[@"id"]) isEqual:identifier])matches++;
+        if(matches==1)return [@"id:" stringByAppendingString:identifier];
+    }
+    return MediaPlaybackNameKey(entry,siblings);
+}
+
+static BOOL MediaPlaybackSavedIdentityMatches(NSString *stable, NSString *nameKey, NSString *savedID, NSString *savedName) {
+    if([stable hasPrefix:@"id:"]&&savedID.length&&[[stable substringFromIndex:3] isEqual:savedID])return YES;
+    NSString *name=[[savedName stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] lowercaseString];
+    return name.length&&[nameKey hasPrefix:@"name:"]&&[[nameKey substringFromIndex:5] isEqual:name];
+}
+
 static NSDictionary *MediaPlaybackComponents(NSDictionary *context, NSInteger lineIndex, NSInteger episodeIndex) {
     NSDictionary *source = [context[@"source"] isKindOfClass:NSDictionary.class] ? context[@"source"] : @{};
     NSDictionary *item = [context[@"item"] isKindOfClass:NSDictionary.class] ? context[@"item"] : @{};
@@ -32,7 +62,7 @@ static NSDictionary *MediaPlaybackComponents(NSDictionary *context, NSInteger li
     NSArray *seasonLines=[season[@"lines"] isKindOfClass:NSArray.class]?season[@"lines"]:@[];
     NSString *seasonID=MediaPlaybackString(season[@"id"]);
     if(MediaPlaybackIsWebURL(seasonID))seasonID=@"";
-    NSString *seasonKey=seasonID.length?seasonID:[NSString stringWithFormat:@"index:%ld",(long)seasonIndex];
+    NSString *seasonKey=MediaPlaybackStableKey(season,seasons);
     NSArray *lines = [detail[@"lines"] isKindOfClass:NSArray.class] ? detail[@"lines"] : @[];
     if(seasonLines.count)lines=seasonLines;
     NSDictionary *line = lineIndex >= 0 && lineIndex < (NSInteger)lines.count && [lines[(NSUInteger)lineIndex] isKindOfClass:NSDictionary.class] ? lines[(NSUInteger)lineIndex] : @{};
@@ -46,8 +76,14 @@ static NSDictionary *MediaPlaybackComponents(NSDictionary *context, NSInteger li
     // Some sources use the signed media URL itself as an episode ID. Never persist it.
     if (MediaPlaybackIsWebURL(lineID)) lineID=@"";
     if (MediaPlaybackIsWebURL(episodeID)) episodeID=@"";
-    NSString *lineKey=lineID.length?lineID:[NSString stringWithFormat:@"index:%ld",(long)lineIndex];
-    NSString *episodeKey=episodeID.length?episodeID:[NSString stringWithFormat:@"index:%ld",(long)episodeIndex];
+    NSString *lineKey=MediaPlaybackStableKey(line,lines);
+    NSString *episodeKey=MediaPlaybackStableKey(episode,episodes);
+    BOOL identityReliable=lineKey.length&&episodeKey.length&&(!season.count||seasonKey.length);
+    // A unique per-position key still permits display of ambiguous history, but
+    // historyEntryForContext will never apply it as a resume position.
+    NSString *storedLineKey=lineKey.length?lineKey:[NSString stringWithFormat:@"index:%ld",(long)lineIndex];
+    NSString *storedEpisodeKey=episodeKey.length?episodeKey:[NSString stringWithFormat:@"index:%ld",(long)episodeIndex];
+    NSString *storedSeasonKey=seasonKey.length?seasonKey:[NSString stringWithFormat:@"index:%ld",(long)seasonIndex];
     NSString *title = MediaPlaybackString(detail[@"name"] ?: item[@"name"]);
     NSString *episodeName = MediaPlaybackString(episode[@"name"]);
     if (!episodeName.length) episodeName = [NSString stringWithFormat:@"第 %ld 集", (long)episodeIndex + 1];
@@ -56,10 +92,13 @@ static NSDictionary *MediaPlaybackComponents(NSDictionary *context, NSInteger li
                                   @"remarks": MediaPlaybackString(item[@"remarks"])};
     return @{@"sourceID": sourceID, @"sourceName": MediaPlaybackString(source[@"name"]),
              @"provider": provider, @"itemID": itemID, @"lineID": lineID,
-             @"episodeID": episodeID, @"episodeName": episodeName, @"lineName": MediaPlaybackString(line[@"name"]),
+             @"episodeID": episodeID, @"episodeName": episodeName, @"episodeNameSynthetic":@(!MediaPlaybackString(episode[@"name"]).length), @"lineName": MediaPlaybackString(line[@"name"]),
              @"item": historyItem, @"lineIndex": @(MAX(0, lineIndex)), @"episodeIndex": @(MAX(0, episodeIndex)),
-             @"seasonIndex":@(season.count?seasonIndex:-1), @"seasonID":seasonID,
-             @"key": MediaPlaybackCompositeKey(season.count?@[sourceID, provider, itemID, seasonKey, lineKey, episodeKey]:@[sourceID, provider, itemID, lineKey, episodeKey]),
+             @"seasonIndex":@(season.count?seasonIndex:-1), @"seasonID":seasonID, @"seasonName":MediaPlaybackString(season[@"name"]),
+             @"lineStableKey":lineKey, @"episodeStableKey":episodeKey, @"seasonStableKey":seasonKey,
+             @"lineNameKey":MediaPlaybackNameKey(line,lines), @"episodeNameKey":MediaPlaybackNameKey(episode,episodes),
+             @"seasonNameKey":MediaPlaybackNameKey(season,seasons), @"identityReliable":@(identityReliable),
+             @"key": MediaPlaybackCompositeKey(season.count?@[sourceID, provider, itemID, storedSeasonKey, storedLineKey, storedEpisodeKey]:@[sourceID, provider, itemID, storedLineKey, storedEpisodeKey]),
              @"seriesKey": MediaPlaybackCompositeKey(@[sourceID, provider, itemID])};
 }
 
@@ -75,13 +114,16 @@ static NSDictionary *MediaPlaybackComponents(NSDictionary *context, NSInteger li
         NSString *lineID=MediaPlaybackString(clean[@"lineID"]),*episodeID=MediaPlaybackString(clean[@"episodeID"]);
         if(MediaPlaybackIsWebURL(lineID)){clean[@"lineID"]=@"";lineID=@"";migrated=YES;}
         if(MediaPlaybackIsWebURL(episodeID)){clean[@"episodeID"]=@"";episodeID=@"";migrated=YES;}
-        NSString *lineKey=lineID.length?lineID:[NSString stringWithFormat:@"index:%ld",(long)[clean[@"lineIndex"] integerValue]];
-        NSString *episodeKey=episodeID.length?episodeID:[NSString stringWithFormat:@"index:%ld",(long)[clean[@"episodeIndex"] integerValue]];
+        NSString *lineKey=MediaPlaybackString(clean[@"lineStableKey"]);
+        NSString *episodeKey=MediaPlaybackString(clean[@"episodeStableKey"]);
+        if(!lineKey.length)lineKey=lineID.length?lineID:[NSString stringWithFormat:@"index:%ld",(long)[clean[@"lineIndex"] integerValue]];
+        if(!episodeKey.length)episodeKey=episodeID.length?episodeID:[NSString stringWithFormat:@"index:%ld",(long)[clean[@"episodeIndex"] integerValue]];
         NSMutableArray *parts=[NSMutableArray arrayWithArray:@[MediaPlaybackString(clean[@"sourceID"]),MediaPlaybackString(clean[@"provider"]),MediaPlaybackString(clean[@"itemID"])]];
         NSNumber *seasonIndex=[clean[@"seasonIndex"] isKindOfClass:NSNumber.class]?clean[@"seasonIndex"]:nil;
         NSString *seasonID=MediaPlaybackString(clean[@"seasonID"]);
         if(seasonID.length||(seasonIndex&&seasonIndex.integerValue>=0)){
-            [parts addObject:seasonID.length?seasonID:[NSString stringWithFormat:@"index:%ld",(long)seasonIndex.integerValue]];
+            NSString *seasonKey=MediaPlaybackString(clean[@"seasonStableKey"]);
+            [parts addObject:seasonKey.length?seasonKey:(seasonID.length?seasonID:[NSString stringWithFormat:@"index:%ld",(long)seasonIndex.integerValue])];
         }
         [parts addObjectsFromArray:@[lineKey,episodeKey]];
         NSString *key=MediaPlaybackCompositeKey(parts);
@@ -99,8 +141,26 @@ static NSDictionary *MediaPlaybackComponents(NSDictionary *context, NSInteger li
 }
 + (NSDictionary *)historyEntryForContext:(NSDictionary *)context lineIndex:(NSInteger)lineIndex episodeIndex:(NSInteger)episodeIndex {
     @synchronized(self){
-        NSString *key = MediaPlaybackComponents(context ?: @{}, lineIndex, episodeIndex)[@"key"];
-        for (NSDictionary *entry in self.watchHistory) if ([entry[@"key"] isEqual:key]) return entry;
+        NSDictionary *parts=MediaPlaybackComponents(context ?: @{}, lineIndex, episodeIndex);
+        if(![parts[@"identityReliable"] boolValue])return nil;
+        for (NSDictionary *entry in self.watchHistory) {
+            if(![entry[@"sourceID"] isEqual:parts[@"sourceID"]]||![entry[@"provider"] isEqual:parts[@"provider"]]||![entry[@"itemID"] isEqual:parts[@"itemID"]])continue;
+            if(!MediaPlaybackSavedIdentityMatches(parts[@"lineStableKey"],parts[@"lineNameKey"],MediaPlaybackString(entry[@"lineID"]),MediaPlaybackString(entry[@"lineName"])))continue;
+            NSString *savedEpisodeID=MediaPlaybackString(entry[@"episodeID"]);
+            NSString *savedEpisodeName=MediaPlaybackString(entry[@"episodeName"]);
+            BOOL synthetic=[entry[@"episodeNameSynthetic"] boolValue];
+            if(!entry[@"episodeNameSynthetic"]&&!savedEpisodeID.length){
+                NSString *legacyFallback=[NSString stringWithFormat:@"第 %ld 集",(long)[entry[@"episodeIndex"] integerValue]+1];
+                synthetic=[savedEpisodeName isEqual:legacyFallback];
+            }
+            if(synthetic&&!savedEpisodeID.length)continue;
+            if(!MediaPlaybackSavedIdentityMatches(parts[@"episodeStableKey"],parts[@"episodeNameKey"],savedEpisodeID,savedEpisodeName))continue;
+            BOOL hasSeason=[parts[@"seasonIndex"] integerValue]>=0;
+            BOOL savedSeason=[entry[@"seasonIndex"] respondsToSelector:@selector(integerValue)]&&[entry[@"seasonIndex"] integerValue]>=0;
+            if(hasSeason!=savedSeason)continue;
+            if(hasSeason&&!MediaPlaybackSavedIdentityMatches(parts[@"seasonStableKey"],parts[@"seasonNameKey"],MediaPlaybackString(entry[@"seasonID"]),MediaPlaybackString(entry[@"seasonName"])))continue;
+            return entry;
+        }
         return nil;
     }
 }
@@ -124,8 +184,11 @@ static NSDictionary *MediaPlaybackComponents(NSDictionary *context, NSInteger li
     entry[@"duration"] = @(duration);
     entry[@"completed"] = @(finished);
     entry[@"updatedAt"] = NSDate.date;
+    NSDictionary *previous=[self historyEntryForContext:context lineIndex:lineIndex episodeIndex:episodeIndex];
     NSMutableArray *rows = [self.watchHistory mutableCopy];
-    NSIndexSet *matches = [rows indexesOfObjectsPassingTest:^BOOL(NSDictionary *candidate, NSUInteger index, BOOL *stop) { return [candidate[@"key"] isEqual:entry[@"key"]]; }];
+    NSIndexSet *matches = [rows indexesOfObjectsPassingTest:^BOOL(NSDictionary *candidate, NSUInteger index, BOOL *stop) {
+        return [candidate[@"key"] isEqual:entry[@"key"]]||(previous&&[candidate[@"key"] isEqual:previous[@"key"]]);
+    }];
     [rows removeObjectsAtIndexes:matches];
     [rows insertObject:entry atIndex:0];
     if (rows.count > MediaWatchHistoryLimit) [rows removeObjectsInRange:NSMakeRange(MediaWatchHistoryLimit, rows.count - MediaWatchHistoryLimit)];

@@ -6,6 +6,7 @@ FOUNDATION_EXPORT NSNotificationName const ProfileStoreMetadataDidChangeNotifica
 + (BOOL)isHTTP:(id)source;
 + (NSDictionary *)metadata:(NSString *)source;
 + (void)update:(NSString *)source values:(NSDictionary *)values;
++ (BOOL)replaceBackupMetadata:(NSDictionary *)profiles error:(NSError **)error;
 + (void)removeValueForKey:(NSString *)key source:(NSString *)source;
 + (void)remove:(NSString *)source;
 + (NSArray<NSString *> *)orderedSources:(NSArray<NSString *> *)sources;

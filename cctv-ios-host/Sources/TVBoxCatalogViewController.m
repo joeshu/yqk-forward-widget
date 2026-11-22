@@ -207,6 +207,7 @@
     self.tableView.tableHeaderView=header;
     UIRefreshControl *rc=[UIRefreshControl new];
     rc.tintColor=HostAccent();
+    rc.attributedTitle=[[NSAttributedString alloc] initWithString:@"下拉重新显示本地合集；远程更新请在资源页选择“刷新合集”"];
     [rc addTarget:self action:@selector(pullRefreshCatalog:) forControlEvents:UIControlEventValueChanged];
     self.refreshControl=rc;
     [self updateCatalogSummary];
@@ -229,10 +230,12 @@
     }
 }
 - (void)pullRefreshCatalog:(UIRefreshControl *)sender {
+    [self rebuildFilteredCatalogCache];
     [self updateCatalogSummary];
     [self updateHeaderLayoutIfNeeded];
     [self.tableView reloadData];
     [self updateEmptyState];
+    [self showTransientPrompt:@"已重载本地合集 · 远程更新请在资源页选择“刷新合集”"];
     __weak typeof(sender) weakSender=sender;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,250*NSEC_PER_MSEC),dispatch_get_main_queue(),^{[weakSender endRefreshing];});
 }

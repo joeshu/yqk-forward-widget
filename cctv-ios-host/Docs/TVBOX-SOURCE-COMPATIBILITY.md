@@ -13,7 +13,7 @@ responses retain the 2 MiB limit.
 | `type: 0` HTTP API | Native MacCMS JSON/XML adapter |
 | `type: 1` or `type: 4` HTTP API | Native TVBox JSON adapter |
 | `.js`, `.mjs`, `.cjs`, `.js.md5`, `.py`, `.py.md5` | Selected script is downloaded and passed to the existing importer |
-| `type: 3` JAR / `csp_*.jar` | Unsupported on iOS; requires an Android/JAR runtime |
+| `type: 3` JAR / `csp_*.jar` | Partial support through the bundled JAR runtime where included, or compatible bridge adapters. Android UI, native libraries and unsupported Android APIs remain unavailable; successful parsing does not establish that a site plays on a device. See `JAR-RUNTIME-20261110.md`. |
 | `lives` URL | Added as an individual live subscription when selected |
 
 Basic-auth URL user information is converted to an `Authorization` header and

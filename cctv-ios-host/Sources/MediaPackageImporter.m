@@ -1,6 +1,7 @@
 #import "MediaPackageImporter.h"
 #import "ResourceContentInspection.h"
 #import "ServiceStore.h"
+#import "HostSecureStore.h"
 #include <zlib.h>
 #import <CommonCrypto/CommonDigest.h>
 
@@ -396,6 +397,7 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     NSString *identifier=NSUUID.UUID.UUIDString,*stage=[[ServiceStore directory] stringByAppendingPathComponent:[@".import-" stringByAppendingString:identifier]];
     NSString *package=[stage stringByAppendingPathComponent:@"package"];NSFileManager *fm=NSFileManager.defaultManager;
     if(![fm createDirectoryAtPath:package withIntermediateDirectories:YES attributes:nil error:error])return nil;
+    __block BOOL credentialsStored=NO;
     NSDictionary *service=nil;BOOL isArchive=[file.pathExtension.lowercaseString isEqual:@"zip"]||(bytes.length>=4&&memcmp(bytes.bytes,"PK\003\004",4)==0);
     @try {
         if(ResourceContentIsHTML(bytes)){PackageError(error,@"此文件是 HTML 网页，请导入网页中的资源直链");return nil;}
@@ -406,6 +408,18 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
             NSURL *url=[connection[@"url"] isKindOfClass:NSString.class]?[NSURL URLWithString:connection[@"url"]]:nil;
             if(!url.host.length||![@[@"http",@"https"] containsObject:url.scheme.lowercaseString]||url.user.length||url.password.length){PackageError(error,@"服务器地址必须是 HTTP/HTTPS，账号请填写到独立字段");return nil;}
             NSMutableDictionary *options=[NSMutableDictionary dictionary];for(NSString *key in @[@"type",@"url",@"name",@"username",@"password",@"apiKey",@"userId"]){id value=connection[key];if(value&&(![value isKindOfClass:NSString.class]||[value length]>8192)){PackageError(error,@"服务器配置字段无效");return nil;}if(value)options[key]=value;}
+            NSMutableDictionary *credentials=[NSMutableDictionary dictionary];
+            for(NSString *key in @[@"username",@"password",@"apiKey",@"userId"]){
+                NSString *value=options[key];
+                if(value.length)credentials[key]=value;
+                [options removeObjectForKey:key];
+            }
+            if(credentials.count){
+                NSData *secret=[NSJSONSerialization dataWithJSONObject:credentials options:0 error:error];
+                if(!secret || !HostSecureStoreWrite(@"media-server",identifier,secret)){PackageError(error,@"无法安全保存媒体服务器凭据，请检查设备钥匙串后重试");return nil;}
+                credentialsStored=YES;
+                options[@"credentialRef"]=@YES;
+            }
             NSString *source=@"from host_media_servers import ServerSpider\nclass Spider(ServerSpider):\n    pass\n";
             NSDictionary *manifest=@{@"schemaVersion":@1,@"runtime":@"python",@"protocol":@"python-spider",@"moduleType":@"script",@"entry":@"server.py",@"name":options[@"name"]?:connection[@"type"],@"options":options};
             if(![[source dataUsingEncoding:NSUTF8StringEncoding] writeToFile:[package stringByAppendingPathComponent:@"server.py"] options:NSDataWritingAtomic error:error]||![[NSJSONSerialization dataWithJSONObject:manifest options:0 error:error] writeToFile:[package stringByAppendingPathComponent:@"cctvhost.json"] options:NSDataWritingAtomic error:error])return nil;
@@ -426,6 +440,28 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
             if(![data writeToFile:[package stringByAppendingPathComponent:name] options:NSDataWritingAtomic error:error])return nil;
         }
         NSMutableDictionary *manifest=[[self inspectDirectory:package runtimeHint:runtimeHint error:error] mutableCopy];if(!manifest)return nil;
+        // Imported media-server ZIPs can include passwords or API keys in the
+        // manifest. Move those values to the device-only keychain before the
+        // candidate is retained in the import preview or its recovery snapshot.
+        NSDictionary *serverOptions=[manifest[@"options"] isKindOfClass:NSDictionary.class]?manifest[@"options"]:nil;
+        BOOL serverAdapter=[manifest[@"entry"] isEqual:@"server.py"]&&[@[@"emby",@"jellyfin",@"xtream",@"webdav"] containsObject:serverOptions[@"type"]?:@""];
+        NSMutableDictionary *serverCredentials=[NSMutableDictionary dictionary];
+        if(serverAdapter)for(NSString *key in @[@"username",@"password",@"apiKey",@"userId"]){
+            id value=serverOptions[key];
+            if(value&&(![value isKindOfClass:NSString.class]||[value length]>8192)){PackageError(error,@"媒体服务器凭据字段无效");return nil;}
+            if([value isKindOfClass:NSString.class]&&[value length])serverCredentials[key]=value;
+        }
+        BOOL archiveContainsCredentials=NO;
+        if(serverCredentials.count){
+            NSData *secret=[NSJSONSerialization dataWithJSONObject:serverCredentials options:0 error:error];
+            if(!secret||!HostSecureStoreWrite(@"media-server",identifier,secret)){PackageError(error,@"无法安全保存媒体服务器凭据，请检查设备钥匙串后重试");return nil;}
+            credentialsStored=YES;archiveContainsCredentials=YES;
+            NSMutableDictionary *safeOptions=[serverOptions mutableCopy];[safeOptions removeObjectsForKeys:@[@"username",@"password",@"apiKey",@"userId"]];safeOptions[@"credentialRef"]=@YES;
+            manifest[@"options"]=safeOptions;
+            NSData *safeManifest=[NSJSONSerialization dataWithJSONObject:manifest options:0 error:error];
+            NSString *manifestPath=[manifest[@"packageRoot"] stringByAppendingPathComponent:@"cctvhost.json"];
+            if(!safeManifest||![safeManifest writeToFile:manifestPath options:NSDataWritingAtomic error:error]){PackageError(error,@"无法安全清理媒体服务器清单，未完成导入");return nil;}
+        }
         NSString *launchArguments=@"";
         NSString *playlistPath=@"";
         NSString *epgPath=@"";
@@ -456,7 +492,9 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
             }
         }
         NSString *relative=[manifest[@"packageRoot"] substringFromIndex:stage.length+1];[manifest removeObjectForKey:@"packageRoot"];
-        BOOL zip=isArchive;
+        // Never retain the original archive once its media credentials have
+        // been extracted; it would otherwise remain a second cleartext copy.
+        BOOL zip=isArchive&&!archiveContainsCredentials;
         if(zip && ![bytes writeToFile:[stage stringByAppendingPathComponent:@"source.zip"] options:NSDataWritingAtomic error:error])return nil;
         NSString *target=[[ServiceStore directory] stringByAppendingPathComponent:identifier];
         if(![fm moveItemAtPath:stage toPath:target error:error])return nil;
@@ -472,9 +510,9 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
         else if([ServiceStore isMediaService:importedService]&&[ServiceStore isLiveMediaService:importedService]){importedService[@"playlistPath"]=@"/all.m3u";importedService[@"playlistPathSource"]=@"inferred";}
         if(playlistPath.length){importedService[@"playlistPath"]=playlistPath;importedService[@"playlistPathSource"]=@"inferred";}
         if(epgPath.length){importedService[@"epgPath"]=epgPath;importedService[@"epgPathSource"]=@"inferred";}
-        service=importedService;
+        service=[ServiceStore resolvedService:importedService];
     } @catch(NSException *exception){PackageError(error,@"资源包结构或清单无效，未执行代码");return nil;}
-    @finally {if([fm fileExistsAtPath:stage])[fm removeItemAtPath:stage error:NULL];}
+    @finally {if([fm fileExistsAtPath:stage])[fm removeItemAtPath:stage error:NULL];if(credentialsStored && !service)HostSecureStoreDelete(@"media-server",identifier);}
     return service;
 }
 @end

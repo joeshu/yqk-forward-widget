@@ -408,8 +408,8 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
         @{ @"title":@"运行诊断记录", @"detail":@"按 App 运行分开查看 · 可单次导出、删除或清空", @"action":@"runtimeDiagnostics", @"icon":@"list.bullet.rectangle", @"subgroup":@"会话追踪", @"badge":@"按次归档" },
         @{ @"title":@"日志中心", @"action":@"logs", @"detail":@"总日志与各插件独立日志", @"icon":@"doc.text.magnifyingglass", @"subgroup":@"插件日志", @"badge":@"实时日志" }
       ]},
-      @{ @"category":@"storage", @"icon":@"externaldrive.fill.badge.checkmark", @"subtitle":@"全量配置备份恢复 · 磁盘缓存释放 · 隐私记录清理", @"title":@"数据备份与存储管理", @"footer":@"目录、分类和搜索结果可保存；影片详情仅短时缓存在内存中，播放地址不持久化。清理缓存或恢复默认偏好时，收藏、观看历史、订阅和插件数据会保留。", @"rows":@[
-        @{ @"title":@"导出本机配置", @"detail":@"导出订阅、收藏、观看历史与全量偏好备份", @"action":@"export", @"icon":@"square.and.arrow.up", @"subgroup":@"配置迁移", @"badge":@"JSON 备份" },
+      @{ @"category":@"storage", @"icon":@"externaldrive.fill.badge.checkmark", @"subtitle":@"配置与合集索引备份 · 缓存与记录管理", @"title":@"数据备份与存储管理", @"footer":@"目录、分类和搜索结果可保存；影片详情仅短时缓存在内存中，播放地址不持久化。清理缓存或恢复默认偏好时，收藏、观看历史、订阅和插件数据会保留。", @"rows":@[
+        @{ @"title":@"导出本机配置", @"detail":@"包含订阅、收藏、历史、偏好及合集索引；脚本、服务配置和钥匙串凭据需另行迁移", @"action":@"export", @"icon":@"square.and.arrow.up", @"subgroup":@"配置迁移", @"badge":@"JSON 备份" },
         @{ @"title":@"导入配置文件", @"detail":@"从 JSON 备份恢复配置并立即应用主题与字号", @"action":@"import", @"icon":@"square.and.arrow.down", @"subgroup":@"配置迁移", @"badge":@"恢复备份" },
         @{ @"title":@"恢复默认偏好设置", @"detail":@"重置界面与播放偏好为默认值（保留订阅与收藏）", @"action":@"resetDefaultPreferences", @"icon":@"arrow.counterclockwise.circle", @"subgroup":@"偏好重置", @"role":@"destructive", @"badge":@"重置偏好" },
         @{ @"title":@"清理全部缓存", @"detail":@"节目单、台标与影视元数据缓存", @"icon":@"trash.fill", @"action":@"clearAllCaches", @"subgroup":@"缓存清理", @"role":@"cache" },
@@ -421,7 +421,7 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
         @{ @"title":@"清除节目单预约提醒", @"detail":SettingsEPGRemindersSummaryText(), @"icon":@"bell.slash", @"action":@"clearEPGReminders", @"subgroup":@"记录清理", @"role":@"destructive" },
         @{ @"title":@"清除搜索历史", @"detail":SettingsSearchHistorySummaryText(), @"icon":@"magnifyingglass.circle", @"action":@"clearSearchHistory", @"subgroup":@"记录清理", @"role":@"destructive" }
       ]},
-      @{ @"category":@"about", @"icon":@"info.circle.fill", @"subtitle":@"五大核心模块直达 · 本地沙盒隐私承诺 · 版本检查", @"title":@"服务直达与关于", @"footer":@"只保存在本机，不会上传到任何服务器。内置 Python / Node.js Mobile / JavaScriptCore 引擎在本地沙盒安全运行。", @"rows":@[
+      @{ @"category":@"about", @"icon":@"info.circle.fill", @"subtitle":@"五大核心模块直达 · 本地沙盒隐私承诺 · 版本检查", @"title":@"服务直达与关于", @"footer":@"偏好保存在本机；订阅、节目单及插件会访问所配置的网络来源。", @"rows":@[
         @{ @"title":@"央视直播", @"detail":@"官方 CNPlayerSDK · VDN 自动选线", @"action":@"openTabLive", @"icon":@"tv", @"subgroup":@"核心导航", @"badge":@"直达" },
         @{ @"title":@"M3U / HLS 订阅", @"detail":@"AVPlayer · iOS 系统解码", @"action":@"openTabChannels", @"icon":@"play.rectangle", @"subgroup":@"核心导航", @"badge":@"直达" },
         @{ @"title":@"影视点播库", @"detail":@"Spider / TVBox / MacCMS 聚合影院", @"action":@"openTabMedia", @"icon":@"film", @"subgroup":@"核心导航", @"badge":@"直达" },
@@ -663,10 +663,10 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
         NSArray<NSString *> *texts=@[
             [NSString stringWithFormat:@"  🎨 %@  ", [HostThemePalette currentPalette].displayName],
             [NSString stringWithFormat:@"  📺 画质·%@  ", SettingsPreferredQualityText()],
-            @"  🛡️ 纯本地无上传  "
+            @"  🛡️ 隐私说明  "
         ];
         for(NSUInteger i=0;i<chips.count&&i<texts.count;i++){
-            if([chips[i] isKindOfClass:UILabel.class])((UILabel *)chips[i]).text=texts[i];
+            if([chips[i] isKindOfClass:UIButton.class])[(UIButton *)chips[i] setTitle:texts[i] forState:UIControlStateNormal];
         }
     }
     if(self.heroQuickTilesStack){
@@ -810,6 +810,8 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
     titleLabel.text=@"CCTVHost 2026";
     titleLabel.textColor=HostText();
     titleLabel.font=HostRoundedFont(20.5,UIFontWeightBold,UIFontTextStyleTitle3);
+    titleLabel.numberOfLines=0;
+    titleLabel.adjustsFontForContentSizeCategory=YES;
     [card addSubview:titleLabel];
 
     UILabel *subtitleLabel=[UILabel new];
@@ -819,6 +821,8 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
     subtitleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
     subtitleLabel.adjustsFontSizeToFitWidth=YES;
     subtitleLabel.minimumScaleFactor=0.80;
+    subtitleLabel.numberOfLines=0;
+    subtitleLabel.adjustsFontForContentSizeCategory=YES;
     [card addSubview:subtitleLabel];
 
     UIButton *moreBtn=[UIButton buttonWithType:UIButtonTypeSystem];
@@ -839,7 +843,8 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
 
     UIStackView *chipsStack=[UIStackView new];
     chipsStack.translatesAutoresizingMaskIntoConstraints=NO;
-    chipsStack.axis=UILayoutConstraintAxisHorizontal;
+    BOOL accessibleLayout=UIContentSizeCategoryIsAccessibilityCategory(self.traitCollection.preferredContentSizeCategory);
+    chipsStack.axis=accessibleLayout?UILayoutConstraintAxisVertical:UILayoutConstraintAxisHorizontal;
     chipsStack.spacing=8;
     chipsStack.distribution=UIStackViewDistributionFillProportionally;
     [card addSubview:chipsStack];
@@ -849,32 +854,31 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
     NSArray<NSDictionary *> *chipData=@[
         @{@"text":[NSString stringWithFormat:@"  🎨 %@  ", [HostThemePalette currentPalette].displayName], @"id":@"settings.hero.chip.theme"},
         @{@"text":[NSString stringWithFormat:@"  📺 画质·%@  ", qualityLabel], @"id":@"settings.hero.chip.quality"},
-        @{@"text":@"  🛡️ 纯本地无上传  ", @"id":@"settings.hero.chip.privacy"}
+        @{@"text":@"  🛡️ 隐私说明  ", @"id":@"settings.hero.chip.privacy"}
     ];
     for(NSUInteger idx=0; idx<chipData.count; idx++){
         NSDictionary *item=chipData[idx];
-        UILabel *chip=[UILabel new];
+        UIButton *chip=[UIButton buttonWithType:UIButtonTypeSystem];
         chip.tag=(NSInteger)idx;
         chip.accessibilityIdentifier=item[@"id"];
-        chip.userInteractionEnabled=YES;
-        chip.text=item[@"text"];
-        chip.font=HostRoundedFont(11,UIFontWeightSemibold,UIFontTextStyleCaption2);
-        chip.textColor=HostSecondaryText();
+        [chip setTitle:item[@"text"] forState:UIControlStateNormal];
+        chip.titleLabel.font=HostRoundedFont(11,UIFontWeightSemibold,UIFontTextStyleCaption2);
+        chip.titleLabel.adjustsFontForContentSizeCategory=YES;
+        [chip setTitleColor:HostSecondaryText() forState:UIControlStateNormal];
         chip.backgroundColor=[HostText() colorWithAlphaComponent:0.06];
         chip.layer.cornerRadius=8;
         chip.layer.cornerCurve=kCACornerCurveContinuous;
         chip.layer.borderWidth=0.5;
         HostSetLayerBorderColor(chip,HostBorder());
         chip.clipsToBounds=YES;
-        chip.textAlignment=NSTextAlignmentCenter;
-        UITapGestureRecognizer *tap=[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleHeroSummaryChipTap:)];
-        [chip addGestureRecognizer:tap];
+        [chip.heightAnchor constraintGreaterThanOrEqualToConstant:44].active=YES;
+        [chip addTarget:self action:@selector(handleHeroSummaryChipTap:) forControlEvents:UIControlEventTouchUpInside];
         [chipsStack addArrangedSubview:chip];
     }
 
     UIStackView *quickTilesStack=[UIStackView new];
     quickTilesStack.translatesAutoresizingMaskIntoConstraints=NO;
-    quickTilesStack.axis=UILayoutConstraintAxisHorizontal;
+    quickTilesStack.axis=accessibleLayout?UILayoutConstraintAxisVertical:UILayoutConstraintAxisHorizontal;
     quickTilesStack.spacing=6;
     quickTilesStack.distribution=UIStackViewDistributionFillEqually;
     quickTilesStack.accessibilityIdentifier=@"settings.hero.quickTiles";
@@ -986,7 +990,6 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
         [card.topAnchor constraintEqualToAnchor:header.topAnchor constant:4],
         [card.leadingAnchor constraintEqualToAnchor:header.leadingAnchor constant:16],
         [card.trailingAnchor constraintEqualToAnchor:header.trailingAnchor constant:-16],
-        [card.heightAnchor constraintEqualToConstant:214],
 
         [iconBox.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:16],
         [iconBox.topAnchor constraintEqualToAnchor:card.topAnchor constant:14],
@@ -1000,8 +1003,8 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
 
         [moreBtn.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-14],
         [moreBtn.centerYAnchor constraintEqualToAnchor:iconBox.centerYAnchor],
-        [moreBtn.widthAnchor constraintEqualToConstant:34],
-        [moreBtn.heightAnchor constraintEqualToConstant:34],
+        [moreBtn.widthAnchor constraintEqualToConstant:44],
+        [moreBtn.heightAnchor constraintEqualToConstant:44],
 
         [titleLabel.leadingAnchor constraintEqualToAnchor:iconBox.trailingAnchor constant:14],
         [titleLabel.topAnchor constraintEqualToAnchor:card.topAnchor constant:14],
@@ -1013,23 +1016,25 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
 
         [chipsStack.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:16],
         [chipsStack.trailingAnchor constraintLessThanOrEqualToAnchor:card.trailingAnchor constant:-16],
-        [chipsStack.topAnchor constraintEqualToAnchor:iconBox.bottomAnchor constant:10],
-        [chipsStack.heightAnchor constraintEqualToConstant:24],
+        [chipsStack.topAnchor constraintGreaterThanOrEqualToAnchor:iconBox.bottomAnchor constant:10],
+        [chipsStack.topAnchor constraintGreaterThanOrEqualToAnchor:subtitleLabel.bottomAnchor constant:10],
 
         [quickTilesStack.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:16],
         [quickTilesStack.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-16],
         [quickTilesStack.topAnchor constraintEqualToAnchor:chipsStack.bottomAnchor constant:10],
-        [quickTilesStack.heightAnchor constraintEqualToConstant:48],
+        [quickTilesStack.heightAnchor constraintEqualToConstant:accessibleLayout?210:48],
 
         [searchField.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:16],
         [searchField.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-16],
+        [searchField.topAnchor constraintEqualToAnchor:quickTilesStack.bottomAnchor constant:10],
         [searchField.bottomAnchor constraintEqualToAnchor:card.bottomAnchor constant:-10],
-        [searchField.heightAnchor constraintEqualToConstant:32],
+        [searchField.heightAnchor constraintGreaterThanOrEqualToConstant:44],
 
         [filterScroll.topAnchor constraintEqualToAnchor:card.bottomAnchor constant:10],
         [filterScroll.leadingAnchor constraintEqualToAnchor:header.leadingAnchor],
         [filterScroll.trailingAnchor constraintEqualToAnchor:header.trailingAnchor],
         [filterScroll.heightAnchor constraintEqualToConstant:40],
+        [filterScroll.bottomAnchor constraintEqualToAnchor:header.bottomAnchor],
 
         [filterStack.leadingAnchor constraintEqualToAnchor:filterScroll.contentLayoutGuide.leadingAnchor constant:16],
         [filterStack.trailingAnchor constraintEqualToAnchor:filterScroll.contentLayoutGuide.trailingAnchor constant:-16],
@@ -1040,8 +1045,7 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
     self.table.tableHeaderView=header;
 }
 
-- (void)handleHeroSummaryChipTap:(UITapGestureRecognizer *)recognizer {
-    UIView *chip=recognizer.view;
+- (void)handleHeroSummaryChipTap:(UIButton *)chip {
     if(!chip)return;
     SettingsTriggerHapticSelection();
     HostAnimateSelection(chip);
@@ -1098,7 +1102,7 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
         }]
     ]];
     HostGlassSheetSection *backupDiagSection=[HostGlassSheetSection sectionWithTitle:@"备份与诊断" actions:@[
-        [HostGlassSheetAction actionWithTitle:@"导出本机配置备份" subtitle:@"打包收藏、历史、订阅与插件偏好" value:nil icon:@"square.and.arrow.up" tint:UIColor.systemBlueColor destructive:NO selected:NO handler:^{
+        [HostGlassSheetAction actionWithTitle:@"导出本机配置备份" subtitle:@"包含订阅、收藏、历史、偏好及合集索引；脚本、服务配置和钥匙串凭据需另行迁移" value:nil icon:@"square.and.arrow.up" tint:UIColor.systemBlueColor destructive:NO selected:NO handler:^{
             if(weakSelf.onExportData)weakSelf.onExportData();
         }],
         [HostGlassSheetAction actionWithTitle:@"复制版本与运行环境摘要" subtitle:@"便于反馈问题或留存排查快照" value:nil icon:@"doc.on.doc" tint:UIColor.systemTealColor destructive:NO selected:NO handler:^{
@@ -1130,11 +1134,15 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
 
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
-    if(self.heroHeaderView && fabs(CGRectGetWidth(self.heroHeaderView.frame)-CGRectGetWidth(self.table.bounds))>0.5 && CGRectGetWidth(self.table.bounds)>0){
+    if(self.heroHeaderView && CGRectGetWidth(self.table.bounds)>0){
         CGRect f=self.heroHeaderView.frame;
         f.size.width=CGRectGetWidth(self.table.bounds);
-        self.heroHeaderView.frame=f;
-        self.table.tableHeaderView=self.heroHeaderView;
+        CGFloat height=[self.heroHeaderView systemLayoutSizeFittingSize:CGSizeMake(f.size.width,UILayoutFittingCompressedSize.height) withHorizontalFittingPriority:UILayoutPriorityRequired verticalFittingPriority:UILayoutPriorityFittingSizeLevel].height;
+        if(height>0 && (fabs(CGRectGetWidth(self.heroHeaderView.frame)-f.size.width)>0.5 || fabs(CGRectGetHeight(self.heroHeaderView.frame)-height)>0.5)){
+            f.size.height=ceil(height);
+            self.heroHeaderView.frame=f;
+            self.table.tableHeaderView=self.heroHeaderView;
+        }
     }
     [self updateImmersiveTableInsets];
 }
@@ -1178,7 +1186,8 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
 
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
     [super traitCollectionDidChange:previousTraitCollection];
-    if(previousTraitCollection&&![previousTraitCollection.preferredContentSizeCategory isEqualToString:self.traitCollection.preferredContentSizeCategory]){
+    if(self.isViewLoaded&&previousTraitCollection&&![previousTraitCollection.preferredContentSizeCategory isEqualToString:self.traitCollection.preferredContentSizeCategory]){
+        [self setupHeroHeaderView];
         [self.table reloadData];
     }
 }
@@ -2203,7 +2212,7 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
 }
 
 - (void)showPrivacyStatement {
-    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"隐私说明" message:@"订阅、收藏、观看历史、搜索历史与各项设置都只保存在本机，不会上传到任何服务器。运行诊断默认关闭；开启后的记录也只保存在本机，可随时导出或清空，日志中的播放地址、查询参数、Cookie 与脚本内容会被脱敏。节目单与订阅内容按你配置的地址获取，播放由央视 SDK 或系统播放器完成。" preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"隐私说明" message:@"收藏、观看历史和偏好保存在本机。订阅、节目单、播放和插件会按配置访问对应的网络来源，来源可能收到请求中的地址和认证信息。诊断记录保存在本机，可导出或清空；导出前请检查内容，备份和原始资源可能包含完整地址及凭据。" preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
     [self presentViewController:alert animated:YES completion:nil];
 }

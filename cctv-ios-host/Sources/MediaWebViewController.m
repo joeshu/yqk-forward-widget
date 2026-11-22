@@ -159,10 +159,18 @@ static BOOL MediaWebIsOfficialWatchPageURL(NSURL *url) {
         BOOL targetLoopback=[targetHost isEqualToString:@"localhost"]||[targetHost isEqualToString:@"::1"]||[targetHost isEqualToString:@"[::1]"]||[targetHost hasPrefix:@"127."]||[targetHost hasPrefix:@"169.254."]||[targetHost hasPrefix:@"0."];
         BOOL pageLoopback=[pageHost isEqualToString:@"localhost"]||[pageHost isEqualToString:@"::1"]||[pageHost isEqualToString:@"[::1]"]||[pageHost hasPrefix:@"127."];
         if(error||raw.length>8192||![@[@"http",@"https"] containsObject:url.scheme.lowercaseString]||!url.host.length||url.user.length||url.password.length||(targetLoopback&&!pageLoopback)||[raw rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location!=NSNotFound){[owner recordMediaEvent:@"web_media_extraction_failed" fields:@{@"failure_stage":error?@"javascript_evaluation":@"no_valid_http_media",@"result_has_media_url":@(raw.length>0),@"error_domain":error.domain?:@"",@"error_code":@(error.code)}];owner.resolvingMedia=NO;owner.nativeButton.enabled=YES;owner.navigationItem.prompt=@"尚未取得可交给原生播放器的地址，请先在网页内开始播放";return;}
-        NSMutableDictionary *headers=[MediaPlaybackHeadersFromResult(owner.result) mutableCopy];
-        // Page credentials must not be forwarded to a different media origin.
-        for(NSString *key in headers.allKeys.copy)if([@[@"cookie",@"authorization",@"proxy-authorization"] containsObject:key.lowercaseString])[headers removeObjectForKey:key];
-        if(owner.web.URL.absoluteString.length)headers[@"Referer"]=owner.web.URL.absoluteString;
+        NSURL *originalURL=[NSURL URLWithString:[owner.result[@"url"] isKindOfClass:NSString.class]?owner.result[@"url"]:@""];
+        NSURL *pageURL=owner.web.URL;
+        NSDictionary *pageHeaders=MediaPlaybackHeadersScopedToURL(MediaPlaybackHeadersFromResult(owner.result),originalURL,pageURL);
+        NSMutableDictionary *headers=[MediaPlaybackHeadersScopedToURL(pageHeaders,pageURL,url) mutableCopy];
+        // Cookies are taken only from WebKit's domain/path/secure-matched store.
+        for(NSString *key in headers.allKeys.copy)if([key.lowercaseString isEqual:@"cookie"])[headers removeObjectForKey:key];
+        NSURLComponents *referer=[NSURLComponents componentsWithURL:pageURL resolvingAgainstBaseURL:NO];
+        referer.user=nil;referer.password=nil;referer.query=nil;referer.fragment=nil;
+        if(referer.URL.absoluteString.length){
+            NSDictionary *scopedReferer=MediaPlaybackHeadersScopedToURL(@{@"Referer":referer.URL.absoluteString},pageURL,url);
+            [headers addEntriesFromDictionary:scopedReferer];
+        }
         [owner.web.configuration.websiteDataStore.httpCookieStore getAllCookies:^(NSArray<NSHTTPCookie *> *cookies){dispatch_async(dispatch_get_main_queue(),^{
             MediaWebViewController *page=weakSelf;if(!page||page.didClose||page.mediaGeneration!=generation)return;
             NSMutableArray *matching=[NSMutableArray array];for(NSHTTPCookie *cookie in cookies){NSString *domain=cookie.domain.lowercaseString;BOOL subdomains=[domain hasPrefix:@"."];if(subdomains)domain=[domain substringFromIndex:1];BOOL host=[url.host.lowercaseString isEqual:domain]||(subdomains&&[url.host.lowercaseString hasSuffix:[@"." stringByAppendingString:domain]]);NSString *path=url.path.length?url.path:@"/";NSString *cp=cookie.path.length?cookie.path:@"/";BOOL pathMatch=[path isEqual:cp]||([path hasPrefix:cp]&&([cp hasSuffix:@"/"]||[path hasPrefix:[cp stringByAppendingString:@"/"]]));if(host&&pathMatch&&(!cookie.secure||[url.scheme.lowercaseString isEqual:@"https"])&&(!cookie.expiresDate||[cookie.expiresDate timeIntervalSinceNow]>0))[matching addObject:cookie];}

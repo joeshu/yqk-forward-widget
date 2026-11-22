@@ -112,7 +112,8 @@ class Round11SettingsDeepAuditTests(unittest.TestCase):
         self.assertIn('@"settings.quick.monitor"', self.settings_m)
         self.assertIn('@"settings.quick.cache"', self.settings_m)
         self.assertIn("- (void)handleHeroQuickTileTap:(UIButton *)sender", self.settings_m)
-        self.assertIn("- (void)handleHeroSummaryChipTap:(UITapGestureRecognizer *)recognizer", self.settings_m)
+        self.assertIn("- (void)handleHeroSummaryChipTap:(UIButton *)chip", self.settings_m)
+        self.assertIn("[chip addTarget:self action:@selector(handleHeroSummaryChipTap:) forControlEvents:UIControlEventTouchUpInside]", self.settings_m)
         self.assertIn("- (void)presentHeroQuickActionsSheet:(UIButton *)sender", self.settings_m)
         self.assertIn("- (NSUInteger)totalRowCountForCategory:(NSString *)categoryID", self.settings_m)
 

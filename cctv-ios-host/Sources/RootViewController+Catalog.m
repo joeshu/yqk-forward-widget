@@ -1,6 +1,23 @@
 #import "RootViewController_Internal.h"
 #import "HostGlassActionSheetViewController.h"
 
+static NSString *CCTVCatchupExplicitEPGID(NSDictionary *channel) {
+    NSString *value=[channel[@"epgID"] isKindOfClass:NSString.class]?channel[@"epgID"]:@"";
+    return [[value stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] lowercaseString];
+}
+
+static BOOL CCTVCatchupSourceEnabled(NSDictionary *channel, NSSet<NSString *> *disabled) {
+    NSArray *owners=CCTVStringArrayValue(channel[@"subscriptionSources"]);
+    if(!owners.count)return YES; // Legacy or synthetic channels may not have subscription metadata.
+    for(id owner in owners)if([owner isKindOfClass:NSString.class] && ![disabled containsObject:owner])return YES;
+    return NO;
+}
+
+static BOOL CCTVCatchupIdentityCompatible(NSDictionary *channel, NSDictionary *candidate) {
+    NSString *left=CCTVCatchupExplicitEPGID(channel),*right=CCTVCatchupExplicitEPGID(candidate);
+    return !left.length || !right.length || [left isEqualToString:right];
+}
+
 @implementation RootViewController (Catalog)
 
 - (void)loadChannels {
@@ -355,21 +372,24 @@
     if (![channel isKindOfClass:NSDictionary.class]) return 0;
     if ([channel[@"remoteURL"] length]) {
         NSMutableSet<NSString *> *urls = [NSMutableSet set];
+        NSSet *disabled=[NSSet setWithArray:[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[]];
         NSString *primary = [self stableURLKey:channel[@"remoteURL"]];
-        if (primary.length) [urls addObject:primary];
+        if (primary.length && CCTVCatchupSourceEnabled(channel,disabled)) [urls addObject:primary];
+        [self ensureChannelLookupIndexes];
         NSString *groupKey = CCTVRouteGroupKey(channel);
-        for (NSString *alt in self.altSources[groupKey]) {
-            NSString *k = [self stableURLKey:alt];
+        for (NSDictionary *candidate in self.channelIndexByGroupKey[groupKey]) {
+            if(!CCTVCatchupSourceEnabled(candidate,disabled))continue;
+            NSString *k = [self stableURLKey:candidate[@"remoteURL"]];
             if (k.length) [urls addObject:k];
         }
-        NSArray *owners = CCTVStringArrayValue(channel[@"subscriptionSources"]);
-        return MAX(urls.count, owners.count);
+        return urls.count;
     }
     return [channel[@"routes"] isKindOfClass:NSArray.class] ? [channel[@"routes"] count] : 0;
 }
 - (NSDictionary *)catchupChannelForChannel:(NSDictionary *)channel {
     if (![channel isKindOfClass:NSDictionary.class]) return nil;
-    if ([channel[@"catchupSource"] isKindOfClass:NSString.class] && [channel[@"catchupSource"] length] > 0) return channel;
+    NSSet *disabled=[NSSet setWithArray:[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[]];
+    if ([channel[@"catchupSource"] isKindOfClass:NSString.class] && [channel[@"catchupSource"] length] > 0 && CCTVCatchupSourceEnabled(channel,disabled)) return channel;
     if (![channel[@"remoteURL"] length]) return nil;
     return [self anyCatchupChannelForStation:channel];
 }
@@ -388,17 +408,20 @@
 }
 - (NSDictionary *)anyCatchupChannelForStation:(NSDictionary *)channel {
     if (![channel isKindOfClass:NSDictionary.class]) return nil;
-    if ([channel[@"catchupSource"] isKindOfClass:NSString.class] && [channel[@"catchupSource"] length] > 0 && [channel[@"remoteURL"] length]) return channel;
+    NSSet *disabled=[NSSet setWithArray:[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[]];
+    if ([channel[@"catchupSource"] isKindOfClass:NSString.class] && [channel[@"catchupSource"] length] > 0 && [channel[@"remoteURL"] length] && CCTVCatchupSourceEnabled(channel,disabled)) return channel;
     [self ensureChannelLookupIndexes];
     NSString *groupKey = CCTVRouteGroupKey(channel);
     if (groupKey.length) {
-        NSDictionary *hit = self.catchupIndexByGroupKey[groupKey];
-        if (hit) return hit;
+        for(NSDictionary *candidate in self.catchupIndexByGroupKey[groupKey]) {
+            if(CCTVCatchupSourceEnabled(candidate,disabled) && CCTVCatchupIdentityCompatible(channel,candidate))return candidate;
+        }
     }
     NSString *canonical = [ProfileStore canonicalStationIDForChannel:channel];
     if (canonical.length) {
-        NSDictionary *hit = self.catchupIndexByCanonical[canonical];
-        if (hit) return hit;
+        for(NSDictionary *candidate in self.catchupIndexByCanonical[canonical]) {
+            if(CCTVCatchupSourceEnabled(candidate,disabled) && CCTVCatchupIdentityCompatible(channel,candidate))return candidate;
+        }
     }
     return nil;
 }
@@ -447,20 +470,20 @@
     NSString *cid=[channel[@"id"] isKindOfClass:NSString.class]?channel[@"id"]:@"";
     NSString *name=[channel[@"name"] isKindOfClass:NSString.class]?channel[@"name"]:cid;
     BOOL fav=[self.favorites containsObject:cid];
-    NSString *epgNow=self.epgCache[cid][@"now"];
+    NSString *subtitle=[self catalogSubtitleForChannel:channel];
     static NSCache<NSString *, NSValue *> *sizeCache=nil;
     static dispatch_once_t sizeCacheOnce;
     dispatch_once(&sizeCacheOnce,^{
         sizeCache=[NSCache new];
         sizeCache.countLimit=4096;
     });
-    NSString *cacheKey=[NSString stringWithFormat:@"%ld|%ld|%.1f|%.1f|%d|%@|%@",(long)itemWidth,(long)columns,titleFont.pointSize,subtitleFont.pointSize,fav?1:0,cid,epgNow?:@""];
+    NSString *cacheKey=[NSString stringWithFormat:@"%ld|%ld|%.1f|%.1f|%d|%lu:%@|%lu:%@",(long)itemWidth,(long)columns,titleFont.pointSize,subtitleFont.pointSize,fav?1:0,(unsigned long)name.length,name,(unsigned long)subtitle.length,subtitle];
     NSValue *cached=[sizeCache objectForKey:cacheKey];
     if(cached)return cached.CGSizeValue;
     if(fav)name=[@"♥ " stringByAppendingString:name];
     CGFloat labelWidth=MAX(1,itemWidth-4);
     CGFloat titleHeight=[self catalogTextHeight:name font:titleFont width:labelWidth maximumLines:2];
-    CGFloat subtitleHeight=[self catalogTextHeight:[self catalogSubtitleForChannel:channel] font:subtitleFont width:labelWidth maximumLines:2];
+    CGFloat subtitleHeight=[self catalogTextHeight:subtitle font:subtitleFont width:labelWidth maximumLines:2];
     CGFloat posterHeight=MIN(78,MAX(44,floor(itemWidth*.68)));
     CGFloat height=posterHeight+5+titleHeight+1+subtitleHeight+4;
     CGSize result=CGSizeMake(itemWidth,height);
@@ -810,25 +833,28 @@
     NSArray<NSDictionary *> *currentAll = self.allChannels;
     if (self.channelIndexSourceArray == currentAll && self.channelIndexByID) return;
     NSMutableDictionary<NSString *, NSDictionary *> *idMap = [NSMutableDictionary dictionaryWithCapacity:currentAll.count];
-    NSMutableDictionary<NSString *, NSDictionary *> *catchupGroup = [NSMutableDictionary dictionary];
-    NSMutableDictionary<NSString *, NSDictionary *> *catchupCanon = [NSMutableDictionary dictionary];
+    NSMutableDictionary<NSString *, NSMutableArray<NSDictionary *> *> *groupMap = [NSMutableDictionary dictionary];
+    NSMutableDictionary<NSString *, NSMutableArray<NSDictionary *> *> *catchupGroup = [NSMutableDictionary dictionary];
+    NSMutableDictionary<NSString *, NSMutableArray<NSDictionary *> *> *catchupCanon = [NSMutableDictionary dictionary];
     NSMutableDictionary<NSString *, NSString *> *nativeNames = [NSMutableDictionary dictionary];
     for (NSDictionary *c in currentAll) {
         if (![c isKindOfClass:NSDictionary.class]) continue;
         NSString *k = [c[@"id"] isKindOfClass:NSString.class] ? c[@"id"] : @"";
         if (k.length && !idMap[k]) idMap[k] = c;
         BOOL isRemote = [c[@"remoteURL"] length] > 0;
+        if(isRemote){NSString *group=CCTVRouteGroupKey(c);if(group.length){if(!groupMap[group])groupMap[group]=[NSMutableArray array];[groupMap[group] addObject:c];}}
         if (!isRemote) {
             NSString *nm = [c[@"name"] isKindOfClass:NSString.class] ? c[@"name"] : @"";
             if (nm.length && k.length && !nativeNames[nm]) nativeNames[nm] = k;
         } else if ([c[@"catchupSource"] isKindOfClass:NSString.class] && [c[@"catchupSource"] length] > 0) {
             NSString *gk = CCTVRouteGroupKey(c);
-            if (gk.length && !catchupGroup[gk]) catchupGroup[gk] = c;
+            if (gk.length) { if(!catchupGroup[gk])catchupGroup[gk]=[NSMutableArray array]; [catchupGroup[gk] addObject:c]; }
             NSString *cn = [ProfileStore canonicalStationIDForChannel:c];
-            if (cn.length && !catchupCanon[cn]) catchupCanon[cn] = c;
+            if (cn.length) { if(!catchupCanon[cn])catchupCanon[cn]=[NSMutableArray array]; [catchupCanon[cn] addObject:c]; }
         }
     }
     self.channelIndexByID = idMap.copy;
+    self.channelIndexByGroupKey = groupMap.copy;
     self.catchupIndexByGroupKey = catchupGroup.copy;
     self.catchupIndexByCanonical = catchupCanon.copy;
     self.nativeIDIndexByName = nativeNames.copy;

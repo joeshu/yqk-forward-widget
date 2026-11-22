@@ -93,10 +93,15 @@ int main(void) {
         check(![HostBackup validatedBackup:encode(bad) error:NULL], @"unrecognized preference rejected");
         bad[@"preferences"] = @{@"autoLoadEPG" : @"yes"};
         check(![HostBackup validatedBackup:encode(bad) error:NULL], @"wrong preference type rejected");
+        [NSUserDefaults.standardUserDefaults setObject:@4 forKey:@"cctv.mediaGridColumns.v1"];
+        [NSUserDefaults.standardUserDefaults setObject:@[] forKey:@"cctv.mediaWatchHistory.v1"];
+        [NSUserDefaults.standardUserDefaults setObject:@{@"stale":@{@"start":@1,@"title":@"旧提醒"}} forKey:@"cctv.epgReminders.v1"];
         [HostBackup restore:valid];
         check([[NSUserDefaults.standardUserDefaults arrayForKey:@"favorites"] isEqual:valid[@"favorites"]],
               @"favorites restored");
         check(![NSUserDefaults.standardUserDefaults boolForKey:@"autoLoadEPG"], @"false preference restored");
+        check([NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaGridColumns.v1"]==nil,@"absent preferences return to app defaults");
+        check([NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaWatchHistory.v1"]==nil&&[NSUserDefaults.standardUserDefaults objectForKey:@"cctv.epgReminders.v1"]==nil,@"absent history and reminders do not leak in from the previous device state");
         check([HostBackup validatedBackup:encode([HostBackup snapshot]) error:NULL] != nil,
               @"export round-trip");
         MediaMetadataCache *metadata=[MediaMetadataCache shared];[metadata clear];
@@ -191,6 +196,25 @@ int main(void) {
         [MediaPlaybackStateStore recordContext:seasonContext lineIndex:0 episodeIndex:0 position:20 duration:120 completed:NO];
         check(MediaPlaybackStateStore.watchHistory.count==2, @"season identities keep same-numbered episodes separate");
         check([[MediaPlaybackStateStore historyEntryForContext:seasonContext lineIndex:0 episodeIndex:0][@"position"] doubleValue]==20, @"history retains the selected season after reading");
+        [MediaPlaybackStateStore clearWatchHistory];
+        // Identifiers may be signed URLs or change when the provider regenerates
+        // a playlist. Unique names should survive reordering, while ambiguous
+        // names must never apply the progress of a different episode.
+        NSDictionary *namedLine=@{@"name":@"主线路",@"episodes":@[@{@"id":@"https://example.test/1?token=a",@"name":@"第一集"},@{@"id":@"https://example.test/2?token=b",@"name":@"第二集"}]};
+        NSMutableDictionary *namedContext=[historyContext mutableCopy];
+        namedContext[@"detail"]=@{@"lines":@[namedLine]};
+        [MediaPlaybackStateStore recordContext:namedContext lineIndex:0 episodeIndex:1 position:75 duration:120 completed:NO];
+        namedContext[@"detail"]=@{@"lines":@[@{@"name":@"主线路",@"episodes":@[@{@"id":@"https://example.test/2?token=new",@"name":@"第二集"},@{@"id":@"https://example.test/1?token=new",@"name":@"第一集"}]}]};
+        check([[MediaPlaybackStateStore historyEntryForContext:namedContext lineIndex:0 episodeIndex:0][@"position"] doubleValue]==75,@"unique episode names preserve progress after playlist reorder and URL refresh");
+        check([MediaPlaybackStateStore historyEntryForContext:namedContext lineIndex:0 episodeIndex:1]==nil,@"reorder never attaches old position to a different episode");
+        namedContext[@"detail"]=@{@"lines":@[@{@"name":@"主线路",@"episodes":@[@{@"name":@"第二集"},@{@"name":@"第二集"}]}]};
+        check([MediaPlaybackStateStore historyEntryForContext:namedContext lineIndex:0 episodeIndex:0]==nil,@"duplicate episode names require manual selection");
+        [MediaPlaybackStateStore clearWatchHistory];
+        NSDictionary *newIDs=@{@"source":@{@"id":@"history-source"},@"provider":@"site-a",@"item":@{@"id":@"film-1"},@"detail":@{@"lines":@[@{@"id":@"line-old",@"name":@"主线路",@"episodes":@[@{@"id":@"episode-old",@"name":@"第一集"}]}]}};
+        [MediaPlaybackStateStore recordContext:newIDs lineIndex:0 episodeIndex:0 position:36 duration:120 completed:NO];
+        NSMutableDictionary *regenerated=[newIDs mutableCopy];
+        regenerated[@"detail"]=@{@"lines":@[@{@"id":@"line-new",@"name":@"主线路",@"episodes":@[@{@"id":@"episode-new",@"name":@"第一集"}]}]};
+        check([[MediaPlaybackStateStore historyEntryForContext:regenerated lineIndex:0 episodeIndex:0][@"position"] doubleValue]==36,@"unique names recover progress when stable IDs change");
         [MediaPlaybackStateStore clearWatchHistory];
         MediaSourceHealthStore *health=MediaSourceHealthStore.shared;NSString *healthID=@"health-fixture";
         [health recordSourceID:healthID success:NO elapsed:1.0];check([health isDeprioritizedSourceID:healthID],@"failed source receives bounded retry cooldown");

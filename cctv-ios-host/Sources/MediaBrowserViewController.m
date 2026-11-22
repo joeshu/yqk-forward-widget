@@ -76,6 +76,20 @@ static BOOL MediaBrowserIdentityNameMatches(id value, NSString *savedName) {
     return candidate.length&&saved.length&&[candidate localizedCaseInsensitiveCompare:saved]==NSOrderedSame;
 }
 
+// Require a unique stable ID or name; never silently select by stale index.
+static NSInteger MediaBrowserUniqueIdentityIndex(NSArray *items, NSString *identifier, NSString *name) {
+    NSInteger match=-1;NSUInteger count=0;
+    if(identifier.length){
+        for(NSUInteger i=0;i<items.count;i++)if([items[i] isKindOfClass:NSDictionary.class]&&[[items[i][@"id"] description] isEqual:identifier]){match=(NSInteger)i;count++;}
+        if(count==1)return match;
+        if(count>1)return -1;
+    }
+    if(!name.length)return -1;
+    match=-1;count=0;
+    for(NSUInteger i=0;i<items.count;i++)if([items[i] isKindOfClass:NSDictionary.class]&&MediaBrowserIdentityNameMatches(items[i][@"name"],name)){match=(NSInteger)i;count++;}
+    return count==1?match:-1;
+}
+
 @interface MediaSourcePicker : UITableViewController <UISearchResultsUpdating>
 @property(nonatomic, copy) NSArray<NSDictionary *> *choices;
 @property(nonatomic, copy) NSArray<NSDictionary *> *shown;
@@ -685,25 +699,24 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
     if(![entry[@"sourceID"] isEqual:self.source[@"id"]]||![entry[@"provider"] isEqual:self.provider?:@""]||![entry[@"itemID"] isEqual:([self.item[@"id"] description]?:@"")]){self.resumeEntry=nil;return;}
     self.usesResumeSeason=NO;
     NSArray *seasons=[self.detail[@"seasons"] isKindOfClass:NSArray.class]?self.detail[@"seasons"]:@[];
-    NSInteger season=[entry[@"seasonIndex"] isKindOfClass:NSNumber.class]?[entry[@"seasonIndex"] integerValue]:-1;
-    NSString *seasonID=[entry[@"seasonID"] isKindOfClass:NSString.class]?entry[@"seasonID"]:@"";
-    if(seasonID.length){
-        season=-1;
-        for(NSUInteger i=0;i<seasons.count;i++)if([seasons[i] isKindOfClass:NSDictionary.class]&&[[seasons[i][@"id"] description] isEqual:seasonID]){season=(NSInteger)i;break;}
-        if(season<0){self.resumeEntry=nil;return;}
+    NSInteger savedSeason=[entry[@"seasonIndex"] isKindOfClass:NSNumber.class]?[entry[@"seasonIndex"] integerValue]:-1;
+    if(savedSeason>=0){
+        NSInteger season=MediaBrowserUniqueIdentityIndex(seasons,[entry[@"seasonID"] isKindOfClass:NSString.class]?entry[@"seasonID"]:@"",[entry[@"seasonName"] isKindOfClass:NSString.class]?entry[@"seasonName"]:@"");
+        if(season<0){self.resumeEntry=nil;self.status.text=@"无法确认上次观看的季度，请手动选择";self.status.hidden=NO;return;}
+        self.usesResumeSeason=YES;self.resumeSeasonIndex=season;
     }
-    self.usesResumeSeason=season>=0&&season<seasons.count;
-    self.resumeSeasonIndex=season;
-    if(!self.lines.count){self.resumeEntry=nil;return;}
-    NSInteger lineIndex=[entry[@"lineIndex"] integerValue],episodeIndex=[entry[@"episodeIndex"] integerValue];NSString *lineID=[entry[@"lineID"] description]?:@"",*episodeID=[entry[@"episodeID"] description]?:@"",*lineName=[entry[@"lineName"] isKindOfClass:NSString.class]?entry[@"lineName"]:@"",*episodeName=[entry[@"episodeName"] isKindOfClass:NSString.class]?entry[@"episodeName"]:@"";BOOL lineFound=NO;
-    for(NSUInteger index=0;index<self.lines.count;index++)if(lineID.length&&[[self.lines[index][@"id"] description] isEqual:lineID]){lineIndex=(NSInteger)index;lineFound=YES;break;}
-    if(!lineFound&&lineName.length){if(lineIndex>=0&&lineIndex<self.lines.count&&MediaBrowserIdentityNameMatches(self.lines[(NSUInteger)lineIndex][@"name"],lineName))lineFound=YES;else for(NSUInteger index=0;index<self.lines.count;index++)if(MediaBrowserIdentityNameMatches(self.lines[index][@"name"],lineName)){lineIndex=(NSInteger)index;lineFound=YES;break;}}
-    if(!lineFound&&(lineIndex<0||lineIndex>=self.lines.count)){self.resumeEntry=nil;return;}
-    NSArray *episodes=[self.lines[(NSUInteger)lineIndex][@"episodes"] isKindOfClass:NSArray.class]?self.lines[(NSUInteger)lineIndex][@"episodes"]:@[];BOOL episodeFound=NO;
-    for(NSUInteger index=0;index<episodes.count;index++)if(episodeID.length&&[[episodes[index][@"id"] description] isEqual:episodeID]){episodeIndex=(NSInteger)index;episodeFound=YES;break;}
-    if(!episodeFound&&episodeName.length){if(episodeIndex>=0&&episodeIndex<episodes.count&&MediaBrowserIdentityNameMatches(episodes[(NSUInteger)episodeIndex][@"name"],episodeName))episodeFound=YES;else for(NSUInteger index=0;index<episodes.count;index++)if(MediaBrowserIdentityNameMatches(episodes[index][@"name"],episodeName)){episodeIndex=(NSInteger)index;episodeFound=YES;break;}}
-    if((episodeID.length&&!episodeFound)||(!episodeFound&&(episodeIndex<0||episodeIndex>=episodes.count))){self.resumeEntry=nil;return;}
-    self.selectedLineIndex=lineIndex;self.selectedEpisodeIndex=episodeIndex;NSInteger episodeGroup=CCTVEpisodeGroupForSourceIndex((NSUInteger)episodeIndex,episodes.count,self.episodeOrderReversed);self.episodePage=episodeGroup==NSNotFound?0:episodeGroup;
+    NSArray *lines=self.lines;
+    NSInteger lineIndex=MediaBrowserUniqueIdentityIndex(lines,[entry[@"lineID"] isKindOfClass:NSString.class]?entry[@"lineID"]:@"",[entry[@"lineName"] isKindOfClass:NSString.class]?entry[@"lineName"]:@"");
+    if(lineIndex<0){self.resumeEntry=nil;self.status.text=@"无法确认上次观看的线路，请手动选择";self.status.hidden=NO;return;}
+    NSArray *episodes=[lines[(NSUInteger)lineIndex][@"episodes"] isKindOfClass:NSArray.class]?lines[(NSUInteger)lineIndex][@"episodes"]:@[];
+    NSInteger episodeIndex=MediaBrowserUniqueIdentityIndex(episodes,[entry[@"episodeID"] isKindOfClass:NSString.class]?entry[@"episodeID"]:@"",[entry[@"episodeName"] isKindOfClass:NSString.class]?entry[@"episodeName"]:@"");
+    if(episodeIndex<0){self.resumeEntry=nil;self.status.text=@"无法确认上次观看的分集，请手动选择";self.status.hidden=NO;return;}
+    NSDictionary *context=@{@"source":self.source?:@{},@"provider":self.provider?:@"",@"item":self.item?:@{},@"detail":self.detail?:@{},@"seasonIndex":@(self.usesResumeSeason?self.resumeSeasonIndex:-1)};
+    NSDictionary *verified=[MediaPlaybackStateStore historyEntryForContext:context lineIndex:lineIndex episodeIndex:episodeIndex];
+    if(!verified||![verified[@"key"] isEqual:entry[@"key"]]){self.resumeEntry=nil;self.status.text=@"无法确认上次观看的进度，请手动选择分集";self.status.hidden=NO;return;}
+    self.selectedLineIndex=lineIndex;self.selectedEpisodeIndex=episodeIndex;
+    NSInteger group=CCTVEpisodeGroupForSourceIndex((NSUInteger)episodeIndex,episodes.count,self.episodeOrderReversed);
+    self.episodePage=group==NSNotFound?0:group;
 }
 - (void)restoreSelectionFromDetail:(NSDictionary *)previousDetail {
     NSArray *oldLines=[previousDetail[@"lines"] isKindOfClass:NSArray.class]?previousDetail[@"lines"]:@[];
@@ -878,7 +891,7 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
     self.pageLabel.text=episodes.count?[NSString stringWithFormat:@"第 %ld/%lu 组 · 第 %lu–%lu 集 · %@",(long)self.episodePage+1,(unsigned long)pageCount,(unsigned long)firstSource+1,(unsigned long)lastSource+1,self.episodeOrderReversed?@"倒序":@"正序"]:@"此线路没有可选分集";
     [self.episodeReverseButton setTitle:self.episodeOrderReversed?@"正序":@"倒序" forState:UIControlStateNormal];self.episodeReverseButton.accessibilityLabel=self.episodeOrderReversed?@"按正序排列分集，当前为倒序":@"按倒序排列分集，当前为正序";self.episodeReverseButton.hidden=episodes.count<2;
     self.previousPageButton.hidden=pageCount<=1;self.nextPageButton.hidden=pageCount<=1;self.previousPageButton.enabled=self.episodePage>0;self.nextPageButton.enabled=self.episodePage+1<pageCount;self.playButton.hidden=(self.inlinePlaybackController!=nil);self.playButton.enabled=episodes.count>0;self.playButton.alpha=episodes.count?1.0:0.55;
-    NSDictionary *selectedLine=self.selectedLineIndex<self.lines.count?self.lines[self.selectedLineIndex]:@{};NSDictionary *selectedEpisode=self.selectedEpisodeIndex<episodes.count?episodes[self.selectedEpisodeIndex]:@{};NSString *resumeLineID=[self.resumeEntry[@"lineID"] description]?:@"",*resumeEpisodeID=[self.resumeEntry[@"episodeID"] description]?:@"",*resumeLineName=[self.resumeEntry[@"lineName"] isKindOfClass:NSString.class]?self.resumeEntry[@"lineName"]:@"",*resumeEpisodeName=[self.resumeEntry[@"episodeName"] isKindOfClass:NSString.class]?self.resumeEntry[@"episodeName"]:@"";BOOL lineMatches=resumeLineID.length&&[[selectedLine[@"id"] description] isEqual:resumeLineID];if(!lineMatches&&resumeLineName.length)lineMatches=MediaBrowserIdentityNameMatches(selectedLine[@"name"],resumeLineName);if(!lineMatches)lineMatches=self.selectedLineIndex==[self.resumeEntry[@"lineIndex"] integerValue];BOOL episodeMatches=resumeEpisodeID.length&&[[selectedEpisode[@"id"] description] isEqual:resumeEpisodeID];if(!episodeMatches&&resumeEpisodeName.length)episodeMatches=MediaBrowserIdentityNameMatches(selectedEpisode[@"name"],resumeEpisodeName);if(!episodeMatches)episodeMatches=self.selectedEpisodeIndex==[self.resumeEntry[@"episodeIndex"] integerValue];BOOL resumeSelected=self.resumeEntry&&lineMatches&&episodeMatches;
+    BOOL resumeSelected=self.resumeEntry!=nil;
     if(resumeSelected){NSString *verb=[self.resumeEntry[@"completed"] boolValue]?@"重新播放":@"继续观看";[self.playButton setTitle:[NSString stringWithFormat:@"▶︎  %@ · %@",verb,self.resumeEntry[@"episodeName"]?:@"上次分集"] forState:UIControlStateNormal];}else [self.playButton setTitle:@"▶︎  播放" forState:UIControlStateNormal];
     CCTVEpisodeLayoutStyle episodeStyle=CCTVEpisodeCurrentLayoutStyle();
     BOOL showBadge=CCTVEpisodeShowRemarksBadgeEnabled();
@@ -932,7 +945,7 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
                 NSUInteger index=CCTVEpisodeSourceIndex(displayIndex,episodes.count,self.episodeOrderReversed);
                 NSDictionary *episode=episodes[index];
                 BOOL isSel=(NSInteger)index==self.selectedEpisodeIndex;
-                BOOL isRes=resumeSelected&&(NSInteger)index==[self.resumeEntry[@"episodeIndex"] integerValue];
+                BOOL isRes=resumeSelected&&(NSInteger)index==self.selectedEpisodeIndex;
                 NSString *name=CCTVEpisodeFormattedDisplayTitle(episode,index,episodeStyle,isSel,isRes,showBadge);
                 [button setTitle:name forState:UIControlStateNormal];
                 button.tag=index;

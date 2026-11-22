@@ -20,7 +20,7 @@ class NativePackageTests(unittest.TestCase):
         cls.folder = Path(cls.tmp.name)
         root = Path(__file__).resolve().parents[1]
         cls.executable = cls.folder / 'package-test'
-        build = subprocess.run(['xcrun', 'clang', '-fobjc-arc', '-framework', 'Foundation', '-lz', '-I', str(root / 'Sources'),
+        build = subprocess.run(['xcrun', 'clang', '-fobjc-arc', '-framework', 'Foundation', '-framework', 'Security', '-lz', '-I', str(root / 'Sources'),
                                 str(root / 'Tests/native_package_tests.m'), str(root / 'Sources/MediaPackageImporter.m'),
                                 str(root / 'Sources/MediaPackageDownloader.m'), str(root / 'Sources/ResourceContentInspection.m'),
                                 str(root / 'Sources/ProfileStore.m'),
@@ -84,6 +84,25 @@ class NativePackageTests(unittest.TestCase):
         self.assertTrue(result['vodCapable'])
         self.assertTrue(result['entryExists'])
         self.assertTrue(result['archiveExists'])
+
+    def test_media_server_credentials_move_to_keychain_before_preview_persistence(self):
+        file = self.archive({
+            'cctvhost.json': json.dumps({'schemaVersion': 1, 'name': '受保护服务器',
+                'entry': 'server.py', 'runtime': 'python', 'protocol': 'python-spider',
+                'moduleType': 'script', 'options': {'type': 'emby',
+                    'url': 'https://media.example.test', 'username': 'viewer', 'userId': 'account-17',
+                    'password': 'private-password', 'apiKey': 'private-api-key'}}),
+            'server.py': 'from host_media_servers import ServerSpider\nclass Spider(ServerSpider):\n    pass\n'})
+        result = subprocess.run([str(self.executable), '--secure-server', str(file)],
+                                capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertTrue(payload['ok'])
+        self.assertFalse(payload['secretInMemoryManifest'])
+        self.assertFalse(payload['secretInSavedManifest'])
+        self.assertEqual(payload['keychainCredentialCount'], 4)
+        self.assertTrue(payload['credentialReference'])
+        self.assertFalse(payload['archiveExists'])
 
     def test_commonjs_require_is_routed_to_node_unless_manifest_overrides(self):
         source = "const helper=require('example-helper');module.exports={search(){return {list:[]}}}"

@@ -160,7 +160,7 @@ CatVod/TVBox 风格 JS 支持 `export default site => ({ init(ext), home(filter)
 
 Hamo v3 单文件影视源可直接作为 JS 资源导入。宿主会把其 `title/poster/sources` 数据映射到影视卡片、详情线路和分集，并把分集引用保存在本机播放 ID 中，交给 `resolve` 解析；返回网页地址时会进入网页播放路径。`$http` 使用本机有界 HTTP 客户端，`$cache` 按来源隔离并支持 TTL，`$crypto.encode` 支持 UTF-8、Base64 与十六进制转换。
 
-TVBox type 3 的远程 `.py` 若提供标准 `class Spider` 接口，可按 Python Spider 导入。依赖 Android `/sdcard`、Activity 或向 Android TVBox 写配置的自动加载器，在 iOS 中不能执行这些 Android 专属动作；导入后会在资源详情中显示说明。Android/JAR `csp_*` 插件仍不能在 iOS 本机运行。
+TVBox type 3 的远程 `.py` 若提供标准 `class Spider` 接口，可按 Python Spider 导入。依赖 Android `/sdcard`、Activity 或向 Android TVBox 写配置的自动加载器，在 iOS 中不能执行这些 Android 专属动作；导入后会在资源详情中显示说明。部分 JAR `csp_*` 可通过完整版的 JAR 运行时或兼容桥接适配，仍受 Android API、原生库和具体站点限制；实机验证范围见 `JAR-RUNTIME-20261110.md`。
 
 CatPawOpen 服务 ZIP 可将 `entry` 指向服务入口（例如 `src/index.js`），入口导出 `start()`/`stop()` 并在本机监听，服务须实现 `/config` 与 `/spider/<key>/3/...`。导入器会检查入口及 `router.js`，自动识别常见 Node 服务包；Node 依赖须一并放进 ZIP 的 `node_modules`。启用后，影视来源选择器按 `/config` 提供的站点显示与搜索。
 
@@ -170,7 +170,7 @@ NanoTV 首次打开频道才按脚本逻辑尝试设备会话注册；服务启�
 
 `.js.md5` 可以直接作为链接导入。宿主先读取校验文件，再从最终校验响应的同目录下载脚本；若脚本声明猫源配置，会在同源下载 `index.config.js.md5` 与 `index.config.js`。本地 ZIP 中若带 `index.js.md5`、`index.config.js.md5`，导入前逐个核对并在详情显示已校验的文件名；不匹配时拒绝安装，原有服务和用户数据保留。MD5 是一致性校验，不是来源签名。
 
-TVBox 配置支持两种可直接使用的 HTTP JSON CMS 来源：type 1 和 type 4。type 1/4 作为影视来源加入首页；CCTVHost 按 `filter=true`、`wd/quick/pg`、`ac=detail/t/pg`、`ac=detail/ids` 与 `play/flag` 发送请求，保留源 URL 查询参数，并传递 `ext` 与请求头。列表、分类、影片详情、多线路、多分集、type 1 直出地址和 type 4 播放解析响应会映射到现有影视页与 AVPlayer/Web 播放链路。请求和响应受超时、URL、请求头、2 MiB 响应体限制；上游响应或解码失败会显示为来源错误。type 3/JAR 明确不支持，iOS 不会下载或运行 JAR；TVBox 的 JS/Python/ZIP 脚本仍走上面的现有脚本导入适配器。导入成功只表示文件和入口已识别，不能证明视频已播放，播放需以 AVPlayer 首帧为准。
+TVBox 配置支持两种可直接使用的 HTTP JSON CMS 来源：type 1 和 type 4。type 1/4 作为影视来源加入首页；CCTVHost 按 `filter=true`、`wd/quick/pg`、`ac=detail/t/pg`、`ac=detail/ids` 与 `play/flag` 发送请求，保留源 URL 查询参数，并传递 `ext` 与请求头。列表、分类、影片详情、多线路、多分集、type 1 直出地址和 type 4 播放解析响应会映射到现有影视页与 AVPlayer/Web 播放链路。请求和响应受超时、URL、请求头、2 MiB 响应体限制；上游响应或解码失败会显示为来源错误。type 3/JAR 可按运行包和站点依赖尝试部分运行时或桥接适配，不兼容的 Android 专属接口仍不可用；TVBox 的 JS/Python/ZIP 脚本走现有脚本导入适配器。导入成功只表示文件和入口已识别，不能证明视频已播放，播放需以 AVPlayer 首帧为准。
 
 MacCMS JSON/XML 接口可在「资源 → ＋ → MacCMS 影视接口」单独添加。保存时不会请求或执行接口；选中该影视来源后，宿主用 `ac=videolist` 请求分类、列表和搜索，用 `ac=detail&ids=…` 请求详情，并自动接受 JSON 或 `<rss><list><video>`、`<rss><class><ty>` 格式的 XML。播放线路中的分集 URL、源请求头和完整查询参数会传入现有播放器分流。XML 输入上限 2 MiB、节点 50,000、文本 1 MiB；外部实体不解析。XML 只覆盖上述常见结构，站点私有 XML 扩展、需要网页登录的来源仍需实际端点样本确认。
 

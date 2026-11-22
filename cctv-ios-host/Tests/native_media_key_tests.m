@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import "MediaKeyRequest.h"
+#import "HostRedirectHeaders.h"
 static void check(BOOL value,NSString *message){if(!value){NSLog(@"FAILED %@",message);exit(1);}}
 static void run(NSString *address,BOOL success,BOOL cancel) {
     __block NSUInteger calls=0;__block NSData *result;__block NSError *failure;
@@ -11,6 +12,14 @@ static void run(NSString *address,BOOL success,BOOL cancel) {
     if(success)check(result.length==16&&!failure,@"valid key is delivered");else check(failure!=nil,@"invalid, oversized or canceled key returns an error");
 }
 int main(int argc,const char **argv){@autoreleasepool{
+    NSDictionary *headers=@{@"Authorization":@"secret",@"X-Auth":@"secret",@"X-Access-Key":@"secret",@"Referer":@"https://origin.test/?token=secret",@"User-Agent":@"fixture"};
+    NSURL *origin=[NSURL URLWithString:@"https://origin.test/path"];
+    NSDictionary *same=HostRedirectHeaders(headers,origin,[NSURL URLWithString:@"https://origin.test:443/other"]);
+    check([same[@"X-Auth"] isEqual:@"secret"],@"same origin retains custom authentication");
+    for(NSString *target in @[@"https://cdn.test/path",@"https://origin.test:8443/path",@"http://origin.test/path"]){
+        NSDictionary *filtered=HostRedirectHeaders(headers,origin,[NSURL URLWithString:target]);
+        check(filtered.count==1 && [filtered[@"User-Agent"] isEqual:@"fixture"],@"cross-origin redirect strips custom auth and referer");
+    }
     NSString *base=[NSString stringWithUTF8String:argv[1]];
     run([base stringByAppendingString:@"/key"],YES,NO);
     run([base stringByAppendingString:@"/large"],NO,NO);

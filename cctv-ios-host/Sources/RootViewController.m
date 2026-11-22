@@ -220,6 +220,7 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
 }
 - (void)sessionPlay {if(self.remoteAdapter.state==MediaPlaybackCicadaAdapterStateCompleted){[self playRemote:@{@"remoteURL":self.currentRemoteURL?:@"",@"id":self.channelID?:@"",@"name":self.channelName?:@"直播",@"headers":self.currentRemoteHeaders?:@{}}];return;}if(self.remoteAdapter){self.remotePlaybackWanted=YES;[self.remoteAdapter start];}else if(![self sessionIsPlaying])[self togglePlayPause];[self updateNowPlaying];}
 - (void)sessionPause {
+    self.remoteProgressSampleTime=0;self.remoteProgressLastAdvanceTime=0;
     self.remotePlaybackWanted=NO;[self.remoteAdapter pause];[self.moviePlayer pause];[self.avPlayer pause];[self call:self.currentPlayer sel:@"pause"];
     [self.playPauseBtn setTitle:@"继续" forState:UIControlStateNormal];[self updateNowPlaying];
 }

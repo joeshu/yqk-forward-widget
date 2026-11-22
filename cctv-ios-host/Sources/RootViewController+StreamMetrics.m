@@ -2,6 +2,66 @@
 #import "HostGlassActionSheetViewController.h"
 
 @implementation RootViewController (StreamMetrics)
+- (void)startRemoteProgressWatchdogForItem:(AVPlayerItem *)item generation:(NSUInteger)generation {
+    __weak typeof(self) ownerRef=self;
+    self.remoteProgressWatchdog=[NSTimer timerWithTimeInterval:5 repeats:YES block:^(NSTimer *timer){
+        RootViewController *owner=ownerRef;
+        if(!owner){[timer invalidate];return;}
+        [owner checkRemotePlaybackProgressForItem:item generation:generation];
+    }];
+    [NSRunLoop.mainRunLoop addTimer:self.remoteProgressWatchdog forMode:NSRunLoopCommonModes];
+}
+- (void)stopRemoteProgressWatchdog {
+    [self.remoteProgressWatchdog invalidate];self.remoteProgressWatchdog=nil;
+    self.remoteProgressSampleTime=0;self.remoteProgressLastAdvanceTime=0;
+}
+- (void)checkRemotePlaybackProgressForItem:(AVPlayerItem *)item generation:(NSUInteger)generation {
+    if(generation!=self.playbackGeneration || item!=self.avPlayer.currentItem)return;
+    BOOL shouldMonitor=UIApplication.sharedApplication.applicationState==UIApplicationStateActive &&
+        [PlaybackCoordinator shared].currentSession==(id<PlaybackSession>)self &&
+        self.remotePlaybackWanted && !self.livePlaybackSuspendedForNavigation &&
+        !self.remotePlaybackFailed && !self.remoteFailureRecoveryPending &&
+        !self.remoteCatchupActive && item.status==AVPlayerItemStatusReadyToPlay;
+    NSTimeInterval now=CACurrentMediaTime();
+    double position=CMTimeGetSeconds(self.avPlayer.currentTime);
+    if(!shouldMonitor || !isfinite(position) || position<0){
+        self.remoteProgressSampleTime=0;
+        self.remoteProgressLastAdvanceTime=0;
+        return;
+    }
+    // An interval missed while the app was inactive or the main thread was
+    // suspended cannot establish that playback itself was stalled.
+    if(self.remoteProgressSampleTime<=0 || now-self.remoteProgressSampleTime>10 ||
+       fabs(position-self.remoteProgressPosition)>0.25){
+        self.remoteProgressLastAdvanceTime=now;
+        self.remoteProgressPosition=position;
+    }
+    self.remoteProgressSampleTime=now;
+    if(now-self.remoteProgressLastAdvanceTime<25)return;
+
+    self.remoteProgressLastAdvanceTime=now;
+    [RuntimeDiagnostics.shared recordEvent:@"live_playback_progress_timeout" category:@"playback" fields:@{
+        @"player":@"AVPlayer", @"timeout_seconds":@25,
+        @"playback_generation":@(generation), @"retry_count":@(self.remoteRetryCount),
+        @"correlation_id":self.currentPlaybackTraceID?:@""}];
+    self.titleLabel.hidden=NO;
+    self.infoLabel.hidden=NO;
+    self.titleLabel.text=[NSString stringWithFormat:@"%@ · 正在恢复",self.channelName?:@"频道"];
+    self.infoLabel.text=@"播放长时间未推进，正在尝试恢复。";
+    if(self.remoteRetryCount<1){
+        self.remoteRetryCount++;
+        NSString *url=self.currentRemoteURL?:@"";
+        NSDictionary *retry=@{@"id":self.channelID?:url,@"name":self.channelName?:url,
+                              @"remoteURL":url,@"nativePlainRoute":@(self.nativePlainRouteActive),
+                              @"headers":self.currentRemoteHeaders?:@{}};
+        [self log:@"直播播放长时间未推进 · 同源重连 1/1"];
+        [self startRemoteChannel:retry];
+    }else{
+        [self log:@"直播播放长时间未推进 · 尝试同台备用源"];
+        [self tryAlternateSource];
+    }
+}
+
 - (NSString *)formatBitrateMbps:(double)bps {
     if (bps <= 0 || isnan(bps) || isinf(bps)) return @"检测中";
     if (bps >= 1000000.0) return [NSString stringWithFormat:@"%.2f Mbps", bps / 1000000.0];

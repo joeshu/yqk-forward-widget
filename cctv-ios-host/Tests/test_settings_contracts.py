@@ -26,6 +26,7 @@ class SettingsContracts(unittest.TestCase):
         cls.root = "\n".join((p.read_text(encoding="utf-8").split("\n- (BOOL)sessionHasContent;", 1)[0] if p.name.endswith(".h") else p.read_text(encoding="utf-8")) for p in ([ROOT / "Sources" / "RootViewController_Internal.h", *sorted((ROOT / "Sources").glob("RootViewController*.m"))]))
         cls.playback = (ROOT / 'Sources/MediaPlaybackViewController.m').read_text()
         cls.backup = (ROOT / 'Sources/HostBackup.m').read_text()
+        cls.services = (ROOT / 'Sources/RootViewController+Services.m').read_text()
         cls.media_api = (ROOT / 'Sources/MediaAPIClient.m').read_text()
         cls.browser = (ROOT / 'Sources/MediaBrowserViewController.m').read_text()
         cls.search = (ROOT / 'Sources/MediaGlobalSearchViewController.m').read_text()
@@ -90,7 +91,8 @@ class SettingsContracts(unittest.TestCase):
         # 节目单缓存不显示占用；无隐私说明入口；版本行只有短版本号，没有 build 号。
         self.assertIn('SettingsEPGCacheSizeText()', self.settings)
         self.assertIn('@\"action\":@\"privacy\"', self.settings)
-        self.assertIn('只保存在本机，不会上传到任何服务器', self.settings)
+        self.assertIn('订阅、节目单、播放和插件会按配置访问对应的网络来源', self.settings)
+        self.assertIn('备份和原始资源可能包含完整地址及凭据', self.settings)
         self.assertIn('CFBundleVersion', self.settings)
 
     def test_settings_restore_last_tab_is_opt_out(self):
@@ -122,6 +124,16 @@ class SettingsContracts(unittest.TestCase):
         self.assertIn('[value doubleValue]<0.5||[value doubleValue]>2.0', self.backup)
         self.assertIn('[value integerValue]!=3&&[value integerValue]!=4', self.backup)
         self.assertIn('AVLayerVideoGravityResizeAspectFill', self.backup)
+
+    def test_restore_keeps_metadata_for_sources_present_in_the_backup(self):
+        body = method_body(self.services, '- (void)confirmConfigurationRestore:')
+        restore_at = body.index('[HostBackup restore:backup error:')
+        self.assertIn('NSSet *restoredSources=[NSSet setWithArray:backup[@"subscriptions"]', body)
+        cleanup_at = body.index('for(NSString *source in self.subscriptionURLs.allObjects)')
+        self.assertLess(restore_at, cleanup_at)
+        cleanup = body[cleanup_at:body.index('NSDictionary *versions=', cleanup_at)]
+        self.assertIn('if(![restoredSources containsObject:source])[self removeSubscriptionSource:source]', cleanup)
+        self.assertIn('[self restoreEPGNotifications:', body)
     def test_settings_offer_auto_skip_intro_outro(self):
         # 自动跳过片头片尾：开关在设置页；播放器每秒检查跳过点，开启后按
         # 记住的位置自动跳过，每集只自动跳一次，换片后标记重置。

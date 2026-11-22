@@ -310,6 +310,7 @@
 }
 
 - (void)stopPlayback {
+    [self stopRemoteProgressWatchdog];
     self.remoteAdapter.delegate=nil;[self.remoteAdapter destroy];self.remoteAdapter=nil;
     // Invalidate the native session first: any callback still in flight to the
     // old session delegate is dropped by its session check, and bumping the ID
@@ -412,6 +413,8 @@
     if (self.avPlayer) {
         BOOL playing=self.remotePlaybackWanted;
         self.remotePlaybackWanted=!playing;
+        self.remoteProgressSampleTime=0;
+        self.remoteProgressLastAdvanceTime=0;
         if (playing) [self.avPlayer pause]; else [self.avPlayer play];
         [self.playPauseBtn setTitle:(playing ? @"继续" : @"暂停") forState:UIControlStateNormal];
         [self syncPlayPauseButtonIcon];
@@ -654,7 +657,7 @@
     [self.avLayer addObserver:self forKeyPath:@"readyForDisplay" options:NSKeyValueObservingOptionInitial|NSKeyValueObservingOptionNew context:kAVLayerFrameContext];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(avItemFailed:) name:AVPlayerItemFailedToPlayToEndTimeNotification object:item];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(avItemStalled:) name:AVPlayerItemPlaybackStalledNotification object:item];
-    [self recordStartupStage:@"prepareCall"];
+    if(generation!=self.playbackGeneration || item!=self.avPlayer.currentItem)return;[self startRemoteProgressWatchdogForItem:item generation:generation];[self recordStartupStage:@"prepareCall"];
     if(@available(iOS 10.0,*))[self.avPlayer playImmediatelyAtRate:1.0];
     else [self.avPlayer play];
     __weak typeof(self) w=self;
@@ -668,6 +671,21 @@
         // timeout after retry/alternate-source recovery has already stopped.
         if(generation!=w.playbackGeneration||item!=w.avPlayer.currentItem||
            item.status==AVPlayerItemStatusFailed||!w.remotePlaybackWanted||w.firstRender)return;
+        BOOL hasAudio=NO,hasVideo=NO;
+        for(AVPlayerItemTrack *track in item.tracks){
+            if(!track.enabled)continue;
+            NSString *type=track.assetTrack.mediaType;
+            if([type isEqualToString:AVMediaTypeAudio])hasAudio=YES;
+            else if([type isEqualToString:AVMediaTypeVideo])hasVideo=YES;
+        }
+        double audioPosition=CMTimeGetSeconds(w.avPlayer.currentTime);
+        if(hasAudio&&!hasVideo&&isfinite(audioPosition)&&audioPosition>0.5){
+            [w.spinner stopAnimating];
+            w.titleLabel.hidden=NO;w.titleLabel.text=[NSString stringWithFormat:@"%@ · 音频播放中",w.channelName?:@"频道"];
+            w.infoLabel.hidden=NO;w.infoLabel.text=@"当前来源为音频流";
+            [w endPlaybackPriority];
+            return;
+        }
         if([w startRemoteCicada:w.currentRemoteURL generation:generation])return;
         NSMutableDictionary *timeoutFields=[@{@"player":@"AVPlayer", @"timeout_seconds":@12, @"playback_generation":@(generation), @"playback_attempt_id":w.currentRemotePlaybackAttemptID?:@"", @"correlation_id":w.currentPlaybackTraceID?:@""} mutableCopy];[timeoutFields addEntriesFromDictionary:MediaPlaybackDiagnosticHeaderFields(w.currentRemoteHeaders)];[timeoutFields addEntriesFromDictionary:CCTVDiagnosticURLFields([NSURL URLWithString:w.currentRemoteURL])];CCTVAddAVPlayerFailureFields(timeoutFields,item,w.avPlayer,item.error);[RuntimeDiagnostics.shared recordEvent:@"playback_first_frame_timeout" category:@"playback" fields:timeoutFields];
         [w.spinner stopAnimating];w.remotePlaybackFailed=YES;w.titleLabel.hidden=NO;w.titleLabel.text=[NSString stringWithFormat:@"%@ · 等待视频首帧",w.channelName];w.infoLabel.hidden=NO;w.infoLabel.text=@"仍可等待，或点按“重试”重新连接";[w.playPauseBtn setTitle:@"重试" forState:UIControlStateNormal];w.playPauseBtn.enabled=YES;NSDictionary *service=[w localServiceForURL:[NSURL URLWithString:w.currentRemoteURL?:@""]];if(service)[w logPluginLine:@"接口已请求，但 12 秒内未收到视频首帧" identifier:service[@"id"] name:service[@"name"]];[w log:@"订阅 12 秒未渲染首帧（并非播放器就绪时间）"];

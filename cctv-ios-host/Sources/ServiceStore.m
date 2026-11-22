@@ -1,5 +1,6 @@
 #import "ServiceStore.h"
 #import "ProfileStore.h"
+#import "HostSecureStore.h"
 static BOOL ServiceRelativePath(NSString *path){
     if(![path isKindOfClass:NSString.class]||!path.length||[path hasPrefix:@"/"]||[path containsString:@"\\"]||[path containsString:@":"])return NO;
     for(NSString *part in path.pathComponents)if([part isEqual:@".."]||[part isEqual:@"."])return NO;
@@ -98,6 +99,40 @@ static NSCache<NSString *,NSDictionary *> *ServiceEntryAnalysisCache(void){
             }
         }
         if(relative.length&&ServiceRelativePath(relative)){resolved[relativeKey]=relative;resolved[key]=[base stringByAppendingPathComponent:relative];}
+    }
+    // Only the built-in media-server adapter uses these option names. Move
+    // its legacy cleartext credentials after the keychain and package writes
+    // succeed; a failed migration leaves the old configuration recoverable.
+    NSDictionary *currentManifest=[resolved[@"manifest"] isKindOfClass:NSDictionary.class]?resolved[@"manifest"]:nil;
+    NSDictionary *options=[currentManifest[@"options"] isKindOfClass:NSDictionary.class]?currentManifest[@"options"]:nil;
+    BOOL serverAdapter=[currentManifest[@"entry"] isEqual:@"server.py"] && [@[@"emby",@"jellyfin",@"xtream",@"webdav"] containsObject:options[@"type"]?:@""];
+    if(serverAdapter && (options[@"username"] || options[@"password"] || options[@"apiKey"] || options[@"userId"])){
+        OSStatus priorStatus=errSecItemNotFound;
+        NSData *priorData=[options[@"credentialRef"] boolValue]?HostSecureStoreRead(@"media-server",identifier,&priorStatus):nil;
+        NSDictionary *prior=priorData?[NSJSONSerialization JSONObjectWithData:priorData options:0 error:NULL]:nil;
+        NSMutableDictionary *credentials=[prior isKindOfClass:NSDictionary.class]?[prior mutableCopy]:[NSMutableDictionary dictionary];
+        BOOL mayUpdate=![options[@"credentialRef"] boolValue] || [prior isKindOfClass:NSDictionary.class];
+        for(NSString *key in @[@"username",@"password",@"apiKey",@"userId"]){
+            if(!options[key])continue;
+            if([options[key] isKindOfClass:NSString.class] && [options[key] length])credentials[key]=options[key];
+            else [credentials removeObjectForKey:key];
+        }
+        NSMutableDictionary *safe=[options mutableCopy];[safe removeObjectsForKeys:@[@"username",@"password",@"apiKey",@"userId"]];
+        BOOL stored=mayUpdate && !credentials.count;
+        if(mayUpdate && credentials.count){NSData *data=[NSJSONSerialization dataWithJSONObject:credentials options:0 error:NULL];stored=data && HostSecureStoreWrite(@"media-server",identifier,data);if(stored)safe[@"credentialRef"]=@YES;}
+        if(stored && !credentials.count){[safe removeObjectForKey:@"credentialRef"];HostSecureStoreDelete(@"media-server",identifier);}
+        if(stored){
+            NSMutableDictionary *safeManifest=[currentManifest mutableCopy];safeManifest[@"options"]=safe;
+            NSString *path=[resolved[@"packageRoot"] stringByAppendingPathComponent:@"cctvhost.json"];
+            NSData *fileData=path.length?[NSData dataWithContentsOfFile:path]:nil;
+            NSMutableDictionary *fileManifest=fileData?[[NSJSONSerialization JSONObjectWithData:fileData options:NSJSONReadingMutableContainers error:NULL] mutableCopy]:nil;
+            if([fileManifest isKindOfClass:NSMutableDictionary.class]){
+                NSMutableDictionary *fileOptions=[fileManifest[@"options"] isKindOfClass:NSDictionary.class]?[fileManifest[@"options"] mutableCopy]:[NSMutableDictionary dictionary];
+                [fileOptions removeObjectsForKeys:@[@"username",@"password",@"apiKey",@"userId"]];if(credentials.count)fileOptions[@"credentialRef"]=@YES;else [fileOptions removeObjectForKey:@"credentialRef"];fileManifest[@"options"]=fileOptions;
+                NSData *clean=[NSJSONSerialization dataWithJSONObject:fileManifest options:0 error:NULL];
+                if(clean && [clean writeToFile:path options:NSDataWritingAtomic error:NULL])resolved[@"manifest"]=safeManifest;
+            }
+        }
     }
     return resolved;
 }
@@ -537,7 +572,7 @@ static NSCache<NSString *,NSDictionary *> *ServiceEntryAnalysisCache(void){
     updated[@"packageRelativePath"]=[relative stringByAppendingPathComponent:[package substringFromIndex:source.length+1]];updated[@"packageRoot"]=[base stringByAppendingPathComponent:updated[@"packageRelativePath"]];
     updated[@"archivePath"]=@"";[updated removeObjectForKey:@"archiveRelativePath"];
     if([archive hasPrefix:[source stringByAppendingString:@"/"]]){updated[@"archiveRelativePath"]=[relative stringByAppendingPathComponent:[archive substringFromIndex:source.length+1]];updated[@"archivePath"]=[base stringByAppendingPathComponent:updated[@"archiveRelativePath"]];}
-    updated[@"status"]=@"已更新 · 待重新启动验证";[self save:updated];return [self resolvedService:updated];
+    updated[@"status"]=@"已更新 · 待重新启动验证";[self save:updated];HostSecureStoreDelete(@"media-server",incomingID);return [self resolvedService:updated];
 
     }
 }
@@ -576,6 +611,8 @@ static NSCache<NSString *,NSDictionary *> *ServiceEntryAnalysisCache(void){
                    error:NULL];
     [NSFileManager.defaultManager removeItemAtPath:[[self directory] stringByAppendingPathComponent:identifier] error:NULL];
     [NSUserDefaults.standardUserDefaults removeObjectForKey:[@"CCTVJSStorage:" stringByAppendingString:identifier]];
+    HostSecureStoreDelete(@"media-server",identifier);
+    HostSecureStoreDelete(@"js-storage",identifier);
 
     }
 }
@@ -623,6 +660,7 @@ static NSCache<NSString *,NSDictionary *> *ServiceEntryAnalysisCache(void){
             return NO;
         }
         [NSUserDefaults.standardUserDefaults removeObjectForKey:[@"CCTVJSStorage:" stringByAppendingString:identifier]];
+        HostSecureStoreDelete(@"js-storage",identifier);
         NSDictionary *resolved = [self resolvedService:service];
         NSString *dataDir = [self dataDirectoryForService:resolved error:error];
         if (!dataDir.length) return NO;

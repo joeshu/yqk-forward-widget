@@ -143,7 +143,7 @@ class UI2026DeepRefinementsTests(unittest.TestCase):
         self.assertIn("self.categoryScroll.contentInset=UIEdgeInsetsMake(0,0,0,14);", mb)
 
         st = (SOURCES / "SettingsViewController.m").read_text(encoding="utf-8")
-        self.assertIn("@\"  🛡️ 纯本地无上传  \"", st)
+        self.assertIn("@\"  🛡️ 隐私说明  \"", st)
         self.assertIn("bottom=MAX(24,self.bottomOverlayInset+22);", st)
 
     def test_ref18_spatial_typography_rounded_headers_monospaced_digits_and_editorial_accents(self):
