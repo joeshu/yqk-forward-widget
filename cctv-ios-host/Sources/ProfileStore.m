@@ -1,5 +1,10 @@
 #import "ProfileStore.h"
 #import <CommonCrypto/CommonDigest.h>
+
+static NSDictionary *ProfileMetadataDefaultsSnapshot(void) {
+    id stored=[NSUserDefaults.standardUserDefaults objectForKey:@"profileMetadata"];
+    return [stored isKindOfClass:NSDictionary.class]?stored:@{};
+}
 NSNotificationName const ProfileStoreMetadataDidChangeNotification = @"CCTVHostProfileStoreMetadataDidChange";
 
 static NSString *const CCTVNativeLogoSourceKey = @"__native_cctv__";
@@ -40,7 +45,7 @@ static NSString *const CCTVEnabledChannelTelemetrySourcesKey = @"enabledChannelT
 + (NSDictionary *)metadata:(NSString *)source {
     if(![source isKindOfClass:NSString.class]||!source.length)return @{};
     @synchronized(self){
-        id value=[NSUserDefaults.standardUserDefaults dictionaryForKey:@"profileMetadata"][source];
+        id value=ProfileMetadataDefaultsSnapshot()[source];
         if(![value isKindOfClass:NSDictionary.class])return @{};
         NSDictionary *dict=(NSDictionary *)value;
         if(![dict[@"_hasDiskPayload"] boolValue])return dict;
@@ -85,7 +90,7 @@ static NSString *const CCTVEnabledChannelTelemetrySourcesKey = @"enabledChannelT
             if(error)*error=[NSError errorWithDomain:@"ProfileStore" code:1 userInfo:@{NSLocalizedDescriptionKey:@"保存订阅缓存失败，原有配置未修改。"}];
             return NO;
         }
-        NSDictionary *previous=[NSUserDefaults.standardUserDefaults dictionaryForKey:@"profileMetadata"]?:@{};
+        NSDictionary *previous=ProfileMetadataDefaultsSnapshot();
         [NSUserDefaults.standardUserDefaults setObject:replacement forKey:@"profileMetadata"];
         for(NSString *source in previous) {
             NSDictionary *old=[previous[source] isKindOfClass:NSDictionary.class]?previous[source]:@{};
@@ -97,7 +102,8 @@ static NSString *const CCTVEnabledChannelTelemetrySourcesKey = @"enabledChannelT
     }
 }
 + (void)storeProfile:(NSMutableDictionary *)profile forSource:(NSString *)source inMetadata:(NSMutableDictionary *)all {
-    NSString *oldName=[all[source][@"_payloadFile"] isKindOfClass:NSString.class]?all[source][@"_payloadFile"]:nil;
+    NSDictionary *oldProfile=[all[source] isKindOfClass:NSDictionary.class]?all[source]:@{};
+    NSString *oldName=[oldProfile[@"_payloadFile"] isKindOfClass:NSString.class]?oldProfile[@"_payloadFile"]:nil;
     BOOL offload=([profile[@"text"] length]>65536)||([profile[@"cachedChannels"] count]>200);
     NSString *path=[self payloadFilePathForSource:source];
     if(offload){
@@ -117,7 +123,7 @@ static NSString *const CCTVEnabledChannelTelemetrySourcesKey = @"enabledChannelT
     @synchronized(self){
     if((source.length&&![self isSource:source])||![values isKindOfClass:NSDictionary.class])return;
     NSString *storageKey=source.length?source:CCTVNativeLogoSourceKey;
-    NSMutableDictionary *all=[[NSUserDefaults.standardUserDefaults dictionaryForKey:@"profileMetadata"]?:@{} mutableCopy];
+    NSMutableDictionary *all=[ProfileMetadataDefaultsSnapshot() mutableCopy];
     NSMutableDictionary *p=[[self metadata:storageKey] mutableCopy];
     [p addEntriesFromDictionary:values];
     [self storeProfile:p forSource:storageKey inMetadata:all];
@@ -128,7 +134,7 @@ static NSString *const CCTVEnabledChannelTelemetrySourcesKey = @"enabledChannelT
     // 只清一个键，其余元数据保留：重新匹配 EPG 时用它丢弃过期
     // detectedEPGURL，而不丢弃名称、状态与更新时间等其余字段。
     if(![self isSource:source]||![key isKindOfClass:NSString.class]||!key.length)return;
-    NSMutableDictionary *all=[[NSUserDefaults.standardUserDefaults dictionaryForKey:@"profileMetadata"]?:@{} mutableCopy];
+    NSMutableDictionary *all=[ProfileMetadataDefaultsSnapshot() mutableCopy];
     NSMutableDictionary *p=[[self metadata:source] mutableCopy];
     if(![p objectForKey:key])return;
     [p removeObjectForKey:key];
@@ -138,10 +144,10 @@ static NSString *const CCTVEnabledChannelTelemetrySourcesKey = @"enabledChannelT
 }
 + (void)remove:(NSString *)source {
     @synchronized(self){
-    NSString *name=[NSUserDefaults.standardUserDefaults dictionaryForKey:@"profileMetadata"][source][@"_payloadFile"];
+    NSDictionary *metadata=ProfileMetadataDefaultsSnapshot();NSDictionary *profile=[metadata[source] isKindOfClass:NSDictionary.class]?metadata[source]:@{};NSString *name=[profile[@"_payloadFile"] isKindOfClass:NSString.class]?profile[@"_payloadFile"]:nil;
     if([name isKindOfClass:NSString.class]&&name.length&&[name.lastPathComponent isEqual:name]){NSString *directory=[[self payloadFilePathForSource:source] stringByDeletingLastPathComponent];[NSFileManager.defaultManager removeItemAtPath:[directory stringByAppendingPathComponent:name] error:NULL];}
     if([source isKindOfClass:NSString.class]&&source.length)[NSFileManager.defaultManager removeItemAtPath:[self payloadFilePathForSource:source] error:NULL];
-    NSMutableDictionary *all=[[NSUserDefaults.standardUserDefaults dictionaryForKey:@"profileMetadata"]?:@{} mutableCopy];[all removeObjectForKey:source];[NSUserDefaults.standardUserDefaults setObject:all forKey:@"profileMetadata"];
+    NSMutableDictionary *all=[ProfileMetadataDefaultsSnapshot() mutableCopy];[all removeObjectForKey:source];[NSUserDefaults.standardUserDefaults setObject:all forKey:@"profileMetadata"];
     for(NSString *key in @[@"profileOrder",@"disabledSubscriptions",CCTVDisabledChannelLogoSourcesKey,CCTVDisabledPlayerCornerLogoSourcesKey,CCTVDisabledChannelPreviewSourcesKey,CCTVDisabledChannelTelemetrySourcesKey,CCTVEnabledChannelLogoSourcesKey,CCTVEnabledPlayerCornerLogoSourcesKey,CCTVEnabledChannelPreviewSourcesKey,CCTVEnabledChannelTelemetrySourcesKey]){NSMutableArray *a=[[NSUserDefaults.standardUserDefaults arrayForKey:key]?:@[] mutableCopy];[a removeObject:source];[NSUserDefaults.standardUserDefaults setObject:a forKey:key];}
 
     }
