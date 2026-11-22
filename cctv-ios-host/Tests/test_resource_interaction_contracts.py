@@ -175,7 +175,15 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('CGFloat contentY=y+6+segmentHeight+4;CGFloat contentBottom=height', self.root)
         self.assertIn('tabContentInset=MAX(8,height-tabY+8)', self.root)
         self.assertIn('setBottomOverlayInset:pageBottomInset', self.root)
-        self.assertIn('five-tab navigation stays fully transparent over content that extends behind it',
+        self.assertIn('five-tab glass navigation grows for dynamic text and stays visible over content',
+                      (ROOT / 'Tests/UISmoke/SmokeDriver.m').read_text())
+
+    def test_tab_bar_uses_short_localized_labels_and_dynamic_type_sizing(self):
+        self.assertIn('NSArray<NSString *> *titles=@[@"央视",@"频道",@"影视",@"资源",@"设置"]', self.root)
+        self.assertIn('accessibilityLabels=@[@"央视直播",@"订阅频道",@"影视库",@"资源管理",@"设置"]', self.root)
+        self.assertIn('identifiers=@[@"tab.live",@"tab.channels",@"tab.vod",@"tab.resources",@"tab.settings"]', self.root)
+        self.assertIn('CGFloat tabHeight=MAX(58,ceil(20+3+tabLabelFont.lineHeight+16))', self.root)
+        self.assertIn('all five navigation tabs retain concise visible labels and full VoiceOver names at large text sizes',
                       (ROOT / 'Tests/UISmoke/SmokeDriver.m').read_text())
 
     def test_top_edge_is_immersive_while_controls_respect_safe_areas(self):
@@ -1168,7 +1176,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('[owner activate:source keepingHome:YES]', self.detail)
         self.assertIn('openHomeConfiguration', self.detail)
         self.assertIn('@"影视库"', self.root)
-        self.assertIn('CCTV",@"频道",@"影视库",@"资源",@"设置', self.root)
+        self.assertIn('央视",@"频道",@"影视",@"资源",@"设置', self.root)
         self.assertIn('@"频道"', self.root)
 
     def test_tvbox_collection_can_be_added_as_a_bounded_batch_with_live_user_agents(self):

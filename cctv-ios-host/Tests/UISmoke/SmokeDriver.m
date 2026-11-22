@@ -556,7 +556,22 @@ static void next(NSArray *steps, NSUInteger index) {
             check(liveList.hidden&&!grid.hidden,@"switching back restores the live grid");
 
             check(tabs.arrangedSubviews.count==5, @"five navigation pages");
-            UIButton *activeTab=(UIButton *)tabs.arrangedSubviews[0];UIView *tabBackdrop=[root valueForKey:@"bottomBarBackdrop"];CGFloat expectedTabTop=CGRectGetHeight(root.view.bounds)-root.view.safeAreaInsets.bottom-58;check([activeTab.accessibilityValue isEqual:@"已选中"]&&(activeTab.accessibilityTraits&UIAccessibilityTraitSelected)!=0,[NSString stringWithFormat:@"bottom navigation marks its active page for accessibility (value=%@)",activeTab.accessibilityValue?:@""]);UIView *channelTable=[root valueForKey:@"table"];check([tabBackdrop.backgroundColor isEqual:UIColor.clearColor]&&!tabBackdrop.isOpaque&&fabs(CGRectGetMinX(tabs.frame))<1&&fabs(CGRectGetWidth(tabs.frame)-CGRectGetWidth(root.view.bounds))<1&&fabs(CGRectGetMinY(tabs.frame)-expectedTabTop)<1.5&&CGRectGetMaxY(tabBackdrop.frame)>=CGRectGetHeight(root.view.bounds)-1&&CGRectGetMaxY(channelTable.frame)>=CGRectGetHeight(root.view.bounds)-1, @"five-tab navigation stays fully transparent over content that extends behind it");
+            UIButton *activeTab=(UIButton *)tabs.arrangedSubviews[0];
+            UIView *tabBackdrop=[root valueForKey:@"bottomBarBackdrop"];
+            UIFont *tabLabelFont=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold] compatibleWithTraitCollection:root.traitCollection];
+            CGFloat expectedTabHeight=MAX(58,ceil(20+3+tabLabelFont.lineHeight+16));
+            CGFloat expectedTabTop=CGRectGetHeight(root.view.bounds)-root.view.safeAreaInsets.bottom-expectedTabHeight;
+            check([activeTab.accessibilityValue isEqual:@"已选中"]&&(activeTab.accessibilityTraits&UIAccessibilityTraitSelected)!=0,[NSString stringWithFormat:@"bottom navigation marks its active page for accessibility (value=%@)",activeTab.accessibilityValue?:@""]);
+            NSArray<NSString *> *shortTabTitles=@[@"央视",@"频道",@"影视",@"资源",@"设置"];
+            NSArray<NSString *> *spokenTabLabels=@[@"央视直播",@"订阅频道",@"影视库",@"资源管理",@"设置"];
+            BOOL allTabsHaveVisibleLabels=tabs.arrangedSubviews.count==shortTabTitles.count;
+            for(NSUInteger index=0;index<MIN(tabs.arrangedSubviews.count,shortTabTitles.count);index++){
+                UIButton *button=(UIButton *)tabs.arrangedSubviews[index];
+                allTabsHaveVisibleLabels &= [button.configuration.title isEqualToString:shortTabTitles[index]] && [button.accessibilityLabel isEqualToString:spokenTabLabels[index]];
+            }
+            check(allTabsHaveVisibleLabels, @"all five navigation tabs retain concise visible labels and full VoiceOver names at large text sizes");
+            UIView *channelTable=[root valueForKey:@"table"];
+            check([tabBackdrop.backgroundColor isEqual:UIColor.clearColor]&&!tabBackdrop.isOpaque&&fabs(CGRectGetMinX(tabs.frame))<1&&fabs(CGRectGetWidth(tabs.frame)-CGRectGetWidth(root.view.bounds))<1&&fabs(CGRectGetHeight(tabs.frame)-expectedTabHeight)<1.5&&fabs(CGRectGetMinY(tabs.frame)-expectedTabTop)<1.5&&CGRectGetMaxY(tabBackdrop.frame)>=CGRectGetHeight(root.view.bounds)-1&&CGRectGetMaxY(channelTable.frame)>=CGRectGetHeight(root.view.bounds)-1, @"five-tab glass navigation grows for dynamic text and stays visible over content");
             NSString *source=@"https://example.com/smoke.m3u";NSMutableSet *originalSubscriptions=[[root valueForKey:@"subscriptionURLs"] mutableCopy]?:[NSMutableSet set];NSMutableSet *smokeSubscriptions=[originalSubscriptions mutableCopy];[smokeSubscriptions addObject:source];[root setValue:smokeSubscriptions forKey:@"subscriptionURLs"];[ProfileStore update:source values:@{@"name":@"UI Smoke Live Resource"}];
             NSDictionary *remote=@{@"id":@"remote-smoke",@"name":@"CCTV-1 M3U8",@"group":@"央视",@"remoteURL":@"https://example.com/live.m3u8",@"subscriptionSources":@[source]};
             NSArray *original=[root valueForKey:@"allChannels"];

@@ -121,7 +121,7 @@
 - M3U 无效/本地文件 URL 被拒绝时同步清除该条目的 catch-up 配置，避免下一条裸 URL 继承错误的回放模板。
 - 点播恢复提示现在在 Cicada seek 完成后校验播放意图、视图挂起状态和当前播放所有者；锁屏/耳机媒体命令新增 toggle play/pause。
 - 频道 VoiceOver 值在首位描述正在播放、已暂停、正在连接或播放失败可重试，再补充首帧时间与连接探测结果；播放失败时保留当前频道标记但不再误报“正在播放”。
-- 全屏网页嗅探超限时停止提取；直播底部玻璃层、频道悬浮控件、通用工具栏和资源头部统一注册 Reduce Transparency 实色刷新；大字号标签栏改为图标显示并保留完整 VoiceOver 标签，频道网格维持 4 列。
+- 全屏网页嗅探超限时停止提取；直播底部玻璃层、频道悬浮控件、通用工具栏和资源头部统一注册 Reduce Transparency 实色刷新；底部标签保留短标题并随动态字号增加高度，VoiceOver 使用完整目的地名称，频道网格维持 4 列。
 - UI-only smoke 改为经 RootViewController 的真实影视库标签打开测试页面，并覆盖 iPhone SE/常规 iPhone、默认/AX XXXL 字号、浅色/深色组合。Xcode workflow 对同一 ref 的构建串行，新 main 提交会取消旧运行；release job 发布前再核对 main HEAD，跳过过期构建。
 
 ## 第三批：公共视频解析授权边界
@@ -130,6 +130,10 @@
 - 原生播放器解析和 Python 媒体运行时都读取同一个设备本地授权偏好。Python `resolve_vip_watch_url`、`resolve_vip_url_via_parsers` 与 `resolve_maccms_stream_by_title` 默认拒绝外部解析；调用端只有在用户显式开启后才传入授权。
 - 用户选择的资源合集解析接口仍由该合集配置声明并正常工作；授权不随配置备份迁移，恢复默认偏好会将其关闭。
 - 回归覆盖默认关闭时不触发公共 CMS/解析请求、设置默认值与重置行为、备份边界和播放参数传递。此项关闭了默认外发；用户主动启用时，第三方服务的数据接收及片名匹配风险仍需由用户承担。
+
+## 标签栏：对齐 Apple HIG
+
+按 [Apple Tab Bars HIG](https://developer.apple.com/design/human-interface-guidelines/tab-bars) 复核后保留五个常用顶层入口（五项以内），将可见标题收短为“央视、频道、影视、资源、设置”，同时为 VoiceOver 提供“央视直播、订阅频道、影视库、资源管理、设置”等明确名称。资源页的新增、刷新、服务操作仍留在页面工具栏/菜单中，底栏只负责导航。底栏继续常驻并使用 SF Symbols 与玻璃材质；字号放大时根据标签行高扩高底栏，并同步调整页面滚动预留，避免只留下图标或遮住页面末行。UI smoke 在 iPhone SE 大字号和 iPhone 16 Accessibility XXXL 场景检查标题、可访问名称及动态高度。
 
 ## 本轮回归修复补充
 
@@ -152,7 +156,7 @@ python3 Scripts/generate_media_capabilities.py --check
 git diff --check
 ```
 
-阶段一/二原回归记录为 Python **936 项，869 通过、67 跳过、0 失败**；Python loopback 测试覆盖 Emby/Jellyfin、Xtream、WebDAV、HTTP 重定向、认证、分页和运行时归一化，不访问公共真实服务。第三批于 2026-11-22 复跑 Python **1168 项，1100 通过、68 跳过、0 失败**；JavaScript 插件测试 3 个 suite 全通过；本批 Python 语法检查、能力表生成检查与 `git diff --check` 通过。
+阶段一/二原回归记录为 Python **936 项，869 通过、67 跳过、0 失败**；Python loopback 测试覆盖 Emby/Jellyfin、Xtream、WebDAV、HTTP 重定向、认证、分页和运行时归一化，不访问公共真实服务。第三批及标签栏 HIG 改进于 2026-11-22 复跑 Python **1169 项，1101 通过、68 跳过、0 失败**；JavaScript 插件测试 3 个 suite 全通过；Python 语法检查、能力表生成检查与 `git diff --check` 通过。
 
 Linux 环境没有 `xcodebuild`、`xcrun` 或 iOS SDK，未编译任何 Objective-C/UIKit/AVFoundation 源，也未运行 `Tests/UISmoke`。静态源契约通过不是 Objective-C 编译证明。
 

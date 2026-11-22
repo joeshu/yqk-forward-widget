@@ -1040,13 +1040,16 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
     self.liveMiniPlayerCloseButton=[UIButton buttonWithType:UIButtonTypeSystem];[self.liveMiniPlayerCloseButton setImage:[UIImage systemImageNamed:@"xmark.circle.fill"] forState:UIControlStateNormal];self.liveMiniPlayerCloseButton.tintColor=HostSecondaryText();self.liveMiniPlayerCloseButton.accessibilityIdentifier=@"live.mini-player.close";self.liveMiniPlayerCloseButton.accessibilityLabel=@"关闭直播挂起提示";[self.liveMiniPlayerCloseButton addTarget:self action:@selector(dismissSuspendedLiveMiniBar) forControlEvents:UIControlEventTouchUpInside];[self.liveMiniPlayerBar addSubview:self.liveMiniPlayerCloseButton];
     [self.view addSubview:self.liveMiniPlayerBar];
     self.hostTabController=[HostTabBarController new];[self addChildViewController:self.hostTabController];self.bottomBar=self.hostTabController.stackView;__weak typeof(self) weakTabOwner=self;self.hostTabController.onSelect=^(UIButton *button){[weakTabOwner bottomTabTapped:button];};
-    NSArray *titles=@[@"CCTV",@"频道",@"影视库",@"资源",@"设置"];
-    NSArray *icons=@[@"tv.fill",@"play.rectangle.on.rectangle",@"house.fill",@"externaldrive.fill",@"gearshape"];
+    NSArray<NSString *> *titles=@[@"央视",@"频道",@"影视",@"资源",@"设置"];
+    NSArray<NSString *> *accessibilityLabels=@[@"央视直播",@"订阅频道",@"影视库",@"资源管理",@"设置"];
+    NSArray<NSString *> *accessibilityHints=@[@"切换到央视直播页面",@"切换到订阅频道页面",@"切换到影视库页面",@"切换到资源管理页面",@"切换到设置页面"];
+    NSArray<NSString *> *identifiers=@[@"tab.live",@"tab.channels",@"tab.vod",@"tab.resources",@"tab.settings"];
+    NSArray *icons=@[@"tv.fill",@"play.rectangle.on.rectangle",@"house.fill",@"square.stack.3d.up.fill",@"gearshape.fill"];
     for (NSInteger i=0;i<titles.count;i++) {
         UIButton *b=[UIButton buttonWithType:UIButtonTypeSystem]; b.tag=i;HostInstallPressFeedback(b);
         UIButtonConfiguration *cfg=[UIButtonConfiguration plainButtonConfiguration]; cfg.title=titles[i]; cfg.image=[UIImage systemImageNamed:icons[i]]; cfg.imagePlacement=NSDirectionalRectEdgeTop; cfg.imagePadding=3; cfg.cornerStyle=UIButtonConfigurationCornerStyleCapsule; cfg.contentInsets=NSDirectionalEdgeInsetsMake(6,3,6,3); cfg.preferredSymbolConfigurationForImage=[UIImageSymbolConfiguration configurationWithPointSize:20 weight:UIImageSymbolWeightMedium]; cfg.baseForegroundColor=(i==0?HostOnAccent():HostMutedText()); cfg.background.backgroundColor=i==0?HostAccentFill():UIColor.clearColor; cfg.titleTextAttributesTransformer=^(NSDictionary<NSAttributedStringKey,id> *attributes){NSMutableDictionary *result=[attributes mutableCopy];result[NSFontAttributeName]=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold]];return result;}; b.configuration=cfg;
-        b.accessibilityLabel=titles[i]; b.accessibilityIdentifier=[NSString stringWithFormat:@"tab.%@",titles[i]];
-        b.accessibilityHint=[NSString stringWithFormat:@"切换到%@页面",titles[i]];
+        b.accessibilityLabel=accessibilityLabels[i]; b.accessibilityIdentifier=identifiers[i];
+        b.accessibilityHint=accessibilityHints[i];
         b.accessibilityTraits=UIAccessibilityTraitButton|(i==0?UIAccessibilityTraitSelected:0);b.accessibilityValue=i==0?@"已选中":@"未选中";
         [self.hostTabController addTabButton:b];
     }
@@ -1130,7 +1133,7 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
 }
 
 - (void)updateBottomBarSelection {
-    NSArray<NSString *> *titles=@[@"CCTV",@"频道",@"影视库",@"资源",@"设置"];
+    NSArray<NSString *> *titles=@[@"央视",@"频道",@"影视",@"资源",@"设置"];
     for (UIButton *button in self.bottomBar.arrangedSubviews) {
         UIButtonConfiguration *configuration=button.configuration;
         BOOL selected=button.tag==self.activeTab;
@@ -1291,7 +1294,7 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
         CGFloat segmentHeight=MAX(32,ceil(segmentFont.lineHeight)+14);
         self.groupControl.frame=CGRectMake(12,y+6,w-24,segmentHeight);self.groupControl.hidden=!catalog||expandedLive;self.playerTabs.frame=CGRectMake(12,y+6,w-24,segmentHeight);self.playerTabs.hidden=!catalog||!expandedLive;
         self.versionLabel.hidden=YES;
-        CGFloat tabHeight=58,tabWidth=MIN(w,560),tabY=MAX(0,height-safe.bottom-tabHeight),tabContentInset=MAX(8,height-tabY+8);self.bottomBar.frame=CGRectMake(MAX(0,(w-tabWidth)/2),tabY,tabWidth,tabHeight);self.bottomBarBackdrop.frame=CGRectMake(0,tabY,w,MAX(tabHeight,height-tabY));self.bottomDockFadeGradient.frame=self.bottomBarBackdrop.bounds;self.bottomDockGlass.frame=CGRectMake(MAX(10,(w-MIN(w-20,540))/2),2,MIN(w-20,540),tabHeight-4);self.bottomBar.hidden=NO;self.bottomBarBackdrop.hidden=NO;
+        UIFont *tabLabelFont=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold] compatibleWithTraitCollection:self.traitCollection];CGFloat tabHeight=MAX(58,ceil(20+3+tabLabelFont.lineHeight+16)),tabWidth=MIN(w,560),tabY=MAX(0,height-safe.bottom-tabHeight),tabContentInset=MAX(8,height-tabY+8);self.bottomBar.frame=CGRectMake(MAX(0,(w-tabWidth)/2),tabY,tabWidth,tabHeight);self.bottomBar.layer.cornerRadius=tabHeight/2;self.bottomBarBackdrop.frame=CGRectMake(0,tabY,w,MAX(tabHeight,height-tabY));self.bottomDockFadeGradient.frame=self.bottomBarBackdrop.bounds;self.bottomDockGlass.frame=CGRectMake(MAX(10,(w-MIN(w-20,540))/2),2,MIN(w-20,540),tabHeight-4);self.bottomDockGlass.layer.cornerRadius=(tabHeight-4)/2;self.bottomBar.hidden=NO;self.bottomBarBackdrop.hidden=NO;
         BOOL showMiniBar=self.livePlaybackSuspendedForNavigation&&self.channelID.length&&self.activeTab>=2;self.liveMiniPlayerBar.hidden=!showMiniBar;if(showMiniBar){CGFloat miniW=MIN(w-28,520),miniH=42;self.liveMiniPlayerBar.frame=CGRectMake((w-miniW)/2,MAX(top+8,tabY-miniH-8),miniW,miniH);self.liveMiniPlayerCloseButton.frame=CGRectMake(miniW-38,5,32,32);self.liveMiniPlayerResumeButton.frame=CGRectMake(miniW-130,5,88,32);self.liveMiniPlayerLabel.frame=CGRectMake(14,0,MAX(0,miniW-150),miniH);[self.view bringSubviewToFront:self.liveMiniPlayerBar];}
         CGFloat contentY=y+6+segmentHeight+4;CGFloat contentBottom=height;CGFloat catalogBottomInset=tabContentInset+62;
         CGFloat floatingPillExtra=catalog?18:0;

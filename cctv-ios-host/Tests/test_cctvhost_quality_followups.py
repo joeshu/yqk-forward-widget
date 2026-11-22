@@ -72,7 +72,8 @@ class CCTVHostQualityFollowupContracts(unittest.TestCase):
         self.assertIn('togglePlayPauseCommand addTarget:self', coordinator)
         self.assertIn('MPRemoteCommandHandlerStatus)togglePlayPause', coordinator)
         self.assertIn('configuration.title=titles[button.tag]', root)
-        self.assertIn('b.accessibilityLabel=titles[i]', root)
+        self.assertIn('accessibilityLabels=@[@"央视直播",@"订阅频道",@"影视库",@"资源管理",@"设置"]', root)
+        self.assertIn('b.accessibilityLabel=accessibilityLabels[i]', root)
 
     def test_ui_matrix_and_release_freshness_are_configured(self):
         workflow = (ROOT.parent / '.github/workflows/cctv-ios-host.yml').read_text()
