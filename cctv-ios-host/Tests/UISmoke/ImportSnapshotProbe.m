@@ -20,14 +20,14 @@ void ImportSnapshotRunSmokeChecksAsync(ImportSnapshotProbeCompletion completion)
     waitForRestore(first,[NSDate dateWithTimeIntervalSinceNow:30],^(BOOL firstRestored){
         if(!firstRestored){NSLog(@"IMPORT_SNAPSHOT_PROBE initial restore timed out");completion(NO);return;}
         NSMutableData *payload=[NSMutableData dataWithLength:2*1024*1024];memset(payload.mutableBytes,0x5A,payload.length);
-        [first setValue:[NSMutableArray arrayWithObject:[@{@"name":@"snapshot fixture",@"retryData":payload,@"selected":@NO} mutableCopy]] forKey:@"candidates"];
+        [first setValue:[NSMutableArray arrayWithObject:[@{@"name":@"snapshot fixture",@"snapshotPayload":payload,@"retryData":payload,@"selected":@NO} mutableCopy]] forKey:@"candidates"];
         [first setValue:@"snapshot fixture" forKey:@"stage"];[first writeCurrentSnapshot];
 
         ResourceImportWorkflowViewController *restored=[ResourceImportWorkflowViewController new];
         waitForRestore(restored,[NSDate dateWithTimeIntervalSinceNow:30],^(BOOL didRestoreBlob){
             NSArray *rows=[restored valueForKey:@"candidates"];
-            BOOL blobRestored=didRestoreBlob&&rows.count==1&&[rows[0][@"retryData"] isEqual:payload];
-            if(!blobRestored)NSLog(@"IMPORT_SNAPSHOT_PROBE blob restore mismatch restored=%d rows=%lu dataClass=%@ dataLength=%lu expectedLength=%lu stage=%@",didRestoreBlob,(unsigned long)rows.count,rows.count?NSStringFromClass([rows[0][@"retryData"] class]):@"none",(unsigned long)[rows.firstObject[@"retryData"] length],(unsigned long)payload.length,[restored valueForKey:@"stage"]);
+            BOOL blobRestored=didRestoreBlob&&rows.count==1&&[rows[0][@"snapshotPayload"] isEqual:payload]&&!rows[0][@"retryData"];
+            if(!blobRestored)NSLog(@"IMPORT_SNAPSHOT_PROBE blob/privacy mismatch restored=%d rows=%lu blobClass=%@ blobLength=%lu retryDataPresent=%d expectedLength=%lu stage=%@",didRestoreBlob,(unsigned long)rows.count,rows.count?NSStringFromClass([rows[0][@"snapshotPayload"] class]):@"none",(unsigned long)[rows.firstObject[@"snapshotPayload"] length],rows.firstObject[@"retryData"]!=nil,(unsigned long)payload.length,[restored valueForKey:@"stage"]);
 
             // Rapid updates must leave the final snapshot, not an earlier queued write.
             for(NSUInteger i=0;i<8;i++){[restored setValue:[NSString stringWithFormat:@"revision %lu",(unsigned long)i] forKey:@"stage"];[restored writeCurrentSnapshot];}
