@@ -60,8 +60,9 @@ static NSString *const CCTVEnabledChannelTelemetrySourcesKey = @"enabledChannelT
         NSMutableDictionary *replacement=[NSMutableDictionary dictionary];
         NSMutableArray<NSString *> *created=[NSMutableArray array];
         NSString *directory=[[self payloadFilePathForSource:@"backup"] stringByDeletingLastPathComponent];
+        BOOL failed=NO;
         for(NSString *source in profiles) {
-            if(![self isSource:source] || ![profiles[source] isKindOfClass:NSDictionary.class]) goto failed;
+            if(![self isSource:source] || ![profiles[source] isKindOfClass:NSDictionary.class]){failed=YES;break;}
             NSMutableDictionary *profile=[profiles[source] mutableCopy];
             [profile removeObjectForKey:@"_payloadFile"];
             [profile removeObjectForKey:@"_hasDiskPayload"];
@@ -71,13 +72,18 @@ static NSString *const CCTVEnabledChannelTelemetrySourcesKey = @"enabledChannelT
                 for(NSString *key in @[@"text",@"cachedChannels"])if(profile[key])payload[key]=profile[key];
                 NSString *name=[NSString stringWithFormat:@"backup-%@.plist",NSUUID.UUID.UUIDString];
                 NSString *path=[directory stringByAppendingPathComponent:name];
-                if(![payload writeToFile:path atomically:YES]) goto failed;
+                if(![payload writeToFile:path atomically:YES]){failed=YES;break;}
                 [created addObject:path];
                 [profile removeObjectsForKeys:payload.allKeys];
                 profile[@"_hasDiskPayload"]=@2;
                 profile[@"_payloadFile"]=name;
             }
             replacement[source]=profile;
+        }
+        if(failed){
+            for(NSString *path in created)[NSFileManager.defaultManager removeItemAtPath:path error:NULL];
+            if(error)*error=[NSError errorWithDomain:@"ProfileStore" code:1 userInfo:@{NSLocalizedDescriptionKey:@"保存订阅缓存失败，原有配置未修改。"}];
+            return NO;
         }
         NSDictionary *previous=[NSUserDefaults.standardUserDefaults dictionaryForKey:@"profileMetadata"]?:@{};
         [NSUserDefaults.standardUserDefaults setObject:replacement forKey:@"profileMetadata"];
@@ -88,10 +94,6 @@ static NSString *const CCTVEnabledChannelTelemetrySourcesKey = @"enabledChannelT
             else if([old[@"_hasDiskPayload"] boolValue])[NSFileManager.defaultManager removeItemAtPath:[self payloadFilePathForSource:source] error:NULL];
         }
         return YES;
-    failed:
-        for(NSString *path in created)[NSFileManager.defaultManager removeItemAtPath:path error:NULL];
-        if(error)*error=[NSError errorWithDomain:@"ProfileStore" code:1 userInfo:@{NSLocalizedDescriptionKey:@"保存订阅缓存失败，原有配置未修改。"}];
-        return NO;
     }
 }
 + (void)storeProfile:(NSMutableDictionary *)profile forSource:(NSString *)source inMetadata:(NSMutableDictionary *)all {
