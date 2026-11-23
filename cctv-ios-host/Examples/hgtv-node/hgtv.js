@@ -27,7 +27,7 @@ const path = require('node:path');
 const zlib = require('node:zlib');
 
 // ---------------- 配置 ----------------
-const VERSION = '1.0.5-cctvhost-r7';
+const VERSION = '1.0.5-cctvhost-r8';
 const SITE = 'https://hongguoduanju.com';
 const DEVICE_REGISTER_API = 'https://log5-applog-lf.fqnovel.com/service/2/device_register/?tt_data=a&cronet_version=8d40f833_2026-03-03&ttnet_version=4.2.243.31-douyin&use_store_region_cookie=1';
 const VIDEO_MODEL_API = 'https://api5-normal-sinfonlineb.fqnovel.com/novel/player/multi_video_model/v1/';
@@ -784,6 +784,45 @@ async function playerV1Model(vid, device) {
 }
 
 
+// r8（2026-11-23）：player/v1 已死（A/B host 全回空体）；主路改走 video_tab
+// 无正文 V5 GET（上游 hongguoTV 7.7 打法，videoTabRequest）。
+// V5 签名常量（v04.10.03 / license 646637794）未变——死的是端点，不是签名。
+// 2026-11-23 实测：video_tab V5 GET 在 sinfonlineb 与 sinfonlinea 两 host
+// 均回 5 档模型（ep1 7706406239239932952、ep22 7706406350871333912）。
+const VIDEO_TAB_V5_ALT_API = 'https://api5-normal-sinfonlinea.fqnovel.com/reading/bookapi/video_tab/multi_video_model/v1/';
+
+function videoTabV5Request(vid, device, base = VIDEO_TAB_API) {
+  const values = {
+    aid: '8662', app_name: 'novelread', version_code: '74332',
+    version_name: '7.4.3.32', channel: 'vivo_8662_64',
+    device_platform: 'android', device_type: 'PGT-AN10',
+    os_version: '12', update_version_code: '74332',
+    iid: String(device.iid), cdid: String(device.cdid), device_id: String(device.device_id),
+    video_id: String(vid), video_id_type: '0', device_level: '1',
+    need_all_video_definition: '1', need_mp4_align: '0', use_os_player: '0',
+    video_platform: '1024', source: '0', from_video_id: '',
+  };
+  const signed = signPlaybackV5(base, values, null, Date.now());
+  const headers = {
+    ...signed.headers,
+    'x-ss-req-ticket': String(signed.ticket),
+    'User-Agent': VIDEO_UA_TMPL.replace('%s', '73932'),
+    Accept: 'application/json',
+  };
+  return { url: signed.url, headers, method: 'GET' };
+}
+
+async function videoTabV5Model(vid, device, base = VIDEO_TAB_API) {
+  const s = videoTabV5Request(vid, device, base);
+  const r = await httpText(s.url, { method: 'GET', headers: s.headers, body: null, timeout: 25000 });
+  if (r.status < 200 || r.status >= 300 || !r.body.length) {
+    throw Error('v5 video_tab returned an empty response');
+  }
+  const j = JSON.parse(r.body.toString('utf8'));
+  return parseVideoModelResponse(j, vid);
+}
+
+
 function signedSingleRequest(vid, contentType, device, host, extraHeaders) {
   const ts = Math.floor(Date.now() / 1000);
   const dev = validDeviceIdentity(device) ? device : (validDeviceIdentity(deviceSession) ? deviceSession : null);
@@ -1386,17 +1425,28 @@ function parseVideoModelResponse(j, vid) {
 }
 
 async function fetchModel(vid) {
-  // r7：v5 player/v1 主路；失败时回退 v3 三次尝试（video_tab → multi → 备用域名）。
+  // r8：video_tab V5 GET 主路（上游 7.7 打法；player/v1 已死）；失败时回退 player/v1，再回退 v3。
   const hit = modelCache.get(String(vid));
   if (hit && Date.now() - hit.t < MODEL_TTL) return hit.vm;
   try {
     const dev = await ensureDeviceSession(false);
-    const vm = await playerV1Model(vid, dev);
-    if (vm && vm.video_list && Object.keys(vm.video_list).length) {
-      modelCache.set(String(vid), { t: Date.now(), vm });
-      return vm;
+    for (const base of [VIDEO_TAB_API, VIDEO_TAB_V5_ALT_API]) {
+      try {
+        const vm = await videoTabV5Model(vid, dev, base);
+        if (vm && vm.video_list && Object.keys(vm.video_list).length) {
+          modelCache.set(String(vid), { t: Date.now(), vm });
+          return vm;
+        }
+      } catch (e) { /* try next host, then player/v1 */ }
     }
-  } catch (e) { /* fall through to v3 */ }
+    try {
+      const vm = await playerV1Model(vid, dev);
+      if (vm && vm.video_list && Object.keys(vm.video_list).length) {
+        modelCache.set(String(vid), { t: Date.now(), vm });
+        return vm;
+      }
+    } catch (e) { /* fall through to v3 */ }
+  } catch (e) { /* device ensure failed; fall through to v3 */ }
   return fetchModelV3(vid);
 }
 

@@ -22,7 +22,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit, parse_qs, urlencode
 from urllib.request import Request, build_opener, HTTPCookieProcessor, HTTPRedirectHandler
 
-VERSION = '1.0.5-cctvhost-r7'
+VERSION = '1.0.5-cctvhost-r8'
 ORIGIN = 'https://hongguoduanju.com'
 COMPAT_PATH = '/api/video/protected/fallback-play-info'
 UA_WEB = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -2260,6 +2260,46 @@ def _player_v1_model(vid, device=None):
     return _parse_video_model_response(j, vid)
 
 
+# r8（2026-11-23）：player/v1 已死（A/B host 全回空体）；主路改走 video_tab
+# 无正文 V5 GET（上游 hongguoTV 7.7 打法，videoTabRequest）。
+# V5 签名常量（v04.10.03 / license 646637794）未变——死的是端点，不是签名。
+# 2026-11-23 实测：video_tab V5 GET 在 sinfonlineb 与 sinfonlinea 两 host
+# 均回 5 档模型（ep1 7706406239239932952、ep22 7706406350871333912）。
+_VIDEO_TAB_V5_URL_B = "https://api5-normal-sinfonlineb.fqnovel.com/reading/bookapi/video_tab/multi_video_model/v1/"
+_VIDEO_TAB_V5_URL_A = "https://api5-normal-sinfonlinea.fqnovel.com/reading/bookapi/video_tab/multi_video_model/v1/"
+
+
+def _video_tab_v5_request(vid, device=None, base=_VIDEO_TAB_V5_URL_B):
+    # r8: video_tab 无正文 V5 GET；values 与上游 7.7 videoTabRequest 一致
+    #（74332 / 7.4.3.32 画像），x-ss-req-ticket 随头发送。
+    dev = device if _valid_device_identity(device) else _ensure_device(False)
+    values = {
+        "aid": "8662", "app_name": "novelread", "version_code": "74332",
+        "version_name": "7.4.3.32", "channel": "vivo_8662_64",
+        "device_platform": "android", "device_type": "PGT-AN10",
+        "os_version": "12", "update_version_code": "74332",
+        "iid": str(dev["iid"]), "cdid": str(dev["cdid"]), "device_id": str(dev["device_id"]),
+        "video_id": str(vid), "video_id_type": "0", "device_level": "1",
+        "need_all_video_definition": "1", "need_mp4_align": "0", "use_os_player": "0",
+        "video_platform": "1024", "source": "0", "from_video_id": "",
+    }
+    url, headers, ticket = _sign_playback_v5(base, values, None, int(_time.time() * 1000))
+    req_headers = dict(headers)
+    req_headers["x-ss-req-ticket"] = str(ticket)
+    req_headers["User-Agent"] = _VIDEO_UA_TMPL % "73932"
+    req_headers["Accept"] = "application/json"
+    return url, req_headers
+
+
+def _video_tab_v5_model(vid, device=None, base=_VIDEO_TAB_V5_URL_B):
+    url, headers = _video_tab_v5_request(vid, device, base)
+    raw = _get_bytes(url, headers, 25)
+    if not raw:
+        raise ValueError("v5 video_tab returned an empty response")
+    j = _json.loads(raw.decode("utf-8", "replace"))
+    return _parse_video_model_response(j, vid)
+
+
 def _tt_encrypt(payload):
     # ttEncrypt：gzip 压缩后 AES-128-CBC 加密；
     # 体 = 746305100000 + 32 字节随机数 + AES-CBC(SHA512(压缩体) || 压缩体)，PKCS7 填充。
@@ -2851,10 +2891,18 @@ def _parse_video_model_response(j, vid):
 
 
 def _signed_model(vid):
-    """r7: v5 player/v1 主路；失败时回退 v3 三次尝试（video_tab → multi → 备用域名）。"""
+    """r8: video_tab V5 GET 主路（上游 7.7 打法；player/v1 已死）；失败时回退 player/v1，再回退 v3。"""
     ent = _SIGN_CACHE.get(str(vid))
     if ent and _time.time() - ent[0] < _SIGN_CACHE_TTL:
         return ent[1]
+    for base in (_VIDEO_TAB_V5_URL_B, _VIDEO_TAB_V5_URL_A):
+        try:
+            vm = _video_tab_v5_model(vid, base=base)
+            if vm:
+                _SIGN_CACHE[str(vid)] = (_time.time(), vm)
+                return vm
+        except Exception as e:
+            _trace("hgtv_v5_tab_failed", episode_id=vid, err=type(e).__name__)
     try:
         vm = _player_v1_model(vid)
         if vm:

@@ -198,8 +198,8 @@ const assert = require('node:assert/strict');
             assert.deepEqual(api.qualityCandidates(model).map(c=>c.q), ['1080p','720p','540p','480p','360p']);
             assert.equal(api.pickBest(model).q,'1080p');
           }
-          // r7: Episode 1: register (#1) -> v5 player/v1 POST (#1 empty) -> video_tab GET (#2 ok, v3 fallback)
-          // Episode 2 & 3: v5 player/v1 POST reuses registered device (#1) directly!
+          // r8: Episode 1: register (#1) -> video_tab V5 GET host B (#1 empty) -> video_tab V5 GET host A (#2 ok)
+          // Episode 2 & 3: video_tab V5 GET host B reuses registered device (#1) directly; player/v1 never called.
           assert.equal(regCount,1);
           assert.equal(playCount,4);
           const regCalls=calls.filter(c=>new URL(c.url).pathname.endsWith('/device_register/'));
@@ -215,11 +215,17 @@ const assert = require('node:assert/strict');
             assert.equal(call.options.body.length>38,true);
           }
           const v5Calls=calls.filter(c=>new URL(c.url).pathname==='/novel/player/multi_video_model/player/v1');
-          assert.equal(v5Calls.length,3);
-          v5Calls.forEach((call, idx)=>{
+          assert.equal(v5Calls.length,0);
+          const tabCalls=calls.filter(c=>new URL(c.url).pathname==='/reading/bookapi/video_tab/multi_video_model/v1/');
+          assert.equal(tabCalls.length,4);
+          assert.deepEqual(tabCalls.map(c=>new URL(c.url).hostname),
+            ['api5-normal-sinfonlineb.fqnovel.com','api5-normal-sinfonlinea.fqnovel.com',
+             'api5-normal-sinfonlineb.fqnovel.com','api5-normal-sinfonlineb.fqnovel.com']);
+          assert.deepEqual(tabCalls.map(c=>new URL(c.url).searchParams.get('video_id')),
+            [episodes[0],episodes[0],episodes[1],episodes[2]]);
+          tabCalls.forEach((call, idx)=>{
             const u=new URL(call.url);
-            assert.equal(u.hostname,'api5-normal-sinfonlinea.fqnovel.com');
-            assert.equal(u.pathname,'/novel/player/multi_video_model/player/v1');
+            assert.equal(u.pathname,'/reading/bookapi/video_tab/multi_video_model/v1/');
             assert.equal(u.searchParams.get('version_code'),'74332');
             assert.equal(u.searchParams.get('version_name'),'7.4.3.32');
             assert.equal(u.searchParams.get('channel'),'vivo_8662_64');
@@ -227,55 +233,32 @@ const assert = require('node:assert/strict');
             assert.equal(u.searchParams.get('device_id'),'7701998877665501');
             assert.ok(u.searchParams.get('cdid'));
             assert.ok(u.searchParams.get('_rticket'));
-            assert.equal(call.options.method,'POST');
-            assert.equal(call.options.headers['User-Agent'],
-              'com.phoenix.read/73932 (Linux; U; Android 12; zh_CN_#Hans; PGT-AN10; Build/V417IR;tt-ok/3.12.13.20)');
-            assert.equal(call.options.headers['Content-Encoding'],'gzip');
-            assert.ok(call.options.headers['x-khronos']);
-            assert.ok(call.options.headers['x-helios']);
-            assert.ok(call.options.headers['x-medusa']);
-            assert.ok(call.options.headers['x-ss-stub']);
-            assert.equal(call.options.headers['x-argus'],undefined);
-            assert.equal(call.options.headers['x-ladon'],undefined);
-            assert.equal(call.options.headers['x-gorgon'],undefined);
-            assert.equal(call.options.headers['passport-sdk-version'],undefined);
-            assert.equal(call.options.headers['x-tt-store-region'],undefined);
-            assert.equal(call.options.headers['Cookie'],undefined);
-            const reqBody=JSON.parse(require('node:zlib').gunzipSync(call.options.body).toString('utf8'));
-            assert.equal(reqBody.dr_scene,'player');
-            assert.equal(reqBody.biz_param.device_level,1);
-            assert.equal(reqBody.biz_param.video_platform,1024);
-            assert.equal(reqBody.biz_param.need_all_video_definition,true);
-            assert.ok(Array.isArray(reqBody.mixed_video_id_map['1004']));
-            assert.equal(reqBody.mixed_video_id_map['1004'].length,1);
-            assert.equal(reqBody.mixed_video_id_map['1004'][0],episodes[idx]);
-          });
-          const tabCalls=calls.filter(c=>new URL(c.url).pathname==='/reading/bookapi/video_tab/multi_video_model/v1/');
-          assert.equal(tabCalls.length,1);
-          tabCalls.forEach((call, idx)=>{
-            const u=new URL(call.url);
-            assert.equal(u.pathname,'/reading/bookapi/video_tab/multi_video_model/v1/');
-            assert.equal(u.searchParams.get('version_code'),'73932');
-            assert.equal(u.searchParams.get('version_name'),'7.3.9.32');
-            assert.equal(u.searchParams.get('video_id'),episodes[0]);
-            assert.ok(u.searchParams.get('cdid'));
+            assert.equal(u.searchParams.get('video_id_type'),'0');
+            assert.equal(u.searchParams.get('device_level'),'1');
+            assert.equal(u.searchParams.get('need_all_video_definition'),'1');
+            assert.equal(u.searchParams.get('need_mp4_align'),'0');
+            assert.equal(u.searchParams.get('use_os_player'),'0');
+            assert.equal(u.searchParams.get('video_platform'),'1024');
+            assert.equal(u.searchParams.get('source'),'0');
             assert.equal(call.options.method,'GET');
             assert.equal(call.options.body,null);
             assert.equal(call.options.headers['User-Agent'],
               'com.phoenix.read/73932 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)');
-            assert.equal(call.options.headers['x-tt-store-region'],'cn');
-            assert.equal(call.options.headers['passport-sdk-version'],'50561');
-            assert.equal(call.options.headers['x-tt-request-tag'],'t=0;n=0');
-            assert.ok(call.options.headers['x-argus']);
-            assert.ok(call.options.headers['x-ladon']);
+            assert.equal(call.options.headers['Accept'],'application/json');
+            assert.ok(call.options.headers['x-khronos']);
+            assert.ok(call.options.headers['x-helios']);
+            assert.ok(call.options.headers['x-medusa']);
+            assert.ok(call.options.headers['x-ss-req-ticket']);
+            assert.equal(call.options.headers['x-argus'],undefined);
+            assert.equal(call.options.headers['x-ladon'],undefined);
             assert.equal(call.options.headers['x-gorgon'],undefined);
-            assert.equal(call.options.headers['x-medusa'],undefined);
             assert.equal(call.options.headers['x-ss-stub'],undefined);
+            assert.equal(call.options.headers['passport-sdk-version'],undefined);
+            assert.equal(call.options.headers['x-tt-store-region'],undefined);
             assert.equal(call.options.headers['Cookie'],undefined);
           });
-          // Verify the single v3 fallback call reused device #1, and all v5 calls used device #1
-          assert.equal(new URL(tabCalls[0].url).searchParams.get('device_id'),'7701998877665501');
-          v5Calls.forEach(call=>{
+          // Verify all video_tab V5 calls reused device #1
+          tabCalls.forEach(call=>{
             assert.equal(new URL(call.url).searchParams.get('device_id'),'7701998877665501');
           });''')
 
