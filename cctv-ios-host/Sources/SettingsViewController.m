@@ -40,6 +40,13 @@ static NSString *SettingsPreferredQualityText(void) {
     return @"自动";
 }
 
+static NSString *SettingsDecodeModeText(void) {
+    NSString *mode=[[NSUserDefaults standardUserDefaults] stringForKey:@"cctv.mediaDecodeMode.v1"]?:@"auto";
+    if([mode isEqualToString:@"cicada"])return @"Cicada 硬解";
+    if([mode isEqualToString:@"cicada_soft"])return @"Cicada 软解";
+    return @"自动回退";
+}
+
 static NSString *SettingsEPGCacheFilePath(void) {
     NSArray *dirs=NSSearchPathForDirectoriesInDomains(NSCachesDirectory,NSUserDomainMask,YES);
     return [[dirs firstObject] stringByAppendingPathComponent:@"epg-cache.json"];
@@ -50,7 +57,7 @@ static NSString *SettingsXMLTVCacheDirectoryPath(void) {
     return [[dirs firstObject] stringByAppendingPathComponent:@"XMLTV"];
 }
 
-static unsigned long long SettingsEPGCacheBytes(void) {
+static unsigned long long SettingsComputeEPGCacheBytesSync(void) {
     NSFileManager *fm=NSFileManager.defaultManager;
     NSDictionary *attrs=[fm attributesOfItemAtPath:SettingsEPGCacheFilePath() error:NULL];
     unsigned long long total=[attrs fileSize];
@@ -64,19 +71,12 @@ static unsigned long long SettingsEPGCacheBytes(void) {
     return total;
 }
 
-static NSString *SettingsEPGCacheSizeText(void) {
-    unsigned long long bytes=SettingsEPGCacheBytes();
-    if(bytes==0)return @"无缓存 · 下次打开频道时重新获取";
-    NSString *size=[NSByteCountFormatter stringFromByteCount:(long long)bytes countStyle:NSByteCountFormatterCountStyleMemory];
-    return [NSString stringWithFormat:@"%@ · 下次打开频道时重新获取",size];
-}
-
 static NSString *SettingsImageThumbnailCacheDirectoryPath(void) {
     NSArray *dirs=NSSearchPathForDirectoriesInDomains(NSCachesDirectory,NSUserDomainMask,YES);
     return [[dirs firstObject] stringByAppendingPathComponent:@"CCTVHostImageThumbnails"];
 }
 
-static unsigned long long SettingsImageThumbnailCacheBytes(void) {
+static unsigned long long SettingsComputeImageThumbnailCacheBytesSync(void) {
     NSFileManager *fm=NSFileManager.defaultManager;
     NSString *thumbDir=SettingsImageThumbnailCacheDirectoryPath();
     NSArray<NSString *> *files=[fm contentsOfDirectoryAtPath:thumbDir error:NULL];
@@ -87,6 +87,49 @@ static unsigned long long SettingsImageThumbnailCacheBytes(void) {
         total+=[attrs fileSize];
     }
     return total;
+}
+
+static unsigned long long gSettingsCachedEPGBytes = 0;
+static unsigned long long gSettingsCachedImageThumbBytes = 0;
+static BOOL gSettingsDiskCacheStatsReady = NO;
+
+static void SettingsInvalidateDiskCacheStats(void) {
+    gSettingsCachedEPGBytes = 0;
+    gSettingsCachedImageThumbBytes = 0;
+    gSettingsDiskCacheStatsReady = NO;
+}
+
+static void SettingsRefreshDiskCacheStatsAsync(void (^ _Nullable completion)(void)) {
+    static dispatch_queue_t q = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        q = dispatch_queue_create("com.cctvhost.settings.cachestats", DISPATCH_QUEUE_SERIAL);
+    });
+    dispatch_async(q, ^{
+        unsigned long long epgBytes = SettingsComputeEPGCacheBytesSync();
+        unsigned long long imgBytes = SettingsComputeImageThumbnailCacheBytesSync();
+        dispatch_async(dispatch_get_main_queue(), ^{
+            gSettingsCachedEPGBytes = epgBytes;
+            gSettingsCachedImageThumbBytes = imgBytes;
+            gSettingsDiskCacheStatsReady = YES;
+            if (completion) completion();
+        });
+    });
+}
+
+static unsigned long long SettingsEPGCacheBytes(void) {
+    return gSettingsDiskCacheStatsReady ? gSettingsCachedEPGBytes : 0;
+}
+
+static NSString *SettingsEPGCacheSizeText(void) {
+    unsigned long long bytes=SettingsEPGCacheBytes();
+    if(bytes==0)return @"无缓存 · 下次打开频道时重新获取";
+    NSString *size=[NSByteCountFormatter stringFromByteCount:(long long)bytes countStyle:NSByteCountFormatterCountStyleMemory];
+    return [NSString stringWithFormat:@"%@ · 下次打开频道时重新获取",size];
+}
+
+static unsigned long long SettingsImageThumbnailCacheBytes(void) {
+    return gSettingsDiskCacheStatsReady ? gSettingsCachedImageThumbBytes : 0;
 }
 
 static NSString *SettingsCompactCacheSizeText(void) {
@@ -118,6 +161,7 @@ static BOOL SettingsRemoveEPGCacheFile(void) {
     NSError *error=nil;
     BOOL removed=![NSFileManager.defaultManager fileExistsAtPath:p]||[NSFileManager.defaultManager removeItemAtPath:p error:&error];
     [[XMLTVStore shared] clear];
+    SettingsInvalidateDiskCacheStats();
     return removed;
 }
 
@@ -327,6 +371,7 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
 -  (void)refreshHeroSummaryChips;
 -  (void)presentThemePicker:(NSIndexPath *)ip;
 -  (void)presentPreferredQualityPicker:(NSIndexPath *)ip;
+-  (void)presentDecodeModePicker:(NSIndexPath *)ip;
 -  (void)showPrivacyStatement;
 -  (void)confirmClearAllCaches;
 -  (void)copyVersionDiagnosticsFromIndexPath:(NSIndexPath *)ip;
@@ -400,6 +445,7 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
         @{ @"title":@"预解析下一个 CCTV 频道", @"detail":@"空闲时预热相邻央视频道线路信息", @"key":@"preloadNativeChannel", @"icon":@"forward.end", @"default":@YES, @"subgroup":@"起播加速" },
         @{ @"title":@"复用原生播放器", @"detail":@"切台时复用已有播放器实例以减少重建开销", @"key":@"legacyNativePlayback", @"icon":@"backward.end", @"default":@YES, @"subgroup":@"起播加速" },
         @{ @"title":@"网络请求超时", @"detail":@"影视接口、目录抓取与搜索请求超时上限", @"key":@"cctv.networkTimeout.v1", @"segmented":@YES, @"options":@[@"10 秒",@"20 秒",@"40 秒"], @"values":@[@10,@20,@40], @"default":@20, @"icon":@"network", @"subgroup":@"网络策略" },
+        @{ @"title":@"点播解码引擎偏好", @"detail":SettingsDecodeModeText(), @"action":@"defaultDecodeMode", @"icon":@"cpu", @"subgroup":@"解码策略" },
         @{ @"title":@"SDK 详细日志（诊断）", @"detail":@"输出底层播放器 SDK 调试日志供排障分析", @"key":@"nativeSDKVerboseLogs", @"icon":@"doc.text", @"default":@NO, @"subgroup":@"底层调试" }
       ]},
       @{ @"category":@"diagnostics", @"icon":@"waveform.path.ecg", @"subtitle":@"站点健康度 · 播放内核选路 · 会话崩溃追踪", @"title":@"运行诊断与日志中心", @"footer":@"开启后记录应用启动、影视加载与播放阶段、海报失败和系统内存告警。站点与播放适配监测支持实时追踪站点连通性、容器编码、播放器内核选路及网址/流媒体探测。", @"rows":@[
@@ -418,8 +464,9 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
         @{ @"title":@"恢复默认偏好设置", @"detail":@"重置界面与播放偏好为默认值（保留订阅与收藏）", @"action":@"resetDefaultPreferences", @"icon":@"arrow.counterclockwise.circle", @"subgroup":@"偏好重置", @"role":@"destructive", @"badge":@"重置偏好" },
         @{ @"title":@"清理全部缓存", @"detail":@"节目单、台标与影视元数据缓存", @"icon":@"trash.fill", @"action":@"clearAllCaches", @"subgroup":@"缓存清理", @"role":@"cache" },
         @{ @"title":@"清理节目单缓存", @"detail":SettingsEPGCacheSizeText(), @"icon":@"trash", @"action":@"clearEPG", @"subgroup":@"缓存清理", @"role":@"cache" },
-        @{ @"title":@"清理台标缓存", @"detail":@"清理内存中的缩略图", @"icon":@"photo", @"action":@"clearImages", @"subgroup":@"缓存清理", @"role":@"cache" },
+        @{ @"title":@"清理台标缓存", @"detail":@"清理内存与磁盘缩略图缓存", @"icon":@"photo", @"action":@"clearImages", @"subgroup":@"缓存清理", @"role":@"cache" },
         @{ @"title":@"清理影视元数据缓存", @"detail":MediaMetadataCacheSummaryText(), @"icon":@"film", @"action":@"clearMediaMetadata", @"subgroup":@"缓存清理", @"role":@"cache" },
+        @{ @"title":@"清理 JAR 运行时缓存", @"detail":@"清理已下载并转换的 TVBox spider.jar 缓存", @"icon":@"shippingbox", @"action":@"clearJARRuntimeCache", @"subgroup":@"缓存清理", @"role":@"cache" },
         @{ @"title":@"清除观看历史", @"detail":SettingsWatchHistorySummaryText(), @"icon":@"clock.arrow.circlepath", @"action":@"clearWatchHistory", @"subgroup":@"记录清理", @"role":@"destructive" },
         @{ @"title":@"清除收藏", @"detail":SettingsFavoritesSummaryText(), @"icon":@"heart.slash", @"action":@"clearFavorites", @"subgroup":@"记录清理", @"role":@"destructive" },
         @{ @"title":@"清除节目单预约提醒", @"detail":SettingsEPGRemindersSummaryText(), @"icon":@"bell.slash", @"action":@"clearEPGReminders", @"subgroup":@"记录清理", @"role":@"destructive" },
@@ -693,6 +740,13 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
     if(!self.heroHeaderView)[self setupHeroHeaderView];
     else [self refreshHeroSummaryChips];
     [self.table reloadData];
+    __weak typeof(self) weakSelf=self;
+    SettingsRefreshDiskCacheStatsAsync(^{
+        SettingsViewController *owner=weakSelf;
+        if(!owner||!owner.isViewLoaded||!owner.view.window)return;
+        [owner refreshHeroSummaryChips];
+        [owner.table reloadData];
+    });
 }
 
 - (void)reloadThemeAppearance {
@@ -1382,6 +1436,7 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
     NSString *action=row[@"action"];
     if([action isEqualToString:@"themePalette"])return [HostThemePalette currentPalette].displayName;
     if([action isEqualToString:@"defaultQuality"])return SettingsPreferredQualityText();
+    if([action isEqualToString:@"defaultDecodeMode"])return SettingsDecodeModeText();
     if([action isEqualToString:@"defaultPlaybackRate"])return SettingsPlaybackRateText();
     if([action isEqualToString:@"defaultVideoGravity"])return SettingsVideoGravityText();
     if([action isEqualToString:@"mediaDisplay"]){
@@ -1512,6 +1567,7 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
     if([row[@"action"] isEqualToString:@"defaultPlaybackRate"])cell.detailTextLabel.text=SettingsPlaybackRateText();
     if([row[@"action"] isEqualToString:@"defaultVideoGravity"])cell.detailTextLabel.text=SettingsVideoGravityText();
     if([row[@"action"] isEqualToString:@"defaultQuality"])cell.detailTextLabel.text=SettingsPreferredQualityText();
+    if([row[@"action"] isEqualToString:@"defaultDecodeMode"])cell.detailTextLabel.text=SettingsDecodeModeText();
     if([row[@"action"] isEqualToString:@"themePalette"])cell.detailTextLabel.text=[HostThemePalette currentPalette].displayName;
     if([row[@"action"] isEqualToString:@"checkUpdate"])cell.detailTextLabel.text=self.lastUpdateCheckText?:@"点按检查最新发布";
 
@@ -1793,12 +1849,20 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
     else if([row[@"action"] isEqualToString:@"clearImages"]){
         [HostImageLoader.shared clearCache];
         [HostImageLoader.shared clearDiskCache];
+        SettingsInvalidateDiskCacheStats();
         self.clearedImagesState=YES;
         [self refreshHeroSummaryChips];
         UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,@"台标缓存已清理");
         [self.table reloadRowsAtIndexPaths:@[ip] withRowAnimation:UITableViewRowAnimationNone];
     }
     else if([row[@"action"] isEqualToString:@"clearMediaMetadata"]) [self confirmClearMediaMetadata:ip];
+    else if([row[@"action"] isEqualToString:@"clearJARRuntimeCache"]){
+        NSString *support=NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory,NSUserDomainMask,YES).firstObject;
+        NSString *jarDir=[support stringByAppendingPathComponent:@"JARRuntime"];
+        if(jarDir.length)[NSFileManager.defaultManager removeItemAtPath:jarDir error:nil];
+        UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,@"JAR 运行时缓存已清理");
+        [self.table reloadRowsAtIndexPaths:@[ip] withRowAnimation:UITableViewRowAnimationNone];
+    }
     else if([row[@"action"] isEqualToString:@"clearAllCaches"]) [self confirmClearAllCaches];
     else if([row[@"action"] isEqualToString:@"clearWatchHistory"]) [self confirmClearWatchHistory];
     else if([row[@"action"] isEqualToString:@"clearFavorites"]) [self confirmClearFavorites];
@@ -1809,6 +1873,7 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
     else if([row[@"action"] isEqualToString:@"defaultPlaybackRate"]) [self presentPlaybackRatePicker:ip];
     else if([row[@"action"] isEqualToString:@"defaultVideoGravity"]) [self presentVideoGravityPicker:ip];
     else if([row[@"action"] isEqualToString:@"defaultQuality"]) [self presentPreferredQualityPicker:ip];
+    else if([row[@"action"] isEqualToString:@"defaultDecodeMode"]) [self presentDecodeModePicker:ip];
     else if([row[@"action"] isEqualToString:@"themePalette"]) [self presentThemePicker:ip];
     else if([row[@"action"] isEqualToString:@"checkUpdate"]) [self checkForUpdateFromIndexPath:ip];
     else if([row[@"action"] isEqualToString:@"openTabLive"]){if(self.onOpenTab)self.onOpenTab(0);}
@@ -1944,6 +2009,39 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
                                         badgeText:[NSString stringWithFormat:@"当前 · %@",activeTitle]
                                        badgeColor:HostAccent()
                                          sections:@[[HostGlassSheetSection sectionWithTitle:@"码率偏好" actions:rows]]
+                                       sourceView:cell?:self.view];
+}
+
+- (void)presentDecodeModePicker:(NSIndexPath *)ip {
+    if(self.presentedViewController)return;
+    NSString *current=[[NSUserDefaults standardUserDefaults] stringForKey:@"cctv.mediaDecodeMode.v1"]?:@"auto";
+    NSArray<NSDictionary *> *options=@[
+        @{@"title":@"自动回退",@"sub":@"按容器与编码智能选路：AVPlayer → Cicada 硬解 → 软解",@"val":@"推荐",@"icon":@"sparkles",@"value":@"auto"},
+        @{@"title":@"优先 Cicada 硬解",@"sub":@"跳过 AVPlayer，直接由 CicadaPlayer 硬件解码器起播",@"val":@"硬解",@"icon":@"cpu",@"value":@"cicada"},
+        @{@"title":@"强制 Cicada 软解",@"sub":@"兼容高码率/异常编码流，功耗略高但容错最强",@"val":@"软解",@"icon":@"wrench.and.screwdriver",@"value":@"cicada_soft"}
+    ];
+    NSMutableArray<HostGlassSheetAction *> *rows=[NSMutableArray array];
+    NSString *activeTitle=@"自动回退";
+    __weak typeof(self) weakSelf=self;
+    for(NSDictionary *option in options){
+        NSString *title=option[@"title"],*value=option[@"value"];
+        BOOL selected=[current isEqualToString:value];
+        if(selected)activeTitle=title;
+        [rows addObject:[HostGlassSheetAction actionWithTitle:title subtitle:option[@"sub"] value:option[@"val"] icon:option[@"icon"] tint:HostAccent() destructive:NO selected:selected handler:^{
+            SettingsViewController *owner=weakSelf;if(!owner)return;
+            [NSUserDefaults.standardUserDefaults setObject:value forKey:@"cctv.mediaDecodeMode.v1"];
+            [owner.table reloadRowsAtIndexPaths:@[ip] withRowAnimation:UITableViewRowAnimationNone];
+            if(owner.onPreferenceChanged)owner.onPreferenceChanged(@"cctv.mediaDecodeMode.v1",YES);
+            UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,[NSString stringWithFormat:@"点播解码引擎偏好已设为%@",title]);
+        }]];
+    }
+    UITableViewCell *cell=[self.table cellForRowAtIndexPath:ip];
+    [HostGlassActionSheetViewController presentOn:self
+                                            title:@"点播解码引擎偏好"
+                                         subtitle:@"全局控制点播初始解码引擎；在播放器右上角菜单中也可随时临时切换。"
+                                        badgeText:[NSString stringWithFormat:@"当前 · %@",activeTitle]
+                                       badgeColor:HostAccent()
+                                         sections:@[[HostGlassSheetSection sectionWithTitle:@"解码策略" actions:rows]]
                                        sourceView:cell?:self.view];
 }
 
@@ -2097,7 +2195,7 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
             @"cctv.mediaKeepScreenAwake", @"allowBackgroundAudio", @"autoPiP", @"autoLoadEPG",
             @"rememberLastChannel", @"resumeLastChannel", @"cctv.mediaPreferredQuality.v1",
             @"cctv.mediaGridColumns.v1", @"cctv.mediaHome.modules.v1", @"cctv.mediaAutoPlayNext", @"cctv.mediaAutoSkipIntroOutro",
-            @"cctv.mediaPlaybackRate", @"cctv.mediaVideoGravity", @"media.globalSearchHistoryEnabled.v1",
+            @"cctv.mediaPlaybackRate", @"cctv.mediaVideoGravity", @"cctv.mediaDecodeMode.v1", @"media.globalSearchHistoryEnabled.v1",
             @"fastNativeStartup", @"preloadNativeChannel", @"legacyNativePlayback",
             @"cctv.networkTimeout.v1", @"nativeSDKVerboseLogs", @"runtimeDiagnosticsEnabled", @"cctv.adaptationMonitor.enabled", @"cctv.allowPublicMediaResolvers"
         ];

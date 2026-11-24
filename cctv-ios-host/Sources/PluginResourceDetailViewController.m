@@ -151,9 +151,7 @@ static NSString *PluginResourceFormattedTimestamp(NSTimeInterval ts) {
 }
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
-    if(self.heroContainer&&self.tableView.bounds.size.width>0&&fabs(self.heroContainer.frame.size.width-self.tableView.bounds.size.width)>0.5){
-        CGRect f=self.heroContainer.frame;f.size.width=self.tableView.bounds.size.width;self.heroContainer.frame=f;self.tableView.tableHeaderView=self.heroContainer;
-    }
+    HostSizeTableHeaderToFit(self.tableView, 136.0);
 }
 - (void)reloadThemeAppearance {
     if(!self.isViewLoaded)return;

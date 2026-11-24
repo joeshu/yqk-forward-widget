@@ -14,6 +14,8 @@
 #import "MediaPlaybackSniffFetch.h"
 #import "MediaPlaybackDecodeRouter.h"
 #import "MediaPlaybackCicadaAdapter.h"
+#import "MediaPlaybackMPVAdapter.h"
+#import "HostSubtitleOverlayView.h"
 #import "MediaPlaybackBufferPolicy.h"
 #import "HostTheme.h"
 #import "RuntimeDiagnostics.h"
@@ -54,15 +56,52 @@ static void MediaPlaybackSetDefaultRate(AVPlayer *player, float rate) {
 // A view-only fullscreen host keeps the same decoder, URL and playback session.
 @interface MediaPlaybackFullscreenHost : UIViewController
 @property(nonatomic,copy) dispatch_block_t onClose;
+@property(nonatomic,copy) dispatch_block_t onTogglePlayPause;
+@property(nonatomic,strong) UIButton *closeButton;
+@property(nonatomic,strong) UIButton *playPauseButton;
+@property(nonatomic,assign) BOOL controlsHidden;
+- (void)updatePlayingState:(BOOL)playing;
 @end
 @implementation MediaPlaybackFullscreenHost
 - (BOOL)shouldAutorotate {return YES;}
 - (UIInterfaceOrientationMask)supportedInterfaceOrientations {return UIInterfaceOrientationMaskAllButUpsideDown;}
 - (void)viewDidLoad {
     [super viewDidLoad];self.view.backgroundColor=UIColor.blackColor;
+    UITapGestureRecognizer *tap=[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(toggleControlsVisibility)];
+    tap.cancelsTouchesInView=NO;[self.view addGestureRecognizer:tap];
     UIButton *close=[UIButton buttonWithType:UIButtonTypeSystem];close.translatesAutoresizingMaskIntoConstraints=NO;close.tintColor=UIColor.whiteColor;close.backgroundColor=[UIColor colorWithWhite:0 alpha:0.6];close.layer.cornerRadius=22;
     [close setImage:[UIImage systemImageNamed:@"xmark"] forState:UIControlStateNormal];close.accessibilityLabel=@"退出全屏";close.accessibilityIdentifier=@"media-cicada-close-fullscreen";[close addTarget:self action:@selector(closeFullscreen) forControlEvents:UIControlEventTouchUpInside];[self.view addSubview:close];
-    [NSLayoutConstraint activateConstraints:@[[close.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-12],[close.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:8],[close.widthAnchor constraintEqualToConstant:44],[close.heightAnchor constraintEqualToConstant:44]]];
+    self.closeButton=close;
+    UIButton *playBtn=[UIButton buttonWithType:UIButtonTypeSystem];playBtn.translatesAutoresizingMaskIntoConstraints=NO;playBtn.tintColor=UIColor.whiteColor;playBtn.backgroundColor=[UIColor colorWithWhite:0 alpha:0.6];playBtn.layer.cornerRadius=24;
+    [playBtn setImage:[UIImage systemImageNamed:@"pause.fill"] forState:UIControlStateNormal];playBtn.accessibilityLabel=@"播放或暂停";playBtn.accessibilityIdentifier=@"media-cicada-fullscreen-playpause";[playBtn addTarget:self action:@selector(togglePlayPauseTapped) forControlEvents:UIControlEventTouchUpInside];[self.view addSubview:playBtn];
+    self.playPauseButton=playBtn;
+    [NSLayoutConstraint activateConstraints:@[
+        [close.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-12],
+        [close.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:8],
+        [close.widthAnchor constraintEqualToConstant:44],[close.heightAnchor constraintEqualToConstant:44],
+        [playBtn.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
+        [playBtn.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-20],
+        [playBtn.widthAnchor constraintEqualToConstant:48],[playBtn.heightAnchor constraintEqualToConstant:48]
+    ]];
+}
+- (void)toggleControlsVisibility {
+    self.controlsHidden=!self.controlsHidden;
+    CGFloat alpha=self.controlsHidden?0.0:1.0;
+    [UIView animateWithDuration:0.2 animations:^{self.closeButton.alpha=alpha;self.playPauseButton.alpha=alpha;}];
+}
+- (void)togglePlayPauseTapped {if(self.onTogglePlayPause)self.onTogglePlayPause();}
+- (void)updatePlayingState:(BOOL)playing {
+    [self.playPauseButton setImage:[UIImage systemImageNamed:playing?@"pause.fill":@"play.fill"] forState:UIControlStateNormal];
+}
+- (void)viewDidAppear:(BOOL)animated {
+    [super viewDidAppear:animated];
+    if (@available(iOS 16.0, *)) {
+        UIWindowScene *scene = self.view.window.windowScene;
+        if (scene) {
+            UIWindowSceneGeometryPreferencesIOS *prefs = [[UIWindowSceneGeometryPreferencesIOS alloc] initWithInterfaceOrientations:UIInterfaceOrientationMaskLandscape];
+            [scene requestGeometryUpdateWithPreferences:prefs errorHandler:nil];
+        }
+    }
 }
 - (void)closeFullscreen {__weak typeof(self) weakSelf=self;[self dismissViewControllerAnimated:YES completion:^{if(weakSelf.onClose)weakSelf.onClose();}];}
 - (void)viewDidDisappear:(BOOL)animated {[super viewDidDisappear:animated];if(self.isBeingDismissed&&self.onClose)self.onClose();}
@@ -275,6 +314,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 @interface MediaPlaybackViewController () <PlaybackSession, UIGestureRecognizerDelegate, AVPlayerViewControllerDelegate, MediaPlaybackCicadaAdapterDelegate, AVAssetResourceLoaderDelegate>
 @property(nonatomic,strong) UIScrollView *controlsViewport;
 @property(nonatomic,strong) PlaybackOverlayController *controlsOverlay;
+@property(nonatomic,strong) HostSubtitleOverlayView *subtitleOverlay;
 @property(nonatomic) BOOL lastOverlayPlaying;
 @property(nonatomic,strong) NSMutableDictionary<NSValue *,MediaKeyRequest *> *keyRequests;
 @property(nonatomic,strong) AVPlayer *player;
@@ -519,6 +559,9 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 - (void)playNextEpisodeManually;
 - (void)playPreviousEpisodeManually;
 - (UIMenu *)playbackOptionsMenu;
+- (UIMenu *)externalSubtitleMenu;
+- (void)ensureSubtitleOverlayInstalled;
+- (void)loadExternalSubtitlesForResult:(NSDictionary *)result headers:(NSDictionary *)headers;
 - (void)playResult:(NSDictionary *)result;
 - (void)finishNativeStreamSniffFailureForGeneration:(NSUInteger)playerGeneration;
 - (void)resolveAndPlay;
@@ -1075,12 +1118,12 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     [NSNotificationCenter.defaultCenter removeObserver:self];[self.client cancel];[self.hedgedClient cancel];self.hedgedClient=nil;self.prefetchGeneration++;[self.prefetchClient cancel];[self.prefetchedAsset cancelLoading];[self.player pause];[self teardownCicadaAdapterUpdatingUI:NO];
 }
 - (void)updateEstimatedThroughput {
-    if(!self.throughputLabel||self.embeddedMode)return;
-    if(self.cicadaAdapter){double bytesPerSecond=self.cicadaAdapterDownloadBPS/8.0;NSString *speed=isfinite(bytesPerSecond)&&bytesPerSecond>0?(bytesPerSecond>=1024.0*1024.0?[NSString stringWithFormat:@"%.1f MB/s",bytesPerSecond/1024.0/1024.0]:[NSString stringWithFormat:@"%.0f KB/s",bytesPerSecond/1024.0]):@"等待网络";NSString *text=self.playbackFailureRecorded?@"测速暂停":speed;self.throughputLabel.text=[NSString stringWithFormat:@"  %@  ",text];self.throughputLabel.accessibilityLabel=text;self.throughputLabel.hidden=YES;self.throughputLabel.alpha=0.0;return;}
+    if(!self.throughputLabel||self.embeddedMode||self.throughputLabel.hidden)return;
+    if(self.cicadaAdapter){double bytesPerSecond=self.cicadaAdapterDownloadBPS/8.0;NSString *speed=isfinite(bytesPerSecond)&&bytesPerSecond>0?(bytesPerSecond>=1024.0*1024.0?[NSString stringWithFormat:@"%.1f MB/s",bytesPerSecond/1024.0/1024.0]:[NSString stringWithFormat:@"%.0f KB/s",bytesPerSecond/1024.0]):@"等待网络";NSString *text=self.playbackFailureRecorded?@"测速暂停":speed;self.throughputLabel.text=[NSString stringWithFormat:@"  %@  ",text];self.throughputLabel.accessibilityLabel=text;return;}
     AVPlayerItemAccessLogEvent *event=self.player.currentItem.accessLog.events.lastObject;
     double bitsPerSecond=event.observedBitrate;
     NSString *text= self.playbackFailureRecorded ? @"测速暂停" : (isfinite(bitsPerSecond)&&bitsPerSecond>0 ? (bitsPerSecond/8.0>=1024.0*1024.0 ? [NSString stringWithFormat:@"估算 %.1f MB/s",bitsPerSecond/8.0/1024.0/1024.0] : [NSString stringWithFormat:@"估算 %.0f KB/s",bitsPerSecond/8.0/1024.0]) : (self.player.timeControlStatus==AVPlayerTimeControlStatusWaitingToPlayAtSpecifiedRate?@"等待网络":@"测速中"));
-    self.throughputLabel.text=[NSString stringWithFormat:@"  %@  ",text];self.throughputLabel.accessibilityLabel=text;self.throughputLabel.hidden=YES;self.throughputLabel.alpha=0.0;
+    self.throughputLabel.text=[NSString stringWithFormat:@"  %@  ",text];self.throughputLabel.accessibilityLabel=text;
 }
 - (void)stopObservingCurrentPlayback {
     [self.avFirstFrameTimer invalidate];self.avFirstFrameTimer=nil;
@@ -1104,6 +1147,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
         MediaPlaybackViewController *owner=weakSelf;if(!owner||!owner.observedItem||owner.observedItem!=owner.player.currentItem)return;
         [owner updateEstimatedThroughput];
         NSTimeInterval position=CMTimeGetSeconds(time);if(!isfinite(position)||position<0)return;
+        [owner.subtitleOverlay updateForPlaybackTime:position];
         HostPlaybackProgressSample(&owner->_progressEvidence,CACurrentMediaTime(),position,owner.player.rate,owner.videoFrameReady&&owner.player.timeControlStatus==AVPlayerTimeControlStatusPlaying&&!owner.pendingPlaybackSeekTime);
         NSUInteger milestone=owner->_progressEvidence.observed>=30?30:(owner->_progressEvidence.observed>=5?5:0);
         if(milestone>owner.progressMilestone){owner.progressMilestone=milestone;[RuntimeDiagnostics.shared recordEvent:@"playback_progress_confirmed" category:@"playback" fields:@{@"playback_attempt_id":owner.playbackAttemptID?:@"",@"correlation_id":owner.diagnosticTraceID?:@"",@"observed_playing_seconds":@(owner->_progressEvidence.observed),@"progress_samples":@(owner->_progressEvidence.samples),@"milestone_seconds":@(milestone)}];}
@@ -1328,7 +1372,8 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     NSMutableDictionary *fields=[@{@"active_playback_attempt_id":terminal?@"":self.playbackAttemptID, @"active_playback_service_id":terminal?@"":serviceID, @"active_playback_source_host":terminal?@"":(sourceURL.host.lowercaseString?:@""), @"active_playback_outcome":terminal?@"":outcome, @"last_playback_attempt_id":self.playbackAttemptID, @"last_playback_outcome":outcome, @"last_playback_source_host":sourceURL.host.lowercaseString?:@"", @"last_playback_failure_kind":failureKind?:@"", @"last_playback_line_index":@(self.lineIndex), @"last_playback_episode_index":@(self.episodeIndex), @"last_playback_http_status":@(MAX(0,httpStatus))} mutableCopy];
     [RuntimeDiagnostics.shared recordLifecycleCheckpoint:(terminal?@"playback_attempt_finished":@"playback_attempt_progressed") fields:fields];
     if(terminal&&failureKind.length){
-        NSString *engineName=self.cicadaAdapter?(self.cicadaAdapterSoftwareDecodeFallbackAttempted?@"CicadaPlayer(软解)":@"CicadaPlayer"):@"AVPlayer";
+        BOOL isMPV=[self.cicadaAdapter isKindOfClass:MediaPlaybackMPVAdapter.class];
+        NSString *engineName=self.cicadaAdapter?(isMPV?(self.cicadaAdapterSoftwareDecodeFallbackAttempted?@"MPV(软解)":@"MPV Universal"):(self.cicadaAdapterSoftwareDecodeFallbackAttempted?@"CicadaPlayer(软解)":@"CicadaPlayer")):@"AVPlayer";
         [MediaAdaptationMonitor.shared recordPlaybackAdaptationWithSource:self.context[@"source"] provider:self.context[@"provider"] mediaName:self.context[@"detail"][@"name"]?:self.title episodeName:self.context[@"episodeName"] lineName:self.lineIndex>=0&&self.lineIndex<self.lines.count?self.lines[self.lineIndex][@"name"]:@"" streamURL:self.result[@"url"] originalURL:self.result[@"originalURL"] playerEngine:engineName routeKind:self.result[@"proxy"]?@"local-proxy":@"direct" containerFormat:self.result[@"format"]?:self.result[@"contentType"] videoCodec:[self.result[@"videoCodec"] isKindOfClass:NSString.class]?self.result[@"videoCodec"]:@"" headers:self.basePlaybackHeaders startupMs:MAX(0,(NSInteger)((CACurrentMediaTime()-self.playbackStartedAt)*1000)) success:NO failureStage:failureKind errorMessage:self.status.text];
     }
 }
@@ -1461,7 +1506,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     if(self.episodeIndex+1<self.episodes.count){
         [episodeNav addObject:[UIAction actionWithTitle:@"播放下一集" image:[UIImage systemImageNamed:@"forward.end.fill"] identifier:nil handler:^(__unused UIAction *a){[weakSelf playNextEpisodeManually];}]];
     }
-    UIMenu *playbackGroup=[UIMenu menuWithTitle:@"音画与解码" image:nil identifier:@"media.playback.menu.av" options:UIMenuOptionsDisplayInline children:@[decodeMenu,[self mediaSelectionMenuForCharacteristic:AVMediaCharacteristicLegible title:@"字幕"],[self mediaSelectionMenuForCharacteristic:AVMediaCharacteristicAudible title:@"音轨"],danmaku]];
+    UIMenu *playbackGroup=[UIMenu menuWithTitle:@"音画与解码" image:nil identifier:@"media.playback.menu.av" options:UIMenuOptionsDisplayInline children:@[decodeMenu,[self mediaSelectionMenuForCharacteristic:AVMediaCharacteristicLegible title:@"字幕"],[self externalSubtitleMenu],[self mediaSelectionMenuForCharacteristic:AVMediaCharacteristicAudible title:@"音轨"],danmaku]];
     UIMenu *controlsGroup=[UIMenu menuWithTitle:@"播放控制" image:nil identifier:@"media.playback.menu.controls" options:UIMenuOptionsDisplayInline children:@[[self playbackRateMenu],gravityMenu,[self playbackSleepTimerMenu]]];
     UIMenu *prefsGroup=[UIMenu menuWithTitle:@"观看偏好" image:nil identifier:@"media.playback.menu.prefs" options:UIMenuOptionsDisplayInline children:@[autoNextAction,awake,skipMenu]];
     UIMenu *diagGroup=[UIMenu menuWithTitle:@"诊断与监测" image:nil identifier:@"media.playback.menu.diag" options:UIMenuOptionsDisplayInline children:@[openMonitor,copyDiag]];
@@ -1469,6 +1514,46 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     if(episodeNav.count)[topChildren addObject:[UIMenu menuWithTitle:@"" image:nil identifier:@"media.playback.menu.episodes" options:UIMenuOptionsDisplayInline children:episodeNav]];
     [topChildren addObjectsFromArray:@[playbackGroup,controlsGroup,prefsGroup,diagGroup]];
     UIMenu *menu=[UIMenu menuWithChildren:topChildren];if(self.inlineOptionsButton)self.inlineOptionsButton.menu=menu;return menu;
+}
+- (void)ensureSubtitleOverlayInstalled {
+    if(self.subtitleOverlay||!self.videoView)return;
+    HostSubtitleOverlayView *overlay=[[HostSubtitleOverlayView alloc] initWithFrame:CGRectZero];
+    overlay.translatesAutoresizingMaskIntoConstraints=NO;
+    [self.videoView addSubview:overlay];
+    [NSLayoutConstraint activateConstraints:@[
+        [overlay.leadingAnchor constraintEqualToAnchor:self.videoView.leadingAnchor],
+        [overlay.trailingAnchor constraintEqualToAnchor:self.videoView.trailingAnchor],
+        [overlay.topAnchor constraintEqualToAnchor:self.videoView.topAnchor],
+        [overlay.bottomAnchor constraintEqualToAnchor:self.videoView.bottomAnchor]
+    ]];
+    self.subtitleOverlay=overlay;
+}
+- (void)loadExternalSubtitlesForResult:(NSDictionary *)result headers:(NSDictionary *)headers {
+    NSArray *subs=[result[@"subtitles"] isKindOfClass:NSArray.class]?result[@"subtitles"]:nil;
+    if(!subs.count){[self.subtitleOverlay clearSubtitles];return;}
+    [self ensureSubtitleOverlayInstalled];
+    for(id entry in subs){
+        NSString *raw=[entry isKindOfClass:NSDictionary.class]?([entry[@"url"] isKindOfClass:NSString.class]?entry[@"url"]:nil):([entry isKindOfClass:NSString.class]?entry:nil);
+        NSURL *subURL=raw.length?[NSURL URLWithString:raw]:nil;
+        if(subURL){[self.subtitleOverlay loadSubtitleURL:subURL headers:headers completion:nil];return;}
+    }
+    [self.subtitleOverlay clearSubtitles];
+}
+- (UIMenu *)externalSubtitleMenu {
+    __weak typeof(self) weakSelf=self;
+    BOOL enabled=self.subtitleOverlay?self.subtitleOverlay.subtitlesEnabled:YES;
+    UIAction *toggle=[UIAction actionWithTitle:(enabled?@"隐藏外挂字幕":@"显示外挂字幕") image:[UIImage systemImageNamed:@"captions.bubble"] identifier:nil handler:^(__unused UIAction *a){
+        [weakSelf ensureSubtitleOverlayInstalled];
+        weakSelf.subtitleOverlay.subtitlesEnabled=!enabled;
+        weakSelf.playbackOptionsItem.menu=[weakSelf playbackOptionsMenu];
+    }];
+    UIAction *scaleStd=[UIAction actionWithTitle:@"字号 · 标准 (1.0×)" image:nil identifier:nil handler:^(__unused UIAction *a){[weakSelf ensureSubtitleOverlayInstalled];weakSelf.subtitleOverlay.fontScale=1.0;}];
+    UIAction *scaleLg=[UIAction actionWithTitle:@"字号 · 大号 (1.25×)" image:nil identifier:nil handler:^(__unused UIAction *a){[weakSelf ensureSubtitleOverlayInstalled];weakSelf.subtitleOverlay.fontScale=1.25;}];
+    UIAction *scaleXl=[UIAction actionWithTitle:@"字号 · 超大 (1.5×)" image:nil identifier:nil handler:^(__unused UIAction *a){[weakSelf ensureSubtitleOverlayInstalled];weakSelf.subtitleOverlay.fontScale=1.5;}];
+    UIAction *offMinus=[UIAction actionWithTitle:@"时间轴 · 提前 0.5 秒" image:nil identifier:nil handler:^(__unused UIAction *a){[weakSelf ensureSubtitleOverlayInstalled];weakSelf.subtitleOverlay.timeOffset-=0.5;}];
+    UIAction *offZero=[UIAction actionWithTitle:@"时间轴 · 重置 0 秒" image:nil identifier:nil handler:^(__unused UIAction *a){[weakSelf ensureSubtitleOverlayInstalled];weakSelf.subtitleOverlay.timeOffset=0.0;}];
+    UIAction *offPlus=[UIAction actionWithTitle:@"时间轴 · 延后 0.5 秒" image:nil identifier:nil handler:^(__unused UIAction *a){[weakSelf ensureSubtitleOverlayInstalled];weakSelf.subtitleOverlay.timeOffset+=0.5;}];
+    return [UIMenu menuWithTitle:@"外挂字幕调节" image:[UIImage systemImageNamed:@"captions.bubble"] identifier:@"media.playback.menu.extsub" options:0 children:@[toggle,scaleStd,scaleLg,scaleXl,offMinus,offZero,offPlus]];
 }
 - (void)playNextEpisodeManually {
     if(self.episodeIndex+1>=self.episodes.count)return;
@@ -2033,7 +2118,7 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
     [self activateBackgroundAudioSessionIfNeeded];
     if(!self.player){self.player=[AVPlayer playerWithPlayerItem:item];[self.player addObserver:self forKeyPath:@"timeControlStatus" options:NSKeyValueObservingOptionInitial|NSKeyValueObservingOptionNew context:CCTVPlayerTimeControlContext];self.observingPlayer=YES;}else[self.player replaceCurrentItemWithPlayerItem:item];
     if(@available(iOS 15.0,*))self.player.audiovisualBackgroundPlaybackPolicy=AVPlayerAudiovisualBackgroundPlaybackPolicyContinuesIfPossible;
-    self.observedItem=item;[item addObserver:self forKeyPath:@"status" options:NSKeyValueObservingOptionInitial|NSKeyValueObservingOptionNew context:CCTVPlayerItemStatusContext];self.player.automaticallyWaitsToMinimizeStalling=!fastStartup;MediaPlaybackSetDefaultRate(self.player,(float)([NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaPlaybackRate"]?[NSUserDefaults.standardUserDefaults doubleForKey:@"cctv.mediaPlaybackRate"]:1.0));self.playerController.videoGravity=[NSUserDefaults.standardUserDefaults stringForKey:@"cctv.mediaVideoGravity"]?:AVLayerVideoGravityResizeAspect;BOOL attachViewPlayer=(UIApplication.sharedApplication.applicationState!=UIApplicationStateBackground||self.pictureInPictureActive);self.playerController.player=attachViewPlayer?self.player:nil;self.playbackOptionsItem.menu=[self playbackOptionsMenu];[self updateEstimatedThroughput];[self installProgressObserverIfNeeded];[self updateEpisodeTitle];
+    self.observedItem=item;[item addObserver:self forKeyPath:@"status" options:NSKeyValueObservingOptionInitial|NSKeyValueObservingOptionNew context:CCTVPlayerItemStatusContext];self.player.automaticallyWaitsToMinimizeStalling=!fastStartup;MediaPlaybackSetDefaultRate(self.player,(float)([NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaPlaybackRate"]?[NSUserDefaults.standardUserDefaults doubleForKey:@"cctv.mediaPlaybackRate"]:1.0));self.playerController.videoGravity=[NSUserDefaults.standardUserDefaults stringForKey:@"cctv.mediaVideoGravity"]?:AVLayerVideoGravityResizeAspect;BOOL attachViewPlayer=(UIApplication.sharedApplication.applicationState!=UIApplicationStateBackground||self.pictureInPictureActive);self.playerController.player=attachViewPlayer?self.player:nil;self.playbackOptionsItem.menu=[self playbackOptionsMenu];[self loadExternalSubtitlesForResult:result headers:requestHeaders];[self updateEstimatedThroughput];[self installProgressObserverIfNeeded];[self updateEpisodeTitle];
     __weak typeof(self) weakSelf=self;dispatch_async(dispatch_get_main_queue(),^{MediaPlaybackViewController *owner=weakSelf;if(owner&&playerGeneration==owner.playerGeneration)[owner observePlayerLayerIfAvailable];});
     if(!self.resumePromptPending&&!self.pendingPlaybackSeekTime){if(!self.playbackSuspendedForVisibility&&self.playbackWantsPlayback)[self.player play];}[self watchAVPlayerFirstFrameForItem:item generation:playerGeneration url:url sourceURL:sourceURL];
 }
@@ -2092,7 +2177,12 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
     // URLs implement headers, cookies, key handling or disguised segment repair.
     if(isLoopbackRelay&&[result[@"dashRemuxed"] boolValue])effectiveURL=sourceURL;
     requestHeaders=MediaPlaybackHeadersScopedToURL(requestHeaders,sourceURL?:url,effectiveURL);
-    MediaPlaybackCicadaAdapter *adapter=[[MediaPlaybackCicadaAdapter alloc] initWithURL:effectiveURL headers:requestHeaders networkTimeout:timeout];
+    NSString *decodeModePref=[[NSUserDefaults standardUserDefaults] stringForKey:@"cctv.mediaDecodeMode.v1"]?:@"auto";
+    BOOL useMPV=[MediaPlaybackMPVAdapter isAvailable]&&![decodeModePref isEqualToString:@"cicada_legacy"];
+    MediaPlaybackCicadaAdapter *adapter=useMPV
+        ?(MediaPlaybackCicadaAdapter *)[[MediaPlaybackMPVAdapter alloc] initWithURL:effectiveURL headers:requestHeaders networkTimeout:timeout]
+        :[[MediaPlaybackCicadaAdapter alloc] initWithURL:effectiveURL headers:requestHeaders networkTimeout:timeout];
+    adapter.liveStreamHint=[result[@"isLive"] boolValue];
     adapter.delegate=self;self.cicadaAdapter=adapter;self.cicadaPosition=0;self.cicadaDuration=0;
     UIView *playerView=adapter.playerView;playerView.translatesAutoresizingMaskIntoConstraints=NO;
     [self.videoView addSubview:playerView];
@@ -2183,7 +2273,8 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
     for(NSLayoutConstraint *constraint in self.videoView.constraints)if(constraint.active&&constraint.firstItem==self.videoView&&(constraint.secondItem==self.videoView||!constraint.secondItem))[constraints addObject:constraint];
     self.cicadaFullscreenSavedConstraints=constraints.copy;[NSLayoutConstraint deactivateConstraints:constraints];
     MediaPlaybackFullscreenHost *host=[MediaPlaybackFullscreenHost new];host.modalPresentationStyle=UIModalPresentationOverFullScreen;self.cicadaFullscreenHost=host;__weak typeof(self) weakSelf=self;host.onClose=^{[weakSelf restoreVideoFromCicadaFullscreen];};
-    [host loadViewIfNeeded];[self.videoView removeFromSuperview];[host.view insertSubview:self.videoView atIndex:0];
+    host.onTogglePlayPause=^{MediaPlaybackViewController *owner=weakSelf;if(!owner||!owner.cicadaAdapter)return;[owner toggleCicadaPlayPause];[owner.cicadaFullscreenHost updatePlayingState:owner.cicadaAdapter.isPlaying];};
+    [host loadViewIfNeeded];[host updatePlayingState:self.cicadaAdapter.isPlaying];[self.videoView removeFromSuperview];[host.view insertSubview:self.videoView atIndex:0];
     self.cicadaFullscreenConstraints=@[[self.videoView.leadingAnchor constraintEqualToAnchor:host.view.leadingAnchor],[self.videoView.trailingAnchor constraintEqualToAnchor:host.view.trailingAnchor],[self.videoView.topAnchor constraintEqualToAnchor:host.view.topAnchor],[self.videoView.bottomAnchor constraintEqualToAnchor:host.view.bottomAnchor]];[NSLayoutConstraint activateConstraints:self.cicadaFullscreenConstraints];
     [self presentViewController:host animated:YES completion:nil];
 }
@@ -2389,6 +2480,13 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
 #pragma mark - MediaPlaybackCicadaAdapterDelegate
 - (void)cicadaAdapterDidPrepare:(id)adapter {
     if(adapter!=self.cicadaAdapter||self.playbackSuspendedForVisibility)return;
+    if([adapter isKindOfClass:MediaPlaybackMPVAdapter.class]&&[self.result[@"subtitles"] isKindOfClass:NSArray.class]){
+        for(id subEntry in self.result[@"subtitles"]){
+            NSString *subURLStr=[subEntry isKindOfClass:NSDictionary.class]?([subEntry[@"url"] isKindOfClass:NSString.class]?subEntry[@"url"]:nil):([subEntry isKindOfClass:NSString.class]?subEntry:nil);
+            NSURL *subURL=subURLStr.length?[NSURL URLWithString:subURLStr]:nil;
+            if(subURL)[(MediaPlaybackMPVAdapter *)adapter addExternalSubtitleURL:subURL];
+        }
+    }
     self.playbackOptionsItem.menu=[self playbackOptionsMenu];
     [self refreshCicadaControls];
     [self.cicadaAdapter setRate:(float)([NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaPlaybackRate"]?[NSUserDefaults.standardUserDefaults doubleForKey:@"cctv.mediaPlaybackRate"]:1.0)];

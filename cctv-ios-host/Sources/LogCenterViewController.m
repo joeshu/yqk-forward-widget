@@ -76,6 +76,7 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
 - (void)copyErrorLog;
 - (void)confirmClearLog;
 - (void)refreshLog;
+- (void)applyParsedLogLines:(NSArray<NSString *> *)lines;
 -  (DiagnosticLogCategory)categoryForLine:(NSString *)line;
 @end
 
@@ -237,10 +238,26 @@ typedef NS_ENUM(NSInteger, DiagnosticLogCategory) {
 }
 - (void)refreshLog {
     if(!self.pageVisible)return;
-    NSString *text=self.logSnapshotProvider?self.logSnapshotProvider():@"";
-    NSMutableArray *lines=[NSMutableArray array];for(NSString *line in [text componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet])if(line.length)[lines addObject:line];
-    // 诊断日志源头上限 4 MiB，整串仍可能上万行：只保留末尾 5000 行，避免两份全量数组常驻内存。
-    if(lines.count>5000)[lines removeObjectsInRange:NSMakeRange(0,lines.count-5000)];
+    NSString * (^provider)(void)=[self.logSnapshotProvider copy];
+    __weak typeof(self) weakSelf=self;
+    static dispatch_queue_t logParseQueue;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken,^{logParseQueue=dispatch_queue_create("com.cctvhost.logcenter.parse",DISPATCH_QUEUE_SERIAL);});
+    dispatch_async(logParseQueue,^{@autoreleasepool{
+        NSString *text=provider?provider():@"";
+        NSMutableArray *lines=[NSMutableArray array];
+        for(NSString *line in [text componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet])if(line.length)[lines addObject:line];
+        // 诊断日志源头上限 4 MiB，整串仍可能上万行：只保留末尾 5000 行，避免两份全量数组常驻内存。
+        if(lines.count>5000)[lines removeObjectsInRange:NSMakeRange(0,lines.count-5000)];
+        NSArray<NSString *> *snapshot=lines.copy;
+        dispatch_async(dispatch_get_main_queue(),^{
+            LogCenterViewController *owner=weakSelf;
+            if(!owner||!owner.pageVisible)return;
+            [owner applyParsedLogLines:snapshot];
+        });
+    }});
+}
+- (void)applyParsedLogLines:(NSArray<NSString *> *)lines {
     if(self.hasLoadedSnapshot&&[self.allLines isEqualToArray:lines])return;
     BOOL followsTail=!self.hasLoadedSnapshot||(self.tableView.window&&self.visibleLines.count>0&&
         self.tableView.contentSize.height-(self.tableView.contentOffset.y+self.tableView.bounds.size.height-self.tableView.adjustedContentInset.bottom)<=48);

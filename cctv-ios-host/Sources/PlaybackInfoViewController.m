@@ -275,6 +275,11 @@
     [self.tableView reloadData];
 }
 
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    HostSizeTableHeaderToFit(self.tableView, 128.0);
+}
+
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
     [super traitCollectionDidChange:previousTraitCollection];
     if ([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection]) {
@@ -502,7 +507,7 @@
     NSDictionary *row = [self rowDictionaryAtIndexPath:ip];
     if (!row.count) return;
     NSString *line = [NSString stringWithFormat:@"%@：%@", [(row[@"title"] ?: @"") description], [(row[@"value"] ?: @"") description]];
-    UIPasteboard.generalPasteboard.string = line;
+    UIPasteboard.generalPasteboard.string = [HostLogRedactor redactText:line];
     [self showTransientPrompt:@"指标已复制"];
     UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification, @"指标已复制");
 }
@@ -532,11 +537,11 @@
     __weak typeof(self) weakSelf = self;
     return [UIContextMenuConfiguration configurationWithIdentifier:ip previewProvider:nil actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggested) {
         UIAction *copyVal = [UIAction actionWithTitle:@"复制指标数值" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a) {
-            UIPasteboard.generalPasteboard.string = value.length ? value : title;
+            UIPasteboard.generalPasteboard.string = [HostLogRedactor redactText:(value.length ? value : title)];
             [weakSelf showTransientPrompt:@"指标已复制"];
         }];
         UIAction *copyPair = [UIAction actionWithTitle:@"复制完整键值" image:[UIImage systemImageNamed:@"list.clipboard"] identifier:nil handler:^(__unused UIAction *a) {
-            UIPasteboard.generalPasteboard.string = [NSString stringWithFormat:@"%@：%@", title, value];
+            UIPasteboard.generalPasteboard.string = [HostLogRedactor redactText:[NSString stringWithFormat:@"%@：%@", title, value]];
             [weakSelf showTransientPrompt:@"指标已复制"];
         }];
         UIAction *copyAll = [UIAction actionWithTitle:@"复制全部播放诊断信息" image:[UIImage systemImageNamed:@"doc.on.clipboard"] identifier:nil handler:^(__unused UIAction *a) {

@@ -1,5 +1,6 @@
 #import "RootViewController_Internal.h"
 #import "HostGlassActionSheetViewController.h"
+#import "ChannelSQLiteIndex.h"
 
 static NSString *CCTVCatchupExplicitEPGID(NSDictionary *channel) {
     NSString *value=[channel[@"epgID"] isKindOfClass:NSString.class]?channel[@"epgID"]:@"";
@@ -1188,8 +1189,41 @@ static BOOL CCTVCatchupIdentityCompatible(NSDictionary *channel, NSDictionary *c
             return NO;
         }]];
     }
+    if (self.allChannels.count >= 500) {
+        static NSUInteger sLastIndexedChannelCount = 0;
+        if (sLastIndexedChannelCount != self.allChannels.count) {
+            sLastIndexedChannelCount = self.allChannels.count;
+            NSArray *snapshot = [self.allChannels copy];
+            dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+                NSMutableArray<NSDictionary *> *rows = [NSMutableArray arrayWithCapacity:snapshot.count];
+                for (NSDictionary *ch in snapshot) {
+                    NSString *name = [ch[@"name"] isKindOfClass:NSString.class] ? ch[@"name"] : @"";
+                    NSString *url = [ch[@"remoteURL"] isKindOfClass:NSString.class] ? ch[@"remoteURL"] : ([ch[@"id"] isKindOfClass:NSString.class] ? ch[@"id"] : @"");
+                    if (name.length && url.length) {
+                        [rows addObject:@{@"name": name, @"group": [ch[@"group"] isKindOfClass:NSString.class] ? ch[@"group"] : @"", @"url": url}];
+                    }
+                }
+                [ChannelSQLiteIndex.shared replaceChannels:rows forSourceID:@"catalog"];
+            });
+        }
+    }
     if (self.query.length) {
         NSString *q = self.query.lowercaseString;
+        if (base.count >= 2000) {
+            NSArray<NSDictionary *> *ftsHits = [ChannelSQLiteIndex.shared searchChannelsWithQuery:self.query sourceID:@"catalog" limit:300];
+            if (ftsHits.count) {
+                NSMutableSet<NSString *> *hitURLs = [NSMutableSet setWithCapacity:ftsHits.count];
+                for (NSDictionary *hit in ftsHits) {
+                    NSString *u = [hit[@"url"] isKindOfClass:NSString.class] ? hit[@"url"] : @"";
+                    if (u.length) [hitURLs addObject:u];
+                }
+                NSArray *fast = [base filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *o, NSDictionary *b) {
+                    NSString *u = [o[@"remoteURL"] isKindOfClass:NSString.class] ? o[@"remoteURL"] : ([o[@"id"] isKindOfClass:NSString.class] ? o[@"id"] : @"");
+                    return u.length && [hitURLs containsObject:u];
+                }]];
+                if (fast.count) base = fast;
+            }
+        }
         base = [base filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *o, NSDictionary *b) {
             // name/id 可能来自外部订阅缓存，非字符串时直接调 lowercaseString 会
             // 抛 unrecognized selector；用 description 归一为字符串再比较。

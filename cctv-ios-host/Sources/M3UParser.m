@@ -1,8 +1,8 @@
 #import "MediaCapabilityRegistry.h"
 #import "M3UParser.h"
 
-static const NSUInteger M3UMaximumChannels = 5000;
-static const NSUInteger M3UMaximumLines = 100000;
+static const NSUInteger M3UMaximumChannels = 25000;
+static const NSUInteger M3UMaximumLines = 250000;
 static const NSUInteger M3UMaximumLineCharacters = 16384;
 static NSError *M3ULimitError(NSString *message) {
     return [NSError errorWithDomain:@"CCTVHostM3UParser" code:1 userInfo:@{NSLocalizedDescriptionKey:message}];
@@ -193,6 +193,11 @@ static NSURL *M3UNormalizedLoopbackURL(NSURL *url, NSURL *baseURL) {
 }
 
 + (NSArray<M3UChannel *> *)parse:(NSString *)text baseURL:(NSURL *)baseURL error:(NSError **)error {
+    return [self parse:text baseURL:baseURL udpxyOverride:nil error:error];
+}
+
++ (NSArray<M3UChannel *> *)parse:(NSString *)text baseURL:(NSURL *)baseURL udpxyOverride:(NSString *)udpxyOverride error:(NSError **)error {
+    NSString *scopedUdpxy = [udpxyOverride stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     NSMutableArray<M3UChannel *> *out = [NSMutableArray array];
     if (!text.length) return out;
     if([text hasPrefix:@"\uFEFF"])text=[text substringFromIndex:1];
@@ -262,7 +267,7 @@ static NSURL *M3UNormalizedLoopbackURL(NSURL *url, NSURL *baseURL) {
             NSString *candidateLine = line;
             NSString *lowerLine = line.lowercaseString;
             if ([lowerLine hasPrefix:@"rtp://"] || [lowerLine hasPrefix:@"udp://"]) {
-                NSString *udpxyBase = [[NSUserDefaults.standardUserDefaults stringForKey:@"cctv.udpxyBaseURL.v1"] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+                NSString *udpxyBase = scopedUdpxy.length ? scopedUdpxy : [[NSUserDefaults.standardUserDefaults stringForKey:@"cctv.udpxyBaseURL.v1"] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
                 if (udpxyBase.length && ([udpxyBase hasPrefix:@"http://"] || [udpxyBase hasPrefix:@"https://"])) {
                     while ([udpxyBase hasSuffix:@"/"]) udpxyBase = [udpxyBase substringToIndex:udpxyBase.length - 1];
                     NSString *proto = [lowerLine hasPrefix:@"rtp://"] ? @"rtp" : @"udp";
@@ -291,7 +296,7 @@ static NSURL *M3UNormalizedLoopbackURL(NSURL *url, NSURL *baseURL) {
             url = nil;
         }
         if (!url) { pendingName = nil; pendingLogo = nil; pendingEPGID = nil; pendingTVGName = nil; catchupMode=nil;catchupSource=nil;catchupDays=0;tvgShift=0;[pendingHeaders removeAllObjects]; return; }
-        if(out.count>=M3UMaximumChannels){limitError=M3ULimitError(@"频道数量超过 5000 条安全上限；已保留上次有效订阅");*stop=YES;return;}
+        if(out.count>=M3UMaximumChannels){limitError=M3ULimitError(@"频道数量超过 25000 条安全上限；已保留上次有效订阅");*stop=YES;return;}
 
         M3UChannel *ch = [M3UChannel new];
         ch.name = pendingName;

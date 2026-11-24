@@ -168,8 +168,7 @@ static BOOL MediaWebIsOfficialWatchPageURL(NSURL *url) {
         NSURLComponents *referer=[NSURLComponents componentsWithURL:pageURL resolvingAgainstBaseURL:NO];
         referer.user=nil;referer.password=nil;referer.query=nil;referer.fragment=nil;
         if(referer.URL.absoluteString.length){
-            NSDictionary *scopedReferer=MediaPlaybackHeadersScopedToURL(@{@"Referer":referer.URL.absoluteString},pageURL,url);
-            [headers addEntriesFromDictionary:scopedReferer];
+            headers[@"Referer"]=referer.URL.absoluteString;
         }
         [owner.web.configuration.websiteDataStore.httpCookieStore getAllCookies:^(NSArray<NSHTTPCookie *> *cookies){dispatch_async(dispatch_get_main_queue(),^{
             MediaWebViewController *page=weakSelf;if(!page||page.didClose||page.mediaGeneration!=generation)return;

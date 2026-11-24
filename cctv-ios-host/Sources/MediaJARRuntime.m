@@ -1,4 +1,5 @@
 #import "MediaJARRuntime.h"
+#import "HostMemoryBudgetCoordinator.h"
 #import "MediaJARSource.h"
 #import <TargetConditionals.h>
 #if TARGET_OS_IOS
@@ -43,7 +44,8 @@ static NSDictionary *JARInvoke(NSDictionary *input) {
 }
 // Requests need a larger native stack for the interpreter and deep DEX conversion.
 static void JARThread(void (^work)(void)) {
-    NSThread *thread=[[NSThread alloc] initWithBlock:work];thread.name=@"CCTVHost JAR";thread.stackSize=8*1024*1024;[thread start];
+    [HostMemoryBudgetCoordinator.shared trimIfNeededForOperation:@"jar_runtime"];
+    NSThread *thread=[[NSThread alloc] initWithBlock:work];thread.name=@"CCTVHost JAR";thread.stackSize=2*1024*1024;[thread start];
 }
 @interface MediaJARRequest () <NSURLSessionDataDelegate>
 @property(atomic) BOOL cancelled;
@@ -173,8 +175,12 @@ static void JARThread(void (^work)(void)) {
     NSString *digest=[record[@"digest"] isKindOfClass:NSString.class]?record[@"digest"]:@"";
     if(digest.length!=64||[digest rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdef"].invertedSet].location!=NSNotFound)digest=@"";
     NSString *jar=[root stringByAppendingPathComponent:[digest stringByAppendingString:@".jar"]];
+    NSString *md5=[reference[@"md5"] isKindOfClass:NSString.class]?reference[@"md5"]:@"";
     NSData *data=digest.length?[NSData dataWithContentsOfFile:jar options:NSDataReadingMappedIfSafe error:NULL]:nil;
-    BOOL cached=data.length&&[JARHash(data,NO) isEqual:digest]&&NSDate.date.timeIntervalSince1970-[record[@"time"] doubleValue]<300;
+    BOOL digestMatches=data.length&&[JARHash(data,NO) isEqual:digest];
+    BOOL md5PinnedHit=digestMatches&&md5.length&&[JARHash(data,YES) isEqual:md5.lowercaseString];
+    BOOL ttlHit=digestMatches&&!md5.length&&NSDate.date.timeIntervalSince1970-[record[@"time"] doubleValue]<86400;
+    BOOL cached=md5PinnedHit||ttlHit;
     NSTimeInterval archiveStarted=NSProcessInfo.processInfo.systemUptime;
     if(!cached){
         NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:url] cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:45];
@@ -197,10 +203,24 @@ static void JARThread(void (^work)(void)) {
         if(data.length<4||memcmp(data.bytes,"PK\003\004",4)!=0){if(error)*error=JARError(7,@"JAR 下载未返回 ZIP/JAR 文件，可能是登录页或访问限制");return nil;}
         digest=JARHash(data,NO);jar=[root stringByAppendingPathComponent:[digest stringByAppendingString:@".jar"]];
     }
-    NSString *md5=[reference[@"md5"] isKindOfClass:NSString.class]?reference[@"md5"]:@"";
     if(md5.length&&![JARHash(data,YES) isEqual:md5.lowercaseString]){if(error)*error=JARError(8,@"JAR 的 MD5 与订阅不符，请刷新订阅");return nil;}
     if(!cached){if(![data writeToFile:jar options:NSDataWritingAtomic error:error])return nil;
-        [[NSJSONSerialization dataWithJSONObject:@{@"digest":digest,@"time":@(NSDate.date.timeIntervalSince1970)} options:0 error:NULL] writeToFile:recordPath atomically:YES];}
+        [[NSJSONSerialization dataWithJSONObject:@{@"digest":digest,@"time":@(NSDate.date.timeIntervalSince1970)} options:0 error:NULL] writeToFile:recordPath atomically:YES];
+        NSFileManager *fm=NSFileManager.defaultManager;
+        NSArray<NSString *> *entries=[fm contentsOfDirectoryAtPath:root error:NULL];
+        NSMutableArray<NSDictionary *> *jars=[NSMutableArray array];
+        for(NSString *item in entries){
+            if(![item hasSuffix:@".jar"])continue;
+            NSString *full=[root stringByAppendingPathComponent:item];
+            if([full isEqualToString:jar])continue;
+            NSDate *mtime=[fm attributesOfItemAtPath:full error:NULL][NSFileModificationDate]?:NSDate.distantPast;
+            [jars addObject:@{@"path":full,@"mtime":mtime}];
+        }
+        if(jars.count>=6){
+            [jars sortUsingComparator:^NSComparisonResult(NSDictionary *a,NSDictionary *b){return [b[@"mtime"] compare:a[@"mtime"]];}];
+            for(NSUInteger i=5;i<jars.count;i++)[fm removeItemAtPath:jars[i][@"path"] error:NULL];
+        }
+    }
 #if TARGET_OS_IOS && !defined(CCTV_JAR_SMOKE)
     [RuntimeDiagnostics.shared recordEvent:@"jar_archive_ready" category:@"media_api"
         fields:@{@"operation":operation?:@"",@"correlation_id":ticket.requestID,

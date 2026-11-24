@@ -1094,8 +1094,9 @@ class PythonSpider:
                 not any(tok in self._source_text for tok in ('.test', '.example', '127.0.0.1'))
             )
             self._last_detail_title = ''
-            self._episode_map = {}
-            self._vod_title_by_id = {}
+            self._episode_map = collections.OrderedDict()
+            self._vod_title_by_id = collections.OrderedDict()
+            self._meta_map_limit = 2048
             self.lock = threading.Lock()
             self.proxy_lock_timeout = 120.0
             # Python Spider implementations are not generally thread-safe, so
@@ -1368,6 +1369,7 @@ class PythonSpider:
 
     def _record_vod_titles(self, payload):
         try:
+            limit = getattr(self, '_meta_map_limit', 2048)
             for r in rows(payload):
                 if not isinstance(r, dict):
                     continue
@@ -1375,6 +1377,10 @@ class PythonSpider:
                 vname = _clean_meta_text(r.get('vod_name') or r.get('name') or r.get('title') or '')
                 if vid and vname and not _is_opaque_id_name(vname, vid):
                     self._vod_title_by_id[vid] = vname
+                    if isinstance(self._vod_title_by_id, collections.OrderedDict):
+                        self._vod_title_by_id.move_to_end(vid)
+                        while len(self._vod_title_by_id) > limit:
+                            self._vod_title_by_id.popitem(last=False)
         except Exception:
             pass
 
@@ -1401,6 +1407,7 @@ class PythonSpider:
 
     def _record_detail_episodes(self, raw_detail, vid=''):
         try:
+            limit = getattr(self, '_meta_map_limit', 2048)
             items = rows(raw_detail)
             item = items[0] if items and isinstance(items[0], dict) else (raw_detail if isinstance(raw_detail, dict) else {})
             title = _clean_meta_text(item.get('vod_name') or item.get('name') or '')
@@ -1420,6 +1427,10 @@ class PythonSpider:
                     ep_name = (label if sep else f'第{idx+1}集').strip()
                     if ep_id:
                         self._episode_map[ep_id] = (title or self._last_detail_title, idx, ep_name)
+                        if isinstance(self._episode_map, collections.OrderedDict):
+                            self._episode_map.move_to_end(ep_id)
+                            while len(self._episode_map) > limit:
+                                self._episode_map.popitem(last=False)
         except Exception:
             pass
 

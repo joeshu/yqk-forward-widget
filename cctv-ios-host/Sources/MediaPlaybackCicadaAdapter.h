@@ -73,6 +73,8 @@ typedef NS_ENUM(NSInteger, MediaPlaybackCicadaAdapterState) {
 @property (nonatomic, readonly) NSTimeInterval firstFrameTimeout;
 // 当前倍速（最近一次 setRate: 的值，未调用时为 1.0；供进度采样校验用）。
 @property (nonatomic, readonly) float rate;
+// 显式直播提示：点播为 NO（默认），直播为 YES；避免 prepare 前 duration==0 时将点播误判为直播。
+@property (nonatomic) BOOL liveStreamHint;
 
 - (void)prepare;
 // 硬解开关：默认 YES（硬件优先）。软件解码重试时传 NO 重建播放器。

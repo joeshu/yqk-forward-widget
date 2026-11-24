@@ -1,4 +1,5 @@
 #import "AppDelegate.h"
+#import "HostMemoryBudgetCoordinator.h"
 #import "RootViewController.h"
 #import "HostTheme.h"
 #import "HostImageLoader.h"
@@ -36,6 +37,7 @@
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
     [RuntimeDiagnostics.shared beginAppSessionWithFields:[self diagnosticLifecycleFields]];
+    [HostMemoryBudgetCoordinator.shared startMonitoring];
     self.window = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
     self.window.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
     self.window.backgroundColor=UIColor.clearColor;

@@ -65,4 +65,38 @@ NSNotificationName const LocalMediaStoreDidChangeNotification = @"LocalMediaStor
 - (void)deleteFileAtURL:(NSURL *)url completion:(void (^)(BOOL,NSError *))completion {
     dispatch_async(self.queue,^{NSURL *candidate=url.URLByStandardizingPath;NSNumber *symbolic=nil,*regular=nil;[candidate getResourceValue:&symbolic forKey:NSURLIsSymbolicLinkKey error:nil];[candidate getResourceValue:&regular forKey:NSURLIsRegularFileKey error:nil];NSError *failure=nil;BOOL removed=NO;if(!candidate.isFileURL||![candidate.URLByDeletingLastPathComponent.path isEqualToString:self.directory.path]||symbolic.boolValue||!regular.boolValue)failure=[NSError errorWithDomain:@"LocalMediaStore" code:4 userInfo:@{NSLocalizedDescriptionKey:@"只能删除本机媒体库中的完整文件"}];else removed=[NSFileManager.defaultManager removeItemAtURL:candidate error:&failure];if(removed)[self refreshCachedFiles];[self notifyChange];if(completion)dispatch_async(dispatch_get_main_queue(),^{completion(removed,failure);});});
 }
+- (NSURL *)bookmarksFileURL {
+    return [self.directory URLByAppendingPathComponent:@".bookmarks.plist"];
+}
+- (void)mountExternalURLs:(NSArray<NSURL *> *)urls completion:(void (^)(NSArray<NSURL *> *, NSArray<NSDictionary<NSString *, NSString *> *> *))completion {
+    NSArray<NSURL *> *items=[[NSArray alloc] initWithArray:urls copyItems:NO];
+    dispatch_async(self.queue,^{
+        NSURL *plistURL=[self bookmarksFileURL];
+        NSMutableArray<NSData *> *bookmarks=[NSMutableArray arrayWithContentsOfURL:plistURL]?:[NSMutableArray array];
+        NSMutableArray<NSURL *> *mounted=[NSMutableArray array];
+        NSMutableArray<NSDictionary<NSString *, NSString *> *> *failures=[NSMutableArray array];
+        for(NSURL *url in items){
+            BOOL scoped=[url startAccessingSecurityScopedResource];
+            NSError *err=nil;
+            NSData *data=[url bookmarkDataWithOptions:NSURLBookmarkCreationMinimalBookmark includingResourceValuesForKeys:nil relativeToURL:nil error:&err];
+            if(scoped)[url stopAccessingSecurityScopedResource];
+            if(data.length){[bookmarks addObject:data];[mounted addObject:url];}
+            else {[failures addObject:@{@"fileName":url.lastPathComponent?:@"media",@"error":err.localizedDescription?:@"无法创建外部引用书签"}];}
+        }
+        [bookmarks writeToURL:plistURL atomically:YES];
+        [self notifyChange];
+        if(completion)dispatch_async(dispatch_get_main_queue(),^{completion(mounted.copy,failures.copy);});
+    });
+}
+- (NSArray<NSURL *> *)mountedBookmarkURLsSnapshot {
+    NSArray<NSData *> *bookmarks=[NSArray arrayWithContentsOfURL:[self bookmarksFileURL]]?:@[];
+    NSMutableArray<NSURL *> *resolved=[NSMutableArray array];
+    for(NSData *data in bookmarks){
+        if(![data isKindOfClass:NSData.class])continue;
+        BOOL stale=NO;
+        NSURL *u=[NSURL URLByResolvingBookmarkData:data options:0 relativeToURL:nil bookmarkDataIsStale:&stale error:nil];
+        if(u)[resolved addObject:u];
+    }
+    return resolved.copy;
+}
 @end

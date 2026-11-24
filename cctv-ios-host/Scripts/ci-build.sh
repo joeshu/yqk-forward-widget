@@ -61,12 +61,13 @@ PY
 [ -s "$APP/Assets.car" ] || { echo "::error::AppIcon asset catalog did not produce Assets.car"; exit 1; }
 if [ -z "${PY_DISABLE:-}" ]; then cp Plugins/ysp-live.py "$APP/ysp-live.py"; cp Scripts/host_service_runtime.py "$APP/host_service_runtime.py"; cp Plugins/yangshipin-js.py "$APP/yangshipin-js.py"; cp GeneratedJS/* "$APP/"; mkdir -p "$APP/JSPlugins"; cp -R JSPlugins/yangshipin JSPlugins/compat "$APP/JSPlugins/"; fi
 if [ -z "${PY_DISABLE:-}" ]; then
-  cp Plugins/media-service.py Plugins/host_media_runtime.py Plugins/host_media_capabilities.py Plugins/media-capabilities.json Plugins/host_media_servers.py Plugins/host_media_relay.py Plugins/host_media_url.py Plugins/host_dash.py Plugins/csp_adapter.py Plugins/example-encrypted-media.py Plugins/node-plugin-host.cjs "$APP/"
+  cp Plugins/media-service.py Plugins/host_media_runtime.py Plugins/host_media_capabilities.py Plugins/media-capabilities.json Plugins/host_media_servers.py Plugins/host_smb2.py Plugins/host_media_relay.py Plugins/host_media_url.py Plugins/host_dash.py Plugins/csp_adapter.py Plugins/example-encrypted-media.py Plugins/node-plugin-host.cjs "$APP/"
   cp -R Plugins/base "$APP/base"
   cp -R Plugins/lxml "$APP/lxml"
   cp Plugins/pyquery.py "$APP/pyquery.py"
   cp Resources/NodeMobile-LICENSE.txt "$APP/"
   python3 Scripts/prepare_node_runtime.py "$APP"
+  if [ "${CCTV_MPV_DISABLE:-}" != "1" ]; then python3 Scripts/prepare_mpv_runtime.py "$APP"; fi
 fi
 printf 'APPL????' > "$APP/PkgInfo"
 mkdir -p "$APP/Frameworks"
@@ -108,6 +109,7 @@ if [ -z "${PY_DISABLE:-}" ]; then
          "$APP/python/lib/python${PY_VER}"/config-* "$APP/python/lib/python${PY_VER}/site-packages"/*.dist-info
   rm -rf "$APP/python/lib/python${PY_VER}/__pycache__"
   find "$APP/python/lib/python${PY_VER}" -name '*.pyc' -delete
+  PYTHONHASHSEED=0 python3 -m compileall -q -f --invalidation-mode unchecked-hash "$APP/python/lib/python${PY_VER}" || true
   for extension in "$APP/python/lib/python${PY_VER}/lib-dynload"/*.so; do
     [ -f "$extension" ] || continue
     filename=$(basename "$extension"); module=${filename%%.*}; framework="$APP/Frameworks/${module}.framework"

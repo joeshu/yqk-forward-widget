@@ -18,4 +18,5 @@
 - (BOOL)stopWithError:(NSError **)error;
 - (BOOL)stopSession:(NSString *)identifier error:(NSError **)error;
 - (BOOL)stopSessionsForServiceIdentifier:(NSString *)identifier error:(NSError **)error;
+- (void)refreshListenersAfterForeground;
 @end

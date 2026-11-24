@@ -1000,6 +1000,7 @@ static void *pyThread(void *rawTask) {
 }
 + (void)stop { NSError *error = nil; if (![self stopWithError:&error] && error) emitLog(error.localizedDescription); }
 + (void)refreshListenersAfterForeground {
+    [NodePluginRuntime.shared refreshListenersAfterForeground];
 #if PYHOST_AVAILABLE
     static dispatch_queue_t fgQueue;
     static dispatch_once_t onceToken;

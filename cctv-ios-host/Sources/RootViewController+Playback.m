@@ -593,7 +593,7 @@
     if(generation!=self.playbackGeneration||self.remoteTriedCicada||![MediaPlaybackCicadaAdapter isAvailable])return NO;
     [self stopPlayback];self.remoteTriedCicada=YES;self.remotePlaybackWanted=YES;
     MediaPlaybackCicadaAdapter *adapter=[[MediaPlaybackCicadaAdapter alloc] initWithURL:[NSURL URLWithString:address] headers:(self.nativePlainRouteActive?@{@"User-Agent":@"qqlive",@"Referer":@"https://live.cctv.cn/"}:self.currentRemoteHeaders) networkTimeout:12];
-    self.remoteAdapter=adapter;adapter.delegate=self;adapter.playerView.frame=self.playerBox.bounds;adapter.playerView.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;[self.playerBox insertSubview:adapter.playerView atIndex:0];
+    adapter.liveStreamHint=!self.remoteCatchupActive;self.remoteAdapter=adapter;adapter.delegate=self;adapter.playerView.frame=self.playerBox.bounds;adapter.playerView.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;[self.playerBox insertSubview:adapter.playerView atIndex:0];
     [adapter prepare];[adapter start];[self updateLiveScreenAwakeState];return YES;
 }
 - (void)cicadaAdapterDidShowFirstFrame:(id)adapter {

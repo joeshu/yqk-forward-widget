@@ -1185,9 +1185,41 @@ process.on('unhandledRejection',error=>{
   else appendLog(null,'Node 宿主未归属的 Promise 异常：'+String(error?.message||error||'未知错误').slice(0,512))
 })
 process.on('uncaughtException',error=>failOwner(scope.getStore(),'插件回调异常：',error))
+function writeControlInfo(port){
+  fs.writeFileSync(infoPath+'.tmp',JSON.stringify({port,reboundAt:Date.now()}))
+  fs.renameSync(infoPath+'.tmp',infoPath)
+}
+let controlRebinding=false
+function rebindControlServer(){
+  if(controlRebinding)return Promise.resolve({rebound:false})
+  controlRebinding=true
+  return new Promise(resolve=>{
+    const prevPort=server.address()?.port||0
+    const finish=(ok,port)=>{controlRebinding=false;resolve({rebound:ok,port:port||0})}
+    const listenAgain=(port,fallback)=>{
+      const onError=()=>{
+        server.removeListener('listening',onListening)
+        if(fallback){listenAgain(0,false)}else{finish(false,0)}
+      }
+      const onListening=()=>{
+        server.removeListener('error',onError)
+        const activePort=server.address()?.port||0
+        if(activePort>0){try{writeControlInfo(activePort)}catch{}}
+        finish(activePort>0,activePort)
+      }
+      server.once('error',onError)
+      server.once('listening',onListening)
+      try{server.listen(port,'127.0.0.1')}catch{onError()}
+    }
+    try{
+      if(server.listening)server.close(()=>listenAgain(prevPort,true))
+      else listenAgain(prevPort,true)
+    }catch{listenAgain(0,false)}
+  })
+}
 const server=http.createServer(async(req,res)=>{
   if(req.headers['x-cctvhost-token']!==token){res.writeHead(403);res.end();return}
-  if(inflight>=16){res.writeHead(503);res.end();return}
+  if(inflight>=16){res.writeHead(503,{'Retry-After':'1'});res.end();return}
   inflight++
   let payload={};let operation=''
   try{
@@ -1196,7 +1228,7 @@ const server=http.createServer(async(req,res)=>{
     let size=0,chunks=[]
     for await(const chunk of req){size+=chunk.length;if(size>262144)throw Error('Node 控制请求过大');chunks.push(chunk)}
     const input=JSON.parse(Buffer.concat(chunks).toString('utf8'));operation=input.operation;payload=input.payload||{}
-    const result=operation==='start'?await start(payload):operation==='stop'?await stop(payload):operation==='state'?{active:owners.size>0,sessions:[...owners.keys()]}:await invoke(operation,payload)
+    const result=operation==='start'?await start(payload):operation==='stop'?await stop(payload):operation==='state'?{active:owners.size>0,sessions:[...owners.keys()]}:operation==='rebind'?{ok:true,active:owners.size}:await invoke(operation,payload)
     const encoded=JSON.stringify({ok:true,result,logs:drainLogs(payload.session)})
     if(Buffer.byteLength(encoded)>2*1024*1024)throw Error('Node 结果超过 2 MB')
     res.setHeader('Content-Type','application/json');res.end(encoded)
@@ -1204,4 +1236,14 @@ const server=http.createServer(async(req,res)=>{
   finally{inflight--}
 })
 server.requestTimeout=120000;server.headersTimeout=15000;server.maxConnections=24
-server.listen(0,'127.0.0.1',()=>{fs.writeFileSync(infoPath+'.tmp',JSON.stringify({port:server.address().port}));fs.renameSync(infoPath+'.tmp',infoPath)})
+server.listen(0,'127.0.0.1',()=>{writeControlInfo(server.address().port)})
+const rebindTriggerPath=infoPath+'.rebind'
+let lastRebindTrigger=''
+const rebindWatcher=setInterval(()=>{
+  try{
+    if(!fs.existsSync(rebindTriggerPath))return
+    const stamp=fs.readFileSync(rebindTriggerPath,'utf8').trim()
+    if(stamp&&stamp!==lastRebindTrigger){lastRebindTrigger=stamp;rebindControlServer()}
+  }catch{}
+},500)
+if(typeof rebindWatcher.unref==='function')rebindWatcher.unref()

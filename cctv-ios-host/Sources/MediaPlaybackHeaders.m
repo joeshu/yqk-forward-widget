@@ -154,8 +154,9 @@ NSDictionary<NSString *,NSString *> *MediaPlaybackHeadersScopedToURL(NSDictionar
     if(!trusted){
         // Cross-origin playback targets may be CDN, parser or relay URLs. Use
         // an explicit transport-header allowlist so custom credential names
-        // such as X-Auth and X-Access-Key cannot escape by naming convention.
-        NSSet *allowed=[NSSet setWithArray:@[@"accept",@"accept-encoding",@"accept-language",@"cache-control",@"if-range",@"range",@"user-agent"]];
+        // such as Cookie, Authorization, X-Auth and X-Access-Key cannot escape
+        // by naming convention, while preserving explicit anti-hotlink Referer/Origin.
+        NSSet *allowed=[NSSet setWithArray:@[@"accept",@"accept-encoding",@"accept-language",@"cache-control",@"if-range",@"origin",@"range",@"referer",@"user-agent"]];
         for(NSString *key in safe.allKeys)if(![allowed containsObject:key.lowercaseString])[safe removeObjectForKey:key];
     }
     return safe.copy;

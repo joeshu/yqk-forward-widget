@@ -371,3 +371,20 @@ static inline void HostUpdateImmersiveTopScrim(UIView *scrimView, CAGradientLaye
         (id)[base colorWithAlphaComponent:0.0].CGColor
     ];
 }
+
+static inline void HostSizeTableHeaderToFit(UITableView *tableView, CGFloat minHeight) {
+    if (!tableView) return;
+    UIView *header = tableView.tableHeaderView;
+    CGFloat w = CGRectGetWidth(tableView.bounds);
+    if (!header || w <= 0) return;
+    CGSize target = CGSizeMake(w, UILayoutFittingCompressedSize.height);
+    CGFloat fitted = ceil([header systemLayoutSizeFittingSize:target
+                                withHorizontalFittingPriority:UILayoutPriorityRequired
+                                      verticalFittingPriority:UILayoutPriorityFittingSizeLevel].height);
+    CGFloat h = MAX(minHeight, fitted);
+    if (fabs(CGRectGetWidth(header.frame) - w) > 0.5 || fabs(CGRectGetHeight(header.frame) - h) > 0.5) {
+        header.frame = CGRectMake(0, 0, w, h);
+        tableView.tableHeaderView = header;
+    }
+}
+

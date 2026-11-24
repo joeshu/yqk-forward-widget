@@ -261,9 +261,7 @@
 }
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
-    if(self.heroContainer&&self.tableView.bounds.size.width>0&&fabs(self.heroContainer.frame.size.width-self.tableView.bounds.size.width)>0.5){
-        CGRect f=self.heroContainer.frame;f.size.width=self.tableView.bounds.size.width;self.heroContainer.frame=f;self.tableView.tableHeaderView=self.heroContainer;
-    }
+    HostSizeTableHeaderToFit(self.tableView, 138.0);
 }
 - (void)reloadThemeAppearance {
     if(!self.isViewLoaded)return;
@@ -348,6 +346,7 @@
     if(self.onRematchEPG)[rows addObject:@{@"title":@"重新匹配节目单（EPG）",@"detail":@"按频道标识重新关联 XMLTV 与官方节目单",@"icon":@"calendar.badge.clock",@"action":@"rematch"}];
     [rows addObject:@{@"title":@"智能匹配官方高清台标与节目单",@"detail":@"自动归一常见央视/卫视频道台标与 EPG",@"icon":@"sparkles.tv",@"action":@"matchLogos"}];
     [rows addObject:@{@"title":@"导出单项资源文件",@"detail":@"导出为可分享或备份的独立资源配置",@"icon":@"square.and.arrow.up",@"action":@"export"}];
+    if(self.source.length)[rows addObject:@{@"title":@"配置本源 udpxy 网关",@"detail":@"为本订阅单独指定局域网 rtp/udp 转发网关（留空则用全局设置）",@"icon":@"network",@"action":@"udpxy"}];
     if(self.source.length)[rows addObject:@{@"title":@"复制订阅地址",@"detail":@"复制原始订阅链接到系统剪贴板",@"icon":@"doc.on.doc",@"action":@"copy"}];
     if(self.source.length&&self.onDelete)[rows addObject:@{@"title":@"移除此订阅",@"detail":@"删除此订阅源及其独有频道，不影响其他源",@"icon":@"trash",@"action":@"delete",@"destructive":@YES}];
     return rows;
@@ -601,6 +600,23 @@
         else if([action isEqual:@"rematch"]){if(self.onRematchEPG){self.onRematchEPG();self.notice=@"已发起节目单（EPG）重新匹配";[self showTransientPrompt:self.notice];[self loadFields];[self.tableView reloadData];}}
         else if([action isEqual:@"matchLogos"]){if(self.onMatchStationLogos)self.onMatchStationLogos();self.notice=@"已完成官方高清台标与节目单归一匹配";[self showTransientPrompt:self.notice];[self loadFields];[self.tableView reloadData];}
         else if([action isEqual:@"export"]){if(self.onExport)self.onExport();}
+        else if([action isEqual:@"udpxy"]){
+            NSDictionary *saved=[NSUserDefaults.standardUserDefaults dictionaryForKey:@"cctv.subscription.udpxy.v1"];
+            NSString *current=[saved isKindOfClass:NSDictionary.class]?saved[self.source]:@"";
+            UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"本源 udpxy 网关" message:@"例如 http://192.168.1.1:4022；留空将回退使用全局 udpxy 设置。" preferredStyle:UIAlertControllerStyleAlert];
+            [alert addTextFieldWithConfigurationHandler:^(UITextField *tf){tf.placeholder=@"http://192.168.1.1:4022";tf.text=current?:@"";tf.keyboardType=UIKeyboardTypeURL;tf.autocapitalizationType=UITextAutocapitalizationTypeNone;}];
+            [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+            __weak typeof(self) weakSelf=self;
+            [alert addAction:[UIAlertAction actionWithTitle:@"保存" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){
+                SubscriptionResourceViewController *owner=weakSelf;if(!owner||!owner.source.length)return;
+                NSString *val=[alert.textFields.firstObject.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]?:@"";
+                NSMutableDictionary *map=[[NSUserDefaults.standardUserDefaults dictionaryForKey:@"cctv.subscription.udpxy.v1"] mutableCopy]?:[NSMutableDictionary dictionary];
+                if(val.length)map[owner.source]=val;else [map removeObjectForKey:owner.source];
+                [NSUserDefaults.standardUserDefaults setObject:map forKey:@"cctv.subscription.udpxy.v1"];
+                [owner showTransientPrompt:val.length?@"已保存本源 udpxy 网关（刷新订阅后生效）":@"已清除本源 udpxy 网关"];
+            }]];
+            [self presentViewController:alert animated:YES completion:nil];
+        }
         else if([action isEqual:@"copy"]){if(self.source.length){UIPasteboard.generalPasteboard.string=self.source;self.notice=@"订阅地址已复制到剪贴板";[self showTransientPrompt:self.notice];}}
         else if([action isEqual:@"delete"]){[self confirmDeleteSubscription];}
     }

@@ -106,6 +106,13 @@
     }
 }
 
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    if (self.table.tableHeaderView) {
+        HostSizeTableHeaderToFit(self.table, 156.0);
+    }
+}
+
 - (void)reloadThemeAppearance {
     self.overrideUserInterfaceStyle = HostSelectedInterfaceStyle();
     if (!self.isViewLoaded) return;

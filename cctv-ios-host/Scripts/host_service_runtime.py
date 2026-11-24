@@ -128,8 +128,9 @@ class Session:
         self.package_prefix = None
         self.package_root = None
         self.plugin_builtins = None
-        self.http_worker_slots = threading.BoundedSemaphore(_http_workers_per_service)
-        self.response_read_slots = threading.BoundedSemaphore(2)
+        is_media_service = bool(identifier and ('media' in str(identifier).lower() or 'relay' in str(identifier).lower()))
+        self.http_worker_slots = threading.BoundedSemaphore(10 if is_media_service else _http_workers_per_service)
+        self.response_read_slots = threading.BoundedSemaphore(6 if is_media_service else 4)
         self.http_worker_rejection_counts = {}
         self.http_worker_rejection_reported = {}
         self.response_rejection_counts = {}
@@ -222,24 +223,42 @@ def _init(server, *args, **kwargs):
 
 
 def _rebind_server_socket(server):
+    address = getattr(server, 'server_address', None)
+    if not address:
+        return
     old_sock = getattr(server, 'socket', None)
-    if old_sock is not None:
+    last_error = None
+    for attempt in range(4):
+        if old_sock is not None:
+            try:
+                old_sock.close()
+            except OSError:
+                pass
+            old_sock = None
+        new_sock = socket.socket(server.address_family, server.socket_type)
         try:
-            old_sock.close()
-        except OSError:
-            pass
-    server.socket = socket.socket(server.address_family, server.socket_type)
-    try:
-        server.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    except OSError:
-        pass
-    if isinstance(server, http.server.HTTPServer):
-        socketserver.TCPServer.server_bind(server)
-        server.server_name = server.server_address[0]
-        server.server_port = server.server_address[1]
-    else:
-        server.server_bind()
-    server.server_activate()
+            try:
+                new_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            except OSError:
+                pass
+            new_sock.bind(address)
+            new_sock.listen(getattr(server, 'request_queue_size', 5))
+            bound_address = new_sock.getsockname()
+            server.socket = new_sock
+            server.server_address = bound_address
+            if isinstance(server, http.server.HTTPServer):
+                server.server_name = bound_address[0]
+                server.server_port = bound_address[1]
+            return
+        except OSError as error:
+            last_error = error
+            try:
+                new_sock.close()
+            except OSError:
+                pass
+            time.sleep(0.05 * (attempt + 1))
+    if last_error is not None:
+        raise last_error
 
 
 def _serve(server, poll_interval=.5):
@@ -254,14 +273,16 @@ def _serve(server, poll_interval=.5):
     _release_startup(owner)
     try:
         while not owner.stopping.is_set() and not getattr(server, '_host_closed', False):
-            server._host_rebind_needed = False
+            if getattr(server, '_host_rebind_needed', False):
+                try:
+                    _rebind_server_socket(server)
+                    server._host_rebind_needed = False
+                except OSError:
+                    time.sleep(0.15)
+                    continue
             result = _serve_forever(server, min(poll_interval, .1))
             if not getattr(server, '_host_rebind_needed', False) or owner.stopping.is_set() or getattr(server, '_host_closed', False):
                 return result
-            try:
-                _rebind_server_socket(server)
-            except OSError:
-                time.sleep(0.1)
     finally:
         server._host_serving.clear()
         if owner.stopping.is_set() and not getattr(server, "_host_closed", False):
@@ -379,17 +400,29 @@ def _accept(server):
     return request, address
 
 
+def _send_http_503(request):
+    sender = getattr(request, 'sendall', None)
+    if not callable(sender):
+        return
+    try:
+        sender(b'HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nRetry-After: 1\r\nConnection: close\r\n\r\n')
+    except OSError:
+        pass
+
+
 def _process(server, request, address):
     slots = getattr(server, '_host_workers', None)
     if slots is None:
         return _process_request(server, request, address)
-    if not slots.acquire(blocking=False):
+    if not slots.acquire(timeout=1.5):
         _report_http_worker_limit(getattr(server, '_host_owner', None), 'per_service_handler_limit')
+        _send_http_503(request)
         server.shutdown_request(request)
         return
-    if not _global_http_workers.acquire(blocking=False):
+    if not _global_http_workers.acquire(timeout=1.5):
         slots.release()
         _report_http_worker_limit(getattr(server, '_host_owner', None), 'host_handler_limit')
+        _send_http_503(request)
         server.shutdown_request(request)
         return
     try:
@@ -549,11 +582,11 @@ def _bounded_http_response_read_using(response, amt, reader):
     per_service_acquired = False
     global_acquired = False
     if use_read_slots:
-        per_service_acquired = owner.response_read_slots.acquire(blocking=False)
+        per_service_acquired = owner.response_read_slots.acquire(timeout=4.0)
         if not per_service_acquired:
             _report_response_limit(owner, 'per_service_read_concurrency', already_read)
             raise HTTPResponseTooLarge('Python service has reached its concurrent response-read budget')
-        global_acquired = _global_response_reads.acquire(blocking=False)
+        global_acquired = _global_response_reads.acquire(timeout=4.0)
         if not global_acquired:
             owner.response_read_slots.release()
             _report_response_limit(owner, 'host_read_concurrency', already_read)

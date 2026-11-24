@@ -1275,7 +1275,12 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
         self.bottomBarBackdrop.hidden = YES;
         self.resourceActionsButton.hidden=YES;
         self.catalogFloatingControls.hidden=YES;
+        self.table.hidden=YES;
         self.channelGrid.hidden=YES;
+        self.groupControl.hidden=YES;
+        self.catalogGroupGlassCard.hidden=YES;
+        self.catalogTopImmersiveScrim.hidden=YES;
+        self.liveMiniPlayerBar.hidden=YES;
         self.playerTabs.hidden=YES;
         self.playbackPanel.view.hidden=YES;
         self.tabPage.view.hidden=YES;
@@ -1294,8 +1299,8 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
         CGFloat segmentHeight=MAX(32,ceil(segmentFont.lineHeight)+14);
         self.groupControl.frame=CGRectMake(12,y+6,w-24,segmentHeight);self.groupControl.hidden=!catalog||expandedLive;self.playerTabs.frame=CGRectMake(12,y+6,w-24,segmentHeight);self.playerTabs.hidden=!catalog||!expandedLive;
         self.versionLabel.hidden=YES;
-        UIFont *tabLabelFont=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold] compatibleWithTraitCollection:self.traitCollection];CGFloat tabHeight=MAX(58,ceil(20+3+tabLabelFont.lineHeight+16)),tabWidth=MIN(w,560),tabY=MAX(0,height-safe.bottom-tabHeight),tabContentInset=MAX(8,height-tabY+8);self.bottomBar.frame=CGRectMake(MAX(0,(w-tabWidth)/2),tabY,tabWidth,tabHeight);self.bottomBar.layer.cornerRadius=tabHeight/2;self.bottomBarBackdrop.frame=CGRectMake(0,tabY,w,MAX(tabHeight,height-tabY));self.bottomDockFadeGradient.frame=self.bottomBarBackdrop.bounds;self.bottomDockGlass.frame=CGRectMake(MAX(10,(w-MIN(w-20,540))/2),2,MIN(w-20,540),tabHeight-4);self.bottomDockGlass.layer.cornerRadius=(tabHeight-4)/2;self.bottomBar.hidden=NO;self.bottomBarBackdrop.hidden=NO;
-        BOOL showMiniBar=self.livePlaybackSuspendedForNavigation&&self.channelID.length&&self.activeTab>=2;self.liveMiniPlayerBar.hidden=!showMiniBar;if(showMiniBar){CGFloat miniW=MIN(w-28,520),miniH=42;self.liveMiniPlayerBar.frame=CGRectMake((w-miniW)/2,MAX(top+8,tabY-miniH-8),miniW,miniH);self.liveMiniPlayerCloseButton.frame=CGRectMake(miniW-38,5,32,32);self.liveMiniPlayerResumeButton.frame=CGRectMake(miniW-130,5,88,32);self.liveMiniPlayerLabel.frame=CGRectMake(14,0,MAX(0,miniW-150),miniH);[self.view bringSubviewToFront:self.liveMiniPlayerBar];}
+        UIFont *tabLabelFont=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold] compatibleWithTraitCollection:self.traitCollection];CGFloat tabHeight=MAX(58,ceil(20+3+tabLabelFont.lineHeight+16)),dockWidth=MIN(MAX(0,w-20),540),dockX=MAX(10,(w-dockWidth)/2),tabY=MAX(0,height-safe.bottom-tabHeight),tabContentInset=MAX(8,height-tabY+8);self.bottomBarBackdrop.frame=CGRectMake(0,tabY,w,MAX(tabHeight,height-tabY));self.bottomDockFadeGradient.frame=self.bottomBarBackdrop.bounds;self.bottomDockGlass.frame=CGRectMake(dockX,2,dockWidth,tabHeight-4);self.bottomDockGlass.layer.cornerRadius=(tabHeight-4)/2;self.bottomBar.frame=CGRectMake(dockX+4,tabY+2,MAX(0,dockWidth-8),tabHeight-4);self.bottomBar.layer.cornerRadius=(tabHeight-4)/2;self.bottomBar.hidden=NO;self.bottomBarBackdrop.hidden=NO;
+        BOOL showMiniBar=self.livePlaybackSuspendedForNavigation&&self.channelID.length&&self.activeTab>=2;self.liveMiniPlayerBar.hidden=!showMiniBar;if(showMiniBar){CGFloat miniW=MIN(w-28,520),miniH=42;self.liveMiniPlayerBar.frame=CGRectMake((w-miniW)/2,MAX(top+8,tabY-miniH-8),miniW,miniH);self.liveMiniPlayerCloseButton.frame=CGRectMake(miniW-38,5,32,32);self.liveMiniPlayerResumeButton.frame=CGRectMake(miniW-130,5,88,32);self.liveMiniPlayerLabel.frame=CGRectMake(14,0,MAX(0,miniW-150),miniH);}
         CGFloat contentY=y+6+segmentHeight+4;CGFloat contentBottom=height;CGFloat catalogBottomInset=tabContentInset+62;
         CGFloat floatingPillExtra=catalog?18:0;
         CGRect frame=CGRectMake(0,0,w,MAX(0,contentBottom));UIEdgeInsets catalogInsets=UIEdgeInsetsMake(contentY,0,catalogBottomInset+floatingPillExtra,0);CCTVApplyImmersiveScrollGeometry(self.table,frame,catalogInsets);CCTVApplyImmersiveScrollGeometry(self.channelGrid,frame,catalogInsets);
@@ -1313,7 +1318,7 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
             self.catalogGroupGlassCard.frame=CGRectInset(self.groupControl.frame,-2,-2);
         }
         self.playerTopScrim.frame=CGRectMake(0,0,w,MIN(CGRectGetHeight(self.playerBox.bounds),expandedLive?48:top+24));self.playerTopGradient.frame=self.playerTopScrim.bounds;
-        [self.view bringSubviewToFront:self.catalogTopImmersiveScrim];[self.view bringSubviewToFront:self.catalogGroupGlassCard];[self.view bringSubviewToFront:self.playerBox];[self.view bringSubviewToFront:self.liveResourceCapsule];[self.view bringSubviewToFront:self.groupControl];[self.view bringSubviewToFront:self.playerTabs];[self.view bringSubviewToFront:self.bottomBarBackdrop];[self.view bringSubviewToFront:self.bottomBar];
+        [self.view bringSubviewToFront:self.catalogTopImmersiveScrim];[self.view bringSubviewToFront:self.catalogGroupGlassCard];[self.view bringSubviewToFront:self.playerBox];[self.view bringSubviewToFront:self.liveResourceCapsule];[self.view bringSubviewToFront:self.groupControl];[self.view bringSubviewToFront:self.playerTabs];[self.view bringSubviewToFront:self.bottomBarBackdrop];[self.view bringSubviewToFront:self.bottomBar];if(showMiniBar)[self.view bringSubviewToFront:self.liveMiniPlayerBar];
         self.resourceActionsButton.hidden=YES;self.resourceActionsButton.frame=CGRectMake(w-safe.right-18-58,CGRectGetMinY(self.bottomBar.frame)-12-58,58,58);
         self.catalogFloatingControls.hidden=!catalog;CGFloat controlsWidth=164,controlsHeight=54;self.catalogFloatingControls.frame=CGRectMake(MAX(12,w-safe.right-controlsWidth-14),MAX(top+8,tabY-controlsHeight-12),controlsWidth,controlsHeight);self.catalogLayoutButton.frame=CGRectMake(4,3,48,48);self.catalogFloatingAirPlayPicker.frame=CGRectMake(58,3,48,48);self.catalogMoreButton.frame=CGRectMake(112,3,48,48);[self.view bringSubviewToFront:self.catalogFloatingControls];
     }

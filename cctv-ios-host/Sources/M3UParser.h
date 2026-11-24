@@ -25,6 +25,7 @@ NS_ASSUME_NONNULL_BEGIN
 + (nullable NSString *)epgURL:(NSString *)text baseURL:(nullable NSURL *)baseURL;
 + (nullable NSArray<M3UChannel *> *)parse:(nullable NSString *)text baseURL:(nullable NSURL *)baseURL;
 + (nullable NSArray<M3UChannel *> *)parse:(nullable NSString *)text baseURL:(nullable NSURL *)baseURL error:(NSError * _Nullable * _Nullable)error;
++ (nullable NSArray<M3UChannel *> *)parse:(nullable NSString *)text baseURL:(nullable NSURL *)baseURL udpxyOverride:(nullable NSString *)udpxyOverride error:(NSError * _Nullable * _Nullable)error;
 @end
 
 NS_ASSUME_NONNULL_END

@@ -73,7 +73,118 @@ def timeline(node, timescale, total, offset=0):
     return stamps
 
 
-def parse_mpd(data, url):
+def parse_sidx_segments(data, index_end):
+    """Parse an ISO BMFF sidx box into [(duration_seconds, 'start-end'), ...]."""
+    if not isinstance(data, (bytes, bytearray)) or len(data) < 28:
+        raise DashError('dash_sidx_invalid')
+    buf = bytes(data)
+    pos = 0
+    sidx_start = -1
+    sidx_size = 0
+    while pos + 8 <= len(buf):
+        box_size = int.from_bytes(buf[pos:pos + 4], 'big')
+        box_type = buf[pos + 4:pos + 8]
+        if box_size == 1 and pos + 16 <= len(buf):
+            box_size = int.from_bytes(buf[pos + 8:pos + 16], 'big')
+        if box_size < 8 or pos + box_size > len(buf):
+            break
+        if box_type == b'sidx':
+            sidx_start = pos
+            sidx_size = box_size
+            break
+        pos += box_size
+    if sidx_start < 0:
+        raise DashError('dash_sidx_invalid')
+    p = sidx_start + 8
+    end = sidx_start + sidx_size
+    if p + 4 > end:
+        raise DashError('dash_sidx_invalid')
+    version = buf[p]
+    p += 4  # version + flags
+    if version == 0:
+        if p + 16 > end:
+            raise DashError('dash_sidx_invalid')
+        timescale = int.from_bytes(buf[p + 4:p + 8], 'big')
+        first_offset = int.from_bytes(buf[p + 12:p + 16], 'big')
+        p += 16
+    elif version == 1:
+        if p + 24 > end:
+            raise DashError('dash_sidx_invalid')
+        timescale = int.from_bytes(buf[p + 4:p + 8], 'big')
+        first_offset = int.from_bytes(buf[p + 16:p + 24], 'big')
+        p += 24
+    else:
+        raise DashError('dash_sidx_invalid')
+    if timescale <= 0 or p + 4 > end:
+        raise DashError('dash_sidx_invalid')
+    ref_count = int.from_bytes(buf[p + 2:p + 4], 'big')
+    p += 4
+    if ref_count <= 0 or ref_count > MAX_SEGMENTS or p + ref_count * 12 > end:
+        raise DashError('dash_sidx_invalid')
+    offset = int(index_end) + 1 + first_offset
+    segments = []
+    for _ in range(ref_count):
+        word0 = int.from_bytes(buf[p:p + 4], 'big')
+        subseg_dur = int.from_bytes(buf[p + 4:p + 8], 'big')
+        p += 12
+        ref_type = (word0 >> 31) & 1
+        ref_size = word0 & 0x7FFFFFFF
+        if ref_type != 0 or ref_size <= 0 or subseg_dur <= 0:
+            raise DashError('dash_sidx_invalid')
+        seg_end = offset + ref_size - 1
+        segments.append((subseg_dur / float(timescale), f'{offset}-{seg_end}'))
+        offset = seg_end + 1
+    return segments
+
+
+def rewrite_hev1_to_hvc1_init(data):
+    """Rewrite fMP4 moov/stsd 'hev1' FourCC to Apple-compatible 'hvc1' when hvcC is present."""
+    if not isinstance(data, (bytes, bytearray)) or b'hev1' not in data or b'hvcC' not in data:
+        return data
+    buf = bytearray(data)
+    container_types = {b'moov', b'trak', b'mdia', b'minf', b'stbl'}
+
+    def walk(start, end):
+        cursor = start
+        while cursor + 8 <= end:
+            size = int.from_bytes(buf[cursor:cursor + 4], 'big')
+            btype = bytes(buf[cursor + 4:cursor + 8])
+            header = 8
+            if size == 1 and cursor + 16 <= end:
+                size = int.from_bytes(buf[cursor + 8:cursor + 16], 'big')
+                header = 16
+            elif size == 0:
+                size = end - cursor
+            if size < header or cursor + size > end:
+                break
+            body_start = cursor + header
+            body_end = cursor + size
+            if btype in container_types:
+                walk(body_start, body_end)
+            elif btype == b'stsd' and body_start + 8 <= body_end:
+                entry_pos = body_start + 8
+                while entry_pos + 8 <= body_end:
+                    esize = int.from_bytes(buf[entry_pos:entry_pos + 4], 'big')
+                    etype = bytes(buf[entry_pos + 4:entry_pos + 8])
+                    if esize < 8 or entry_pos + esize > body_end:
+                        break
+                    if etype == b'hev1' and b'hvcC' in buf[entry_pos:entry_pos + esize]:
+                        buf[entry_pos + 4:entry_pos + 8] = b'hvc1'
+                    entry_pos += esize
+            cursor = body_end
+
+    walk(0, len(buf))
+    return bytes(buf)
+
+
+_CLEARKEY_SCHEMES = {
+    'urn:mpeg:dash:mp4protection:2011',
+    'urn:uuid:e2719d58-a985-b3c9-781a-b030af78d30e',
+    'urn:uuid:1077efec-c0b2-4d02-ace3-3c1e52e2fb4b',
+}
+
+
+def parse_mpd(data, url, sidx_fetcher=None, clearkey_keys=None):
     if len(data) > 2 * 1024 * 1024 or b'<!DOCTYPE' in data.upper() or b'<!ENTITY' in data.upper():
         raise DashError('dash_manifest_invalid')
     try:
@@ -82,8 +193,25 @@ def parse_mpd(data, url):
         raise DashError('dash_manifest_invalid') from error
     if root.tag.rsplit('}', 1)[-1] != 'MPD':
         raise DashError('dash_manifest_invalid')
-    if any(e.tag.rsplit('}', 1)[-1] == 'ContentProtection' for e in root.iter()):
-        raise DashError('dash_requires_license')
+    cp_nodes = [e for e in root.iter() if e.tag.rsplit('}', 1)[-1] == 'ContentProtection']
+    clearkey_info = None
+    if cp_nodes:
+        schemes = {(e.get('schemeIdUri') or '').strip().lower() for e in cp_nodes}
+        default_kid = ''
+        for e in cp_nodes:
+            for k, v in e.attrib.items():
+                if k.rsplit('}', 1)[-1].lower() == 'default_kid' and v:
+                    default_kid = v.replace('-', '').strip().lower()
+                    break
+            if default_kid:
+                break
+        if not clearkey_keys or not (schemes & _CLEARKEY_SCHEMES):
+            raise DashError('dash_requires_license')
+        clearkey_info = {
+            'enabled': True,
+            'default_kid': default_kid,
+            'keys': dict(clearkey_keys) if isinstance(clearkey_keys, dict) else {'default': str(clearkey_keys)},
+        }
     periods = children(root, 'Period')
     if len(periods) != 1:
         raise DashError('dash_multiple_periods_unsupported')
@@ -95,7 +223,7 @@ def parse_mpd(data, url):
         for r_index, rep in enumerate(children(adaptation, 'Representation')):
             nodes = (root, period, adaptation, rep)
             base = url
-            attrs, template, segment_list = {}, None, None
+            attrs, template, segment_list, segment_base = {}, None, None, None
             template_attrs, template_timeline = {}, None
             for node in nodes:
                 attrs.update(node.attrib)
@@ -110,6 +238,8 @@ def parse_mpd(data, url):
                         template_timeline = child(t, 'SegmentTimeline')
                 if child(node, 'SegmentList') is not None:
                     segment_list = child(node, 'SegmentList')
+                if child(node, 'SegmentBase') is not None:
+                    segment_base = child(node, 'SegmentBase')
             mime, codecs = attrs.get('mimeType', ''), attrs.get('codecs', '')
             kind = attrs.get('contentType') or mime.split('/')[0]
             if kind not in ('video', 'audio'):
@@ -144,18 +274,51 @@ def parse_mpd(data, url):
                     stamps = timeline(template_timeline, scale, total, offset)
                 else:
                     length = int(template_attrs.get('duration', 0))
-                    if live or length <= 0 or total <= 0:
+                    media_tpl = template_attrs.get('media', '')
+                    if live and length > 0 and '$Number' in media_tpl:
+                        seg_sec = length / scale
+                        window_sec = duration(root.get('timeShiftBufferDepth')) or max(seg_sec * 6.0, 24.0)
+                        win_count = max(3, min(MAX_SEGMENTS, int(math.ceil(window_sec / seg_sec))))
+                        avail_raw = (root.get('availabilityStartTime') or '').strip()
+                        live_end_num = number + win_count - 1
+                        if avail_raw:
+                            try:
+                                import datetime
+                                avail_dt = datetime.datetime.fromisoformat(avail_raw.replace('Z', '+00:00'))
+                                elapsed = max(0.0, time.time() - avail_dt.timestamp())
+                                live_end_num = max(number, number + int(elapsed // seg_sec) - 1)
+                            except Exception:
+                                pass
+                        number = max(number, live_end_num - win_count + 1)
+                        stamps = [(offset + (number + i) * length, seg_sec) for i in range(win_count)]
+                    elif live or length <= 0 or total <= 0:
                         raise DashError('dash_timeline_required')
-                    count = math.ceil(total * scale / length)
-                    if count > MAX_SEGMENTS:
-                        raise DashError('dash_segments_exceeded')
-                    stamps = [(offset + i * length, min(length / scale, total - i * length / scale)) for i in range(count)]
+                    else:
+                        count = math.ceil(total * scale / length)
+                        if count > MAX_SEGMENTS:
+                            raise DashError('dash_segments_exceeded')
+                        stamps = [(offset + i * length, min(length / scale, total - i * length / scale)) for i in range(count)]
                 media = template_attrs.get('media', '')
                 init_template = template_attrs.get('initialization', '')
                 if not media or not init_template:
                     raise DashError('dash_initialization_required')
                 init = urllib.parse.urljoin(base, expand(init_template, rep))
                 segments = [(urllib.parse.urljoin(base, expand(media, rep, number + i, stamp)), length, '') for i, (stamp, length) in enumerate(stamps)]
+            elif segment_base is not None and segment_base.get('indexRange') and callable(sidx_fetcher):
+                idx_range = segment_base.get('indexRange', '').strip()
+                m_idx = re.fullmatch(r'(\d+)-(\d+)', idx_range)
+                if not m_idx or int(m_idx[2]) < int(m_idx[1]):
+                    raise DashError('dash_byte_range_invalid')
+                initialization = child(segment_base, 'Initialization')
+                if initialization is not None:
+                    init = urllib.parse.urljoin(base, initialization.get('sourceURL', ''))
+                    init_range = initialization.get('range', '')
+                else:
+                    init = base
+                    init_range = f'0-{max(0, int(m_idx[1]) - 1)}'
+                sidx_bytes = sidx_fetcher(base, idx_range)
+                parsed_sidx = parse_sidx_segments(sidx_bytes, int(m_idx[2]))
+                segments = [(base, seg_dur, seg_span) for seg_dur, seg_span in parsed_sidx]
             else:
                 raise DashError('dash_segment_base_unsupported')
             if not init or not segments or any(not math.isfinite(s[1]) or s[1] <= 0 for s in segments):
@@ -164,13 +327,15 @@ def parse_mpd(data, url):
                 raise DashError('dash_segments_exceeded')
             if live:
                 # A sliding timeline's first Number must advance as segments
-                # disappear. Time-based numbering stays stable across reloads.
-                if template is None or not stamps or '$Time' not in template_attrs.get('media', ''):
+                # disappear. Support both $Time$ timelines and fixed-duration $Number$ windows.
+                media_tpl = template_attrs.get('media', '')
+                if template is None or not stamps or ('$Time' not in media_tpl and '$Number' not in media_tpl):
                     raise DashError('dash_live_numbering_unsupported')
-                step = max(1, round(stamps[0][1] * scale))
-                if any(round(length * scale) != step for _, length in stamps):
-                    raise DashError('dash_live_variable_timeline_unsupported')
-                number = stamps[0][0] // step
+                if '$Time' in media_tpl:
+                    step = max(1, round(stamps[0][1] * scale))
+                    if any(round(length * scale) != step for _, length in stamps):
+                        raise DashError('dash_live_variable_timeline_unsupported')
+                    number = stamps[0][0] // step
             tracks.append({'id': str(a_index) + ':' + str(rep.get('id', r_index)), 'kind': kind,
                            'bandwidth': max(1, int(attrs.get('bandwidth', 1000000))),
                            'codecs': codecs, 'width': attrs.get('width', ''), 'height': attrs.get('height', ''),
@@ -180,7 +345,10 @@ def parse_mpd(data, url):
                 raise DashError('dash_tracks_exceeded')
     if not tracks or not required_kinds.issubset({t['kind'] for t in tracks}):
         raise DashError('dash_codec_unsupported')
-    return {'tracks': tracks, 'live': live, 'ttl': max(1, min(duration(root.get('minimumUpdatePeriod')) or 3, 30)) if live else 3600}
+    result = {'tracks': tracks, 'live': live, 'ttl': max(1, min(duration(root.get('minimumUpdatePeriod')) or 3, 30)) if live else 3600}
+    if clearkey_info:
+        result['clearkey'] = clearkey_info
+    return result
 
 
 def byte_range(value):
@@ -206,7 +374,10 @@ class DashSession:
             if self.snapshot and time.monotonic() < self.expires:
                 return self.snapshot
             data, final_url = self.relay.read_dash_manifest(self.url, self.headers, self.diagnostic_id)
-            snapshot = parse_mpd(data, final_url)
+            sidx_fetcher = None
+            if hasattr(self.relay, 'read_dash_range'):
+                sidx_fetcher = lambda seg_url, span: self.relay.read_dash_range(seg_url, self.headers, span, self.diagnostic_id)
+            snapshot = parse_mpd(data, final_url, sidx_fetcher=sidx_fetcher)
             self.manifest_url = final_url
             self.snapshot, self.expires = snapshot, time.monotonic() + snapshot['ttl']
             return snapshot
@@ -233,6 +404,8 @@ class DashSession:
             for t in video or audio:
                 attrs = ['BANDWIDTH=' + str(t['bandwidth'] + (max(x['bandwidth'] for x in audio) if video and audio else 0))]
                 codecs = ','.join(dict.fromkeys([t['codecs']] + ([x['codecs'] for x in audio] if video else []))).strip(',')
+                if codecs:
+                    codecs = re.sub(r'\bhev1(?=\.|$)', 'hvc1', codecs)
                 if codecs and re.fullmatch(r'[A-Za-z0-9.,_-]+', codecs):
                     attrs.append('CODECS="' + codecs + '"')
                 if str(t['width']).isdigit() and str(t['height']).isdigit():

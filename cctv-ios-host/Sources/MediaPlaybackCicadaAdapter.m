@@ -366,7 +366,10 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
     if(!self.config||!self.player)return;
     BOOL constrained=NSProcessInfo.processInfo.lowPowerModeEnabled;
     NSString *lowerURL=self.url.absoluteString.lowercaseString?:@"";
-    BOOL isLikelyLive=(self.duration<=0)||[lowerURL hasPrefix:@"rtmp://"]||[lowerURL hasPrefix:@"rtmps://"]||[lowerURL containsString:@".flv"]||[lowerURL containsString:@"/live/"];
+    BOOL urlLooksLive=[lowerURL hasPrefix:@"rtmp://"]||[lowerURL hasPrefix:@"rtmps://"]||[lowerURL containsString:@".flv"]||[lowerURL containsString:@"/live/"];
+    // prepare 尚未完成时 self.duration 恒为 0，不能仅凭 duration<=0 将点播误判为直播；
+    // 仅在显式标记 liveStreamHint、URL 具备直播特征、或已 prepared 后仍确认无时长时按直播缓冲。
+    BOOL isLikelyLive=self.liveStreamHint||urlLooksLive||(self.preparedReported&&self.duration<=0);
     if(isLikelyLive){
         int liveHigh=1500+(int)MIN(self.stallCount,(NSUInteger)3)*700;
         int liveMax=constrained?8000:12000;
@@ -382,6 +385,7 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
         CicadaCallVoidInt(self.config,NSSelectorFromString(@"setStartBufferDuration:"),500);
         CicadaCallVoidInt(self.config,NSSelectorFromString(@"setHighBufferDuration:"),high);
         CicadaCallVoidInt(self.config,NSSelectorFromString(@"setMaxBufferDuration:"),vodMax);
+        CicadaCallVoidInt(self.config,NSSelectorFromString(@"setMaxDelayTime:"),0);
     }
     CicadaCallVoidObject(self.player,NSSelectorFromString(@"setConfig:"),self.config);
 }
@@ -584,6 +588,7 @@ static dispatch_queue_t MediaPlaybackCicadaQuarantineQueue(void) {
 - (void)handlePrepared {
     if (self.preparedReported || self.destroyed || self.state==MediaPlaybackCicadaAdapterStateFailed) return;
     self.preparedReported = YES;
+    [self updateBufferConfiguration];
     if ([self.delegate respondsToSelector:@selector(cicadaAdapterDidPrepare:)]) {
         [self.delegate cicadaAdapterDidPrepare:self];
     }

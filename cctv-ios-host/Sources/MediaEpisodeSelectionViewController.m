@@ -32,7 +32,10 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
     button.titleLabel.adjustsFontForContentSizeCategory=YES;
 }
 
+@interface MediaEpisodeSelectionViewController () <UIGestureRecognizerDelegate>
+@end
 @interface MediaEpisodeSelectionViewController () <UIContextMenuInteractionDelegate>
+@property(nonatomic,weak) id<UIGestureRecognizerDelegate> previousPopDelegate;
 @property(nonatomic) NSUInteger generation;
 @property(nonatomic) NSUInteger refreshGeneration;
 @property(nonatomic,copy) NSString *inFlightEpisodeSignature;
@@ -98,7 +101,7 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
 
 - (instancetype)init { return [super init]; }
 - (BOOL)shouldAutorotate { return YES; }
-- (UIInterfaceOrientationMask)supportedInterfaceOrientations { return UIInterfaceOrientationMaskPortrait; }
+- (UIInterfaceOrientationMask)supportedInterfaceOrientations { return UIDevice.currentDevice.userInterfaceIdiom==UIUserInterfaceIdiomPad?UIInterfaceOrientationMaskAll:UIInterfaceOrientationMaskPortrait; }
 - (UIStatusBarStyle)preferredStatusBarStyle { return UIStatusBarStyleLightContent; }
 - (NSArray *)seasonCollections {
     id value=self.detail[@"seasons"]?:self.detail[@"seasonList"]?:self.detail[@"season_list"];
@@ -186,10 +189,17 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
     [super viewWillAppear:animated];
     if(!self.savedNavigationBarVisibility){self.originalNavigationBarHidden=self.navigationController.navigationBarHidden;self.savedNavigationBarVisibility=YES;}
     [self.navigationController setNavigationBarHidden:YES animated:animated];
+    UIGestureRecognizer *popGesture=self.navigationController.interactivePopGestureRecognizer;
+    if(popGesture&&popGesture.delegate!=self){self.previousPopDelegate=popGesture.delegate;popGesture.delegate=self;popGesture.enabled=YES;}
     [self setNeedsStatusBarAppearanceUpdate];
+}
+- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gestureRecognizer {
+    return self.navigationController.viewControllers.count>1;
 }
 - (void)viewWillDisappear:(BOOL)animated {
     [super viewWillDisappear:animated];
+    UIGestureRecognizer *popGesture=self.navigationController.interactivePopGestureRecognizer;
+    if(popGesture.delegate==self)popGesture.delegate=self.previousPopDelegate;
     if(self.isMovingFromParentViewController)[self.navigationController setNavigationBarHidden:self.originalNavigationBarHidden animated:animated];
 }
 - (void)viewDidDisappear:(BOOL)animated {

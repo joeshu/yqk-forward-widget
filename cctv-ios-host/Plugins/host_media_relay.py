@@ -53,7 +53,7 @@ def ll_hls_upstream_url(url, request_path):
 
 _CROSS_ORIGIN_SAFE_HEADERS = frozenset((
     'accept', 'accept-encoding', 'accept-language', 'cache-control',
-    'if-range', 'range', 'user-agent',
+    'if-range', 'origin', 'range', 'referer', 'user-agent',
 ))
 
 
@@ -585,7 +585,10 @@ def _drop_spliced_ad_segments(text, playlist_url):
     seen_segment = False
     for line in lines:
         if not seen_segment and not line.startswith('#EXTINF:'):
-            preamble.append(line)
+            if line.startswith(('#EXT-X-KEY:', '#EXT-X-MAP:', '#EXT-X-BYTERANGE:', '#EXT-X-PROGRAM-DATE-TIME:')):
+                current['lines'].append(line)
+            else:
+                preamble.append(line)
             continue
         if line.startswith('#EXT-X-DISCONTINUITY'):
             blocks.append(current)
@@ -676,6 +679,33 @@ class MediaRelay:
         self.dash_playlists = collections.OrderedDict()
         self.responses = set()
         self.stopping = threading.Event()
+        self._warmup_executor = None
+
+    def _get_warmup_executor(self):
+        with self.lock:
+            if self.stopping.is_set():
+                return None
+            if self._warmup_executor is None:
+                import concurrent.futures
+                self._warmup_executor = concurrent.futures.ThreadPoolExecutor(
+                    max_workers=4, thread_name_prefix='cctvhost-hls-warmup'
+                )
+            return self._warmup_executor
+
+    @staticmethod
+    def _connection_header(handler, has_content_length=True):
+        req_ver = getattr(handler, 'request_version', 'HTTP/1.0')
+        proto_ver = getattr(handler, 'protocol_version', 'HTTP/1.0')
+        if not isinstance(req_ver, str) or not isinstance(proto_ver, str):
+            return 'close'
+        req_conn = ''
+        headers = getattr(handler, 'headers', None)
+        if headers is not None and hasattr(headers, 'get'):
+            req_conn = str(headers.get('Connection') or '').lower()
+        if (has_content_length and req_ver >= 'HTTP/1.1' and
+                'close' not in req_conn and proto_ver >= 'HTTP/1.1'):
+            return 'keep-alive'
+        return 'close'
 
     @staticmethod
     def _normalize_hls_key_bytes(raw):
@@ -935,6 +965,24 @@ class MediaRelay:
                 self.responses.discard(response)
             response.close()
 
+    def read_dash_range(self, url, headers, byte_span, diagnostic_id):
+        req_headers = {k: v for k, v in headers.items() if k.lower() not in ('range', 'accept-encoding')}
+        req_headers['Range'] = 'bytes=' + str(byte_span)
+        req_headers['Accept-Encoding'] = 'identity'
+        request = urllib.request.Request(http_url(url), headers=req_headers)
+        response = _open_with_timeout_retry(request, diagnostic_id)
+        with self.lock:
+            if self.stopping.is_set():
+                response.close()
+                raise ValueError('dash_service_stopping')
+            self.responses.add(response)
+        try:
+            return response.read(256 * 1024 + 1)
+        finally:
+            with self.lock:
+                self.responses.discard(response)
+            response.close()
+
     @staticmethod
     def _same_origin(left, right):
         return (left.scheme.lower(), left.netloc.lower()) == (right.scheme.lower(), right.netloc.lower())
@@ -1021,12 +1069,12 @@ class MediaRelay:
                 variant_pending = False
             lines.append(line)
         if (warmup_key_token or warmup_map_token or warmup_segment_token) and self._should_speculative_warmup(parent.hostname):
-            threading.Thread(
-                target=self.warmup_manifest_assets,
-                args=(warmup_key_token, warmup_map_token, warmup_segment_token),
-                name='cctvhost-hls-warmup',
-                daemon=True,
-            ).start()
+            executor = self._get_warmup_executor()
+            if executor is not None:
+                try:
+                    executor.submit(self.warmup_manifest_assets, warmup_key_token, warmup_map_token, warmup_segment_token)
+                except RuntimeError:
+                    pass
         return '\n'.join(lines) + '\n'
 
     @staticmethod
@@ -1178,7 +1226,7 @@ class MediaRelay:
         handler.send_header('Content-Type', 'application/vnd.apple.mpegurl')
         handler.send_header('Content-Length', str(len(body)))
         handler.send_header('Cache-Control', 'no-store')
-        handler.send_header('Connection', 'close')
+        handler.send_header('Connection', self._connection_header(handler, has_content_length=True))
         handler.end_headers()
         self._write_client(handler, body)
 
@@ -1626,22 +1674,30 @@ class MediaRelay:
                 self._write_client(handler, norm_key)
                 resource_event('completed', len(norm_key))
                 return
-            if resource_kind == 'map' and not head and response.status == 200 and not handler.headers.get('Range') and (expected_bytes is None or expected_bytes <= 262144):
+            if resource_kind == 'map' and not head and response.status in (200, 206) and (expected_bytes is None or expected_bytes <= 262144):
                 raw_map = prefix + response.read(262145 - len(prefix))
                 if len(raw_map) <= 262144 and (expected_bytes is None or len(raw_map) == expected_bytes):
+                    if b'hev1' in raw_map and b'hvcC' in raw_map:
+                        try:
+                            from host_dash import rewrite_hev1_to_hvc1_init
+                            raw_map = rewrite_hev1_to_hvc1_init(raw_map)
+                        except Exception:
+                            pass
                     map_ct = 'video/mp4' if (len(raw_map) >= 8 and raw_map[4:8] in (b'ftyp', b'styp', b'moof', b'moov')) else mime
-                    if not record[3]:
+                    if not record[3] and response.status == 200 and not handler.headers.get('Range'):
                         with self.lock:
                             self.remote_map_cache[(url, pairs)] = (raw_map, map_ct)
                             self.remote_map_cache.move_to_end((url, pairs))
                             while len(self.remote_map_cache) > 32:
                                 self.remote_map_cache.popitem(last=False)
                     resource_event('byte', len(raw_map))
-                    handler.send_response(200)
+                    handler.send_response(response.status)
                     handler.send_header('Content-Type', map_ct)
                     handler.send_header('Content-Length', str(len(raw_map)))
+                    if response.headers.get('Content-Range'):
+                        handler.send_header('Content-Range', response.headers.get('Content-Range'))
                     handler.send_header('Cache-Control', 'no-store')
-                    handler.send_header('Connection', 'close')
+                    handler.send_header('Connection', self._connection_header(handler, has_content_length=True))
                     handler.end_headers()
                     sent = True
                     self._write_client(handler, raw_map)
@@ -1723,6 +1779,7 @@ class MediaRelay:
                     if sniffed_ct:
                         override_ct = sniffed_ct
             handler.send_response(response.status)
+            has_cl = False
             for key in ('Content-Type', 'Content-Length', 'Content-Range', 'Accept-Ranges'):
                 val = response.headers.get(key)
                 if key == 'Content-Type' and override_ct:
@@ -1730,8 +1787,10 @@ class MediaRelay:
                 elif key == 'Content-Length' and stripped_diff > 0 and expected_bytes is not None:
                     val = str(max(0, expected_bytes - stripped_diff))
                 if val:
+                    if key == 'Content-Length':
+                        has_cl = True
                     handler.send_header(key, val)
-            handler.send_header('Connection', 'close')
+            handler.send_header('Connection', self._connection_header(handler, has_content_length=has_cl))
             handler.end_headers()
             sent = True
             if not head:
@@ -1811,6 +1870,8 @@ class MediaRelay:
     def close(self):
         self.stopping.set()
         with self.lock:
+            warmup_executor = self._warmup_executor
+            self._warmup_executor = None
             responses = list(self.responses)
             flights = list(self.refreshing.values())
             manifest_flights = list(self.manifest_flights.values())
@@ -1838,4 +1899,11 @@ class MediaRelay:
             try:
                 response.close()
             except OSError:
+                pass
+        if warmup_executor is not None:
+            try:
+                warmup_executor.shutdown(wait=False, cancel_futures=True)
+            except TypeError:
+                warmup_executor.shutdown(wait=False)
+            except Exception:
                 pass

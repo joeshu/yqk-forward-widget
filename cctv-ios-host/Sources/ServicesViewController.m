@@ -308,11 +308,7 @@ static NSString *ServiceResolvedVersionText(NSDictionary *service){
 }
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
-    UIView *header=self.tableView.tableHeaderView;
-    CGFloat w=CGRectGetWidth(self.tableView.bounds);
-    if(header&&w>0&&fabs(CGRectGetWidth(header.frame)-w)>0.5){
-        CGRect f=header.frame;f.size.width=w;header.frame=f;self.tableView.tableHeaderView=header;
-    }
+    HostSizeTableHeaderToFit(self.tableView, 126.0);
 }
 - (void)reloadThemeAppearance {
     if(!self.isViewLoaded)return;
@@ -463,8 +459,7 @@ static NSString *ServiceResolvedVersionText(NSDictionary *service){
             c.textLabel.font = HostRoundedFont(15.5,UIFontWeightSemibold,UIFontTextStyleSubheadline);
             c.textLabel.textColor = isRunning ? UIColor.systemGreenColor : HostText();
             c.detailTextLabel.text = isRunning ? (self.health.length ? self.health : @"HTTP 健康状态未知 · 点按“检测服务接口”") : [self stopDetailText];
-            c.imageView.image = [UIImage systemImageNamed:isRunning ? @"checkmark.Power" : @"power.circle.fill"];
-            if(!c.imageView.image)c.imageView.image=[UIImage systemImageNamed:isRunning?@"bolt.horizontal.circle.fill":@"stop.circle.fill"];
+            c.imageView.image = [UIImage systemImageNamed:isRunning ? @"bolt.horizontal.circle.fill" : @"power.circle.fill"];
             c.imageView.tintColor = isRunning ? UIColor.systemGreenColor : HostSecondaryText();
             UIButton *control=[UIButton buttonWithType:UIButtonTypeSystem];
             BOOL managed=[PyHost isManagedServiceIdentifier:self.service[@"id"]];

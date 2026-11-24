@@ -68,20 +68,42 @@
     sheet.badgeText = badgeText;
     sheet.badgeColor = badgeColor;
     sheet.sections = sections ?: @[];
-    sheet.modalPresentationStyle = UIModalPresentationPageSheet;
-    if (@available(iOS 15.0, *)) {
-        UISheetPresentationController *sp = sheet.sheetPresentationController;
-        if (sp) {
-            sp.detents = @[UISheetPresentationControllerDetent.mediumDetent, UISheetPresentationControllerDetent.largeDetent];
-            sp.prefersGrabberVisible = YES;
-            sp.preferredCornerRadius = 28.0;
-            sp.prefersScrollingExpandsWhenScrolledToEdge = YES;
+    BOOL usePopover = (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad && sourceView != nil);
+    sheet.modalPresentationStyle = usePopover ? UIModalPresentationPopover : UIModalPresentationPageSheet;
+    if (!usePopover) {
+        if (@available(iOS 16.0, *)) {
+            UISheetPresentationController *sp = sheet.sheetPresentationController;
+            if (sp) {
+                __weak typeof(sheet) weakSheet = sheet;
+                UISheetPresentationControllerDetent *fitDetent = [UISheetPresentationControllerDetent customDetentWithIdentifier:@"host.sheet.fit" resolver:^CGFloat(id<UISheetPresentationControllerDetentResolutionContext> context) {
+                    HostGlassActionSheetViewController *owner = weakSheet;
+                    CGFloat maxH = context.maximumDetentValue;
+                    if (!owner || !owner.isViewLoaded) return MIN(maxH, 360.0);
+                    [owner.view layoutIfNeeded];
+                    CGFloat contentH = owner.scrollView.contentSize.height + 116.0;
+                    if (contentH <= 140.0) contentH = 320.0;
+                    return MIN(maxH, MAX(220.0, contentH));
+                }];
+                sp.detents = @[fitDetent, UISheetPresentationControllerDetent.largeDetent];
+                sp.prefersGrabberVisible = YES;
+                sp.preferredCornerRadius = 28.0;
+                sp.prefersScrollingExpandsWhenScrolledToEdge = YES;
+            }
+        } else if (@available(iOS 15.0, *)) {
+            UISheetPresentationController *sp = sheet.sheetPresentationController;
+            if (sp) {
+                sp.detents = @[UISheetPresentationControllerDetent.mediumDetent, UISheetPresentationControllerDetent.largeDetent];
+                sp.prefersGrabberVisible = YES;
+                sp.preferredCornerRadius = 28.0;
+                sp.prefersScrollingExpandsWhenScrolledToEdge = YES;
+            }
         }
     }
     if (sheet.popoverPresentationController) {
         UIView *anchor = sourceView ?: presenter.view;
         sheet.popoverPresentationController.sourceView = anchor;
         sheet.popoverPresentationController.sourceRect = anchor.bounds;
+        sheet.preferredContentSize = CGSizeMake(380.0, 440.0);
     }
     [presenter presentViewController:sheet animated:YES completion:nil];
 }
@@ -406,8 +428,10 @@
     trailingIcon.translatesAutoresizingMaskIntoConstraints = NO;
     trailingIcon.tintColor = action.selected ? HostAccent() : HostMutedText();
     trailingIcon.userInteractionEnabled = NO;
+    trailingIcon.hidden = action.destructive && !action.selected;
     [trailingIcon setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
     [row addSubview:trailingIcon];
+    HostInstallPressFeedback(row);
 
     NSLayoutXAxisAnchor *trailingAnchor = trailingIcon.leadingAnchor;
     if (action.value.length) {

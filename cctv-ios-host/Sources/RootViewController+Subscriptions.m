@@ -409,7 +409,9 @@
         if(status<200||status>=300||data.length>10*1024*1024)data=nil;
         NSString *text = data.length ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
         NSError *parseError=nil;
-        NSArray<M3UChannel *> *list = text.length ? [M3UParser parse:text baseURL:resp.URL?:url error:&parseError] : nil;
+        NSDictionary *udpxyMap=[NSUserDefaults.standardUserDefaults dictionaryForKey:@"cctv.subscription.udpxy.v1"];
+        NSString *udpxyOverride=[udpxyMap isKindOfClass:NSDictionary.class]?udpxyMap[url.absoluteString]:nil;
+        NSArray<M3UChannel *> *list = text.length ? [M3UParser parse:text baseURL:resp.URL?:url udpxyOverride:udpxyOverride error:&parseError] : nil;
         dispatch_async(dispatch_get_main_queue(), ^{
             if ([weakSelf.subscriptionRequestVersions[sourceKey] unsignedIntegerValue] != requestVersion) return;
             [weakSelf.subscriptionTasks removeObjectForKey:sourceKey];
@@ -683,7 +685,9 @@
         NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]?[(NSHTTPURLResponse *)response statusCode]:0;
         NSData *data=(location.path.length&&size&&!error&&status>=200&&status<300&&size.unsignedLongLongValue<=10*1024*1024)?[NSData dataWithContentsOfFile:location.path options:NSDataReadingMappedIfSafe error:NULL]:nil;
         NSString *text=data?[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]:nil;
-        NSArray *channels=text.length?[M3UParser parse:text baseURL:response.URL?:[NSURL URLWithString:url]]:nil;
+        NSDictionary *udpxyMap=[NSUserDefaults.standardUserDefaults dictionaryForKey:@"cctv.subscription.udpxy.v1"];
+        NSString *udpxyOverride=[udpxyMap isKindOfClass:NSDictionary.class]?udpxyMap[url]:nil;
+        NSArray *channels=text.length?[M3UParser parse:text baseURL:response.URL?:[NSURL URLWithString:url] udpxyOverride:udpxyOverride error:NULL]:nil;
         dispatch_async(dispatch_get_main_queue(),^{RootViewController *owner=weakSelf;if(!owner||owner.subscriptionEditTasks[source]!=(id)task)return;[owner.subscriptionEditTasks removeObjectForKey:source];
             [progress dismissViewControllerAnimated:YES completion:^{
                 if(!channels.count){completion(error?:[NSError errorWithDomain:@"SubscriptionEdit" code:2 userInfo:@{NSLocalizedDescriptionKey:@"新地址没有返回有效频道，已保留原订阅"}]);return;}

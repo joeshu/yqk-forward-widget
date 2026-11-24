@@ -29,6 +29,8 @@
 - (void)applyFilterAndSort;
 - (UIMenu *)buildSortFilterMenu;
 - (NSString *)displayNameForURL:(NSURL *)url;
+@property(nonatomic,assign) BOOL nextImportUsesZeroCopyBookmark;
+- (void)presentDocumentPickerForBookmark:(BOOL)useBookmark;
 - (void)importMedia;
 - (void)stopImport;
 - (void)refreshLocalMedia;
@@ -163,8 +165,8 @@
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
     if(self.tableView.tableHeaderView==self.progressHeader)[self updateProgressHeaderSize];
-    else if(self.tableView.tableHeaderView==self.summaryHeaderContainer&&self.tableView.bounds.size.width>0&&fabs(self.summaryHeaderContainer.frame.size.width-self.tableView.bounds.size.width)>0.5){
-        CGRect f=self.summaryHeaderContainer.frame;f.size.width=self.tableView.bounds.size.width;self.summaryHeaderContainer.frame=f;self.tableView.tableHeaderView=self.summaryHeaderContainer;
+    else if(self.tableView.tableHeaderView==self.summaryHeaderContainer){
+        HostSizeTableHeaderToFit(self.tableView, 80.0);
     }
 }
 - (void)updateProgressHeaderSize {CGFloat width=self.tableView.bounds.size.width;if(width<=0)return;CGRect frame=self.progressHeader.frame;frame.size.width=width;self.progressHeader.frame=frame;[self.progressHeader setNeedsLayout];[self.progressHeader layoutIfNeeded];CGSize fitting=[self.progressHeader systemLayoutSizeFittingSize:CGSizeMake(width,UILayoutFittingCompressedSize.height) withHorizontalFittingPriority:UILayoutPriorityRequired verticalFittingPriority:UILayoutPriorityFittingSizeLevel];CGFloat height=MAX(62,fitting.height);if(fabs(self.progressHeader.frame.size.height-height)>0.5){frame.size.height=height;self.progressHeader.frame=frame;self.tableView.tableHeaderView=self.progressHeader;}}
@@ -189,7 +191,9 @@
 }
 - (NSString *)displayNameForURL:(NSURL *)url {NSString *name=url.lastPathComponent?:@"媒体文件";if(name.length>37&&[name characterAtIndex:36]=='-')return [name substringFromIndex:37];return name;}
 - (void)updateFromStore {
-    self.allFiles=[self.store filesSnapshot];NSDictionary *state=[self.store stateSnapshot];BOOL importing=[state[@"importing"] boolValue],stopping=[state[@"stopRequested"] boolValue];self.navigationItem.rightBarButtonItem.enabled=!importing;
+    NSMutableArray<NSURL *> *merged=[NSMutableArray arrayWithArray:[self.store filesSnapshot]?:@[]];
+    for(NSURL *bm in [self.store mountedBookmarkURLsSnapshot]?:@[])if(![merged containsObject:bm])[merged addObject:bm];
+    self.allFiles=merged.copy;NSDictionary *state=[self.store stateSnapshot];BOOL importing=[state[@"importing"] boolValue],stopping=[state[@"stopRequested"] boolValue];self.navigationItem.rightBarButtonItem.enabled=!importing;
     NSMutableDictionary<NSURL *, NSNumber *> *sizes=[NSMutableDictionary dictionaryWithCapacity:self.allFiles.count];
     long long totalBytes=0;NSUInteger videoCount=0,audioCount=0;
     for(NSURL *u in self.allFiles){
@@ -206,18 +210,33 @@
         NSUInteger failed=[state[@"failureCount"] unsignedIntegerValue];
         if(failed)self.navigationItem.prompt=[NSString stringWithFormat:@"%lu 个文件未能保存；请重新选择",(unsigned long)failed];
         else if(stopping)self.navigationItem.prompt=[NSString stringWithFormat:@"已停止后续导入 · 已完成 %lu/%lu 个文件",(unsigned long)[state[@"completed"] unsignedIntegerValue],(unsigned long)[state[@"total"] unsignedIntegerValue]];
-        else self.navigationItem.prompt=self.allFiles.count?@"点击播放 · 长按分享 · 左滑删除":@"添加视频或音频；文件会复制到本机";
+        else self.navigationItem.prompt=self.allFiles.count?@"点击播放 · 长按分享 · 左滑删除":@"添加视频或音频；支持零拷贝挂载或本机副本";
     }
     [self applyFilterAndSort];
     self.emptyLabel.hidden=self.files.count>0||importing;self.tableView.backgroundView.hidden=self.emptyLabel.hidden;
 }
 - (void)storeDidChange:(NSNotification *)notification {if(!NSThread.isMainThread){__weak typeof(self) weakSelf=self;dispatch_async(dispatch_get_main_queue(),^{[weakSelf storeDidChange:notification];});return;}[self updateFromStore];}
-- (void)importMedia {
-    if([[self.store stateSnapshot][@"importing"] boolValue]){self.navigationItem.prompt=@"已有导入任务进行中";return;}
+- (void)presentDocumentPickerForBookmark:(BOOL)useBookmark {
+    self.nextImportUsesZeroCopyBookmark=useBookmark;
     UIDocumentPickerViewController *picker=[[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeMovie,UTTypeAudio,UTTypeAudiovisualContent] asCopy:NO];picker.delegate=self;picker.allowsMultipleSelection=YES;[self presentViewController:picker animated:YES completion:nil];
 }
+- (void)importMedia {
+    if([[self.store stateSnapshot][@"importing"] boolValue]){self.navigationItem.prompt=@"已有导入任务进行中";return;}
+    UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"添加本地媒体" message:@"4K/大体积视频推荐选择零拷贝外部挂载，不占用双倍存储空间" preferredStyle:UIAlertControllerStyleActionSheet];
+    __weak typeof(self) weakSelf=self;
+    [sheet addAction:[UIAlertAction actionWithTitle:@"零拷贝外部挂载（推荐）" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[weakSelf presentDocumentPickerForBookmark:YES];}]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"复制到本机沙盒" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[weakSelf presentDocumentPickerForBookmark:NO];}]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    if(sheet.popoverPresentationController){sheet.popoverPresentationController.barButtonItem=self.navigationItem.rightBarButtonItem;}
+    [self presentViewController:sheet animated:YES completion:nil];
+}
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
-    if(!urls.count)return;__weak typeof(self) weakSelf=self;[self.store importURLs:urls completion:^(NSArray<NSURL *> *imported,NSArray<NSDictionary<NSString *,NSString *> *> *failures){LocalMediaViewController *owner=weakSelf;if(!owner)return;[owner updateFromStore];if(failures.count)owner.navigationItem.prompt=[NSString stringWithFormat:@"%lu 个文件未能保存，请检查访问权限或可用空间",(unsigned long)failures.count];else if(imported.count)owner.navigationItem.prompt=[NSString stringWithFormat:@"已保存 %lu 个本机副本",(unsigned long)imported.count];}];[self updateFromStore];
+    if(!urls.count)return;__weak typeof(self) weakSelf=self;
+    if(self.nextImportUsesZeroCopyBookmark){
+        [self.store mountExternalURLs:urls completion:^(NSArray<NSURL *> *mounted,NSArray<NSDictionary<NSString *,NSString *> *> *failures){LocalMediaViewController *owner=weakSelf;if(!owner)return;[owner updateFromStore];if(failures.count)owner.navigationItem.prompt=[NSString stringWithFormat:@"%lu 个文件挂载失败",(unsigned long)failures.count];else if(mounted.count)owner.navigationItem.prompt=[NSString stringWithFormat:@"已零拷贝挂载 %lu 个外部媒体",(unsigned long)mounted.count];}];
+        return;
+    }
+    [self.store importURLs:urls completion:^(NSArray<NSURL *> *imported,NSArray<NSDictionary<NSString *,NSString *> *> *failures){LocalMediaViewController *owner=weakSelf;if(!owner)return;[owner updateFromStore];if(failures.count)owner.navigationItem.prompt=[NSString stringWithFormat:@"%lu 个文件未能保存，请检查访问权限或可用空间",(unsigned long)failures.count];else if(imported.count)owner.navigationItem.prompt=[NSString stringWithFormat:@"已保存 %lu 个本机副本",(unsigned long)imported.count];}];[self updateFromStore];
 }
 - (void)stopImport {[self.store stopAfterCurrentFile];}
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {return self.files.count;}

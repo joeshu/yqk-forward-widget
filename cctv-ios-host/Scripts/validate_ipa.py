@@ -84,6 +84,10 @@ def validate(path):
             assert any('JavaScriptCore.framework/' in name for name in result['binaries'][binary]['dependencies']), 'missing JavaScriptCore link'
             result['binaries']['NodeMobile'] = macho_info(z.read(root + 'Frameworks/NodeMobile.framework/NodeMobile'))
             assert not any('NodeMobile.framework/' in name for name in result['binaries'][binary]['dependencies']), 'Node must load on demand'
+            mpv_member = root + 'Frameworks/CCTVMPVCore.framework/CCTVMPVCore'
+            if mpv_member in z.namelist():
+                result['binaries']['CCTVMPVCore'] = macho_info(z.read(mpv_member))
+                assert not any('CCTVMPVCore.framework/' in name for name in result['binaries'][binary]['dependencies']), 'CCTVMPVCore must load via dlopen RTLD_LOCAL'
             for member in ('media-service.py', 'host_media_runtime.py', 'host_media_relay.py', 'host_media_url.py', 'host_dash.py', 'csp_adapter.py', 'example-encrypted-media.py', 'node-plugin-host.cjs', 'node-fetch.bundle.cjs', 'node-fetch-THIRD-PARTY-NOTICES.txt', 'base/spider.py', 'lxml/__init__.py', 'lxml/etree.py', 'lxml/html.py', 'pyquery.py', 'NodeMobile-LICENSE.txt', 'drpy-LICENSE.txt'):
                 assert root + member in z.namelist(), 'missing media component: ' + member
             assert len(z.read(root + 'js-runtime.bundle.js')) > 100000, 'missing generic JS and drpy engine'

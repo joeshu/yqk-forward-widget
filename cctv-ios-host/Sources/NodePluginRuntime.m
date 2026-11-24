@@ -14,7 +14,8 @@
 @property(atomic) NSInteger controlPort;
 @property(nonatomic, strong) NSURLSession *session;
 @property(nonatomic, strong) NSMutableDictionary<NSString *, void (^)(NSString *)> *sessionLogHandlers;
--  (NSError *)error:(NSString *)message;
+- (NSError *)error:(NSString *)message;
+- (void)triggerControlRebindSynchronously;
 @end
 @implementation NodePluginRuntime
 + (instancetype)shared {static NodePluginRuntime *runtime;static dispatch_once_t once;dispatch_once(&once,^{runtime=[self new];});return runtime;}
@@ -79,25 +80,74 @@
     }else if([operation isEqual:@"stop"] && ![self isManagedSession:session])return @"{\"ok\":true,\"result\":true}";
     NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"http://127.0.0.1:%ld/control",(long)self.controlPort]]];request.HTTPMethod=@"POST";[request setValue:self.token forHTTPHeaderField:@"X-CCTVHost-Token"];[request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
     request.HTTPBody=[NSJSONSerialization dataWithJSONObject:@{@"operation":operation,@"payload":payload} options:0 error:error];if(!request.HTTPBody){if([operation isEqual:@"start"])[self removeManagedSession:session];return nil;}
-    __block NSData *body=nil;__block NSError *failure=nil;
+    __block NSData *body=nil;__block NSError *failure=nil;__block NSInteger statusCode=0;
     for(NSUInteger retry=0;retry<3;retry++){
-        body=nil;failure=nil;
+        body=nil;failure=nil;statusCode=0;
+        NSInteger port=self.controlPort;
+        if(port>0)request.URL=[NSURL URLWithString:[NSString stringWithFormat:@"http://127.0.0.1:%ld/control",(long)port]];
         dispatch_semaphore_t done=dispatch_semaphore_create(0);
-        NSURLSessionDataTask *task=[self.session dataTaskWithRequest:request completionHandler:^(NSData *data,NSURLResponse *response,NSError *networkError){body=data;failure=networkError;dispatch_semaphore_signal(done);}];[task resume];
+        NSURLSessionDataTask *task=[self.session dataTaskWithRequest:request completionHandler:^(NSData *data,NSURLResponse *response,NSError *networkError){body=data;failure=networkError;statusCode=[response isKindOfClass:NSHTTPURLResponse.class]?[(NSHTTPURLResponse *)response statusCode]:0;dispatch_semaphore_signal(done);}];[task resume];
         int64_t waitSec=([operation isEqual:@"play"]||[operation isEqual:@"proxy"])?95:36;if(dispatch_semaphore_wait(done,dispatch_time(DISPATCH_TIME_NOW,waitSec*NSEC_PER_SEC))!=0){[task cancel];if([operation isEqual:@"start"]||[operation isEqual:@"stop"])[self markStartUncertain:session];if(error)*error=[self error:@"Node 操作超时；会话结果未知，可尝试停止后重试"];return nil;}
-        if(!failure && body.length)break;
-        BOOL transient = failure && [failure.domain isEqualToString:NSURLErrorDomain] &&
-                         (failure.code == NSURLErrorCannotConnectToHost || failure.code == NSURLErrorNetworkConnectionLost || failure.code == NSURLErrorTimedOut);
+        if(!failure && statusCode!=503 && body.length)break;
+        BOOL connDead=failure && [failure.domain isEqualToString:NSURLErrorDomain] && (failure.code==NSURLErrorCannotConnectToHost||failure.code==NSURLErrorNetworkConnectionLost);
+        if(connDead)[self triggerControlRebindSynchronously];
+        BOOL transient=(statusCode==503) || (failure && [failure.domain isEqualToString:NSURLErrorDomain] &&
+                         (failure.code == NSURLErrorCannotConnectToHost || failure.code == NSURLErrorNetworkConnectionLost || failure.code == NSURLErrorTimedOut));
         if(!transient && failure)break;
         [NSThread sleepForTimeInterval:(0.06 * (1 << retry))];
     }
-    if(failure || body.length>2*1024*1024 || !body.length){if([operation isEqual:@"start"]||[operation isEqual:@"stop"])[self markStartUncertain:session];if(error)*error=failure?:[self error:@"Node 返回结果无效或过大"];return nil;}
+    if(failure || statusCode==503 || body.length>2*1024*1024 || !body.length){if([operation isEqual:@"start"]||[operation isEqual:@"stop"])[self markStartUncertain:session];if(error)*error=failure?:[self error:@"Node 返回结果无效或过大"];return nil;}
     id reply=[NSJSONSerialization JSONObjectWithData:body options:0 error:error];if(![reply isKindOfClass:NSDictionary.class]){if([operation isEqual:@"start"]||[operation isEqual:@"stop"])[self markStartUncertain:session];return nil;}
     if([operation isEqual:@"start"]){if([reply[@"ok"] boolValue]){@synchronized(self){[self.startingSessions removeObject:session];[self.uncertainSessions removeObject:session];[self.confirmedSessions addObject:session];}}else [self removeManagedSession:session];}
     else if([operation isEqual:@"stop"]&&[reply[@"ok"] boolValue])[self removeManagedSession:session];
     NSString *logIdentifier=[payload[@"serviceID"] isKindOfClass:NSString.class]?payload[@"serviceID"]:session;void(^logger)(NSString *)=nil;@synchronized(self){logger=[self.sessionLogHandlers[logIdentifier] copy]?:[self.logHandler copy];}
     if([reply[@"logs"] isKindOfClass:NSArray.class] && logger)for(id line in reply[@"logs"])if([line isKindOfClass:NSString.class])logger(line);
     return [[NSString alloc] initWithData:body encoding:NSUTF8StringEncoding];
+}
+- (void)triggerControlRebindSynchronously {
+    NSString *infoPath=nil;
+    @synchronized(self){if(!self.launched||!self.infoPath.length)return;infoPath=self.infoPath;}
+    NSData *prevData=[NSData dataWithContentsOfFile:infoPath];
+    id prevObj=prevData?[NSJSONSerialization JSONObjectWithData:prevData options:0 error:NULL]:nil;
+    NSNumber *prevStamp=[prevObj isKindOfClass:NSDictionary.class]?prevObj[@"reboundAt"]:nil;
+    NSString *triggerPath=[infoPath stringByAppendingString:@".rebind"];
+    NSString *stamp=[NSString stringWithFormat:@"%.0f",NSDate.date.timeIntervalSince1970*1000.0];
+    [stamp writeToFile:triggerPath atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+    for(NSUInteger i=0;i<25;i++){
+        [NSThread sleepForTimeInterval:0.08];
+        NSData *curData=[NSData dataWithContentsOfFile:infoPath];
+        id curObj=curData?[NSJSONSerialization JSONObjectWithData:curData options:0 error:NULL]:nil;
+        if([curObj isKindOfClass:NSDictionary.class]&&[curObj[@"port"] integerValue]>0){
+            NSNumber *curStamp=curObj[@"reboundAt"];
+            if(!prevStamp||(curStamp&&![curStamp isEqual:prevStamp])){
+                @synchronized(self){self.controlPort=[curObj[@"port"] integerValue];}
+                return;
+            }
+        }
+    }
+}
+- (void)refreshListenersAfterForeground {
+    static dispatch_queue_t fgQueue;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken,^{fgQueue=dispatch_queue_create("com.cctvhost.node.foreground",DISPATCH_QUEUE_SERIAL);});
+    dispatch_block_t work=^{
+        BOOL ready=NO;NSInteger port=0;NSString *token=nil;NSURLSession *session=nil;
+        @synchronized(self){ready=self.launched&&self.controlPort>0&&self.token.length&&self.session!=nil;port=self.controlPort;token=self.token;session=self.session;}
+        if(!ready)return;
+        NSMutableURLRequest *probe=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"http://127.0.0.1:%ld/health",(long)port]] cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:1.2];
+        [probe setValue:token forHTTPHeaderField:@"X-CCTVHost-Token"];
+        dispatch_semaphore_t done=dispatch_semaphore_create(0);
+        __block BOOL reachable=NO;
+        [[session dataTaskWithRequest:probe completionHandler:^(NSData *data,NSURLResponse *resp,NSError *err){
+            NSInteger code=[resp isKindOfClass:NSHTTPURLResponse.class]?[(NSHTTPURLResponse *)resp statusCode]:0;
+            reachable=(!err && code==200);
+            dispatch_semaphore_signal(done);
+        }] resume];
+        dispatch_semaphore_wait(done,dispatch_time(DISPATCH_TIME_NOW,(int64_t)(1.5*NSEC_PER_SEC)));
+        if(!reachable)[self triggerControlRebindSynchronously];
+    };
+    if(NSThread.isMainThread)dispatch_async(fgQueue,work);
+    else work();
 }
 - (BOOL)stopWithError:(NSError **)error {
     NSArray *sessions=nil;@synchronized(self){sessions=self.activeSessions.allKeys.copy;}BOOL result=YES;NSError *first=nil;

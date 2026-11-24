@@ -264,6 +264,7 @@
     tile.layer.cornerCurve = kCACornerCurveContinuous;
     tile.layer.borderWidth = 0.6;
     HostSetLayerBorderColor(tile, HostBorder());
+    tile.isAccessibilityElement = YES;
     tile.accessibilityLabel = title;
     tile.accessibilityTraits = UIAccessibilityTraitButton;
 
@@ -366,6 +367,7 @@
 - (UIView *)makeActionRowWithTitle:(NSString *)title subtitle:(NSString *)subtitle value:(NSString *)value icon:(NSString *)iconName tint:(UIColor *)tint handler:(dispatch_block_t)handler {
     UIControl *row = [UIControl new];
     row.translatesAutoresizingMaskIntoConstraints = NO;
+    row.isAccessibilityElement = YES;
     row.accessibilityLabel = title;
     row.accessibilityTraits = UIAccessibilityTraitButton;
 

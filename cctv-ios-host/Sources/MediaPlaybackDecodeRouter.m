@@ -94,6 +94,13 @@ static NSString *MediaPlaybackDecodeResultFormat(NSDictionary *result) {
     return MediaPlaybackDecodeLowerString(result[@"format"] ?: result[@"mediaType"] ?: result[@"playbackType"]);
 }
 
+static BOOL MediaPlaybackMPVUniversalAvailable(void) {
+    Class cls = NSClassFromString(@"MediaPlaybackMPVAdapter");
+    SEL sel = NSSelectorFromString(@"isAvailable");
+    if (!cls || ![cls respondsToSelector:sel]) return NO;
+    return ((BOOL (*)(id, SEL))[(id)cls methodForSelector:sel])(cls, sel);
+}
+
 BOOL MediaPlaybackResultSupportsCicadaPlayer(NSDictionary *result) {
     if (![result isKindOfClass:NSDictionary.class]) return NO;
     if ([result[@"dashRemuxed"] boolValue]) return NO;
@@ -111,6 +118,11 @@ BOOL MediaPlaybackResultSupportsCicadaPlayer(NSDictionary *result) {
     if ([lowerRaw hasPrefix:@"rtmp://"] || [lowerRaw hasPrefix:@"rtmps://"] || [lowerRaw hasPrefix:@"udp://"]) return YES;
     NSString *extension = MediaPlaybackDecodeResultExtension(result);
     if ([@[@"flv", @"mpd", @"mkv", @"webm", @"3gp", @"3gpp"] containsObject:extension]) return YES;
+    if (MediaPlaybackMPVUniversalAvailable()) {
+        if ([lowerRaw hasPrefix:@"rtsp://"] || [lowerRaw hasPrefix:@"rtsps://"] || [lowerRaw hasPrefix:@"srt://"] || [lowerRaw hasPrefix:@"smb://"]) return YES;
+        if ([@[@"avi", @"wmv", @"asf", @"rm", @"rmvb", @"vob", @"ogm", @"ogv"] containsObject:extension] ||
+            [@[@"avi", @"wmv", @"asf", @"rm", @"rmvb"] containsObject:format]) return YES;
+    }
     if (!extension.length && lowerRaw.length) {
         if ([lowerRaw containsString:@".flv?"] || [lowerRaw containsString:@"format=flv"] || [lowerRaw containsString:@"type=flv"] || [lowerRaw containsString:@"format=mpd"] || [lowerRaw containsString:@".mpd?"]) return YES;
     }
@@ -119,6 +131,7 @@ BOOL MediaPlaybackResultSupportsCicadaPlayer(NSDictionary *result) {
 
 BOOL MediaPlaybackResultRequiresWebViewOnly(NSDictionary *result) {
     if (![result isKindOfClass:NSDictionary.class]) return NO;
+    if (MediaPlaybackMPVUniversalAvailable()) return NO;
     NSString *format = MediaPlaybackDecodeResultFormat(result);
     NSString *mime = MediaPlaybackDecodeResultMIME(result);
     // AVI：无 avi demuxer；WMV/ASF：无 asf demuxer、无 wmv 解码器；
@@ -153,8 +166,10 @@ MediaPlaybackDecodeRoute MediaPlaybackDecodeRouteNextForResult(NSDictionary *res
     if (!probedContainer.length && [result[@"headerBytes"] isKindOfClass:NSData.class]) {
         probedContainer = MediaPlaybackSniffContainerFormat(result[@"headerBytes"]) ?: @"";
     }
-    BOOL probedCicadaOnly = [@[@"flv", @"live_flv", @"mkv", @"matroska", @"webm", @"3gp", @"3gpp", @"rtmp"] containsObject:probedContainer];
-    BOOL preferCicada = probedCicadaOnly || [decodeMode isEqualToString:@"cicada"] || [decodeMode isEqualToString:@"cicada_soft"] || [MediaPlaybackDecodeLowerString(result[@"playbackEngine"]) isEqualToString:@"cicada"];
+    BOOL probedCicadaOnly = [@[@"flv", @"live_flv", @"mkv", @"matroska", @"webm", @"3gp", @"3gpp", @"rtmp", @"mpegts"] containsObject:probedContainer];
+    NSString *urlExt = MediaPlaybackDecodeResultExtension(result);
+    BOOL rawProgressiveTS = ([urlExt isEqualToString:@"ts"] && ![MediaPlaybackDecodeResultFormat(result) isEqualToString:@"hls"] && ![MediaPlaybackDecodeResultFormat(result) isEqualToString:@"m3u8"]);
+    BOOL preferCicada = probedCicadaOnly || rawProgressiveTS || [decodeMode isEqualToString:@"cicada"] || [decodeMode isEqualToString:@"cicada_soft"] || [MediaPlaybackDecodeLowerString(result[@"playbackEngine"]) isEqualToString:@"cicada"];
 
     // Parser and platform watch pages are documents, not media resources. Send
     // them straight to the in-app browser instead of making both native players

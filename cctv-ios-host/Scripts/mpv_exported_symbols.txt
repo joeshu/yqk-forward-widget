@@ -1,0 +1,27 @@
+# Exported C API allowlist for CCTVMPVCore.framework (Darwin arm64).
+# Linked with -fvisibility=hidden -Wl,-exported_symbols_list to guarantee
+# zero FFmpeg (avcodec/avformat/avutil/sws/swr/avfilter) or OpenSSL symbol
+# leaks that could collide with CNPlayerSDK (IJK FFmpeg) or Python.framework.
+_mpv_client_api_version
+_mpv_error_string
+_mpv_free
+_mpv_create
+_mpv_initialize
+_mpv_destroy
+_mpv_terminate_destroy
+_mpv_set_option
+_mpv_set_option_string
+_mpv_command
+_mpv_command_async
+_mpv_command_ret
+_mpv_set_property
+_mpv_set_property_string
+_mpv_set_property_async
+_mpv_get_property
+_mpv_get_property_string
+_mpv_observe_property
+_mpv_unobserve_property
+_mpv_wait_event
+_mpv_wakeup
+_mpv_request_log_messages
+_mpv_free_node_contents
