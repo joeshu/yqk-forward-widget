@@ -43,6 +43,7 @@
 @interface HostGlassActionSheetViewController ()
 @property(nonatomic, strong) UIVisualEffectView *blurBackdrop;
 @property(nonatomic, strong) UIView *tintOverlay;
+@property(nonatomic, strong) UIScrollView *scrollView;
 @property(nonatomic, strong) NSMutableArray<dispatch_block_t> *actionHandlers;
 - (void)dismissSheet;
 - (void)runActionControl:(UIControl *)sender;
@@ -131,6 +132,7 @@
     scroll.alwaysBounceVertical = YES;
     scroll.showsVerticalScrollIndicator = NO;
     [self.view addSubview:scroll];
+    self.scrollView = scroll;
 
     UIStackView *rootStack = [UIStackView new];
     rootStack.translatesAutoresizingMaskIntoConstraints = NO;

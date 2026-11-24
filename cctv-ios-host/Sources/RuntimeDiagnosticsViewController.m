@@ -108,6 +108,13 @@
 
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
+    if (self.table.tableHeaderView && CGRectGetWidth(self.table.bounds) > 0 && fabs(CGRectGetWidth(self.table.tableHeaderView.frame) - CGRectGetWidth(self.table.bounds)) > 0.5) {
+        UIView *header = self.table.tableHeaderView;
+        CGRect f = header.frame;
+        f.size.width = CGRectGetWidth(self.table.bounds);
+        header.frame = f;
+        self.table.tableHeaderView = header;
+    }
     if (self.table.tableHeaderView) {
         HostSizeTableHeaderToFit(self.table, 156.0);
     }
@@ -150,17 +157,6 @@
             weakSelf.navigationItem.prompt = nil;
         }
     });
-}
-
-- (void)viewDidLayoutSubviews {
-    [super viewDidLayoutSubviews];
-    if (self.table.tableHeaderView && CGRectGetWidth(self.table.bounds) > 0 && fabs(CGRectGetWidth(self.table.tableHeaderView.frame) - CGRectGetWidth(self.table.bounds)) > 0.5) {
-        UIView *header = self.table.tableHeaderView;
-        CGRect f = header.frame;
-        f.size.width = CGRectGetWidth(self.table.bounds);
-        header.frame = f;
-        self.table.tableHeaderView = header;
-    }
 }
 
 - (void)viewWillAppear:(BOOL)animated {

@@ -2273,8 +2273,8 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
     for(NSLayoutConstraint *constraint in self.videoView.constraints)if(constraint.active&&constraint.firstItem==self.videoView&&(constraint.secondItem==self.videoView||!constraint.secondItem))[constraints addObject:constraint];
     self.cicadaFullscreenSavedConstraints=constraints.copy;[NSLayoutConstraint deactivateConstraints:constraints];
     MediaPlaybackFullscreenHost *host=[MediaPlaybackFullscreenHost new];host.modalPresentationStyle=UIModalPresentationOverFullScreen;self.cicadaFullscreenHost=host;__weak typeof(self) weakSelf=self;host.onClose=^{[weakSelf restoreVideoFromCicadaFullscreen];};
-    host.onTogglePlayPause=^{MediaPlaybackViewController *owner=weakSelf;if(!owner||!owner.cicadaAdapter)return;[owner toggleCicadaPlayPause];[owner.cicadaFullscreenHost updatePlayingState:owner.cicadaAdapter.isPlaying];};
-    [host loadViewIfNeeded];[host updatePlayingState:self.cicadaAdapter.isPlaying];[self.videoView removeFromSuperview];[host.view insertSubview:self.videoView atIndex:0];
+    host.onTogglePlayPause=^{MediaPlaybackViewController *owner=weakSelf;if(!owner||!owner.cicadaAdapter)return;[owner toggleCicadaPlayback];[owner.cicadaFullscreenHost updatePlayingState:owner.cicadaAdapter.state==MediaPlaybackCicadaAdapterStatePlaying];};
+    [host loadViewIfNeeded];[host updatePlayingState:self.cicadaAdapter.state==MediaPlaybackCicadaAdapterStatePlaying];[self.videoView removeFromSuperview];[host.view insertSubview:self.videoView atIndex:0];
     self.cicadaFullscreenConstraints=@[[self.videoView.leadingAnchor constraintEqualToAnchor:host.view.leadingAnchor],[self.videoView.trailingAnchor constraintEqualToAnchor:host.view.trailingAnchor],[self.videoView.topAnchor constraintEqualToAnchor:host.view.topAnchor],[self.videoView.bottomAnchor constraintEqualToAnchor:host.view.bottomAnchor]];[NSLayoutConstraint activateConstraints:self.cicadaFullscreenConstraints];
     [self presentViewController:host animated:YES completion:nil];
 }

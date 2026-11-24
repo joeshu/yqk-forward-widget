@@ -44,7 +44,9 @@ static NSDictionary *JARInvoke(NSDictionary *input) {
 }
 // Requests need a larger native stack for the interpreter and deep DEX conversion.
 static void JARThread(void (^work)(void)) {
+#if TARGET_OS_IOS && !defined(CCTV_JAR_SMOKE)
     [HostMemoryBudgetCoordinator.shared trimIfNeededForOperation:@"jar_runtime"];
+#endif
     NSThread *thread=[[NSThread alloc] initWithBlock:work];thread.name=@"CCTVHost JAR";thread.stackSize=2*1024*1024;[thread start];
 }
 @interface MediaJARRequest () <NSURLSessionDataDelegate>
