@@ -840,7 +840,7 @@ static void next(NSArray *steps, NSUInteger index) {
             check([PluginLogStore.shared runsForIdentifier:@"ui-smoke-plugin"].count==2, @"plugin store persisted two independent runs");
             [history performSelector:@selector(refreshRuns)];
             NSDate *deadline=[NSDate dateWithTimeIntervalSinceNow:15];
-            while([[(NSArray *)[history valueForKey:@"runs"] count]<2&&deadline.timeIntervalSinceNow>0){
+            while([[history valueForKey:@"runs"] count]<2&&deadline.timeIntervalSinceNow>0){
                 [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.025]];
             }
             check([history tableView:history.tableView numberOfRowsInSection:0]==2, @"two service starts appear as two separate log entries");
