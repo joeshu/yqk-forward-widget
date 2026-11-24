@@ -198,8 +198,8 @@ const assert = require('node:assert/strict');
             assert.deepEqual(api.qualityCandidates(model).map(c=>c.q), ['1080p','720p','540p','480p','360p']);
             assert.equal(api.pickBest(model).q,'1080p');
           }
-          // r8: Episode 1: register (#1) -> video_tab V5 GET host B (#1 empty) -> video_tab V5 GET host A (#2 ok)
-          // Episode 2 & 3: video_tab V5 GET host B reuses registered device (#1) directly; player/v1 never called.
+          // r9: Episode 1: register (#1) -> preload/v1 POST (#1 empty) -> video_tab V5 GET host B (#2 ok)
+          // Episode 2 & 3: preload/v1 POST reuses registered device (#1) directly; player/v1 / single video_model/v1 never called.
           assert.equal(regCount,1);
           assert.equal(playCount,4);
           const regCalls=calls.filter(c=>new URL(c.url).pathname.endsWith('/device_register/'));
@@ -216,20 +216,59 @@ const assert = require('node:assert/strict');
           }
           const v5Calls=calls.filter(c=>new URL(c.url).pathname==='/novel/player/multi_video_model/player/v1');
           assert.equal(v5Calls.length,0);
+          const modelCalls=calls.filter(c=>new URL(c.url).pathname==='/novel/player/video_model/v1/');
+          assert.equal(modelCalls.length,0);
+          const preloadCalls=calls.filter(c=>new URL(c.url).pathname==='/novel/player/multi_video_model/preload/v1');
+          assert.equal(preloadCalls.length,3);
+          assert.deepEqual(preloadCalls.map(c=>new URL(c.url).hostname),
+            ['reading.snssdk.com','reading.snssdk.com','reading.snssdk.com']);
+          preloadCalls.forEach((call, idx)=>{
+            const u=new URL(call.url);
+            assert.equal(u.pathname,'/novel/player/multi_video_model/preload/v1');
+            assert.equal(u.searchParams.get('version_code'),'74532');
+            assert.equal(u.searchParams.get('version_name'),'7.4.5.32');
+            assert.equal(u.searchParams.get('channel'),'update_64');
+            assert.equal(u.searchParams.get('device_type'),'25053RT47C');
+            assert.equal(u.searchParams.get('device_id'),'7701998877665501');
+            assert.ok(u.searchParams.get('cdid'));
+            assert.ok(u.searchParams.get('_rticket'));
+            assert.equal(call.options.method,'POST');
+            assert.ok(Buffer.isBuffer(call.options.body));
+            const bodyJson=JSON.parse(require('node:zlib').gunzipSync(call.options.body).toString('utf8'));
+            assert.equal(bodyJson.dr_scene,'preload');
+            assert.equal(bodyJson.biz_param.device_level,2);
+            assert.equal(bodyJson.biz_param.need_all_video_definition,true);
+            assert.equal(bodyJson.biz_param.video_platform,1024);
+            assert.deepEqual(bodyJson.mixed_video_id_map,{'1004':[episodes[idx]]});
+            assert.equal(call.options.headers['User-Agent'],'okhttp/4.12.0');
+            assert.equal(call.options.headers['Accept'],'application/json');
+            assert.equal(call.options.headers['Content-Type'],'application/json; charset=utf-8');
+            assert.equal(call.options.headers['Content-Encoding'],'gzip');
+            assert.ok(call.options.headers['x-khronos']);
+            assert.ok(call.options.headers['x-helios']);
+            assert.ok(call.options.headers['x-medusa']);
+            assert.ok(call.options.headers['x-ss-stub']);
+            assert.equal(call.options.headers['x-ss-req-ticket'],undefined);
+            assert.equal(call.options.headers['x-argus'],undefined);
+            assert.equal(call.options.headers['x-ladon'],undefined);
+            assert.equal(call.options.headers['x-gorgon'],undefined);
+            assert.equal(call.options.headers['passport-sdk-version'],undefined);
+            assert.equal(call.options.headers['x-tt-store-region'],undefined);
+            assert.equal(call.options.headers['Cookie'],undefined);
+          });
           const tabCalls=calls.filter(c=>new URL(c.url).pathname==='/reading/bookapi/video_tab/multi_video_model/v1/');
-          assert.equal(tabCalls.length,4);
+          assert.equal(tabCalls.length,1);
           assert.deepEqual(tabCalls.map(c=>new URL(c.url).hostname),
-            ['api5-normal-sinfonlineb.fqnovel.com','api5-normal-sinfonlinea.fqnovel.com',
-             'api5-normal-sinfonlineb.fqnovel.com','api5-normal-sinfonlineb.fqnovel.com']);
+            ['api5-normal-sinfonlineb.fqnovel.com']);
           assert.deepEqual(tabCalls.map(c=>new URL(c.url).searchParams.get('video_id')),
-            [episodes[0],episodes[0],episodes[1],episodes[2]]);
+            [episodes[0]]);
           tabCalls.forEach((call, idx)=>{
             const u=new URL(call.url);
             assert.equal(u.pathname,'/reading/bookapi/video_tab/multi_video_model/v1/');
-            assert.equal(u.searchParams.get('version_code'),'74332');
-            assert.equal(u.searchParams.get('version_name'),'7.4.3.32');
-            assert.equal(u.searchParams.get('channel'),'vivo_8662_64');
-            assert.equal(u.searchParams.get('device_type'),'PGT-AN10');
+            assert.equal(u.searchParams.get('version_code'),'74532');
+            assert.equal(u.searchParams.get('version_name'),'7.4.5.32');
+            assert.equal(u.searchParams.get('channel'),'update_64');
+            assert.equal(u.searchParams.get('device_type'),'25053RT47C');
             assert.equal(u.searchParams.get('device_id'),'7701998877665501');
             assert.ok(u.searchParams.get('cdid'));
             assert.ok(u.searchParams.get('_rticket'));

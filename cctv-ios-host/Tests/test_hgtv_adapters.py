@@ -221,7 +221,7 @@ class HgtvAdapterTests(unittest.TestCase):
                 self.assertEqual(module._pick_best({'video_list': items}, '360p')[1], '360p')
                 self.assertIsNone(module._pick_best({'video_list': items}, '480p'))
 
-    def test_signed_model_registers_anonymous_device_and_queries_current_video_tab_api_for_5_tiers(self):
+    def test_signed_model_registers_anonymous_device_and_queries_current_preload_api_for_5_tiers(self):
         from contextlib import ExitStack
 
         episodes = [
@@ -243,7 +243,7 @@ class HgtvAdapterTests(unittest.TestCase):
         }
         for module in (hgtv,):
             with self.subTest(version=module.VERSION):
-                # r8：主路 video_tab V5 GET（上游 7.7 打法，74332 画像）；player/v1 已死，仅作回退。
+                # r9：主路 preload/v1 POST（上游 hongguoTV 0.16.10 打法，74532 画像）；video_tab / player/v1 / 单集 video_model/v1 依次回退。
                 calls = []
                 prev_dir = module._DEC_DIR
                 module._DEC_DIR = os.path.join(self.tmp.name, f'cache-{module.VERSION}')
@@ -305,7 +305,7 @@ class HgtvAdapterTests(unittest.TestCase):
                                 self.assertEqual(picked[1], q)
                             self.assertEqual(module._pick_best(model, None)[1], '1080p')
 
-                    # 1 anonymous device_register + 3 episode video_tab V5 GETs (reusing registered device)
+                    # 1 anonymous device_register + 3 episode preload/v1 V5 POSTs (reusing registered device)
                     self.assertEqual(len(calls), 4)
                     reg_call = calls[0]
                     reg_url = urlsplit(reg_call['url'])
@@ -323,37 +323,36 @@ class HgtvAdapterTests(unittest.TestCase):
                     for idx, vid in enumerate(episodes):
                         play_call = calls[idx + 1]
                         play_url = urlsplit(play_call['url'])
-                        self.assertEqual(play_call['method'], 'GET')
-                        self.assertIsNone(play_call['body'])
-                        self.assertEqual(play_url.hostname, 'api5-normal-sinfonlineb.fqnovel.com')
-                        self.assertEqual(play_url.path, '/reading/bookapi/video_tab/multi_video_model/v1/')
+                        self.assertEqual(play_call['method'], 'POST')
+                        self.assertIsInstance(play_call['body'], bytes)
+                        self.assertEqual(play_url.hostname, 'reading.snssdk.com')
+                        self.assertEqual(play_url.path, '/novel/player/multi_video_model/preload/v1')
                         query = parse_qs(play_url.query)
                         self.assertEqual(query['device_id'], ['7701998877665501'])
                         self.assertEqual(query['iid'], ['7701998877669901'])
-                        self.assertEqual(query['version_code'], ['74332'])
-                        self.assertEqual(query['version_name'], ['7.4.3.32'])
-                        self.assertEqual(query['channel'], ['vivo_8662_64'])
-                        self.assertEqual(query['device_type'], ['PGT-AN10'])
-                        self.assertEqual(query['video_id'], [vid])
-                        self.assertEqual(query['video_id_type'], ['0'])
-                        self.assertEqual(query['device_level'], ['1'])
-                        self.assertEqual(query['need_all_video_definition'], ['1'])
-                        self.assertEqual(query['need_mp4_align'], ['0'])
-                        self.assertEqual(query['use_os_player'], ['0'])
-                        self.assertEqual(query['video_platform'], ['1024'])
-                        self.assertEqual(query['source'], ['0'])
-                        self.assertIn('from_video_id=', play_url.query)
+                        self.assertEqual(query['version_code'], ['74532'])
+                        self.assertEqual(query['version_name'], ['7.4.5.32'])
+                        self.assertEqual(query['channel'], ['update_64'])
+                        self.assertEqual(query['device_type'], ['25053RT47C'])
                         self.assertTrue(query.get('cdid'))
                         self.assertTrue(query.get('_rticket'))
                         self.assertNotIn('openudid', query)
+                        body_json = json.loads(gzip.decompress(play_call['body']).decode('utf-8'))
+                        self.assertEqual(body_json['dr_scene'], 'preload')
+                        self.assertEqual(body_json['biz_param']['device_level'], 2)
+                        self.assertTrue(body_json['biz_param']['need_all_video_definition'])
+                        self.assertEqual(body_json['biz_param']['video_platform'], 1024)
+                        self.assertEqual(body_json['mixed_video_id_map'], {'1004': [vid]})
                         headers = play_call['headers']
                         self.assertTrue(headers.get('x-khronos'))
                         self.assertTrue(headers.get('x-helios'))
                         self.assertTrue(headers.get('x-medusa'))
-                        self.assertTrue(headers.get('x-ss-req-ticket'))
-                        self.assertEqual(headers.get('user-agent'), module._VIDEO_UA_TMPL % '73932')
+                        self.assertTrue(headers.get('x-ss-stub'))
+                        self.assertEqual(headers.get('user-agent'), module._V5_PRELOAD_UA)
                         self.assertEqual(headers.get('accept'), 'application/json')
-                        self.assertNotIn('x-ss-stub', headers)
+                        self.assertEqual(headers.get('content-type'), 'application/json; charset=utf-8')
+                        self.assertEqual(headers.get('content-encoding'), 'gzip')
+                        self.assertNotIn('x-ss-req-ticket', headers)
                         self.assertNotIn('x-argus', headers)
                         self.assertNotIn('x-ladon', headers)
                         self.assertNotIn('x-gorgon', headers)
@@ -361,7 +360,7 @@ class HgtvAdapterTests(unittest.TestCase):
                         self.assertNotIn('x-tt-store-region', headers)
                         self.assertNotIn('cookie', headers)
 
-                    # r8 空响应 → 回退链：video_tab V5 GET（B 空）→ video_tab V5 GET（A 空）→ player/v1 POST（空）→ v3 video_tab GET（空）→ 重新注册 → multi POST（单集场景）
+                    # r9 空响应 → 回退链：preload POST（空）→ video_tab V5 GET（B 空）→ video_tab V5 GET（A 空）→ player/v1 POST（空）→ video_model/v1 A POST（空）→ video_model/v1 C POST（空）→ v3 video_tab GET（空）→ 重新注册 → multi POST（单集场景）
                     calls.clear()
                     module._DEVICE_SESSION = None
                     module._SIGN_CACHE.pop(episodes[0], None)
@@ -393,9 +392,9 @@ class HgtvAdapterTests(unittest.TestCase):
                                 'device_id': int(did),
                                 'install_id': int(iid),
                             }).encode('utf-8')
-                        if parsed.hostname == 'api5-normal-sinfonlinea.fqnovel.com':
-                            return b''
-                        return model_payload()
+                        if parsed.path == '/novel/player/multi_video_model/v1/':
+                            return model_payload()
+                        return b''
 
                     with ExitStack() as stack:
                         stack.enter_context(mock.patch.object(module, '_get_bytes', side_effect=fake_get_empty))
@@ -403,29 +402,50 @@ class HgtvAdapterTests(unittest.TestCase):
                         model = module._signed_model(episodes[0])
                     self.assertIsNotNone(model)
                     self.assertEqual(module._pick_best(model, None)[1], '1080p')
-                    # 调用顺序：注册 → tab V5 GET（B 空）→ tab V5 GET（A 空）→ player/v1 POST（空）→ video_tab 551 GET（空）→ 重新注册 → multi POST（回退，取回模型）
-                    self.assertEqual([c['method'] for c in calls], ['POST', 'GET', 'GET', 'POST', 'GET', 'POST', 'POST'])
-                    tab_b_call = calls[1]
+                    # 调用顺序：注册 → preload POST（空）→ tab V5 GET（B 空）→ tab V5 GET（A 空）→ player/v1 POST（空）→ video_model/v1 A POST（空）→ video_model/v1 C POST（空）→ video_tab 551 GET（空）→ 重新注册 → multi POST（回退，取回模型）
+                    self.assertEqual([c['method'] for c in calls], ['POST', 'POST', 'GET', 'GET', 'POST', 'POST', 'POST', 'GET', 'POST', 'POST'])
+                    preload_call = calls[1]
+                    preload_url = urlsplit(preload_call['url'])
+                    self.assertEqual(preload_call['method'], 'POST')
+                    self.assertEqual(preload_url.hostname, 'reading.snssdk.com')
+                    self.assertEqual(preload_url.path, '/novel/player/multi_video_model/preload/v1')
+                    self.assertTrue(preload_call['headers'].get('x-medusa'))
+                    self.assertNotIn('x-argus', preload_call['headers'])
+                    tab_b_call = calls[2]
                     tab_b_url = urlsplit(tab_b_call['url'])
                     self.assertEqual(tab_b_call['method'], 'GET')
                     self.assertEqual(tab_b_url.hostname, 'api5-normal-sinfonlineb.fqnovel.com')
                     self.assertEqual(tab_b_url.path, '/reading/bookapi/video_tab/multi_video_model/v1/')
                     self.assertTrue(tab_b_call['headers'].get('x-medusa'))
                     self.assertNotIn('x-argus', tab_b_call['headers'])
-                    tab_a_call = calls[2]
+                    tab_a_call = calls[3]
                     tab_a_url = urlsplit(tab_a_call['url'])
                     self.assertEqual(tab_a_call['method'], 'GET')
                     self.assertEqual(tab_a_url.hostname, 'api5-normal-sinfonlinea.fqnovel.com')
                     self.assertEqual(tab_a_url.path, '/reading/bookapi/video_tab/multi_video_model/v1/')
                     self.assertTrue(tab_a_call['headers'].get('x-medusa'))
                     self.assertNotIn('x-argus', tab_a_call['headers'])
-                    v5_call = calls[3]
+                    v5_call = calls[4]
                     v5_url = urlsplit(v5_call['url'])
                     self.assertEqual(v5_url.hostname, 'api5-normal-sinfonlinea.fqnovel.com')
                     self.assertEqual(v5_url.path, '/novel/player/multi_video_model/player/v1')
                     self.assertTrue(v5_call['headers'].get('x-medusa'))
                     self.assertNotIn('x-argus', v5_call['headers'])
-                    post_call = calls[6]
+                    model_a_call = calls[5]
+                    model_a_url = urlsplit(model_a_call['url'])
+                    self.assertEqual(model_a_call['method'], 'POST')
+                    self.assertEqual(model_a_url.hostname, 'api5-normal-sinfonlinea.fqnovel.com')
+                    self.assertEqual(model_a_url.path, '/novel/player/video_model/v1/')
+                    self.assertTrue(model_a_call['headers'].get('x-medusa'))
+                    self.assertNotIn('x-argus', model_a_call['headers'])
+                    model_c_call = calls[6]
+                    model_c_url = urlsplit(model_c_call['url'])
+                    self.assertEqual(model_c_call['method'], 'POST')
+                    self.assertEqual(model_c_url.hostname, 'api5-normal-sinfonlinec.fqnovel.com')
+                    self.assertEqual(model_c_url.path, '/novel/player/video_model/v1/')
+                    self.assertTrue(model_c_call['headers'].get('x-medusa'))
+                    self.assertNotIn('x-argus', model_c_call['headers'])
+                    post_call = calls[9]
                     post_url = urlsplit(post_call['url'])
                     self.assertEqual(post_url.hostname, 'api5-normal-sinfonlineb.fqnovel.com')
                     self.assertEqual(post_url.path, '/novel/player/multi_video_model/v1/')

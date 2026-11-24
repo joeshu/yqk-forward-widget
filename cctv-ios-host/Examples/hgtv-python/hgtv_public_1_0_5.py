@@ -22,7 +22,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit, parse_qs, urlencode
 from urllib.request import Request, build_opener, HTTPCookieProcessor, HTTPRedirectHandler
 
-VERSION = '1.0.5-cctvhost-r8'
+VERSION = '1.0.5-cctvhost-r9'
 ORIGIN = 'https://hongguoduanju.com'
 COMPAT_PATH = '/api/video/protected/fallback-play-info'
 UA_WEB = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -2167,7 +2167,7 @@ def _medusa_v5(url, body, ts, who):
         (7, version), (8, "v04.10.03-ml-android"), (9, 0x040a0300, "sint"),
         (10, flags, "bytes"), (12, ts, "sint"), (13, f13, "bytes"), (14, query[:6], "bytes"),
         (15, _proto([(1, 1, "sint"), (2, 1, "sint"), (3, 1, "sint"), (5, 1, "sint")]), "message"),
-        (17, ts, "sint"), (20, "none"), (21, 377, "sint"), (23, env, "message"),
+        (17, ts, "sint"), (20, "none"), (21, 312, "sint"), (23, env, "message"),
         (24, '{"cmr":16777216,"cmr2":16777216,"un_h":11,"vpn":0,"kd":0,"dyn":"","do":1,"tk":true}'),
     ])
     nonce = _rand_s32()
@@ -2214,13 +2214,16 @@ def _sign_playback_v5(base, values, body, now_ms):
 
 
 def _player_v1_request(vid, device=None):
-    # v5 播放主路：POST api5-normal-sinfonlinea.../player/v1（host 带尾 a）。
+    # v5 播放回退：POST api5-normal-sinfonlinea.../player/v1（host 带尾 a）。
     dev = device if _valid_device_identity(device) else _ensure_device(False)
     values = {
-        "aid": "8662", "app_name": "novelread", "version_code": "74332",
-        "version_name": "7.4.3.32", "channel": "vivo_8662_64",
-        "device_platform": "android", "device_type": "PGT-AN10",
-        "os_version": "12", "update_version_code": "74332",
+        "aid": "8662", "app_name": "novelread", "version_code": "74532",
+        "version_name": "7.4.5.32", "channel": "update_64",
+        "device_platform": "android", "device_type": "25053RT47C",
+        "device_brand": "Redmi", "os_version": "16", "os_api": "36",
+        "ac": "wifi", "language": "zh", "host_abi": "arm64-v8a",
+        "manifest_version_code": "74532", "update_version_code": "74532",
+        "os": "android", "ssmix": "a",
         "iid": str(dev["iid"]), "cdid": str(dev["cdid"]), "device_id": str(dev["device_id"]),
     }
     payload = {
@@ -2260,24 +2263,27 @@ def _player_v1_model(vid, device=None):
     return _parse_video_model_response(j, vid)
 
 
-# r8（2026-11-23）：player/v1 已死（A/B host 全回空体）；主路改走 video_tab
-# 无正文 V5 GET（上游 hongguoTV 7.7 打法，videoTabRequest）。
-# V5 签名常量（v04.10.03 / license 646637794）未变——死的是端点，不是签名。
-# 2026-11-23 实测：video_tab V5 GET 在 sinfonlineb 与 sinfonlinea 两 host
-# 均回 5 档模型（ep1 7706406239239932952、ep22 7706406350871333912）。
+# r9（2026-11-24）：r8 的 74332 画像 + medusa f21=377 已死（video_tab /
+# player/v1 全回空体）；主路改走 preload/v1（上游 hongguoTV 0.16.10
+# 打法），74532 画像 + medusa f21=312；video_tab 降为回退。
+# 2026-11-24 实测：preload / video_tab / 单集 video_model/v1 在
+# 74532+312 下均回 5 档模型（ep1 7706406239239932952、ep22 7706406350871333912）。
 _VIDEO_TAB_V5_URL_B = "https://api5-normal-sinfonlineb.fqnovel.com/reading/bookapi/video_tab/multi_video_model/v1/"
 _VIDEO_TAB_V5_URL_A = "https://api5-normal-sinfonlinea.fqnovel.com/reading/bookapi/video_tab/multi_video_model/v1/"
 
 
 def _video_tab_v5_request(vid, device=None, base=_VIDEO_TAB_V5_URL_B):
     # r8: video_tab 无正文 V5 GET；values 与上游 7.7 videoTabRequest 一致
-    #（74332 / 7.4.3.32 画像），x-ss-req-ticket 随头发送。
+    #（74532 / 7.4.5.32 画像），x-ss-req-ticket 随头发送。
     dev = device if _valid_device_identity(device) else _ensure_device(False)
     values = {
-        "aid": "8662", "app_name": "novelread", "version_code": "74332",
-        "version_name": "7.4.3.32", "channel": "vivo_8662_64",
-        "device_platform": "android", "device_type": "PGT-AN10",
-        "os_version": "12", "update_version_code": "74332",
+        "aid": "8662", "app_name": "novelread", "version_code": "74532",
+        "version_name": "7.4.5.32", "channel": "update_64",
+        "device_platform": "android", "device_type": "25053RT47C",
+        "device_brand": "Redmi", "os_version": "16", "os_api": "36",
+        "ac": "wifi", "language": "zh", "host_abi": "arm64-v8a",
+        "manifest_version_code": "74532", "update_version_code": "74532",
+        "os": "android", "ssmix": "a",
         "iid": str(dev["iid"]), "cdid": str(dev["cdid"]), "device_id": str(dev["device_id"]),
         "video_id": str(vid), "video_id_type": "0", "device_level": "1",
         "need_all_video_definition": "1", "need_mp4_align": "0", "use_os_player": "0",
@@ -2296,6 +2302,124 @@ def _video_tab_v5_model(vid, device=None, base=_VIDEO_TAB_V5_URL_B):
     raw = _get_bytes(url, headers, 25)
     if not raw:
         raise ValueError("v5 video_tab returned an empty response")
+    j = _json.loads(raw.decode("utf-8", "replace"))
+    return _parse_video_model_response(j, vid)
+
+
+# r9（2026-11-24）：r8 的 74332 画像 + medusa f21=377 已被服务端丢弃
+#（video_tab / player/v1 / video_model/v1 全回 HTTP 200 空体；同请求 A/B：
+# 74332+377 空、74332+312 空、74532+377 空，唯 74532+312 出 5 档）。
+# 上游 N3urda/hongguoTV 0.16.10 现行打法（MobilePlayback.ladder，
+# currentAppProtocol）：主路改走 reading.snssdk.com 的
+# /novel/player/multi_video_model/preload/v1（device_level 2，
+# dr_scene "preload"，UA okhttp/4.12.0），74532 / 7.4.5.32 画像，
+# medusa f21=312。video_tab / player/v1 / 单集 video_model/v1
+# （上游 hongguo-drama 8.0 MODEL_APIS）依次回退，再回退 v3。
+_V5_PROFILE_74532 = {
+    "aid": "8662", "app_name": "novelread", "version_code": "74532",
+    "version_name": "7.4.5.32", "channel": "update_64",
+    "device_platform": "android", "device_type": "25053RT47C",
+    "device_brand": "Redmi", "os_version": "16", "os_api": "36",
+    "ac": "wifi", "language": "zh", "host_abi": "arm64-v8a",
+    "manifest_version_code": "74532", "update_version_code": "74532",
+    "os": "android", "ssmix": "a",
+}
+_V5_PRELOAD_URL = "https://reading.snssdk.com/novel/player/multi_video_model/preload/v1"
+_V5_PRELOAD_UA = "okhttp/4.12.0"
+_VIDEO_MODEL_V5_URLS = (
+    "https://api5-normal-sinfonlinea.fqnovel.com/novel/player/video_model/v1/",
+    "https://api5-normal-sinfonlinec.fqnovel.com/novel/player/video_model/v1/",
+)
+
+
+def _v5_profile_values(dev):
+    values = dict(_V5_PROFILE_74532)
+    values.update({
+        "iid": str(dev["iid"]), "cdid": str(dev["cdid"]),
+        "device_id": str(dev["device_id"]),
+    })
+    return values
+
+
+def _preload_v5_request(vid, device=None):
+    # r9: preload/v1 POST（上游 hongguoTV 0.16.10 主路；74532 画像）。
+    dev = device if _valid_device_identity(device) else _ensure_device(False)
+    values = _v5_profile_values(dev)
+    payload = {
+        "biz_param": {
+            "detail_page_version": 0, "device_level": 2, "disable_digg_stat": False,
+            "disable_video_relate_book": False, "need_all_video_definition": True,
+            "need_mp4_align": False, "use_os_player": False, "use_server_dns": False,
+            "video_platform": 1024,
+        },
+        "mixed_video_id_map": {"1004": [str(vid)]},
+        "dr_scene": "preload",
+    }
+    body = _gzip.compress(_json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8"),
+                          compresslevel=6, mtime=0)
+    url, headers, _ticket = _sign_playback_v5(_V5_PRELOAD_URL, values, body, int(_time.time() * 1000))
+    req_headers = {
+        "User-Agent": _V5_PRELOAD_UA,
+        "Accept": "application/json",
+        "Content-Encoding": "gzip",
+        "x-ss-stub": _hashlib.md5(body).hexdigest().upper(),
+    }
+    req_headers.update(headers)
+    return url, req_headers, body
+
+
+def _preload_v5_model(vid, device=None):
+    url, headers, body = _preload_v5_request(vid, device)
+    raw = _post_bytes(url, body, headers, 25)
+    if not raw:
+        raise ValueError("v5 preload/v1 returned an empty response")
+    if raw[:2] == b"\x1f\x8b":
+        try:
+            raw = _gzip.decompress(raw)
+        except Exception:
+            pass
+    j = _json.loads(raw.decode("utf-8", "replace"))
+    return _parse_video_model_response(j, vid)
+
+
+def _video_model_v5_request(vid, device=None, base=_VIDEO_MODEL_V5_URLS[0]):
+    # r9: 单集 video_model/v1 POST（上游 hongguo-drama 8.0 MODEL_APIS；
+    # V5 签名，74532 画像；biz_param 与上游 playbackModelRequest 一致）。
+    dev = device if _valid_device_identity(device) else _ensure_device(False)
+    values = _v5_profile_values(dev)
+    payload = {
+        "biz_param": {
+            "detail_page_version": 0, "device_level": 3, "disable_digg_stat": False,
+            "from_video_id": "", "need_all_video_definition": True, "need_mp4_align": False,
+            "source": 9, "use_os_player": False, "use_server_dns": False,
+            "video_platform": 3,
+        },
+        "content_type": 1004,
+        "video_id": str(vid),
+    }
+    body = _gzip.compress(_json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8"),
+                          compresslevel=6, mtime=0)
+    url, headers, _ticket = _sign_playback_v5(base, values, body, int(_time.time() * 1000))
+    req_headers = {
+        "User-Agent": _V5_PLAYER_UA,
+        "Accept": "application/json",
+        "Content-Encoding": "gzip",
+        "x-ss-stub": _hashlib.md5(body).hexdigest().upper(),
+    }
+    req_headers.update(headers)
+    return url, req_headers, body
+
+
+def _video_model_v5_model(vid, device=None, base=_VIDEO_MODEL_V5_URLS[0]):
+    url, headers, body = _video_model_v5_request(vid, device, base)
+    raw = _post_bytes(url, body, headers, 25)
+    if not raw:
+        raise ValueError("v5 video_model/v1 returned an empty response")
+    if raw[:2] == b"\x1f\x8b":
+        try:
+            raw = _gzip.decompress(raw)
+        except Exception:
+            pass
     j = _json.loads(raw.decode("utf-8", "replace"))
     return _parse_video_model_response(j, vid)
 
@@ -2891,10 +3015,17 @@ def _parse_video_model_response(j, vid):
 
 
 def _signed_model(vid):
-    """r8: video_tab V5 GET 主路（上游 7.7 打法；player/v1 已死）；失败时回退 player/v1，再回退 v3。"""
+    """r9: preload/v1 POST 主路（上游 hongguoTV 0.16.10 打法；74532 画像 + medusa f21=312）；失败时回退 video_tab，再回退 player/v1、单集 video_model/v1，最后回退 v3。"""
     ent = _SIGN_CACHE.get(str(vid))
     if ent and _time.time() - ent[0] < _SIGN_CACHE_TTL:
         return ent[1]
+    try:
+        vm = _preload_v5_model(vid)
+        if vm:
+            _SIGN_CACHE[str(vid)] = (_time.time(), vm)
+            return vm
+    except Exception as e:
+        _trace("hgtv_v5_preload_failed", episode_id=vid, err=type(e).__name__)
     for base in (_VIDEO_TAB_V5_URL_B, _VIDEO_TAB_V5_URL_A):
         try:
             vm = _video_tab_v5_model(vid, base=base)
@@ -2910,6 +3041,14 @@ def _signed_model(vid):
             return vm
     except Exception as e:
         _trace("hgtv_v5_player_failed", episode_id=vid, err=type(e).__name__)
+    for base in _VIDEO_MODEL_V5_URLS:
+        try:
+            vm = _video_model_v5_model(vid, base=base)
+            if vm:
+                _SIGN_CACHE[str(vid)] = (_time.time(), vm)
+                return vm
+        except Exception as e:
+            _trace("hgtv_v5_model_failed", episode_id=vid, err=type(e).__name__)
     return _signed_model_v3(vid)
 
 

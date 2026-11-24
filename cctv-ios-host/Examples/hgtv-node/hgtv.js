@@ -27,7 +27,7 @@ const path = require('node:path');
 const zlib = require('node:zlib');
 
 // ---------------- 配置 ----------------
-const VERSION = '1.0.5-cctvhost-r8';
+const VERSION = '1.0.5-cctvhost-r9';
 const SITE = 'https://hongguoduanju.com';
 const DEVICE_REGISTER_API = 'https://log5-applog-lf.fqnovel.com/service/2/device_register/?tt_data=a&cronet_version=8d40f833_2026-03-03&ttnet_version=4.2.243.31-douyin&use_store_region_cookie=1';
 const VIDEO_MODEL_API = 'https://api5-normal-sinfonlineb.fqnovel.com/novel/player/multi_video_model/v1/';
@@ -690,7 +690,7 @@ function medusaV5(url, body, ts, who) {
     [7, version], [8, 'v04.10.03-ml-android'], [9, 0x040a0300, 'sint'],
     [10, flags, 'bytes'], [12, ts, 'sint'], [13, f13, 'bytes'], [14, query.subarray(0, 6), 'bytes'],
     [15, proto([[1, 1, 'sint'], [2, 1, 'sint'], [3, 1, 'sint'], [5, 1, 'sint']]), 'message'],
-    [17, ts, 'sint'], [20, 'none'], [21, 377, 'sint'], [23, env, 'message'],
+    [17, ts, 'sint'], [20, 'none'], [21, 312, 'sint'], [23, env, 'message'],
     [24, '{"cmr":16777216,"cmr2":16777216,"un_h":11,"vpn":0,"kd":0,"dyn":"","do":1,"tk":true}'],
   ]);
   const nonce = crypto.randomBytes(4).readInt32LE(0);
@@ -741,10 +741,13 @@ function signPlaybackV5(base, values, body, nowMs) {
 
 function playerV1Request(vid, device) {
   const values = {
-    aid: '8662', app_name: 'novelread', version_code: '74332',
-    version_name: '7.4.3.32', channel: 'vivo_8662_64',
-    device_platform: 'android', device_type: 'PGT-AN10',
-    os_version: '12', update_version_code: '74332',
+    aid: '8662', app_name: 'novelread', version_code: '74532',
+    version_name: '7.4.5.32', channel: 'update_64',
+    device_platform: 'android', device_type: '25053RT47C',
+    device_brand: 'Redmi', os_version: '16', os_api: '36',
+    ac: 'wifi', language: 'zh', host_abi: 'arm64-v8a',
+    manifest_version_code: '74532', update_version_code: '74532',
+    os: 'android', ssmix: 'a',
     iid: String(device.iid), cdid: String(device.cdid), device_id: String(device.device_id),
   };
   const payload = {
@@ -784,19 +787,22 @@ async function playerV1Model(vid, device) {
 }
 
 
-// r8（2026-11-23）：player/v1 已死（A/B host 全回空体）；主路改走 video_tab
-// 无正文 V5 GET（上游 hongguoTV 7.7 打法，videoTabRequest）。
-// V5 签名常量（v04.10.03 / license 646637794）未变——死的是端点，不是签名。
-// 2026-11-23 实测：video_tab V5 GET 在 sinfonlineb 与 sinfonlinea 两 host
-// 均回 5 档模型（ep1 7706406239239932952、ep22 7706406350871333912）。
+// r9（2026-11-24）：r8 的 74332 画像 + medusa f21=377 已死（video_tab /
+// player/v1 全回空体）；主路改走 preload/v1（上游 hongguoTV 0.16.10
+// 打法），74532 画像 + medusa f21=312；video_tab 降为回退。
+// 2026-11-24 实测：preload / video_tab / 单集 video_model/v1 在
+// 74532+312 下均回 5 档模型（ep1 7706406239239932952、ep22 7706406350871333912）。
 const VIDEO_TAB_V5_ALT_API = 'https://api5-normal-sinfonlinea.fqnovel.com/reading/bookapi/video_tab/multi_video_model/v1/';
 
 function videoTabV5Request(vid, device, base = VIDEO_TAB_API) {
   const values = {
-    aid: '8662', app_name: 'novelread', version_code: '74332',
-    version_name: '7.4.3.32', channel: 'vivo_8662_64',
-    device_platform: 'android', device_type: 'PGT-AN10',
-    os_version: '12', update_version_code: '74332',
+    aid: '8662', app_name: 'novelread', version_code: '74532',
+    version_name: '7.4.5.32', channel: 'update_64',
+    device_platform: 'android', device_type: '25053RT47C',
+    device_brand: 'Redmi', os_version: '16', os_api: '36',
+    ac: 'wifi', language: 'zh', host_abi: 'arm64-v8a',
+    manifest_version_code: '74532', update_version_code: '74532',
+    os: 'android', ssmix: 'a',
     iid: String(device.iid), cdid: String(device.cdid), device_id: String(device.device_id),
     video_id: String(vid), video_id_type: '0', device_level: '1',
     need_all_video_definition: '1', need_mp4_align: '0', use_os_player: '0',
@@ -819,6 +825,118 @@ async function videoTabV5Model(vid, device, base = VIDEO_TAB_API) {
     throw Error('v5 video_tab returned an empty response');
   }
   const j = JSON.parse(r.body.toString('utf8'));
+  return parseVideoModelResponse(j, vid);
+}
+
+
+// r9（2026-11-24）：r8 的 74332 画像 + medusa f21=377 已被服务端丢弃
+//（video_tab / player/v1 / video_model/v1 全回 HTTP 200 空体；同请求 A/B：
+// 74332+377 空、74332+312 空、74532+377 空，唯 74532+312 出 5 档）。
+// 上游 N3urda/hongguoTV 0.16.10 现行打法（MobilePlayback.ladder，
+// currentAppProtocol）：主路改走 reading.snssdk.com 的
+// /novel/player/multi_video_model/preload/v1（device_level 2，
+// dr_scene "preload"，UA okhttp/4.12.0），74532 / 7.4.5.32 画像，
+// medusa f21=312。video_tab / player/v1 / 单集 video_model/v1
+// （上游 hongguo-drama 8.0 MODEL_APIS）依次回退，再回退 v3。
+const V5_PROFILE_74532 = {
+  aid: '8662', app_name: 'novelread', version_code: '74532',
+  version_name: '7.4.5.32', channel: 'update_64',
+  device_platform: 'android', device_type: '25053RT47C',
+  device_brand: 'Redmi', os_version: '16', os_api: '36',
+  ac: 'wifi', language: 'zh', host_abi: 'arm64-v8a',
+  manifest_version_code: '74532', update_version_code: '74532',
+  os: 'android', ssmix: 'a',
+};
+const V5_PRELOAD_URL = 'https://reading.snssdk.com/novel/player/multi_video_model/preload/v1';
+const V5_PRELOAD_UA = 'okhttp/4.12.0';
+const VIDEO_MODEL_V5_URLS = [
+  'https://api5-normal-sinfonlinea.fqnovel.com/novel/player/video_model/v1/',
+  'https://api5-normal-sinfonlinec.fqnovel.com/novel/player/video_model/v1/',
+];
+
+function v5ProfileValues(device) {
+  return {
+    ...V5_PROFILE_74532,
+    iid: String(device.iid), cdid: String(device.cdid), device_id: String(device.device_id),
+  };
+}
+
+function preloadV5Request(vid, device) {
+  // r9: preload/v1 POST（上游 hongguoTV 0.16.10 主路；74532 画像）。
+  const values = v5ProfileValues(device);
+  const payload = {
+    biz_param: {
+      detail_page_version: 0, device_level: 2, disable_digg_stat: false,
+      disable_video_relate_book: false, need_all_video_definition: true,
+      need_mp4_align: false, use_os_player: false, use_server_dns: false,
+      video_platform: 1024,
+    },
+    mixed_video_id_map: { '1004': [String(vid)] },
+    dr_scene: 'preload',
+  };
+  const body = zlib.gzipSync(Buffer.from(JSON.stringify(payload), 'utf8'), { level: 6, mtime: 0 });
+  const signed = signPlaybackV5(V5_PRELOAD_URL, values, body, Date.now());
+  const headers = {
+    'User-Agent': V5_PRELOAD_UA,
+    Accept: 'application/json',
+    'Content-Encoding': 'gzip',
+    'x-ss-stub': md5(body).toString('hex').toUpperCase(),
+    ...signed.headers,
+  };
+  return { url: signed.url, headers, body, method: 'POST' };
+}
+
+async function preloadV5Model(vid, device) {
+  const s = preloadV5Request(vid, device);
+  const r = await httpText(s.url, { method: 'POST', headers: s.headers, body: s.body, timeout: 25000 });
+  if (r.status < 200 || r.status >= 300 || !r.body.length) {
+    throw Error('v5 preload/v1 returned an empty response');
+  }
+  let raw = Buffer.from(r.body);
+  if (raw[0] === 0x1f && raw[1] === 0x8b) {
+    try { raw = zlib.gunzipSync(raw); } catch (e) { /* keep raw */ }
+  }
+  const j = JSON.parse(raw.toString('utf8'));
+  return parseVideoModelResponse(j, vid);
+}
+
+function videoModelV5Request(vid, device, base = VIDEO_MODEL_V5_URLS[0]) {
+  // r9: 单集 video_model/v1 POST（上游 hongguo-drama 8.0 MODEL_APIS；
+  // V5 签名，74532 画像；biz_param 与上游 playbackModelRequest 一致）。
+  const values = v5ProfileValues(device);
+  const payload = {
+    biz_param: {
+      detail_page_version: 0, device_level: 3, disable_digg_stat: false,
+      from_video_id: '', need_all_video_definition: true, need_mp4_align: false,
+      source: 9, use_os_player: false, use_server_dns: false,
+      video_platform: 3,
+    },
+    content_type: 1004,
+    video_id: String(vid),
+  };
+  const body = zlib.gzipSync(Buffer.from(JSON.stringify(payload), 'utf8'), { level: 6, mtime: 0 });
+  const signed = signPlaybackV5(base, values, body, Date.now());
+  const headers = {
+    'User-Agent': V5_PLAYER_UA,
+    Accept: 'application/json',
+    'Content-Encoding': 'gzip',
+    'x-ss-stub': md5(body).toString('hex').toUpperCase(),
+    ...signed.headers,
+  };
+  return { url: signed.url, headers, body, method: 'POST' };
+}
+
+async function videoModelV5Model(vid, device, base = VIDEO_MODEL_V5_URLS[0]) {
+  const s = videoModelV5Request(vid, device, base);
+  const r = await httpText(s.url, { method: 'POST', headers: s.headers, body: s.body, timeout: 25000 });
+  if (r.status < 200 || r.status >= 300 || !r.body.length) {
+    throw Error('v5 video_model/v1 returned an empty response');
+  }
+  let raw = Buffer.from(r.body);
+  if (raw[0] === 0x1f && raw[1] === 0x8b) {
+    try { raw = zlib.gunzipSync(raw); } catch (e) { /* keep raw */ }
+  }
+  const j = JSON.parse(raw.toString('utf8'));
   return parseVideoModelResponse(j, vid);
 }
 
@@ -1425,11 +1543,18 @@ function parseVideoModelResponse(j, vid) {
 }
 
 async function fetchModel(vid) {
-  // r8：video_tab V5 GET 主路（上游 7.7 打法；player/v1 已死）；失败时回退 player/v1，再回退 v3。
+  // r9：preload/v1 POST 主路（上游 hongguoTV 0.16.10 打法；74532 画像 + medusa f21=312）；失败时回退 video_tab，再回退 player/v1、单集 video_model/v1，最后回退 v3。
   const hit = modelCache.get(String(vid));
   if (hit && Date.now() - hit.t < MODEL_TTL) return hit.vm;
   try {
     const dev = await ensureDeviceSession(false);
+    try {
+      const vm = await preloadV5Model(vid, dev);
+      if (vm && vm.video_list && Object.keys(vm.video_list).length) {
+        modelCache.set(String(vid), { t: Date.now(), vm });
+        return vm;
+      }
+    } catch (e) { /* try video_tab */ }
     for (const base of [VIDEO_TAB_API, VIDEO_TAB_V5_ALT_API]) {
       try {
         const vm = await videoTabV5Model(vid, dev, base);
@@ -1445,7 +1570,16 @@ async function fetchModel(vid) {
         modelCache.set(String(vid), { t: Date.now(), vm });
         return vm;
       }
-    } catch (e) { /* fall through to v3 */ }
+    } catch (e) { /* try single video_model/v1 */ }
+    for (const base of VIDEO_MODEL_V5_URLS) {
+      try {
+        const vm = await videoModelV5Model(vid, dev, base);
+        if (vm && vm.video_list && Object.keys(vm.video_list).length) {
+          modelCache.set(String(vid), { t: Date.now(), vm });
+          return vm;
+        }
+      } catch (e) { /* try next host, then v3 */ }
+    }
   } catch (e) { /* device ensure failed; fall through to v3 */ }
   return fetchModelV3(vid);
 }
