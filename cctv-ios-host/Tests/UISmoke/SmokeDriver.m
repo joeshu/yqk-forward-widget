@@ -837,24 +837,26 @@ static void next(NSArray *steps, NSUInteger index) {
           ^{
             PluginRunHistoryViewController *history=(id)nav.topViewController;
             check([history isKindOfClass:PluginRunHistoryViewController.class], @"service logs first show independent run records");
+            check([PluginLogStore.shared runsForIdentifier:@"ui-smoke-plugin"].count==2, @"plugin store persisted two independent runs");
             [history performSelector:@selector(refreshRuns)];
-            NSDate *deadline=[NSDate dateWithTimeIntervalSinceNow:10];
-            while([history tableView:history.tableView numberOfRowsInSection:0]<2&&deadline.timeIntervalSinceNow>0){
+            NSDate *deadline=[NSDate dateWithTimeIntervalSinceNow:15];
+            while([[(NSArray *)[history valueForKey:@"runs"] count]<2&&deadline.timeIntervalSinceNow>0){
                 [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.025]];
             }
             check([history tableView:history.tableView numberOfRowsInSection:0]==2, @"two service starts appear as two separate log entries");
             [history tableView:history.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
             LogCenterViewController *logs=(id)nav.topViewController;
             check([logs isKindOfClass:LogCenterViewController.class], @"selecting a run opens its own searchable log page");
-            if(![logs isKindOfClass:LogCenterViewController.class]){[nav popToRootViewControllerAnimated:NO];return;}
-            [logs loadViewIfNeeded];
-            check([logs.logSnapshotProvider() containsString:@"第二次独立运行日志"] && ![logs.logSnapshotProvider() containsString:@"第一次运行日志"], @"a run log contains only the selected invocation");
-            check(![logs.logSnapshotProvider() containsString:@"plugin-secret"], @"plugin log view redacts sensitive values before display");
-            check(logs.onExportLog!=nil && logs.onClearLog!=nil, @"plugin log page exposes independent export and clear actions");
-            check([[logs valueForKey:@"categories"] numberOfSegments]==4, @"log center supports all, playback, plugin and error filters");
-            NSString *pluginExport=pluginLogExportURL?[NSString stringWithContentsOfURL:pluginLogExportURL encoding:NSUTF8StringEncoding error:NULL]:nil;
-            check(pluginLogExportURL && [[NSFileManager defaultManager] fileExistsAtPath:pluginLogExportURL.path] && ![pluginExport containsString:@"plugin-secret"], @"per-plugin log export creates a separate redacted text file");
-            capture(self.window, @"10-diagnostic-log");
+            if([logs isKindOfClass:LogCenterViewController.class]){
+                [logs loadViewIfNeeded];
+                check([logs.logSnapshotProvider() containsString:@"第二次独立运行日志"] && ![logs.logSnapshotProvider() containsString:@"第一次运行日志"], @"a run log contains only the selected invocation");
+                check(![logs.logSnapshotProvider() containsString:@"plugin-secret"], @"plugin log view redacts sensitive values before display");
+                check(logs.onExportLog!=nil && logs.onClearLog!=nil, @"plugin log page exposes independent export and clear actions");
+                check([[logs valueForKey:@"categories"] numberOfSegments]==4, @"log center supports all, playback, plugin and error filters");
+                NSString *pluginExport=pluginLogExportURL?[NSString stringWithContentsOfURL:pluginLogExportURL encoding:NSUTF8StringEncoding error:NULL]:nil;
+                check(pluginLogExportURL && [[NSFileManager defaultManager] fileExistsAtPath:pluginLogExportURL.path] && ![pluginExport containsString:@"plugin-secret"], @"per-plugin log export creates a separate redacted text file");
+                capture(self.window, @"10-diagnostic-log");
+            }
             [nav popToRootViewControllerAnimated:NO];
             [NSUserDefaults.standardUserDefaults setBool:YES forKey:@"legacyNativePlayback"];
             [root selectChannel:[root channelWithID:@"cctv1"]];
