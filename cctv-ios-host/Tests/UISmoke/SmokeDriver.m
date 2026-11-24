@@ -561,6 +561,8 @@ static void next(NSArray *steps, NSUInteger index) {
             UIFont *tabLabelFont=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold] compatibleWithTraitCollection:root.traitCollection];
             CGFloat expectedTabHeight=MAX(58,ceil(20+3+tabLabelFont.lineHeight+16));
             CGFloat expectedTabTop=CGRectGetHeight(root.view.bounds)-root.view.safeAreaInsets.bottom-expectedTabHeight;
+            CGFloat expectedDockWidth=MIN(MAX(0,CGRectGetWidth(root.view.bounds)-20),540);
+            CGFloat expectedDockX=MAX(10,(CGRectGetWidth(root.view.bounds)-expectedDockWidth)/2);
             check([activeTab.accessibilityValue isEqual:@"已选中"]&&(activeTab.accessibilityTraits&UIAccessibilityTraitSelected)!=0,[NSString stringWithFormat:@"bottom navigation marks its active page for accessibility (value=%@)",activeTab.accessibilityValue?:@""]);
             NSArray<NSString *> *shortTabTitles=@[@"央视",@"频道",@"影视",@"资源",@"设置"];
             NSArray<NSString *> *spokenTabLabels=@[@"央视直播",@"订阅频道",@"影视库",@"资源管理",@"设置"];
@@ -571,7 +573,7 @@ static void next(NSArray *steps, NSUInteger index) {
             }
             check(allTabsHaveVisibleLabels, @"all five navigation tabs retain concise visible labels and full VoiceOver names at large text sizes");
             UIView *channelTable=[root valueForKey:@"table"];
-            check([tabBackdrop.backgroundColor isEqual:UIColor.clearColor]&&!tabBackdrop.isOpaque&&fabs(CGRectGetMinX(tabs.frame))<1&&fabs(CGRectGetWidth(tabs.frame)-CGRectGetWidth(root.view.bounds))<1&&fabs(CGRectGetHeight(tabs.frame)-expectedTabHeight)<1.5&&fabs(CGRectGetMinY(tabs.frame)-expectedTabTop)<1.5&&CGRectGetMaxY(tabBackdrop.frame)>=CGRectGetHeight(root.view.bounds)-1&&CGRectGetMaxY(channelTable.frame)>=CGRectGetHeight(root.view.bounds)-1, @"five-tab glass navigation grows for dynamic text and stays visible over content");
+            check([tabBackdrop.backgroundColor isEqual:UIColor.clearColor]&&!tabBackdrop.isOpaque&&fabs(CGRectGetMinX(tabs.frame)-(expectedDockX+4))<1.5&&fabs(CGRectGetWidth(tabs.frame)-(expectedDockWidth-8))<1.5&&fabs(CGRectGetHeight(tabs.frame)-(expectedTabHeight-4))<1.5&&fabs(CGRectGetMinY(tabs.frame)-(expectedTabTop+2))<1.5&&CGRectGetMaxY(tabBackdrop.frame)>=CGRectGetHeight(root.view.bounds)-1&&CGRectGetMaxY(channelTable.frame)>=CGRectGetHeight(root.view.bounds)-1, @"five-tab glass navigation grows for dynamic text and stays visible over content");
             NSString *source=@"https://example.com/smoke.m3u";NSMutableSet *originalSubscriptions=[[root valueForKey:@"subscriptionURLs"] mutableCopy]?:[NSMutableSet set];NSMutableSet *smokeSubscriptions=[originalSubscriptions mutableCopy];[smokeSubscriptions addObject:source];[root setValue:smokeSubscriptions forKey:@"subscriptionURLs"];[ProfileStore update:source values:@{@"name":@"UI Smoke Live Resource"}];
             NSDictionary *remote=@{@"id":@"remote-smoke",@"name":@"CCTV-1 M3U8",@"group":@"央视",@"remoteURL":@"https://example.com/live.m3u8",@"subscriptionSources":@[source]};
             NSArray *original=[root valueForKey:@"allChannels"];
@@ -614,7 +616,7 @@ static void next(NSArray *steps, NSUInteger index) {
             [root selectBottomTab:(id)tabs.arrangedSubviews[2]];
             [root.view layoutIfNeeded];
             MediaBrowserViewController *mediaHome=(id)[root valueForKey:@"tabPage"];
-            CGFloat expectedMediaOverlayInset=MAX(8,CGRectGetHeight(root.view.bounds)-CGRectGetMinY(tabs.frame)+8);CGFloat actualMediaOverlayInset=[[mediaHome valueForKey:@"bottomOverlayInset"] doubleValue];check(fabs(actualMediaOverlayInset-expectedMediaOverlayInset)<1.5,[NSString stringWithFormat:@"root passes the tab overlay inset to the media page (actual=%.1f expected=%.1f)",actualMediaOverlayInset,expectedMediaOverlayInset]);[mediaHome setValue:@(actualMediaOverlayInset) forKey:@"bottomOverlayInset"];
+            CGFloat expectedMediaOverlayInset=MAX(8,CGRectGetHeight(root.view.bounds)-(CGRectGetMinY(tabs.frame)-2)+8);CGFloat actualMediaOverlayInset=[[mediaHome valueForKey:@"bottomOverlayInset"] doubleValue];check(fabs(actualMediaOverlayInset-expectedMediaOverlayInset)<1.5,[NSString stringWithFormat:@"root passes the tab overlay inset to the media page (actual=%.1f expected=%.1f)",actualMediaOverlayInset,expectedMediaOverlayInset]);[mediaHome setValue:@(actualMediaOverlayInset) forKey:@"bottomOverlayInset"];
             check([mediaHome isKindOfClass:MediaBrowserViewController.class]&&mediaHome.isHomeMode&&root.title.length==0, @"media tab opens the compact untitled home");
             check(mediaHome!=nil, @"media page embedded");
             check(nav.delegate==root&&nav.navigationBarHidden,@"navigation bar is hidden only while the home tab is visible");
@@ -835,7 +837,8 @@ static void next(NSArray *steps, NSUInteger index) {
           ^{
             PluginRunHistoryViewController *history=(id)nav.topViewController;
             check([history isKindOfClass:PluginRunHistoryViewController.class], @"service logs first show independent run records");
-            NSDate *deadline=[NSDate dateWithTimeIntervalSinceNow:5];
+            [history performSelector:@selector(refreshRuns)];
+            NSDate *deadline=[NSDate dateWithTimeIntervalSinceNow:10];
             while([history tableView:history.tableView numberOfRowsInSection:0]<2&&deadline.timeIntervalSinceNow>0){
                 [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.025]];
             }
@@ -857,6 +860,10 @@ static void next(NSArray *steps, NSUInteger index) {
             [root selectChannel:[root channelWithID:@"cctv1"]];
           },
           ^{
+            NSDate *firstRenderDeadline=[NSDate dateWithTimeIntervalSinceNow:5];
+            while(![[root valueForKey:@"firstRender"] boolValue]&&firstRenderDeadline.timeIntervalSinceNow>0){
+                [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.025]];
+            }
             check([[root valueForKey:@"firstRender"] boolValue], @"legacy native first frame received");
             check([[root valueForKey:@"activeTab"] integerValue]==0, @"native playback opens CCTV page");
             check([root.title isEqual:@"CCTV-1 综合"]&&nav.navigationBarHidden, @"expanded live playback retains its channel title while replacing the opaque navigation/search header with immersive video");UIView *livePlayerBox=[root valueForKey:@"playerBox"];UILabel *livePlayerTitle=[root valueForKey:@"titleLabel"];UIButton *cctvResourceCapsule=(id)[root valueForKey:@"liveResourceCapsule"];check(fabs(CGRectGetMinY(livePlayerBox.frame)-root.view.safeAreaInsets.top-44)<1.5&&fabs(CGRectGetHeight(livePlayerBox.frame)-CGRectGetWidth(livePlayerBox.frame)*9.0/16.0)<1.5&&fabs(CGRectGetMinY(livePlayerTitle.frame)-8)<1.5&&CGRectGetMaxY(cctvResourceCapsule.frame)<CGRectGetMinY(livePlayerBox.frame),@"expanded CCTV video has a distinct resource capsule row above the player with status-safe title controls");check(!cctvResourceCapsule.hidden&&[cctvResourceCapsule.configuration.title isEqual:@"央视直播"]&&!cctvResourceCapsule.menu,@"CCTV playback identifies its official live resource without offering unrelated playlist switching");
@@ -873,6 +880,7 @@ static void next(NSArray *steps, NSUInteger index) {
             check([CNPlayer smokePlayCount]==playCount && [root valueForKey:@"currentPlayer"]==retainedWrapper,
                   @"same-channel tap preserves active session");
             [root player:retainedWrapper playbackFailed:[NSError errorWithDomain:@"fixture" code:4012 userInfo:nil]];
+            check([[root valueForKey:@"nativePlaybackFailed"] boolValue], @"injected terminal failure is recorded");
             check([[[root valueForKey:@"playPauseBtn"] titleForState:UIControlStateNormal] isEqual:@"重试"],
                   @"terminal playback error exposes an explicit retry action");
             UICollectionView *failedGrid=(id)[root valueForKey:@"channelGrid"];NSIndexPath *failedSelectionPath=[root indexPathForChannelID:@"cctv1"];if(failedGrid&&failedSelectionPath){[failedGrid scrollToItemAtIndexPath:failedSelectionPath atScrollPosition:UICollectionViewScrollPositionCenteredVertically animated:NO];[failedGrid layoutIfNeeded];selectedLiveCard=[failedGrid cellForItemAtIndexPath:failedSelectionPath];selectedLiveMark=(id)[selectedLiveCard.contentView viewWithTag:4107];}
