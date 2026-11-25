@@ -3,6 +3,7 @@
 #import "RootViewController_Internal.h"
 #import "MediaEpisodeLayout.h"
 #import "MediaAdaptationMonitor.h"
+#import "HostPerfMetrics.h"
 
 void *const kAVItemStatusContext = (void *)&kAVItemStatusContext;
 void *const kAVLayerFrameContext = (void *)&kAVLayerFrameContext;
@@ -278,14 +279,13 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
     [self registerCallbackProtocol];
     [self setupSDK];
     [self log:@"日志持久化已启用（按需批量保存）"];
-    [PyHost recoverInterruptedPythonSessions];
+    // 插件会话恢复、EPG 磁盘缓存、内置资源注册改到首屏后执行：见 RootViewController+EPG.m schedulePostFirstScreenStartupTasks。
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onBackground) name:UIApplicationDidEnterBackgroundNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onForeground) name:UIApplicationWillEnterForegroundNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(checkVisibleMediaAfterActivation) name:UIApplicationDidBecomeActiveNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(reloadThemeAppearance) name:@"HostThemeDidChangeNotification" object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(handleAudioRouteChange:) name:AVAudioSessionRouteChangeNotification object:nil];
     [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"cctv.nativeFallbackSiteKeys.v1"];
-    [self installBundledMediaResourcesIfNeeded];
 }
 
 - (void)installBundledMediaResourcesIfNeeded {
@@ -400,6 +400,7 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
     if(self.navigationController.delegate!=self)self.navigationController.delegate=self;
+    if([HostPerfMetrics.shared markFirstScreenInteractive:NSStringFromClass(self.class)])[self schedulePostFirstScreenStartupTasks];
     if(!self.initialTabRestorePending)return;
     self.initialTabRestorePending=NO;
     NSInteger savedTab=self.activeTab;

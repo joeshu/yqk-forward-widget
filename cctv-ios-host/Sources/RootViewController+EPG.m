@@ -1,4 +1,5 @@
 #import "RootViewController_Internal.h"
+#import "HostPerfMetrics.h"
 #import "HostSyncRequest.h"
 
 static const NSUInteger CCTVOfficialEPGMaximumBytes = 2 * 1024 * 1024;
@@ -22,7 +23,7 @@ static const NSUInteger CCTVOfficialEPGMaximumBytes = 2 * 1024 * 1024;
         if (![obj isKindOfClass:NSDictionary.class]) return;
         double ts = [obj[@"ts"] doubleValue];
         if (ts > 0 && ts <= now && now - ts < 6 * 3600 &&
-            [obj[@"now"] isKindOfClass:NSString.class]) self.epgCache[key] = obj;
+            [obj[@"now"] isKindOfClass:NSString.class] && !self.epgCache[key]) self.epgCache[key] = obj;
     }];
     [self trimEPGCache];
     [self log:@"EPG 缓存载入 %lu 条", (unsigned long)self.epgCache.count];
@@ -314,4 +315,32 @@ static const NSUInteger CCTVOfficialEPGMaximumBytes = 2 * 1024 * 1024;
         [self.epgCache removeObjectForKey:oldest];
     }
 }
+
+#pragma mark - 首屏后启动任务
+
+/// 首屏（根页面首次 viewDidAppear）之后延后执行的启动任务；只执行一次。
+/// 这些任务原先在 viewDidLoad / loadChannels 中同步触发，功能保持不变，只改变时机。
+- (void)schedulePostFirstScreenStartupTasks {
+    __weak typeof(self) weakSelf=self;
+    NSTimeInterval scheduledAt=CACurrentMediaTime();
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(0.8*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
+        RootViewController *owner=weakSelf;
+        if(!owner)return;
+        NSTimeInterval startedAt=CACurrentMediaTime();
+        // 1) 插件运行时：回收上次未清理的 Python 会话面包屑（仅处理旧进程记录，与新会话无竞争）。
+        [PyHost recoverInterruptedPythonSessions];
+        // 2) EPG：载入磁盘上的“正在播出/下一档”缓存；不会覆盖首屏后已拉取到的新数据。
+        NSUInteger epgBefore=owner.epgCache.count;
+        [owner loadEPGCache];
+        if(owner.epgCache.count!=epgBefore&&owner.activeTab<2)[owner reloadActiveCatalogView];
+        // 3) 内置影视/插件资源注册（内部再转后台队列）。
+        [owner installBundledMediaResourcesIfNeeded];
+        [HostPerfMetrics.shared recordMark:@"perf_deferred_startup_tasks" fields:@{
+            @"delay_ms":@((NSInteger)((startedAt-scheduledAt)*1000)),
+            @"main_thread_cost_ms":@((NSInteger)((CACurrentMediaTime()-startedAt)*1000)),
+            @"tasks":@[@"python_session_recovery",@"epg_cache_load",@"bundled_media_resources"]
+        }];
+    });
+}
+
 @end

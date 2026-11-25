@@ -44,6 +44,7 @@
 #import "HostLocalPort.h"
 #import "PlaybackStartupTrace.h"
 #import "NativeStartupTuner.h"
+#import "HostPerfMetrics.h"
 #import "NativeCDNPreference.h"
 #import "NativeChannelPreloader.h"
 #import "NativeTimeshiftSession.h"
@@ -913,6 +914,8 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 - (BOOL)startRemoteCatchupForChannel:(NSDictionary *)channel program:(NSDictionary *)program start:(NSTimeInterval)start end:(NSTimeInterval)end;
 - (EPGViewController *)epgPageForChannel:(NSString *)cid name:(NSString *)name;
 - (void)cacheXMLRows:(NSArray *)rows channel:(NSString *)cid;
+/// 根页面首次出现后（主队列延后 0.8s）执行一次的非首屏启动任务。
+- (void)schedulePostFirstScreenStartupTasks;
 - (void)trimEPGCache;
 @end
 

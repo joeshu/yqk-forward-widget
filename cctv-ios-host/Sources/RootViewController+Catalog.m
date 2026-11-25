@@ -1,4 +1,5 @@
 #import "RootViewController_Internal.h"
+#import "HostPerfMetrics.h"
 #import "HostGlassActionSheetViewController.h"
 #import "ChannelSQLiteIndex.h"
 
@@ -33,7 +34,9 @@ static BOOL CCTVCatchupIdentityCompatible(NSDictionary *channel, NSDictionary *c
     self.favorites = [NSMutableArray arrayWithArray:[[NSUserDefaults standardUserDefaults] arrayForKey:@"favorites"] ?: @[]];
     self.altSources = [NSMutableDictionary dictionary];
     self.epgCache = [NSMutableDictionary dictionary];
-    [self loadEPGCache];
+    // 冷启动时 EPG 磁盘缓存改为首屏后载入（RootViewController schedulePostFirstScreenStartupTasks）；
+    // 首屏之后的重新载入（如配置恢复）仍同步读取，行为不变。
+    if (HostPerfMetrics.shared.hasReachedFirstScreen) [self loadEPGCache];
     self.epgInflight = [NSMutableSet set];
     self.recents = [NSMutableArray arrayWithArray:[[NSUserDefaults standardUserDefaults] arrayForKey:@"recents"] ?: @[]];
     self.subscriptions = [NSMutableArray array];
