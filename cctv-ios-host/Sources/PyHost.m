@@ -14,6 +14,17 @@
 #import <mach/task_info.h>
 #import <QuartzCore/QuartzCore.h>
 
+static NSString *gPyHostControlToken(void) {
+    static NSString *token;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        token = [[NSUUID.UUID.UUIDString stringByReplacingOccurrencesOfString:@"-" withString:@""] lowercaseString];
+        setenv("CCTVHOST_CONTROL_TOKEN", token.UTF8String, 1);
+    });
+    return token;
+}
+NSString *PyHostControlToken(void) { return gPyHostControlToken(); }
+
 #if __has_include(<Python.h>)
 #define PY_SSIZE_T_CLEAN
 #import <Python.h>
@@ -916,6 +927,7 @@ static void *pyThread(void *rawTask) {
 #if !PYHOST_AVAILABLE
     if (error) *error = [NSError errorWithDomain:@"PyHost" code:3 userInfo:@{NSLocalizedDescriptionKey:@"此构建未包含 CPython 运行时；插件未启动。"}]; return NO;
 #else
+    (void)gPyHostControlToken();
     NSString *res = NSBundle.mainBundle.resourcePath, *home = [res stringByAppendingPathComponent:@"python"];
     NSString *stdlib = [home stringByAppendingPathComponent:@"lib/python3.13"], *dynload = [stdlib stringByAppendingPathComponent:@"lib-dynload"];
     BOOL runtimeOK = [NSFileManager.defaultManager fileExistsAtPath:path] && [NSFileManager.defaultManager fileExistsAtPath:stdlib] && [NSFileManager.defaultManager fileExistsAtPath:dynload] && [NSFileManager.defaultManager fileExistsAtPath:[home stringByAppendingPathComponent:@"ssl/cert.pem"]] && [NSFileManager.defaultManager fileExistsAtPath:[res stringByAppendingPathComponent:@"host_service_runtime.py"]];
