@@ -40,8 +40,13 @@ class UI2026PerformanceStabilityTests(unittest.TestCase):
     def test_06_sleep_timer_invalidation_in_dealloc_and_teardown(self):
         root = "\n".join((p.read_text(encoding="utf-8").split("\n- (BOOL)sessionHasContent;", 1)[0] if p.name.endswith(".h") else p.read_text(encoding="utf-8")) for p in ([SOURCES / "RootViewController_Internal.h", *sorted(SOURCES.glob("RootViewController*.m"))]))
         playback = (SOURCES / "MediaPlaybackViewController.m").read_text(encoding="utf-8")
+        coordinator = (SOURCES / "MediaPlaybackSettingsCoordinator.m").read_text(encoding="utf-8")
         self.assertIn("[self.liveSleepTimer invalidate];", root)
-        self.assertGreaterEqual(playback.count("[self.mediaSleepTimer invalidate];"), 2)
+        # B-P1: sleep timer lifecycle migrated to MediaPlaybackSettingsCoordinator.
+        # VC calls invalidateSleepTimer in both teardownAfterScreenExit and dealloc.
+        self.assertGreaterEqual(playback.count("[self.settingsCoordinator invalidateSleepTimer];"), 2)
+        # Coordinator owns the NSTimer and invalidates it internally.
+        self.assertIn("[self.mediaSleepTimer invalidate]", coordinator)
 
     def test_07_config_center_detail_summary_memoization_cache(self):
         config = (SOURCES / "ConfigCenterViewController.m").read_text(encoding="utf-8")

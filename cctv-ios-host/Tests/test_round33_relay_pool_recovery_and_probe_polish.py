@@ -74,7 +74,9 @@ class TestRound33RelayPoolRecoveryAndProbePolish(unittest.TestCase):
 
     def test_media_playback_common_modes_weak_self_and_channel_probe_main_thread(self):
         pb = self._read("Sources/MediaPlaybackViewController.m")
-        self.assertIn("[NSRunLoop.mainRunLoop addTimer:self.mediaSleepTimer forMode:NSRunLoopCommonModes];", pb)
+        # B-P1: sleep timer lives in MediaPlaybackSettingsCoordinator now.
+        pb_coord = self._read("Sources/MediaPlaybackSettingsCoordinator.m")
+        self.assertIn("[NSRunLoop.mainRunLoop addTimer:self.mediaSleepTimer forMode:NSRunLoopCommonModes];", pb_coord)
         self.assertIn("[NSRunLoop.mainRunLoop addTimer:self.avFirstFrameTimer forMode:NSRunLoopCommonModes];", pb)
         self.assertIn("if(!NSThread.isMainThread){NSNotification *note=notification;__weak typeof(self) weakSelf=self;dispatch_async(dispatch_get_main_queue(),^{[weakSelf playerItemEnded:note];});return;}", pb)
         self.assertIn("if(!NSThread.isMainThread){NSNotification *note=notification;__weak typeof(self) weakSelf=self;dispatch_async(dispatch_get_main_queue(),^{[weakSelf playerItemFailed:note];});return;}", pb)
