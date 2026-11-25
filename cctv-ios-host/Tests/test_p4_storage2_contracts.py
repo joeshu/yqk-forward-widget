@@ -37,6 +37,21 @@ class P4StorageContracts(unittest.TestCase):
         self.assertIn('HostLibraryStore.shared.mediaWatchHistory', backup)
         self.assertIn('replaceMediaFavorites:backup[@"vodFavorites"]', backup)
 
+    def test_ui_smoke_driver_reads_store_not_legacy_defaults(self):
+        """CI #617 回归契约：电影收藏冒烟用例必须读迁移后的 HostLibraryStore，
+        而非已废弃的 NSUserDefaults cctv.mediaFavorites.v1 键。"""
+        driver = (ROOT / "Tests" / "UISmoke" / "SmokeDriver.m").read_text(encoding="utf-8")
+        # 旧 defaults 读取路径必须从冒烟用例中彻底移除。
+        self.assertNotIn(
+            'dictionaryForKey:@"cctv.mediaFavorites.v1"',
+            driver,
+            "SmokeDriver must not assert against the legacy NSUserDefaults media favorites key",
+        )
+        # 收藏断言须经迁移后的存储读取，并保留可见的 accessibilityLabel 断言。
+        self.assertIn("HostLibraryStore.shared.mediaFavorites", driver)
+        self.assertIn('#import "HostLibraryStore.h"', driver)
+        self.assertIn('[favorite.accessibilityLabel isEqual:@"取消收藏影片"]', driver)
+
     def test_disk_cache_bounds_and_lru(self):
         xml = self.source("XMLTVStore.m")
         meta = self.source("MediaMetadataCache.m")

@@ -12,6 +12,7 @@
 #import "XMLTVStore.h"
 #import "ServicesViewController.h"
 #import "HostImageLoader.h"
+#import "HostLibraryStore.h"
 #import "NodePluginRuntime.h"
 #import "MediaBrowserViewController.h"
 #import "MediaFeedView.h"
