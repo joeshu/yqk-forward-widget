@@ -720,7 +720,7 @@ class FallbackPendingFlagTests(unittest.TestCase):
         # Failure handler: closeLocked + set FallbackPendingKey + write to defaults
         self.assertIn("[self closeLocked];", method)
         self.assertIn("setBool:YES forKey:HostLibraryFallbackPendingKey", method)
-        self.assertIn("setObject:snapshot forKey:HostLibraryLegacyFavoritesKey", method)
+        self.assertIn("setObject:normalized forKey:HostLibraryLegacyFavoritesKey", method)
         # The failure handler must be inside the if (prepareLocked) branch, not the else
         prepare_idx = method.index("if ([self prepareLocked])")
         else_idx = method.index("else {")
@@ -738,7 +738,7 @@ class FallbackPendingFlagTests(unittest.TestCase):
         method = impl[start:end]
         self.assertIn("[self closeLocked];", method)
         self.assertIn("setBool:YES forKey:HostLibraryFallbackPendingKey", method)
-        self.assertIn("setObject:snapshot forKey:HostLibraryLegacyRecentsKey", method)
+        self.assertIn("setObject:normalized forKey:HostLibraryLegacyRecentsKey", method)
         prepare_idx = method.index("if ([self prepareLocked])")
         else_idx = method.index("else {")
         handler_idx = method.index("[self closeLocked];")
