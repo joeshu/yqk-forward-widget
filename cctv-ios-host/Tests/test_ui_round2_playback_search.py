@@ -12,6 +12,8 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 SOURCES = ROOT / "Sources"
 PLAYBACK_SOURCE = (SOURCES / "MediaPlaybackViewController.m").read_text(encoding="utf-8")
+# b-route-episode-panel：线路按钮纯呈现迁入面板视图，a11y/类型守护随之迁移。
+ROUTE_PANEL_SOURCE = (SOURCES / "MediaPlaybackRoutePanelView.m").read_text(encoding="utf-8")
 WEBVIEW_SOURCE = (SOURCES / "MediaWebViewController.m").read_text(encoding="utf-8")
 SEARCH_SOURCE = (SOURCES / "MediaGlobalSearchViewController.m").read_text(encoding="utf-8")
 EPISODE_SOURCE = (SOURCES / "MediaEpisodeSelectionViewController.m").read_text(encoding="utf-8")
@@ -83,8 +85,11 @@ class PlaybackSearchRound2Contracts(unittest.TestCase):
         )
 
     def test_line_buttons_require_string_names(self):
-        body = method_body(PLAYBACK_SOURCE, "- (void)buildLines {")
+        # b-route-episode-panel：按钮构造迁入面板视图，类型守护随之迁移。
+        body = method_body(ROUTE_PANEL_SOURCE, "- (void)rebuildWithLines:")
         self.assertIn('isKindOfClass:NSString.class]?line[@"name"]', body)
+        # VC 门面转发，调用点签名不变。
+        self.assertIn("rebuildWithLines:self.lines", PLAYBACK_SOURCE)
 
     def test_episode_title_line_name_requires_string(self):
         body = method_body(PLAYBACK_SOURCE, "- (void)updateEpisodeTitle {")

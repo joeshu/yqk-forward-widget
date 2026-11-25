@@ -20,6 +20,9 @@ ROOT_SOURCE = (SOURCES / "RootViewController.m").read_text(encoding="utf-8")
 CATALOG_SOURCE = (SOURCES / "RootViewController+Catalog.m").read_text(encoding="utf-8")
 BROWSER_SOURCE = (SOURCES / "MediaBrowserViewController.m").read_text(encoding="utf-8")
 PLAYBACK_SOURCE = (SOURCES / "MediaPlaybackViewController.m").read_text(encoding="utf-8")
+# b-route-episode-panel：线路按钮纯呈现迁入 MediaPlaybackRoutePanelView，
+# buildLines 成为门面；a11y 契约随代码迁到新位置继续守护。
+ROUTE_PANEL_SOURCE = (SOURCES / "MediaPlaybackRoutePanelView.m").read_text(encoding="utf-8")
 EPISODE_SOURCE = (SOURCES / "MediaEpisodeSelectionViewController.m").read_text(encoding="utf-8")
 SERVICES_SOURCE = (SOURCES / "ServicesViewController.m").read_text(encoding="utf-8")
 TVBOX_SOURCE = (SOURCES / "TVBoxCatalogViewController.m").read_text(encoding="utf-8")
@@ -65,8 +68,11 @@ class DynamicTypeContracts(unittest.TestCase):
         self.assertIn("MediaEpisodeApplyScaledPillFont(button);", body)
 
     def test_playback_line_buttons_use_scaled_pill_font(self):
-        body = method_body(PLAYBACK_SOURCE, "- (void)buildLines {")
+        # b-route-episode-panel：按钮构造迁入 MediaPlaybackRoutePanelView。
+        body = method_body(ROUTE_PANEL_SOURCE, "- (void)rebuildWithLines:")
         self.assertIn("MediaPlaybackApplyScaledPillFont(button);", body)
+        # VC 门面仍保留 buildLines 签名，转发到面板，保证既有调用点不变。
+        self.assertIn("rebuildWithLines:self.lines", PLAYBACK_SOURCE)
 
     def test_playback_quality_buttons_use_scaled_pill_font(self):
         body = method_body(PLAYBACK_SOURCE, "- (void)buildQualityButtons {")
@@ -120,10 +126,13 @@ class VoiceOverButtonContracts(unittest.TestCase):
         self.assertIn("UIAccessibilityTraitButton|(selected?", body)
 
     def test_playback_line_buttons_carry_label_hint_and_selected_trait(self):
-        body = method_body(PLAYBACK_SOURCE, "- (void)buildLines {")
+        # b-route-episode-panel：a11y 契约随按钮构造迁入面板视图。
+        body = method_body(ROUTE_PANEL_SOURCE, "- (void)rebuildWithLines:")
         self.assertIn("button.accessibilityLabel=[NSString stringWithFormat:", body)
         self.assertIn("button.accessibilityHint=", body)
-        self.assertIn("UIAccessibilityTraitButton|(idx==self.lineIndex?", body)
+        self.assertIn("UIAccessibilityTraitButton|(idx==selectedIndex?", body)
+        # VC 门面转发，调用点签名不变。
+        self.assertIn("rebuildWithLines:self.lines", PLAYBACK_SOURCE)
 
     def test_playback_quality_buttons_keep_existing_label_and_hint(self):
         body = method_body(PLAYBACK_SOURCE, "- (void)buildQualityButtons {")
