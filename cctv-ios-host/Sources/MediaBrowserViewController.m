@@ -1,5 +1,6 @@
 #import "LocalMediaViewController.h"
 #import "MediaBrowserViewController.h"
+#import "HostLibraryStore.h"
 #import "MediaBrowserQueryBuilder.h"
 #import "ShortDramaVerticalFeedController.h"
 #import "MediaFeedView.h"
@@ -802,7 +803,7 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
 }
 - (NSString *)favoriteKey {NSString *sourceID=[self safeDetailString:self.source[@"id"]],*provider=self.provider?:@"",*itemID=[self safeDetailString:self.item[@"id"]];return [NSString stringWithFormat:@"%lu:%@%lu:%@%lu:%@",(unsigned long)sourceID.length,sourceID,(unsigned long)provider.length,provider,(unsigned long)itemID.length,itemID];}
 - (void)updateFavoriteButton {
-    NSDictionary *favorites=[NSUserDefaults.standardUserDefaults dictionaryForKey:@"cctv.mediaFavorites.v1"]?:@{};BOOL favorite=favorites[[self favoriteKey]]!=nil;UIImageSymbolConfiguration *configuration=[UIImageSymbolConfiguration configurationWithPointSize:13.5 weight:UIImageSymbolWeightSemibold];UIImage *image=[[UIImage systemImageNamed:favorite?@"heart.fill":@"heart" withConfiguration:configuration] imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];if(image)[self.favoriteButton setImage:image forState:UIControlStateNormal];self.favoriteButton.tintColor=HostAccent();[self.favoriteButton setTitleColor:HostText() forState:UIControlStateNormal];if(self.favoriteButton.imageView)[self.favoriteButton bringSubviewToFront:self.favoriteButton.imageView];if(self.favoriteButton.titleLabel)[self.favoriteButton bringSubviewToFront:self.favoriteButton.titleLabel];self.favoriteButton.accessibilityLabel=favorite?@"取消收藏影片":@"收藏影片";self.favoriteButton.accessibilityValue=favorite?@"已收藏":@"未收藏";self.favoriteButton.accessibilityHint=favorite?@"从收藏中移除当前影片":@"将当前影片加入收藏";
+    NSDictionary *favorites=HostLibraryStore.shared.mediaFavorites;BOOL favorite=favorites[[self favoriteKey]]!=nil;UIImageSymbolConfiguration *configuration=[UIImageSymbolConfiguration configurationWithPointSize:13.5 weight:UIImageSymbolWeightSemibold];UIImage *image=[[UIImage systemImageNamed:favorite?@"heart.fill":@"heart" withConfiguration:configuration] imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];if(image)[self.favoriteButton setImage:image forState:UIControlStateNormal];self.favoriteButton.tintColor=HostAccent();[self.favoriteButton setTitleColor:HostText() forState:UIControlStateNormal];if(self.favoriteButton.imageView)[self.favoriteButton bringSubviewToFront:self.favoriteButton.imageView];if(self.favoriteButton.titleLabel)[self.favoriteButton bringSubviewToFront:self.favoriteButton.titleLabel];self.favoriteButton.accessibilityLabel=favorite?@"取消收藏影片":@"收藏影片";self.favoriteButton.accessibilityValue=favorite?@"已收藏":@"未收藏";self.favoriteButton.accessibilityHint=favorite?@"从收藏中移除当前影片":@"将当前影片加入收藏";
 }
 - (NSString *)parserPreferenceKey {NSString *sourceID=[self.source[@"id"] isKindOfClass:NSString.class]?self.source[@"id"]:([self.source[@"api"] isKindOfClass:NSString.class]?self.source[@"api"]:@"default");return [NSString stringWithFormat:@"cctv.media.parser.%@",sourceID];}
 - (NSString *)playbackParserCatalogID {NSString *catalogID=[self.source[@"catalogID"] isKindOfClass:NSString.class]?self.source[@"catalogID"]:([self.source[@"tvboxCatalogID"] isKindOfClass:NSString.class]?self.source[@"tvboxCatalogID"]:@"");return [catalogID stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];}
@@ -821,10 +822,11 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
     picker.onSelect=^(NSDictionary *choice){MediaDetailViewController *owner=weakSelf;if(!owner)return;NSString *identifier=[choice[@"id"] isKindOfClass:NSString.class]?choice[@"id"]:@"";[NSUserDefaults.standardUserDefaults setObject:identifier forKey:[owner parserPreferenceKey]];[owner updateParserSelectionButton];[RuntimeDiagnostics.shared recordEvent:@"media_parser_selection_changed" category:@"playback" fields:@{@"service_id":owner.source[@"id"]?:@"",@"parser_id":identifier,@"parser_name":choice[@"name"]?:@"自动"}];};
     UINavigationController *navigation=[[UINavigationController alloc] initWithRootViewController:picker];navigation.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();HostStyleNavigation(navigation);navigation.navigationBar.prefersLargeTitles=NO;navigation.modalPresentationStyle=UIModalPresentationPageSheet;UISheetPresentationController *sheet=navigation.sheetPresentationController;if(sheet){sheet.detents=@[UISheetPresentationControllerDetent.mediumDetent,UISheetPresentationControllerDetent.largeDetent];sheet.prefersGrabberVisible=YES;sheet.preferredCornerRadius=24;sheet.prefersScrollingExpandsWhenScrolledToEdge=YES;}[self presentViewController:navigation animated:YES completion:nil];
 }
+// Favorites retain the legacy cctv.mediaFavorites.v1 payload and key format.
 - (void)toggleFavorite {
-    NSMutableDictionary *favorites=[[NSUserDefaults.standardUserDefaults dictionaryForKey:@"cctv.mediaFavorites.v1"] mutableCopy]?:[NSMutableDictionary dictionary];NSString *key=[self favoriteKey];
+    NSMutableDictionary *favorites=[HostLibraryStore.shared.mediaFavorites mutableCopy]?:[NSMutableDictionary dictionary];NSString *key=[self favoriteKey];
     if(favorites[key]) [favorites removeObjectForKey:key];else favorites[key]=@{@"sourceID":self.source[@"id"]?:@"",@"sourceName":self.source[@"name"]?:@"",@"provider":self.provider?:@"",@"item":self.item?:@{}};
-    [NSUserDefaults.standardUserDefaults setObject:favorites forKey:@"cctv.mediaFavorites.v1"];[self updateFavoriteButton];
+    [HostLibraryStore.shared replaceMediaFavorites:favorites];[self updateFavoriteButton];
 }
 - (void)toggleDescription {self.descriptionExpanded=!self.descriptionExpanded;self.descriptionLabel.numberOfLines=self.descriptionExpanded?0:3;[self.descriptionToggle setTitle:self.descriptionExpanded?@"收起简介":@"展开简介" forState:UIControlStateNormal];}
 - (void)handleEpisodeLayoutStyleDidChange {
@@ -1181,7 +1183,7 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
 - (void)reloadThemeAppearance {self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();if(!self.isViewLoaded)return;self.view.backgroundColor=HostBackground();self.view.tintColor=HostAccent();self.tableView.backgroundColor=HostBackground();self.tableView.separatorColor=HostSeparator();self.tableView.rowHeight=MAX(92,24+2*[UIFont preferredFontForTextStyle:UIFontTextStyleHeadline].lineHeight+2*[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1].lineHeight);[self.tableView reloadData];}
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {[super traitCollectionDidChange:previousTraitCollection];if([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection])[self reloadThemeAppearance];}
 - (NSArray<NSDictionary *> *)computeFavoriteEntries {
-    NSDictionary *saved=[NSUserDefaults.standardUserDefaults dictionaryForKey:@"cctv.mediaFavorites.v1"]?:@{};
+    NSDictionary *saved=HostLibraryStore.shared.mediaFavorites;
     NSMutableArray<NSDictionary *> *rows=[NSMutableArray array];
     [saved enumerateKeysAndObjectsUsingBlock:^(NSString *key,NSDictionary *entry,BOOL *stop){
         if([entry isKindOfClass:NSDictionary.class]&&[entry[@"item"] isKindOfClass:NSDictionary.class]){
@@ -1228,7 +1230,7 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
     UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"清空影视收藏？" message:@"将移除本机保存的全部影视收藏记录。" preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     __weak typeof(self) weakSelf=self;
-    [alert addAction:[UIAlertAction actionWithTitle:@"清空" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *action){MediaFavoritesViewController *owner=weakSelf;if(!owner)return;[NSUserDefaults.standardUserDefaults removeObjectForKey:@"cctv.mediaFavorites.v1"];[owner reloadFavoriteEntries];[owner.tableView reloadData];}]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"清空" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *action){MediaFavoritesViewController *owner=weakSelf;if(!owner)return;[HostLibraryStore.shared replaceMediaFavorites:@{}];[owner reloadFavoriteEntries];[owner.tableView reloadData];}]];
     [self presentViewController:alert animated:YES completion:nil];
 }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
@@ -1253,7 +1255,7 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
     return [UIContextMenuConfiguration configurationWithIdentifier:@"media.favorite.context" previewProvider:nil actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggested){
         UIAction *open=[UIAction actionWithTitle:@"打开影片详情" image:[UIImage systemImageNamed:@"play.rectangle"] identifier:nil handler:^(__unused UIAction *a){if(weakSelf.onSelect)weakSelf.onSelect(entry);}];
         UIAction *copy=[UIAction actionWithTitle:@"复制影片名称" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){UIPasteboard.generalPasteboard.string=title;}];
-        UIAction *unfav=[UIAction actionWithTitle:@"取消收藏" image:[UIImage systemImageNamed:@"heart.slash"] identifier:nil handler:^(__unused UIAction *a){if(!favKey.length)return;NSMutableDictionary *saved=[[NSUserDefaults.standardUserDefaults dictionaryForKey:@"cctv.mediaFavorites.v1"] mutableCopy]?:[NSMutableDictionary dictionary];[saved removeObjectForKey:favKey];[NSUserDefaults.standardUserDefaults setObject:saved forKey:@"cctv.mediaFavorites.v1"];[weakSelf applyFavoriteEntriesIncremental];}];unfav.attributes=UIMenuElementAttributesDestructive;
+        UIAction *unfav=[UIAction actionWithTitle:@"取消收藏" image:[UIImage systemImageNamed:@"heart.slash"] identifier:nil handler:^(__unused UIAction *a){if(!favKey.length)return;NSMutableDictionary *saved=[HostLibraryStore.shared.mediaFavorites mutableCopy]?:[NSMutableDictionary dictionary];[saved removeObjectForKey:favKey];[HostLibraryStore.shared replaceMediaFavorites:saved];[weakSelf applyFavoriteEntriesIncremental];}];unfav.attributes=UIMenuElementAttributesDestructive;
         return [UIMenu menuWithTitle:title children:@[open,copy,unfav]];
     }];
 }
@@ -1264,8 +1266,8 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
     __weak typeof(self) weakSelf=self;
     UIContextualAction *unfav=[UIContextualAction contextualActionWithStyle:UIContextualActionStyleDestructive title:@"取消收藏" handler:^(__unused UIContextualAction *action,__unused UIView *view,void (^done)(BOOL)){
         MediaFavoritesViewController *owner=weakSelf;if(!owner||!favKey.length){done(NO);return;}
-        NSMutableDictionary *saved=[[NSUserDefaults.standardUserDefaults dictionaryForKey:@"cctv.mediaFavorites.v1"] mutableCopy]?:[NSMutableDictionary dictionary];
-        [saved removeObjectForKey:favKey];[NSUserDefaults.standardUserDefaults setObject:saved forKey:@"cctv.mediaFavorites.v1"];
+        NSMutableDictionary *saved=[HostLibraryStore.shared.mediaFavorites mutableCopy]?:[NSMutableDictionary dictionary];
+        [saved removeObjectForKey:favKey];[HostLibraryStore.shared replaceMediaFavorites:saved];
         [owner applyFavoriteEntriesIncremental];done(YES);
     }];
     return [UISwipeActionsConfiguration configurationWithActions:@[unfav]];

@@ -1,9 +1,9 @@
 #import "MediaPlaybackStateStore.h"
+#import "HostLibraryStore.h"
 #import <math.h>
 
 static NSString * const MediaWatchHistoryDefaultsKey = @"cctv.mediaWatchHistory.v1";
 static NSString * const MediaSkipPointsDefaultsKey = @"cctv.mediaSkipPoints.v1";
-static const NSUInteger MediaWatchHistoryLimit = 100;
 
 static NSString *MediaPlaybackString(id value) {
     if ([value isKindOfClass:NSString.class]) return value;
@@ -105,7 +105,7 @@ static NSDictionary *MediaPlaybackComponents(NSDictionary *context, NSInteger li
 @implementation MediaPlaybackStateStore
 + (NSArray<NSDictionary *> *)watchHistory {
     @synchronized(self){
-    id rows = [NSUserDefaults.standardUserDefaults objectForKey:MediaWatchHistoryDefaultsKey];
+    id rows = [HostLibraryStore.shared mediaWatchHistory];
     if (![rows isKindOfClass:NSArray.class]) return @[];
     NSMutableArray *valid = [NSMutableArray array];BOOL migrated=NO;
     for (id row in (NSArray *)rows) {
@@ -130,7 +130,7 @@ static NSDictionary *MediaPlaybackComponents(NSDictionary *context, NSInteger li
         if(![clean[@"key"] isEqual:key]){clean[@"key"]=key;migrated=YES;}
         [valid addObject:clean];
     }
-    if(migrated)[NSUserDefaults.standardUserDefaults setObject:valid forKey:MediaWatchHistoryDefaultsKey];
+    if(migrated)[HostLibraryStore.shared replaceMediaWatchHistory:valid];
     return [valid sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
         NSDate *left = [a[@"updatedAt"] isKindOfClass:NSDate.class] ? a[@"updatedAt"] : NSDate.distantPast;
         NSDate *right = [b[@"updatedAt"] isKindOfClass:NSDate.class] ? b[@"updatedAt"] : NSDate.distantPast;
@@ -191,8 +191,8 @@ static NSDictionary *MediaPlaybackComponents(NSDictionary *context, NSInteger li
     }];
     [rows removeObjectsAtIndexes:matches];
     [rows insertObject:entry atIndex:0];
-    if (rows.count > MediaWatchHistoryLimit) [rows removeObjectsInRange:NSMakeRange(MediaWatchHistoryLimit, rows.count - MediaWatchHistoryLimit)];
-    [NSUserDefaults.standardUserDefaults setObject:rows forKey:MediaWatchHistoryDefaultsKey];
+    if (rows.count > HostMediaWatchHistoryLimit) [rows removeObjectsInRange:NSMakeRange(HostMediaWatchHistoryLimit, rows.count - HostMediaWatchHistoryLimit)];
+    [HostLibraryStore.shared replaceMediaWatchHistory:rows];
 
     }
 }
@@ -202,12 +202,12 @@ static NSDictionary *MediaPlaybackComponents(NSDictionary *context, NSInteger li
     NSMutableArray *rows = [self.watchHistory mutableCopy];
     NSIndexSet *matches = [rows indexesOfObjectsPassingTest:^BOOL(NSDictionary *entry, NSUInteger index, BOOL *stop) { return [entry[@"key"] isEqual:key]; }];
     [rows removeObjectsAtIndexes:matches];
-    [NSUserDefaults.standardUserDefaults setObject:rows forKey:MediaWatchHistoryDefaultsKey];
+    [HostLibraryStore.shared replaceMediaWatchHistory:rows];
 
     }
 }
 + (void)clearWatchHistory {
-    @synchronized(self){ [NSUserDefaults.standardUserDefaults removeObjectForKey:MediaWatchHistoryDefaultsKey];
+    @synchronized(self){ [HostLibraryStore.shared clearMediaWatchHistory];
     }
 }
 + (NSDictionary *)skipPointsForContext:(NSDictionary *)context {

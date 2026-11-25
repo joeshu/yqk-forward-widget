@@ -30,9 +30,9 @@ static NSArray<NSString *> *stringPreferenceKeys(void){return @[@"cctv.mediaVide
     snap[@"catalogs"]=catalogs;snap[@"resourceDependencies"]=dependencies;
     NSArray *recents=[HostLibraryStore.shared recents];
     if([recents isKindOfClass:NSArray.class]&&[NSJSONSerialization isValidJSONObject:recents])snap[@"recents"]=recents;
-    NSDictionary *vodFavorites=[d dictionaryForKey:@"cctv.mediaFavorites.v1"];
+    NSDictionary *vodFavorites=HostLibraryStore.shared.mediaFavorites;
     if([vodFavorites isKindOfClass:NSDictionary.class]&&[NSJSONSerialization isValidJSONObject:vodFavorites])snap[@"vodFavorites"]=vodFavorites;
-    NSArray *watchHistory=[d arrayForKey:@"cctv.mediaWatchHistory.v1"];
+    NSArray *watchHistory=HostLibraryStore.shared.mediaWatchHistory;
     if([watchHistory isKindOfClass:NSArray.class]){
         NSMutableArray *rows=[NSMutableArray array];
         for(id value in watchHistory){
@@ -123,7 +123,7 @@ invalid:
     }
     if([backup[@"recents"] isKindOfClass:NSArray.class])[d setObject:backup[@"recents"] forKey:@"recents"];else[d removeObjectForKey:@"recents"];
     [HostLibraryStore.shared replaceRecents:[backup[@"recents"] isKindOfClass:NSArray.class]?backup[@"recents"]:@[]];
-    if([backup[@"vodFavorites"] isKindOfClass:NSDictionary.class])[d setObject:backup[@"vodFavorites"] forKey:@"cctv.mediaFavorites.v1"];else[d removeObjectForKey:@"cctv.mediaFavorites.v1"];
+    if([backup[@"vodFavorites"] isKindOfClass:NSDictionary.class])[HostLibraryStore.shared replaceMediaFavorites:backup[@"vodFavorites"]];else[HostLibraryStore.shared replaceMediaFavorites:@{}];
     if([backup[@"watchHistory"] isKindOfClass:NSArray.class]){
         NSMutableArray *rows=[NSMutableArray array];
         for(NSDictionary *entry in backup[@"watchHistory"]){
@@ -131,8 +131,8 @@ invalid:
             if([row[@"updatedAt"] isKindOfClass:NSNumber.class])row[@"updatedAt"]=[NSDate dateWithTimeIntervalSince1970:[row[@"updatedAt"] doubleValue]];
             [rows addObject:row];
         }
-        [d setObject:rows forKey:@"cctv.mediaWatchHistory.v1"];
-    }else[d removeObjectForKey:@"cctv.mediaWatchHistory.v1"];
+        [HostLibraryStore.shared replaceMediaWatchHistory:rows];
+    }else[HostLibraryStore.shared clearMediaWatchHistory];
     if([backup[@"skipPoints"] isKindOfClass:NSDictionary.class])[d setObject:backup[@"skipPoints"] forKey:@"cctv.mediaSkipPoints.v1"];else[d removeObjectForKey:@"cctv.mediaSkipPoints.v1"];
     if([backup[@"epgReminders"] isKindOfClass:NSDictionary.class])[d setObject:backup[@"epgReminders"] forKey:@"cctv.epgReminders.v1"];else[d removeObjectForKey:@"cctv.epgReminders.v1"];
     NSDictionary *p=backup[@"preferences"];

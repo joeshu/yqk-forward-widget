@@ -7,6 +7,8 @@ FOUNDATION_EXPORT NSString *const HostLibraryLegacyFavoritesKey;   // @"favorite
 FOUNDATION_EXPORT NSString *const HostLibraryLegacyRecentsKey;     // @"recents"
 /// 一次性迁移完成标记键。
 FOUNDATION_EXPORT NSString *const HostLibraryMigrationMarkerKey;   // @"cctv.libraryStore.migrated.v1"
+/// 点播观看历史上限。
+FOUNDATION_EXPORT const NSUInteger HostMediaWatchHistoryLimit;
 /// 最近观看条数上限（与原 rememberChannel 的 24 条保持一致）。
 FOUNDATION_EXPORT const NSUInteger HostLibraryRecentsLimit;
 
@@ -39,6 +41,15 @@ FOUNDATION_EXPORT const NSUInteger HostLibraryRecentsLimit;
 /// 整体替换（用于移除单条、ID 迁移、备份恢复），保持数组顺序。
 - (void)replaceRecents:(nullable NSArray *)recents;
 - (void)clearRecents;
+
+#pragma mark - 点播收藏与历史
+/// 字典格式保持 cctv.mediaFavorites.v1：key → {sourceID, sourceName, provider, item}。
+- (NSDictionary<NSString *, NSDictionary *> *)mediaFavorites;
+- (void)replaceMediaFavorites:(nullable NSDictionary *)favorites;
+/// 历史为最新在前的字典数组，updatedAt 对外仍为 NSDate。
+- (NSArray<NSDictionary *> *)mediaWatchHistory;
+- (void)replaceMediaWatchHistory:(nullable NSArray *)history;
+- (void)clearMediaWatchHistory;
 
 /// 等待所有已排队的写入完成。
 - (void)flush;
