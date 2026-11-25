@@ -515,7 +515,7 @@ static dispatch_queue_t MediaPlaybackCicadaQuarantineQueue(void) {
 
 - (void)setRate:(float)rate {
     // 上限 3.0：长按手势请求 3.0x（见 VC handlePlaybackLongPress:），
-    // 旧钳制 2.0 会把它静默截断；设置菜单的持久倍速仍由调用方钳制在 2.0。
+    // 旧钳制 2.0 会把它静默截断；设置菜单的持久倍速现由调用方钳制到 3.0。
     if (!isfinite(rate)) return;
     self.pendingRate = MIN(3.0f, MAX(0.5f, rate));
     self.hasPendingRate = YES;
