@@ -811,8 +811,8 @@
         if (!strongSelf) { [timer invalidate]; return; }
         [strongSelf tick:timer];
     }];
+    self.watchdog.tolerance = 0.1;
 }
-
 - (BOOL)recoverNativeStartupForReason:(NSString *)reason {
     if(self.directNativeRouteActive || self.nativeTimeShiftActive || self.nativeTransitionKind.length || self.firstRender || self.nativePlaybackFailed || self.nativeStartupRecoveryUsed || !self.currentPlayer || !self.channelID.length)return NO;
     NSString *channelID=self.channelID;

@@ -125,6 +125,7 @@ static const NSUInteger CCTVOfficialEPGMaximumBytes = 2 * 1024 * 1024;
         if (!strongSelf) { [timer invalidate]; return; }
         [strongSelf refreshNowNext];
     }];
+    self.epgTimer.tolerance = 3.0;
 }
 
 - (void)refreshNowNext {

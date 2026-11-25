@@ -259,6 +259,7 @@
         if (!owner) { [timer invalidate]; return; }
         [owner updateLiveQualityBadge];
     }];
+    self.liveQualityBadgeTimer.tolerance = 0.4;
     [self updateLiveQualityBadge];
 }
 - (PlaybackInfoViewController *)playbackInformationPage {
