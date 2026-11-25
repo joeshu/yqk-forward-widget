@@ -4,6 +4,7 @@
 #import "MediaFeedView.h"
 #import "MediaAPIClient.h"
 #import "HostImageLoader.h"
+#import "HostListDiffHelper.h"
 #import "HostTheme.h"
 #import "HostGlassActionSheetViewController.h"
 #import "MediaEpisodeLayout.h"
@@ -1171,14 +1172,14 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
 @end
 @implementation MediaFavoritesViewController
 - (instancetype)init {return [super initWithStyle:UITableViewStyleInsetGrouped];}
-- (void)viewWillAppear:(BOOL)animated {[super viewWillAppear:animated];[self reloadFavoriteEntries];[self.tableView reloadData];}
+- (void)viewWillAppear:(BOOL)animated {[super viewWillAppear:animated];[self reloadFavoriteEntries];[self.tableView reloadData];NSMutableArray<NSString *> *prefetchPosters=[NSMutableArray array];for(NSDictionary *entry in self.entries){NSString *poster=[entry[@"item"][@"poster"] isKindOfClass:NSString.class]?entry[@"item"][@"poster"]:nil;if(poster.length)[prefetchPosters addObject:poster];}if(prefetchPosters.count)[HostImageLoader.shared prefetchPosterURLs:prefetchPosters];}
 - (void)viewDidLoad {
     [super viewDidLoad];self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();self.title=@"影视收藏";self.view.backgroundColor=HostBackground();self.view.tintColor=HostAccent();self.tableView.backgroundColor=HostBackground();self.tableView.separatorColor=HostSeparator();self.tableView.keyboardDismissMode=UIScrollViewKeyboardDismissModeOnDrag;self.tableView.rowHeight=MAX(92,24+2*[UIFont preferredFontForTextStyle:UIFontTextStyleHeadline].lineHeight+2*[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1].lineHeight);self.tableView.estimatedRowHeight=92;
     [self reloadFavoriteEntries];
 }
 - (void)reloadThemeAppearance {self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();if(!self.isViewLoaded)return;self.view.backgroundColor=HostBackground();self.view.tintColor=HostAccent();self.tableView.backgroundColor=HostBackground();self.tableView.separatorColor=HostSeparator();self.tableView.rowHeight=MAX(92,24+2*[UIFont preferredFontForTextStyle:UIFontTextStyleHeadline].lineHeight+2*[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1].lineHeight);[self.tableView reloadData];}
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {[super traitCollectionDidChange:previousTraitCollection];if([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection])[self reloadThemeAppearance];}
-- (void)reloadFavoriteEntries {
+- (NSArray<NSDictionary *> *)computeFavoriteEntries {
     NSDictionary *saved=[NSUserDefaults.standardUserDefaults dictionaryForKey:@"cctv.mediaFavorites.v1"]?:@{};
     NSMutableArray<NSDictionary *> *rows=[NSMutableArray array];
     [saved enumerateKeysAndObjectsUsingBlock:^(NSString *key,NSDictionary *entry,BOOL *stop){
@@ -1186,8 +1187,40 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
             NSMutableDictionary *copy=[entry mutableCopy];copy[@"__favoriteKey"]=key;[rows addObject:copy];
         }
     }];
-    self.entries=[rows sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *a,NSDictionary *b){NSString *left=a[@"item"][@"name"]?:@"",*right=b[@"item"][@"name"]?:@"";return [left localizedStandardCompare:right];}];
-    self.navigationItem.rightBarButtonItem=self.entries.count?[[UIBarButtonItem alloc] initWithTitle:@"清空" style:UIBarButtonItemStylePlain target:self action:@selector(confirmClearFavorites)]:nil;
+    return [rows sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *a,NSDictionary *b){NSString *left=a[@"item"][@"name"]?:@"",*right=b[@"item"][@"name"]?:@"";return [left localizedStandardCompare:right];}];
+}
+- (void)reloadFavoriteEntries {self.entries=[self computeFavoriteEntries];self.navigationItem.rightBarButtonItem=self.entries.count?[[UIBarButtonItem alloc] initWithTitle:@"清空" style:UIBarButtonItemStylePlain target:self action:@selector(confirmClearFavorites)]:nil;}
+// Incremental refresh: diff the previously displayed entries against the freshly
+// computed set and drive a single coordinated UITableView batch update instead
+// of a full reloadData. This animates single-entry unfavorite as a row deletion
+// (with stable __favoriteKey identities) and avoids rebuilding every visible
+// cell. Falls back to reloadData when the view is not yet in a window so we
+// never perform batch updates on an unmounted table (snapshot consistency).
+- (void)applyFavoriteEntriesIncremental {
+    NSArray<NSDictionary *> *oldEntries=self.entries?:@[];
+    NSArray<NSDictionary *> *newEntries=[self computeFavoriteEntries];
+    self.entries=newEntries;
+    self.navigationItem.rightBarButtonItem=newEntries.count?[[UIBarButtonItem alloc] initWithTitle:@"清空" style:UIBarButtonItemStylePlain target:self action:@selector(confirmClearFavorites)]:nil;
+    UITableView *tableView=self.tableView;
+    if(!tableView.window){if(self.isViewLoaded)[tableView reloadData];return;}
+    HostListDiff *diff=[HostListDiffHelper diffFromOld:oldEntries toNew:newEntries identityBlock:^NSString *(NSDictionary *entry){
+        NSString *key=[entry[@"__favoriteKey"] isKindOfClass:NSString.class]?entry[@"__favoriteKey"]:@"";
+        return key.length?key:[NSString stringWithFormat:@"__entry_ptr:%p",entry];
+    } isEqualBlock:^BOOL(NSDictionary *oldEntry,NSDictionary *newEntry){
+        NSDictionary *oldItem=oldEntry[@"item"]?:@{},*newItem=newEntry[@"item"]?:@{};
+        NSString *oldName=oldItem[@"name"]?:@"",*newName=newItem[@"name"]?:@"";
+        NSString *oldPoster=[oldItem[@"poster"] isKindOfClass:NSString.class]?oldItem[@"poster"]:@"",*newPoster=[newItem[@"poster"] isKindOfClass:NSString.class]?newItem[@"poster"]:@"";
+        NSString *oldSource=oldEntry[@"sourceName"]?:@"",*newSource=newEntry[@"sourceName"]?:@"";
+        NSString *oldProvider=oldEntry[@"provider"]?:@"",*newProvider=newEntry[@"provider"]?:@"";
+        return [oldName isEqual:newName]&&[oldPoster isEqual:newPoster]&&[oldSource isEqual:newSource]&&[oldProvider isEqual:newProvider];
+    }];
+    if(diff.isEmpty)return;
+    [tableView performBatchUpdates:^{
+        if(diff.deletedOldIndexes.count){NSMutableArray<NSIndexPath *> *paths=[NSMutableArray array];for(NSNumber *i in diff.deletedOldIndexes)[paths addObject:[NSIndexPath indexPathForRow:i.unsignedIntegerValue inSection:0]];[tableView deleteRowsAtIndexPaths:paths withRowAnimation:UITableViewRowAnimationAutomatic];}
+        if(diff.insertedNewIndexes.count){NSMutableArray<NSIndexPath *> *paths=[NSMutableArray array];for(NSNumber *i in diff.insertedNewIndexes)[paths addObject:[NSIndexPath indexPathForRow:i.unsignedIntegerValue inSection:0]];[tableView insertRowsAtIndexPaths:paths withRowAnimation:UITableViewRowAnimationAutomatic];}
+        for(NSDictionary *move in diff.moves){[tableView moveRowAtIndexPath:[NSIndexPath indexPathForRow:[move[@"from"] unsignedIntegerValue] inSection:0] toIndexPath:[NSIndexPath indexPathForRow:[move[@"to"] unsignedIntegerValue] inSection:0]];}
+        if(diff.reloadedNewIndexes.count){NSMutableArray<NSIndexPath *> *paths=[NSMutableArray array];for(NSNumber *i in diff.reloadedNewIndexes)[paths addObject:[NSIndexPath indexPathForRow:i.unsignedIntegerValue inSection:0]];[tableView reloadRowsAtIndexPaths:paths withRowAnimation:UITableViewRowAnimationAutomatic];}
+    } completion:nil];
 }
 - (void)confirmClearFavorites {
     UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"清空影视收藏？" message:@"将移除本机保存的全部影视收藏记录。" preferredStyle:UIAlertControllerStyleAlert];
@@ -1218,7 +1251,7 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
     return [UIContextMenuConfiguration configurationWithIdentifier:@"media.favorite.context" previewProvider:nil actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggested){
         UIAction *open=[UIAction actionWithTitle:@"打开影片详情" image:[UIImage systemImageNamed:@"play.rectangle"] identifier:nil handler:^(__unused UIAction *a){if(weakSelf.onSelect)weakSelf.onSelect(entry);}];
         UIAction *copy=[UIAction actionWithTitle:@"复制影片名称" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){UIPasteboard.generalPasteboard.string=title;}];
-        UIAction *unfav=[UIAction actionWithTitle:@"取消收藏" image:[UIImage systemImageNamed:@"heart.slash"] identifier:nil handler:^(__unused UIAction *a){if(!favKey.length)return;NSMutableDictionary *saved=[[NSUserDefaults.standardUserDefaults dictionaryForKey:@"cctv.mediaFavorites.v1"] mutableCopy]?:[NSMutableDictionary dictionary];[saved removeObjectForKey:favKey];[NSUserDefaults.standardUserDefaults setObject:saved forKey:@"cctv.mediaFavorites.v1"];[weakSelf reloadFavoriteEntries];[weakSelf.tableView reloadData];}];unfav.attributes=UIMenuElementAttributesDestructive;
+        UIAction *unfav=[UIAction actionWithTitle:@"取消收藏" image:[UIImage systemImageNamed:@"heart.slash"] identifier:nil handler:^(__unused UIAction *a){if(!favKey.length)return;NSMutableDictionary *saved=[[NSUserDefaults.standardUserDefaults dictionaryForKey:@"cctv.mediaFavorites.v1"] mutableCopy]?:[NSMutableDictionary dictionary];[saved removeObjectForKey:favKey];[NSUserDefaults.standardUserDefaults setObject:saved forKey:@"cctv.mediaFavorites.v1"];[weakSelf applyFavoriteEntriesIncremental];}];unfav.attributes=UIMenuElementAttributesDestructive;
         return [UIMenu menuWithTitle:title children:@[open,copy,unfav]];
     }];
 }
@@ -1231,7 +1264,7 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
         MediaFavoritesViewController *owner=weakSelf;if(!owner||!favKey.length){done(NO);return;}
         NSMutableDictionary *saved=[[NSUserDefaults.standardUserDefaults dictionaryForKey:@"cctv.mediaFavorites.v1"] mutableCopy]?:[NSMutableDictionary dictionary];
         [saved removeObjectForKey:favKey];[NSUserDefaults.standardUserDefaults setObject:saved forKey:@"cctv.mediaFavorites.v1"];
-        [owner reloadFavoriteEntries];[owner.tableView reloadData];done(YES);
+        [owner applyFavoriteEntriesIncremental];done(YES);
     }];
     return [UISwipeActionsConfiguration configurationWithActions:@[unfav]];
 }
