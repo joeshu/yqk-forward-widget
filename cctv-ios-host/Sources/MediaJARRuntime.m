@@ -1,5 +1,6 @@
 #import "MediaJARRuntime.h"
 #import "HostMemoryBudgetCoordinator.h"
+#import "HostRuntimeLifecycleCoordinator.h"
 #import "MediaJARSource.h"
 #import <TargetConditionals.h>
 #if TARGET_OS_IOS
@@ -110,6 +111,9 @@ static void JARThread(void (^work)(void)) {
 }
 + (MediaJARRequest *)requestSource:(NSDictionary *)source operation:(NSString *)operation arguments:(NSDictionary *)arguments completion:(void (^)(id,NSError *))completion {
     MediaJARRequest *ticket=[MediaJARRequest new];ticket.requestID=NSUUID.UUID.UUIDString;
+    // JVM ↔ Node 互斥：拉起 JVM 前若 Node 无活跃会话则先回收其空闲会话（非阻塞，best-effort）。
+    [HostRuntimeLifecycleCoordinator.shared prepareForMutualExclusionBeforeActivating:HostRuntimeKindJVM];
+    [HostRuntimeLifecycleCoordinator.shared noteRuntimeActivity:HostRuntimeKindJVM];
     static NSOperationQueue *queue;static dispatch_once_t once;
     static NSUInteger activeBridgeCalls;
     dispatch_once(&once,^{queue=[NSOperationQueue new];queue.name=@"CCTVHost JAR requests";queue.maxConcurrentOperationCount=2;});

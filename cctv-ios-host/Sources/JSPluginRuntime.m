@@ -1,4 +1,5 @@
 #import "JSPluginRuntime.h"
+#import "HostRuntimeLifecycleCoordinator.h"
 #import "HostSyncRequest.h"
 #import "HostRedirectHeaders.h"
 #import "HostSecureStore.h"
@@ -660,6 +661,7 @@ static NSTimeInterval const JSIdleEvictionSeconds = 120.0;
     for(NSString *key in self.calls.allKeys)[self finishCall:key answer:@"{\"ok\":false,\"error\":\"JS 服务已停止\"}"];
 }
 - (NSString *)callOperation:(NSString *)operation json:(NSString *)json timeout:(NSTimeInterval)timeout error:(NSError **)error {
+    [HostRuntimeLifecycleCoordinator.shared noteRuntimeActivity:HostRuntimeKindJavaScript];
     if(self.router){
         NSData *input=[json dataUsingEncoding:NSUTF8StringEncoding];id payload=input?[NSJSONSerialization JSONObjectWithData:input options:0 error:NULL]:nil;
         NSString *session=[payload isKindOfClass:NSDictionary.class]&&[payload[@"session"] isKindOfClass:NSString.class]?payload[@"session"]:@"";

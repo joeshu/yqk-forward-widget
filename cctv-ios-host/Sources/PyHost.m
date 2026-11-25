@@ -2,6 +2,7 @@
 #import "PyHost.h"
 #import "JSPluginRuntime.h"
 #import "NodePluginRuntime.h"
+#import "HostRuntimeLifecycleCoordinator.h"
 #import "RuntimeDiagnostics.h"
 #import "PluginLogStore.h"
 #import <pthread.h>
@@ -924,6 +925,7 @@ static void *pyThread(void *rawTask) {
 }
 + (BOOL)startScriptAtPath:(NSString *)path identifier:(NSString *)identifier port:(NSInteger)port dataDir:(NSString *)dataDir arguments:(NSArray<NSString *> *)arguments error:(NSError **)error {
     ensureMaps();
+    [HostRuntimeLifecycleCoordinator.shared noteRuntimeActivity:HostRuntimeKindPython];
     if (!identifier.length || !path.length || !dataDir.length) { if (error) *error = [NSError errorWithDomain:@"PyHost" code:2 userInfo:@{NSLocalizedDescriptionKey:@"服务 ID、脚本路径和数据目录不能为空。"}]; return NO; }
 #if !PYHOST_AVAILABLE
     if (error) *error = [NSError errorWithDomain:@"PyHost" code:3 userInfo:@{NSLocalizedDescriptionKey:@"此构建未包含 CPython 运行时；插件未启动。"}]; return NO;

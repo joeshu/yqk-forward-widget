@@ -1,6 +1,8 @@
 #import "AppDelegate.h"
 #import "HostMemoryBudgetCoordinator.h"
+#import "HostRuntimeLifecycleCoordinator.h"
 #import "RootViewController.h"
+#import "RootViewController_Internal.h"
 #import "HostTheme.h"
 #import "HostImageLoader.h"
 #import "MediaMetadataCache.h"
@@ -40,11 +42,19 @@
     [RuntimeDiagnostics.shared beginAppSessionWithFields:[self diagnosticLifecycleFields]];
     [HostPerfMetrics.shared markLaunchStarted];
     [HostMemoryBudgetCoordinator.shared startMonitoring];
+    [HostRuntimeLifecycleCoordinator.shared startMonitoring];
     self.window = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
     self.window.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
     self.window.backgroundColor=UIColor.clearColor;
     HostInstallGlassBackdrop(self.window);
     RootViewController *vc = [RootViewController new];
+    // 播放占用判定：回放期间运行时空闲回收绝不触发。在 AppDelegate 注册以避免
+    // 撑大已逼近模块行数预算的 RootViewController.m。
+    __weak RootViewController *weakVC = vc;
+    [HostRuntimeLifecycleCoordinator.shared registerPlaybackActiveProvider:^BOOL{
+        RootViewController *w = weakVC;
+        return w && (w.currentPlayer != nil || w.avPlayer != nil || w.cicadaPlayer != nil);
+    }];
     UINavigationController *nav = [[HostNavigationController alloc] initWithRootViewController:vc];
     self.window.rootViewController = nav;
     [self.window makeKeyAndVisible];
