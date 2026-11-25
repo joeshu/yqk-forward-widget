@@ -574,11 +574,20 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
     }
     return count;
 }
+- (void)applyModalDismissProtection {
+    // 防误关闭（Phase-C UI 审计 §6/§9）：导入进行中时禁止手势/外部 dismiss，
+    // 对齐 MediaWebViewController。full-screen 演示下为兜底保险；一旦以 sheet
+    // 呈现即阻止下拉关闭，进度不被误中断。显式取消仍走 cancelWork，语义不变。
+    BOOL modal=self.busy&&!self.finished;
+    self.isModalInPresentation=modal;
+    if(self.navigationController)self.navigationController.isModalInPresentation=modal;
+}
 - (void)updateView {
     for(NSMutableDictionary *row in self.candidates)if([row[@"needsDecoration"] boolValue])[self decorateCandidate:row file:nil origin:row[@"origin"]];
     NSUInteger readyCount=[self selectedUnsavedCandidateCount];
     self.navigationItem.rightBarButtonItem.enabled=!self.busy&&!self.finished&&readyCount>0;
     self.navigationItem.rightBarButtonItem.title=readyCount>1?[NSString stringWithFormat:@"保存(%lu)",(unsigned long)readyCount]:@"保存";
+    [self applyModalDismissProtection];
     self.address.editable=!self.busy;self.pasteAddressButton.enabled=!self.busy;self.pasteAndRecognizeButton.enabled=!self.busy;self.clearAddressButton.enabled=!self.busy;self.clearAddressButton.hidden=self.address.text.length==0&&self.candidates.count==0;self.runtime.enabled=!self.busy;self.duplicatePolicy.enabled=!self.busy;[self refreshSmartClipboardAndPresets];[self.tableView reloadData];
     if(self.viewIfLoaded.window && self.stage.length && ![self.stage isEqualToString:self.lastAnnouncedStage]){
         self.lastAnnouncedStage=self.stage;
