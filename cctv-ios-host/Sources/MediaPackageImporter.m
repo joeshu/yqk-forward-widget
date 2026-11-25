@@ -41,7 +41,7 @@ static NSData *ReadBounded(NSURL *url,NSUInteger limit,NSError **error){
     NSMutableData *bytes=[NSMutableData data];
     @try {
         while(bytes.length<=limit){NSData *part=[file readDataUpToLength:MIN((NSUInteger)65536,limit+1-bytes.length) error:error];if(!part){bytes=nil;break;}if(!part.length)break;[bytes appendData:part];}
-    }@catch(NSException *exception){PackageError(error,@"无法读取资源文件");bytes=nil;}
+    }@catch(NSException *exception){NSLog(@"[CCTVHost] package read raised %@",exception.name);PackageError(error,@"无法读取资源文件");bytes=nil;}
     @finally{[file closeAndReturnError:NULL];}
     if(bytes.length>limit){PackageError(error,@"资源文件超过允许的大小");return nil;}return bytes;
 }
@@ -511,7 +511,7 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
         if(playlistPath.length){importedService[@"playlistPath"]=playlistPath;importedService[@"playlistPathSource"]=@"inferred";}
         if(epgPath.length){importedService[@"epgPath"]=epgPath;importedService[@"epgPathSource"]=@"inferred";}
         service=[ServiceStore resolvedService:importedService];
-    } @catch(NSException *exception){PackageError(error,@"资源包结构或清单无效，未执行代码");return nil;}
+    } @catch(NSException *exception){NSLog(@"[CCTVHost] package parse raised %@: %@",exception.name,exception.reason);PackageError(error,@"资源包结构或清单无效，未执行代码");return nil;}
     @finally {if([fm fileExistsAtPath:stage])[fm removeItemAtPath:stage error:NULL];if(credentialsStored && !service)HostSecureStoreDelete(@"media-server",identifier);}
     return service;
 }

@@ -112,6 +112,17 @@ static void *CCTVPlayerItemStatusContext = &CCTVPlayerItemStatusContext;
 static void *CCTVPlayerTimeControlContext = &CCTVPlayerTimeControlContext;
 static void *CCTVPlayerLayerReadyContext = &CCTVPlayerLayerReadyContext;
 static void *CCTVPlayerControllerReadyContext = &CCTVPlayerControllerReadyContext;
+// KVO 移除 / AVPlayer time observer 移除的统一异常边界：观察者未注册或已被系统移除时
+// Foundation 会抛 NSRangeException / NSInvalidArgumentException，拆除路径只记录不崩溃。
+// 不用 block：dealloc 中调用时不捕获 self。token 为 nil 时表示移除 KVO，否则移除 time observer。
+static void MediaPlaybackGuardedTeardown(NSString *what, id target, NSObject *observer, NSString *keyPath, void *context, id token) {
+    if (!target) return;
+    @try {
+        if (token) [(AVPlayer *)target removeTimeObserver:token];
+        else if (observer && keyPath.length) [(NSObject *)target removeObserver:observer forKeyPath:keyPath context:context];
+    }
+    @catch (NSException *exception) { NSLog(@"[CCTVHost] playback teardown %@ raised %@: %@", what, exception.name, exception.reason); }
+}
 static NSUInteger const CCTVAutomaticRouteFallbackLimit = 16;
 typedef NS_ENUM(NSInteger, MediaPlaybackPanMode) {
     MediaPlaybackPanModeNone,
@@ -1115,9 +1126,9 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     self.playerGeneration++;
     for(MediaKeyRequest *request in self.keyRequests.allValues)[request cancel];[self.keyRequests removeAllObjects];
     [self persistPlaybackProgress];
-    if(self.progressTimeObserver&&self.player){@try{[self.player removeTimeObserver:self.progressTimeObserver];}@catch(NSException *exception){}self.progressTimeObserver=nil;}
+    if(self.progressTimeObserver&&self.player){MediaPlaybackGuardedTeardown(@"timeObserver",self.player,nil,nil,NULL,self.progressTimeObserver);self.progressTimeObserver=nil;}
     if(self.idleTimerOverrideActive){BOOL previousIdleTimerDisabled=self.previousIdleTimerDisabled;if(NSThread.isMainThread)UIApplication.sharedApplication.idleTimerDisabled=previousIdleTimerDisabled;else dispatch_async(dispatch_get_main_queue(),^{UIApplication.sharedApplication.idleTimerDisabled=previousIdleTimerDisabled;});}
-    if(self.observingPlayer){@try{[self.player removeObserver:self forKeyPath:@"timeControlStatus" context:CCTVPlayerTimeControlContext];}@catch(NSException *exception){}}
+    if(self.observingPlayer){MediaPlaybackGuardedTeardown(@"timeControlStatus",self.player,self,@"timeControlStatus",CCTVPlayerTimeControlContext,nil);}
     [self.streamSniffTask cancel];self.streamSniffTask=nil;
     [self stopObservingCurrentPlayback];
     [NSNotificationCenter.defaultCenter removeObserver:self];[self.client cancel];[self.hedgedClient cancel];self.hedgedClient=nil;self.prefetchGeneration++;[self.prefetchClient cancel];[self.prefetchedAsset cancelLoading];[self.player pause];[self teardownCicadaAdapterUpdatingUI:NO];
@@ -1135,16 +1146,16 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     // 每秒回调的 time observer 只在 dealloc 移除，clearCurrentPlayerItem /
     // viewDidDisappear 走这里清理时不移除会空转；新 item 由
     // installProgressObserverIfNeeded 重装。
-    if(self.progressTimeObserver&&self.player){@try{[self.player removeTimeObserver:self.progressTimeObserver];}@catch(NSException *exception){}self.progressTimeObserver=nil;}
+    if(self.progressTimeObserver&&self.player){MediaPlaybackGuardedTeardown(@"timeObserver",self.player,nil,nil,NULL,self.progressTimeObserver);self.progressTimeObserver=nil;}
     if(self.playbackAttemptID.length&&!self.progressSummaryRecorded){
         self.progressSummaryRecorded=YES;
         [RuntimeDiagnostics.shared recordEvent:@"playback_progress_summary" category:@"playback" fields:@{@"playback_attempt_id":self.playbackAttemptID,@"correlation_id":self.diagnosticTraceID?:@"",@"first_frame_observed":@(self.videoFrameReady),@"observed_playing_seconds":@(_progressEvidence.observed),@"progress_samples":@(_progressEvidence.samples),@"stall_notifications":@(self.diagnosticStallCount)}];
     }
     AVPlayerItem *item=self.observedItem;
-    if(self.observingPlayerControllerReady){@try{[self.playerController removeObserver:self forKeyPath:@"readyForDisplay" context:CCTVPlayerControllerReadyContext];}@catch(NSException *exception){}self.observingPlayerControllerReady=NO;}
-    if(self.observingVideoLayer&&self.videoLayer){@try{[self.videoLayer removeObserver:self forKeyPath:@"readyForDisplay" context:CCTVPlayerLayerReadyContext];}@catch(NSException *exception){}self.observingVideoLayer=NO;}
+    if(self.observingPlayerControllerReady){MediaPlaybackGuardedTeardown(@"controllerReadyForDisplay",self.playerController,self,@"readyForDisplay",CCTVPlayerControllerReadyContext,nil);self.observingPlayerControllerReady=NO;}
+    if(self.observingVideoLayer&&self.videoLayer){MediaPlaybackGuardedTeardown(@"layerReadyForDisplay",self.videoLayer,self,@"readyForDisplay",CCTVPlayerLayerReadyContext,nil);self.observingVideoLayer=NO;}
     self.videoLayer=nil;
-    if(item){@try{[item removeObserver:self forKeyPath:@"status" context:CCTVPlayerItemStatusContext];}@catch(NSException *exception){}[NSNotificationCenter.defaultCenter removeObserver:self name:AVPlayerItemFailedToPlayToEndTimeNotification object:item];[NSNotificationCenter.defaultCenter removeObserver:self name:AVPlayerItemPlaybackStalledNotification object:item];[NSNotificationCenter.defaultCenter removeObserver:self name:AVPlayerItemDidPlayToEndTimeNotification object:item];self.observedItem=nil;}
+    if(item){MediaPlaybackGuardedTeardown(@"itemStatus",item,self,@"status",CCTVPlayerItemStatusContext,nil);[NSNotificationCenter.defaultCenter removeObserver:self name:AVPlayerItemFailedToPlayToEndTimeNotification object:item];[NSNotificationCenter.defaultCenter removeObserver:self name:AVPlayerItemPlaybackStalledNotification object:item];[NSNotificationCenter.defaultCenter removeObserver:self name:AVPlayerItemDidPlayToEndTimeNotification object:item];self.observedItem=nil;}
 }
 - (void)installProgressObserverIfNeeded {
     if(!self.player||self.progressTimeObserver)return;__weak typeof(self) weakSelf=self;
@@ -1173,10 +1184,9 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 }
 - (void)activateBackgroundAudioSessionIfNeeded {
     AVAudioSession *session=[AVAudioSession sharedInstance];
-    @try{
-        [session setCategory:AVAudioSessionCategoryPlayback mode:AVAudioSessionModeMoviePlayback options:0 error:nil];
-        [session setActive:YES error:nil];
-    }@catch(NSException *exception){}
+    // 两个调用均经 NSError 报告失败，不抛 ObjC 异常。
+    [session setCategory:AVAudioSessionCategoryPlayback mode:AVAudioSessionModeMoviePlayback options:0 error:nil];
+    [session setActive:YES error:nil];
 }
 - (void)beginBackgroundAutoAdvanceTaskIfNeeded {
     UIApplication *app=UIApplication.sharedApplication;
@@ -1283,7 +1293,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     if(self.playerController&&!self.observingPlayerControllerReady){self.observingPlayerControllerReady=YES;[self.playerController addObserver:self forKeyPath:@"readyForDisplay" options:NSKeyValueObservingOptionInitial|NSKeyValueObservingOptionNew context:CCTVPlayerControllerReadyContext];}
     AVPlayerLayer *layer=self.playerController.isViewLoaded?[self playerLayerInLayerTree:self.playerController.view.layer]:nil;
     if(layer&&layer!=self.videoLayer){
-        if(self.observingVideoLayer){@try{[self.videoLayer removeObserver:self forKeyPath:@"readyForDisplay" context:CCTVPlayerLayerReadyContext];}@catch(NSException *exception){}}
+        if(self.observingVideoLayer){MediaPlaybackGuardedTeardown(@"layerReadyForDisplay",self.videoLayer,self,@"readyForDisplay",CCTVPlayerLayerReadyContext,nil);}
         self.videoLayer=layer;self.observingVideoLayer=YES;
         [layer addObserver:self forKeyPath:@"readyForDisplay" options:NSKeyValueObservingOptionInitial|NSKeyValueObservingOptionNew context:CCTVPlayerLayerReadyContext];
     }

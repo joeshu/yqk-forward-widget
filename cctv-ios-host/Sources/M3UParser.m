@@ -293,6 +293,7 @@ static NSURL *M3UNormalizedLoopbackURL(NSURL *url, NSURL *baseURL) {
                 url = parts.URL;
             }
         } @catch (NSException *exception) {
+            NSLog(@"[CCTVHost] M3U line URL raised %@", exception.name);
             url = nil;
         }
         if (!url) { pendingName = nil; pendingLogo = nil; pendingEPGID = nil; pendingTVGName = nil; catchupMode=nil;catchupSource=nil;catchupDays=0;tvgShift=0;[pendingHeaders removeAllObjects]; return; }

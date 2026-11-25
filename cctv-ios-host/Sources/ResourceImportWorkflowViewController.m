@@ -17,7 +17,7 @@ static NSString * const ResourceImportRecentURLsPreferenceKey = @"cctv.resourceI
 
 static NSData *ResourceImportReadBounded(NSURL *url,NSUInteger limit) {
     NSFileHandle *file=[NSFileHandle fileHandleForReadingFromURL:url error:NULL];NSData *data=nil;
-    @try{data=[file readDataUpToLength:limit+1 error:NULL];if(data.length>limit)data=nil;}@catch(NSException *exception){data=nil;}@finally{[file closeAndReturnError:NULL];}return data;
+    @try{data=[file readDataUpToLength:limit+1 error:NULL];if(data.length>limit)data=nil;}@catch(NSException *exception){NSLog(@"[CCTVHost] resource import read raised %@",exception.name);data=nil;}@finally{[file closeAndReturnError:NULL];}return data;
 }
 
 static NSURL *ResourceImportNormalizedURL(NSString *raw) {
@@ -943,9 +943,8 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
         NSData *data=[NSJSONSerialization dataWithJSONObject:config options:0 error:NULL];NSURL *file=[NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"server-%@.json",NSUUID.UUID.UUIDString]]];
         NSError *writeError=nil;
         if(![data writeToURL:file options:NSDataWritingAtomic|NSDataWritingFileProtectionCompleteUntilFirstUserAuthentication error:&writeError]){owner.stage=@"服务器配置写入失败，请重试";[owner updateView];return;}
-        NSMutableDictionary *row=nil;
-        @try { row=[owner candidateForData:data file:file origin:nil companions:@{} hint:nil]; }
-        @finally { [NSFileManager.defaultManager removeItemAtURL:file error:NULL]; }
+        NSMutableDictionary *row=[owner candidateForData:data file:file origin:nil companions:@{} hint:nil];
+        [NSFileManager.defaultManager removeItemAtURL:file error:NULL];
         if(row)[owner.candidates addObject:row];owner.stage=row[@"error"]?@"服务器配置识别失败，请检查账号并重试":@"服务器配置已识别 · 选择保存后再启用";[owner updateView];
     }]];[self presentViewController:form animated:YES completion:nil];
 }

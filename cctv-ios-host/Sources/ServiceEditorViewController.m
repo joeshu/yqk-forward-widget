@@ -177,7 +177,7 @@
     NSString *path=self.path;NSUInteger limit=self.readOnly?512*1024:2*1024*1024;__weak typeof(self) weakSelf=self;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{@autoreleasepool{
         NSError *error=nil;NSData *data=nil;NSFileHandle *file=path.length?[NSFileHandle fileHandleForReadingAtPath:path]:nil;
-        @try{if(file)data=[file readDataUpToLength:limit+1 error:&error];}@catch(NSException *exception){error=[NSError errorWithDomain:@"CCTVHostCode" code:1 userInfo:nil];}@finally{[file closeAndReturnError:NULL];}
+        @try{if(file)data=[file readDataUpToLength:limit+1 error:&error];}@catch(NSException *exception){NSLog(@"[CCTVHost] code file read raised %@",exception.name);error=[NSError errorWithDomain:@"CCTVHostCode" code:1 userInfo:nil];}@finally{[file closeAndReturnError:NULL];}
         BOOL truncated=data.length>limit;if(truncated)data=[data subdataWithRange:NSMakeRange(0,limit)];
         NSString *text=data?[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]:nil;
         for(NSUInteger trim=1;!text && truncated && trim<=3;trim++)text=[[NSString alloc] initWithData:[data subdataWithRange:NSMakeRange(0,data.length-trim)] encoding:NSUTF8StringEncoding];
@@ -1185,7 +1185,7 @@
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{
         BOOL scoped=[u startAccessingSecurityScopedResource];
         NSFileHandle *handle=[NSFileHandle fileHandleForReadingFromURL:u error:NULL];NSData *data=nil;
-        @try{data=[handle readDataUpToLength:2*1024*1024+1 error:NULL];if(data.length>2*1024*1024)data=nil;}@catch(NSException *exception){data=nil;}@finally{[handle closeAndReturnError:NULL];}
+        @try{data=[handle readDataUpToLength:2*1024*1024+1 error:NULL];if(data.length>2*1024*1024)data=nil;}@catch(NSException *exception){NSLog(@"[CCTVHost] code import read raised %@",exception.name);data=nil;}@finally{[handle closeAndReturnError:NULL];}
         if(scoped)[u stopAccessingSecurityScopedResource];
         dispatch_async(dispatch_get_main_queue(),^{ServiceEditorViewController *owner=weakSelf;if(owner)[owner acceptCode:data];});
     });

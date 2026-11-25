@@ -1482,7 +1482,8 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('UIApplication.sharedApplication.applicationState!=UIApplicationStateBackground||self.pictureInPictureActive', self.playback)
         self.assertIn('CCTVPlayerControllerReadyContext', self.playback)
         self.assertIn('[self.playerController addObserver:self forKeyPath:@"readyForDisplay"', self.playback)
-        self.assertIn('[self.playerController removeObserver:self forKeyPath:@"readyForDisplay"', self.playback)
+        # P1 cleanup: KVO removal routed through the guarded teardown helper.
+        self.assertIn('MediaPlaybackGuardedTeardown(@"controllerReadyForDisplay",self.playerController,self,@"readyForDisplay",CCTVPlayerControllerReadyContext,nil);', self.playback)
         self.assertIn('item==self.player.currentItem&&controller==self.playerController&&controller.readyForDisplay', self.playback)
         self.assertIn('未能按名称确认分集', self.playback)
 

@@ -358,7 +358,7 @@ static NSString *CCTVRouteGroupKey(NSDictionary *channel) {
 static BOOL CCTVRouteRequiresSDK(NSDictionary *route) {
     if([route[@"requiresSDK"] boolValue]||[route[@"drm"] boolValue])return YES;
     NSString *raw=[route[@"url"] isKindOfClass:NSString.class]?route[@"url"]:@"";
-    NSURLComponents *components=nil;@try{if(raw.length<=8192)components=[NSURLComponents componentsWithString:raw];}@catch(NSException *exception){}
+    NSURLComponents *components=raw.length<=8192?[NSURLComponents componentsWithString:raw]:nil;
     NSString *path=components.percentEncodedPath.lowercaseString?:@"",*query=components.percentEncodedQuery.lowercaseString?:@"";
     // UDRM endpoints can omit EXT-X-KEY while still requiring the broadcaster's SDK.
     return [path containsString:@"/udrm"]||[query containsString:@"udrm"];
@@ -827,6 +827,10 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 - (id)call:(id)obj sel:(NSString *)name;
 - (id)call:(id)obj sel:(NSString *)name args:(NSArray *)args;
 - (id)invokeTarget:(id)target selector:(SEL)sel args:(NSArray *)args;
+- (BOOL)guardedSetValue:(id)value forKey:(NSString *)key onObject:(id)target;
+- (id)guardedValueForKey:(NSString *)key ofObject:(id)target;
+- (id)guardedNewInstanceOfClass:(Class)cls;
+- (void)guardedRemoveObserverFrom:(NSObject *)object keyPath:(NSString *)keyPath context:(void *)context;
 - (void)player:(id)player loadStateDidChanged:(NSUInteger)state;
 - (void)player:(id)player programPubicChanged:(BOOL)isPublic;
 - (void)player:(id)player programPubicChanged:(BOOL)isPublic type:(NSUInteger)sourceType error:(NSError *)error;

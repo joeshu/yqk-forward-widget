@@ -133,8 +133,9 @@ static void writePythonBreadcrumbsLocked(NSDictionary<NSString *, NSDictionary *
     NSData *data = [NSJSONSerialization dataWithJSONObject:@{@"version":@1, @"sessions":rows} options:0 error:NULL];
     if (!data.length || ![data writeToFile:path options:NSDataWritingAtomic error:NULL]) return;
     NSFileHandle *file = [NSFileHandle fileHandleForWritingAtPath:path];
-    @try { [file synchronizeFile]; [file closeFile]; }
-    @catch (__unused NSException *exception) { @try { [file closeFile]; } @catch (__unused NSException *ignored) {} }
+    // iOS 13+ 的 NSError 版本不抛 ObjC 异常，失败时忽略即可（数据已原子写入）。
+    [file synchronizeAndReturnError:NULL];
+    [file closeAndReturnError:NULL];
 }
 
 static NSDictionary *pythonProcessMemoryFields(void) {

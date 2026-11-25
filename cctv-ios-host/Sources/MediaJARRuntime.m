@@ -139,11 +139,17 @@ static void JARThread(void (^work)(void)) {
             }
             activeBridgeCalls++;
         }
+        // 180 秒等待只允许发生在后台队列；万一被调度到主线程则直接回报错误，不阻塞 UI。
+        if(NSThread.isMainThread){
+            @synchronized(queue){activeBridgeCalls--;}
+            dispatch_async(dispatch_get_main_queue(),^{if(ticket.watchdog){dispatch_source_cancel(ticket.watchdog);ticket.watchdog=nil;}if(!ticket.cancelled&&[ticket claimCompletion]&&completion)completion(nil,JARError(15,@"JAR 服务须从后台调用"));});
+            return;
+        }
         dispatch_semaphore_t finished=dispatch_semaphore_create(0);
         JARThread(^{@autoreleasepool {
             NSError *error=nil;id result=nil;
             @try {result=[self perform:source operation:operation arguments:arguments ticket:ticket error:&error];}
-            @catch(NSException *exception){error=JARError(3,@"JAR 运行时请求失败，请查看诊断日志");}
+            @catch(NSException *exception){NSLog(@"[CCTVHost] JAR runtime raised %@: %@",exception.name,exception.reason);error=JARError(3,@"JAR 运行时请求失败，请查看诊断日志");}
             @finally {
                 dispatch_async(dispatch_get_main_queue(),^{if(ticket.watchdog){dispatch_source_cancel(ticket.watchdog);ticket.watchdog=nil;}if(!ticket.cancelled&&[ticket claimCompletion]&&completion)completion(result,error);});
                 @synchronized(queue){activeBridgeCalls--;}
@@ -160,6 +166,8 @@ static void JARThread(void (^work)(void)) {
     return ticket;
 }
 + (id)perform:(NSDictionary *)source operation:(NSString *)operation arguments:(NSDictionary *)arguments ticket:(MediaJARRequest *)ticket error:(NSError **)error {
+    // 含 65 秒下载等待：主线程调用直接返回错误，绝不阻塞（同 NodePluginRuntime 的写法）。
+    if(NSThread.isMainThread){if(error)*error=JARError(15,@"JAR 服务须从后台调用");return nil;}
     if(!self.available){if(error)*error=JARError(4,@"此构建未包含 JAR 运行时，请安装完整版本");return nil;}
     NSDictionary *params=MediaJARParameters(operation,arguments);
     if(!params){if(error)*error=JARError(5,@"JAR 操作不受支持");return nil;}

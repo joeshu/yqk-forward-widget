@@ -52,7 +52,7 @@ static const NSTimeInterval NativeChannelPreloaderTTLSeconds = 90.0;
             NativeChannelPreloader *owner=weakSelf;
             if(owner && generation==owner.generation)[owner cancel];
         });
-    } @catch(NSException *exception){[self cancel];}
+    } @catch(NSException *exception){NSLog(@"[CCTVHost] CNPlayer preload raised %@: %@",exception.name,exception.reason);[self cancel];}
 }
 - (id)takeChannel:(NSString *)channel {
     if(!self.ready || ![self.channel isEqualToString:channel] || self.clock()>=self.deadline){[self cancel];return nil;}
@@ -65,7 +65,7 @@ static const NSTimeInterval NativeChannelPreloaderTTLSeconds = 90.0;
 - (void)cancel {
     self.generation++;self.ready=NO;self.channel=nil;
     id<CCTVMetadataPlayer> player=self.player;self.player=nil;
-    @try{player.delegate=nil;[player reset];}@catch(NSException *exception){}
+    @try{player.delegate=nil;[player reset];}@catch(NSException *exception){NSLog(@"[CCTVHost] CNPlayer preload reset raised %@",exception.name);}
 }
 - (void)dealloc { [self cancel]; }
 // Defensive: metadata preparation is never allowed to create a second video session.

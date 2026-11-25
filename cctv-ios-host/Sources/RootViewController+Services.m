@@ -620,7 +620,7 @@ static NSArray *CCTVBackupServices(NSError **error) {
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{
         NSError *readError=nil;NSData *data=nil;NSFileHandle *file=[NSFileHandle fileHandleForReadingFromURL:url error:&readError];
         @try{if(file)data=[file readDataUpToLength:32*1024*1024+1 error:&readError];}
-        @catch(NSException *exception){readError=[NSError errorWithDomain:@"CCTVHostBackup" code:1 userInfo:@{NSLocalizedDescriptionKey:@"无法读取所选配置文件"}];}
+        @catch(NSException *exception){NSLog(@"[CCTVHost] backup import read raised %@",exception.name);readError=[NSError errorWithDomain:@"CCTVHostBackup" code:1 userInfo:@{NSLocalizedDescriptionKey:@"无法读取所选配置文件"}];}
         @finally{[file closeAndReturnError:NULL];if(scoped)[url stopAccessingSecurityScopedResource];}
         if(data.length>32*1024*1024){data=nil;readError=[NSError errorWithDomain:@"CCTVHostBackup" code:2 userInfo:@{NSLocalizedDescriptionKey:@"配置文件超过 32 MiB 上限"}];}
         dispatch_async(dispatch_get_main_queue(),^{RootViewController *owner=weakSelf;if(!owner)return;owner.navigationItem.prompt=nil;if(readError)[owner showServiceError:readError.localizedDescription];else[owner finishConfigurationImport:data];});

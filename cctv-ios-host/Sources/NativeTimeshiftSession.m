@@ -41,13 +41,13 @@
             delivered=YES;completion(NO,[NSError errorWithDomain:@"CCTVHostTimeshift" code:CCTVHostTimeshiftErrorTimeout userInfo:@{NSLocalizedDescriptionKey:@"回看定位超时，未收到播放器回调"}]);
         });
         return YES;
-    } @catch(NSException *exception){return NO;}
+    } @catch(NSException *exception){NSLog(@"[CCTVHost] CNPlayer timeshift seek raised %@: %@",exception.name,exception.reason);return NO;}
 }
 - (BOOL)backToLive {
     [self cancel];
     NSMethodSignature *signature=[(NSObject *)self.player methodSignatureForSelector:@selector(backToLive)];
     if(!signature || signature.numberOfArguments!=2 || signature.methodReturnType[0]!='v')return NO;
-    @try{[self.player backToLive];return YES;}@catch(NSException *exception){return NO;}
+    @try{[self.player backToLive];return YES;}@catch(NSException *exception){NSLog(@"[CCTVHost] CNPlayer backToLive raised %@: %@",exception.name,exception.reason);return NO;}
 }
 - (void)cancel {self.generation++;}
 @end

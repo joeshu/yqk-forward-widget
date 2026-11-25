@@ -327,6 +327,7 @@
             ([scheme isEqualToString:@"https"] && components.port.integerValue == 443)) components.port = nil;
         return components.URL.absoluteString;
     } @catch (NSException *exception) {
+        [self log:@"订阅地址规范化异常 %@", exception.name];
         // M3U is untrusted input. One malformed percent escape must never abort the UI process.
         return nil;
     }

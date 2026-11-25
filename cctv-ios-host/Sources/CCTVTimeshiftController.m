@@ -204,6 +204,7 @@ static NSString *const CCTVTimeshiftErrorDomain = @"CCTVHostTimeshift";
             deliver(isPublic, error);
         }];
     } @catch (NSException *exception) {
+        NSLog(@"[CCTVHost] CNPlayer checkPublicPlaytime raised %@: %@", exception.name, exception.reason);
         deliver(YES, [NSError errorWithDomain:CCTVTimeshiftErrorDomain code:CCTVTimeshiftErrorUnsupportedPlayer userInfo:nil]);
         return;
     }
