@@ -305,8 +305,8 @@
 }
 
 - (void)recordStartupStage:(NSString *)stage {
-    if([self.startupTrace record:stage atTime:CACurrentMediaTime()])
-        [self log:@"起播阶段 %@ [%lu] %@ +%.2fs",self.channelID?:@"—",(unsigned long)self.playbackGeneration,stage,[self.startupTrace.stages[stage] doubleValue]];
+    if(![self.startupTrace record:stage atTime:CACurrentMediaTime()])return;
+    [self log:@"起播阶段 %@ [%lu] %@ +%.2fs",self.channelID?:@"—",(unsigned long)self.playbackGeneration,stage,[self.startupTrace.stages[stage] doubleValue]];if([stage isEqualToString:@"frame"])[HostPerfMetrics.shared recordFirstFrameWithEngine:(self.remoteAdapter?@"cicada":(self.currentRemoteURL.length?@"avplayer":@"cnplayer")) channelID:self.channelID elapsedSeconds:[self.startupTrace.stages[@"frame"] doubleValue] stages:self.startupTrace.stages]; // 首帧按内核分类写入 perf_first_frame
 }
 
 - (void)stopPlayback {

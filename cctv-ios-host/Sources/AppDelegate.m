@@ -6,6 +6,7 @@
 #import "MediaMetadataCache.h"
 #import "XMLTVStore.h"
 #import "RuntimeDiagnostics.h"
+#import "HostPerfMetrics.h"
 #import <mach/mach.h>
 
 @interface HostNavigationController : UINavigationController
@@ -37,6 +38,7 @@
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
     [RuntimeDiagnostics.shared beginAppSessionWithFields:[self diagnosticLifecycleFields]];
+    [HostPerfMetrics.shared markLaunchStarted];
     [HostMemoryBudgetCoordinator.shared startMonitoring];
     self.window = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
     self.window.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();
@@ -46,6 +48,7 @@
     UINavigationController *nav = [[HostNavigationController alloc] initWithRootViewController:vc];
     self.window.rootViewController = nav;
     [self.window makeKeyAndVisible];
+    [HostPerfMetrics.shared markDidFinishLaunching];
     return YES;
 }
 

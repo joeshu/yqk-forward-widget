@@ -286,6 +286,28 @@ static NSString *RuntimeDiagnosticsISO8601String(NSDate *date) {
 - (void)didReceiveMetricPayloads:(NSArray<MXMetricPayload *> *)payloads {
     if (!self.enabled) return;
     for (MXMetricPayload *payload in payloads ?: @[]) {
+        MXAppLaunchMetric *launchMetric = payload.applicationLaunchMetrics;
+        MXHistogram<NSUnitDuration *> *firstDraw = launchMetric.histogrammedTimeToFirstDraw;
+        if (firstDraw.totalBucketCount > 0) {
+            // Aggregate histogram over the reporting interval; the mean uses bucket midpoints.
+            NSUInteger samples = 0;
+            double weightedSeconds = 0;
+            for (MXHistogramBucket<NSUnitDuration *> *bucket in firstDraw.bucketEnumerator) {
+                double start = [bucket.bucketStart measurementByConvertingToUnit:NSUnitDuration.seconds].doubleValue;
+                double end = [bucket.bucketEnd measurementByConvertingToUnit:NSUnitDuration.seconds].doubleValue;
+                samples += (NSUInteger)bucket.bucketCount;
+                weightedSeconds += (start + end) / 2.0 * (double)bucket.bucketCount;
+            }
+            NSMutableDictionary *launchFields = [@{
+                @"report_is_aggregate":@YES,
+                @"time_to_first_draw_samples":@(samples),
+                @"time_to_first_draw_bucket_count":@(firstDraw.totalBucketCount),
+                @"time_to_first_draw_mean_ms":@(samples ? (NSInteger)(weightedSeconds / (double)samples * 1000.0) : 0)
+            } mutableCopy];
+            if (payload.timeStampBegin) launchFields[@"metric_period_start"] = RuntimeDiagnosticsISO8601String(payload.timeStampBegin);
+            if (payload.timeStampEnd) launchFields[@"metric_period_end"] = RuntimeDiagnosticsISO8601String(payload.timeStampEnd);
+            [self recordEvent:@"perf_metrickit_launch_metrics" category:@"performance" fields:launchFields];
+        }
         if (@available(iOS 14.0, *)) {
             MXAppExitMetric *exitMetric = payload.applicationExitMetrics;
             if (exitMetric) {
@@ -360,6 +382,36 @@ static NSString *RuntimeDiagnosticsISO8601String(NSDate *date) {
             }
             [self recordEventSynchronously:@"metrickit_crash_diagnostic_received" category:@"crash" fields:fields];
         }
+        for (MXHangDiagnostic *hang in payload.hangDiagnostics ?: @[]) {
+            NSMeasurement<NSUnitDuration *> *duration = hang.hangDuration;
+            double hangSeconds = duration ? [duration measurementByConvertingToUnit:NSUnitDuration.seconds].doubleValue : 0;
+            NSMutableDictionary *fields = [@{
+                @"related_session_id":self.previousUnclosedSessionID.length ? self.previousUnclosedSessionID : @"unknown",
+                @"hang_duration_ms":@((NSInteger)(hangSeconds * 1000.0)),
+                @"app_build":hang.metaData.applicationBuildVersion ?: @"unknown",
+                @"call_stack_available":@(hang.callStackTree != nil)
+            } mutableCopy];
+            if (hang.callStackTree) {
+                NSData *stackJSON = [hang.callStackTree JSONRepresentation];
+                fields[@"call_stack_tree_json_bytes"] = @(stackJSON.length);
+                id stackObject = stackJSON.length ? [NSJSONSerialization JSONObjectWithData:stackJSON options:NSJSONReadingFragmentsAllowed error:NULL] : nil;
+                NSMutableArray<NSString *> *frames = [NSMutableArray array];
+                RuntimeDiagnosticsCollectCallStackFrames(stackObject, frames, 0);
+                fields[@"call_stack_frame_summary_count"] = @(frames.count);
+                fields[@"call_stack_summary_parsed"] = @(stackObject != nil);
+                if (frames.count) fields[@"call_stack_frame_summaries"] = frames;
+            }
+            [self recordEvent:@"metrickit_hang_diagnostic_received" category:@"hang" fields:fields];
+        }
+        NSMutableDictionary *summary = [@{
+            @"crash_count":@(payload.crashDiagnostics.count),
+            @"hang_count":@(payload.hangDiagnostics.count),
+            @"cpu_exception_count":@(payload.cpuExceptionDiagnostics.count),
+            @"disk_write_exception_count":@(payload.diskWriteExceptionDiagnostics.count)
+        } mutableCopy];
+        if (payload.timeStampBegin) summary[@"diagnostic_period_start"] = RuntimeDiagnosticsISO8601String(payload.timeStampBegin);
+        if (payload.timeStampEnd) summary[@"diagnostic_period_end"] = RuntimeDiagnosticsISO8601String(payload.timeStampEnd);
+        [self recordEvent:@"metrickit_diagnostic_payload_summary" category:@"diagnostics" fields:summary];
     }
 }
 
