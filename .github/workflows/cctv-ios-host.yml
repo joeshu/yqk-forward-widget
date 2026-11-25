@@ -284,6 +284,14 @@ jobs:
           set -o pipefail
           python3 Scripts/validate_ipa.py build/CCTVHost-unsigned.ipa | tee build/validation.json
 
+      - name: Run CI packaging gates (size / frameworks / mpv symbols)
+        working-directory: cctv-ios-host
+        run: |
+          set -o pipefail
+          python3 Scripts/ci_gates.py build/CCTVHost-unsigned.ipa 2>&1 | tee build/ci-gates.log
+          # ci_gates exits non-zero when any gate fails; the tee above already
+          # printed per-gate PASS/FAIL lines and ::error annotations.
+
       - name: Analyze embedded Python bridge
         working-directory: cctv-ios-host
         run: CCTV_AUDIT_ONLY=PyHost bash Scripts/audit_native.sh python-native-audit
@@ -309,6 +317,7 @@ jobs:
             cctv-ios-host/build.log
             cctv-ios-host/syntax.log
             cctv-ios-host/regression.log
+            cctv-ios-host/build/ci-gates.log
             cctv-ios-host/python-native-audit/
           if-no-files-found: ignore
           retention-days: 14
