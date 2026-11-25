@@ -464,7 +464,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 @property(nonatomic,strong) UIBarButtonItem *playbackOptionsItem;
 @property(nonatomic,strong) UIBarButtonItem *retryItem;
 @property(nonatomic,strong) UIBarButtonItem *webFallbackItem;
-@property(nonatomic,copy) NSDictionary<NSString *,NSString *> *basePlaybackHeaders;
+@property(nonatomic,copy) NSDictionary<NSString *,NSString *> *basePlaybackHeaders; // 经自定义存取器转发至 playbackSession。
 @property(nonatomic,strong) id progressTimeObserver;
 @property(nonatomic,copy) NSDictionary *resumeEntry;
 @property(nonatomic,copy) NSDictionary *pendingPlaybackResumeEntry;
@@ -472,8 +472,8 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 @property(nonatomic,strong) NSNumber *pendingQualitySeekTime;
 @property(nonatomic) BOOL pendingQualityRestorePlaybackState;
 @property(nonatomic) BOOL pendingQualityWasPlaying;
-@property(nonatomic) NSUInteger stallRecoveryAttempts;
-@property(nonatomic) NSTimeInterval lastPersistedPosition;
+@property(nonatomic) NSUInteger stallRecoveryAttempts; // KVC 兼容的 playbackSession.retryCount 转发
+@property(nonatomic) NSTimeInterval lastPersistedPosition; // KVC 兼容的 playbackSession.resumePosition 转发
 @property(nonatomic) BOOL resumePromptPending;
 @property(nonatomic) BOOL resumePromptShown;
 @property(nonatomic,copy) NSString *skipButtonAction;
@@ -606,6 +606,12 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 - (HostPlaybackSession *)playbackSession {if(!_playbackSession)_playbackSession=[[HostPlaybackSession alloc] init];return _playbackSession;}
 - (NSUInteger)attemptedRoutes {return self.playbackSession.attemptedRoutes;}
 - (void)setAttemptedRoutes:(NSUInteger)attemptedRoutes {self.playbackSession.attemptedRoutes=attemptedRoutes;}
+- (NSDictionary<NSString *,NSString *> *)basePlaybackHeaders {return self.playbackSession.requestHeaders;}
+- (void)setBasePlaybackHeaders:(NSDictionary<NSString *,NSString *> *)headers {self.playbackSession.requestHeaders=headers;}
+- (NSUInteger)stallRecoveryAttempts {return self.playbackSession.retryCount;}
+- (void)setStallRecoveryAttempts:(NSUInteger)attempts {self.playbackSession.retryCount=attempts;}
+- (NSTimeInterval)lastPersistedPosition {return self.playbackSession.resumePosition;}
+- (void)setLastPersistedPosition:(NSTimeInterval)position {self.playbackSession.resumePosition=position;}
 @synthesize playbackWantsPlayback = _playbackWantsPlayback;
 @synthesize playbackSuspendedForVisibility = _playbackSuspendedForVisibility;
 - (void)setPlaybackWantsPlayback:(BOOL)value {
