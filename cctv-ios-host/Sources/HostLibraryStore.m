@@ -537,17 +537,19 @@ static double HostLibraryWatchedAt(NSDictionary *entry) {
 - (void)replaceFavorites:(NSArray *)favorites {
     NSArray *snapshot = [favorites isKindOfClass:NSArray.class] ? [favorites copy] : @[];
     [self performAsync:^{
+        // 归一化（去重/过滤空串）在两层共用，确保 NSUserDefaults 回退镜像与 SQLite 一致，
+        // 避免备份含重复收藏时回退层出现重复条目、与 SQLite 层分叉。
+        NSArray<NSString *> *normalized = HostLibraryNormalizedFavorites(snapshot);
         if ([self prepareLocked]) {
-            NSArray<NSString *> *normalized = HostLibraryNormalizedFavorites(snapshot);
             if (![self transactionLocked:^BOOL{
                 return [self writeFavoritesLocked:normalized];
             }]) {
                 [self closeLocked];
                 [self.defaults setBool:YES forKey:HostLibraryFallbackPendingKey];
-                [self.defaults setObject:snapshot forKey:HostLibraryLegacyFavoritesKey];
+                [self.defaults setObject:normalized forKey:HostLibraryLegacyFavoritesKey];
             }
         } else {
-            [self.defaults setObject:snapshot forKey:HostLibraryLegacyFavoritesKey];
+            [self.defaults setObject:normalized forKey:HostLibraryLegacyFavoritesKey];
         }
     }];
 }
@@ -597,17 +599,19 @@ static double HostLibraryWatchedAt(NSDictionary *entry) {
 - (void)replaceRecents:(NSArray *)recents {
     NSArray *snapshot = [recents isKindOfClass:NSArray.class] ? [recents copy] : @[];
     [self performAsync:^{
+        // 归一化（按 id 去重/过滤无 id 项/确保可序列化）在两层共用，确保 NSUserDefaults 回退镜像与 SQLite 一致，
+        // 避免备份含无 id 或重复 id 条目时回退层保留无效/重复项、与 SQLite 层分叉导致再快照丢数据。
+        NSArray<NSDictionary *> *normalized = HostLibraryNormalizedRecents(snapshot);
         if ([self prepareLocked]) {
-            NSArray<NSDictionary *> *normalized = HostLibraryNormalizedRecents(snapshot);
             if (![self transactionLocked:^BOOL{
                 return [self writeRecentsLocked:normalized];
             }]) {
                 [self closeLocked];
                 [self.defaults setBool:YES forKey:HostLibraryFallbackPendingKey];
-                [self.defaults setObject:snapshot forKey:HostLibraryLegacyRecentsKey];
+                [self.defaults setObject:normalized forKey:HostLibraryLegacyRecentsKey];
             }
         } else {
-            [self.defaults setObject:snapshot forKey:HostLibraryLegacyRecentsKey];
+            [self.defaults setObject:normalized forKey:HostLibraryLegacyRecentsKey];
         }
     }];
 }
