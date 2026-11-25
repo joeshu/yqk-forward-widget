@@ -233,6 +233,7 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
 @property (nonatomic) BOOL startRequested;
 @property (nonatomic, readwrite) BOOL loading;
 @property (nonatomic) NSUInteger stallCount;
+@property (nonatomic, readwrite) NSInteger lastErrorCode;
 @property (nonatomic) NSTimeInterval bufferedTime;
 @property (nonatomic) CFTimeInterval lastPositionEmission;
 @property (nonatomic) BOOL playbackRequested;
@@ -651,8 +652,15 @@ static dispatch_queue_t MediaPlaybackCicadaQuarantineQueue(void) {
     }
 }
 
+- (NSInteger)lastErrorCode { return _lastErrorCode; }
+
+- (NSDictionary<NSString *, id> *)playbackStatistics {
+    return @{};
+}
+
 - (void)reportErrorWithCode:(NSInteger)code message:(NSString *)message {
     if (self.destroyed || self.state == MediaPlaybackCicadaAdapterStateFailed) return;
+    self.lastErrorCode = code;
     self.startRequested=NO;self.playbackRequested=NO;
     self.state = MediaPlaybackCicadaAdapterStateFailed;
     self.loading = NO;

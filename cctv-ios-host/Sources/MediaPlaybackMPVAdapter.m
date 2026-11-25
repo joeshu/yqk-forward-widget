@@ -215,6 +215,7 @@ enum {
 @property (nonatomic) BOOL loading;
 @property (nonatomic) BOOL hasVideoTrack;
 @property (nonatomic) float rate;
+@property (nonatomic, readwrite) NSInteger lastErrorCode;
 @property (nonatomic) BOOL muted;
 @property (nonatomic, copy) NSString *pendingGravity;
 @property (nonatomic) BOOL destroyed;
@@ -847,10 +848,17 @@ enum {
     }
 }
 
+- (NSInteger)lastErrorCode { return _lastErrorCode; }
+
+- (NSDictionary<NSString *, id> *)playbackStatistics {
+    return @{};
+}
+
 - (void)handleFailureWithCode:(NSInteger)code message:(NSString *)message {
     [self runOnMain:^{
         if (self.destroyed) return;
         self.loading = NO;
+        self.lastErrorCode = code;
         [self cancelFirstFrameWatchdog];
         [self finishPendingSeek:NO];
         self.state = MediaPlaybackCicadaAdapterStateFailed;

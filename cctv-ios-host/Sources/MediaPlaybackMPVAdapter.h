@@ -41,8 +41,9 @@ FOUNDATION_EXPORT NSString * const MediaPlaybackMPVAdapterErrorDomain;
 @property (nonatomic, readonly) NSTimeInterval bufferedPosition;
 @property (nonatomic, readonly) BOOL loading;
 @property (nonatomic, readonly) BOOL hasVideoTrack;
+@property (nonatomic, readonly) NSInteger lastErrorCode;
 @property (nonatomic, readonly) NSTimeInterval firstFrameTimeout;
-@property (nonatomic, readonly) float rate;
+@property (nonatomic) float rate;
 /// 显式直播提示：点播为 NO（默认），直播为 YES。
 @property (nonatomic) BOOL liveStreamHint;
 

@@ -1,6 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
-#import "MediaPlaybackCicadaAdapter.h"
+#import "CCTVPlaybackEngineTypes.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -15,7 +15,6 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readonly) NSTimeInterval bufferedPosition;
 @property (nonatomic, readonly) BOOL loading;
 @property (nonatomic, readonly) BOOL hasVideoTrack;
-@property (nonatomic, readonly) float rate;
 @property (nonatomic) BOOL liveStreamHint;
 
 - (void)prepare;
@@ -25,14 +24,15 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)stop;
 - (void)destroy;
 - (void)seekToTime:(NSTimeInterval)time completion:(nullable void (^)(BOOL finished))completion;
-- (void)setRate:(float)rate;
 - (void)setMuted:(BOOL)muted;
+
+@optional
+/// 统一可选能力；调用方调用前必须使用 respondsToSelector: 检查。
+@property (nonatomic) float rate;
 - (NSArray<NSDictionary *> *)availableTracks;
 - (BOOL)canSelectTracks;
 - (BOOL)selectTrackWithIndex:(NSInteger)index;
 - (void)applyVideoGravity:(NSString *)gravity;
-
-@optional
 /// Unified optional telemetry/error surface; adapters expose only data supported by their engine.
 @property (nonatomic, readonly) NSInteger lastErrorCode;
 - (NSDictionary<NSString *, id> *)playbackStatistics;

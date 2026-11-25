@@ -19,39 +19,19 @@
 //         位置轮询兜底）。
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
+#import "CCTVPlaybackEngineTypes.h"
+#import "CCTVPlaybackEngineProtocol.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
 FOUNDATION_EXPORT NSString * const MediaPlaybackCicadaAdapterErrorDomain;
 
-typedef NS_ENUM(NSInteger, MediaPlaybackCicadaAdapterState) {
-    MediaPlaybackCicadaAdapterStateIdle = 0,
-    MediaPlaybackCicadaAdapterStatePreparing,
-    MediaPlaybackCicadaAdapterStatePlaying,
-    MediaPlaybackCicadaAdapterStatePaused,
-    MediaPlaybackCicadaAdapterStateCompleted,
-    MediaPlaybackCicadaAdapterStateFailed,
-};
-
-@protocol MediaPlaybackCicadaAdapterDelegate <NSObject>
-@optional
-- (void)cicadaAdapterDidPrepare:(id)adapter;
-- (void)cicadaAdapterDidShowFirstFrame:(id)adapter;
-- (void)cicadaAdapter:(id)adapter didFailWithError:(NSError *)error;
-- (void)cicadaAdapterDidComplete:(id)adapter;
-- (void)cicadaAdapter:(id)adapter didUpdatePosition:(NSTimeInterval)position duration:(NSTimeInterval)duration;
-- (void)cicadaAdapter:(id)adapter didUpdateLoading:(BOOL)loading progress:(float)progress;
-// 下载速度：SDK 的 onCurrentDownLoadSpeed 回调，speed 单位 bit/s（与直连
-// 路径的 cicadaDownloadBPS 同义，调用方除以 8 得字节/秒）。
-- (void)cicadaAdapter:(id)adapter didUpdateDownloadSpeed:(double)bitsPerSecond;
-// 视频尺寸：SDK 的 onVideoSizeChanged 回调，rotation 为视频旋转角度。
-- (void)cicadaAdapter:(id)adapter didUpdateVideoSize:(CGSize)size rotation:(NSInteger)rotation;
-- (void)cicadaAdapterDidSeek:(id)adapter;
-@end
+// Delegate callbacks declared in CCTVPlaybackEngineTypes.h:
+// cicadaAdapter:didUpdateDownloadSpeed: and cicadaAdapter:didUpdateVideoSize:rotation:
 
 // Lifecycle and control methods are used on the main thread. SDK callbacks
 // are marshalled to that thread before state changes or delegate delivery.
-@interface MediaPlaybackCicadaAdapter : NSObject
+@interface MediaPlaybackCicadaAdapter : NSObject <CCTVPlaybackEngine>
 
 // SDK 类是否存在（NSClassFromString(@"CicadaPlayer")）。ui-smoke 构建里为 NO。
 + (BOOL)isAvailable;
@@ -70,9 +50,10 @@ typedef NS_ENUM(NSInteger, MediaPlaybackCicadaAdapterState) {
 @property (nonatomic, readonly) NSTimeInterval bufferedPosition;
 @property (nonatomic, readonly) BOOL loading;
 @property (nonatomic, readonly) BOOL hasVideoTrack;
+@property (nonatomic, readonly) NSInteger lastErrorCode;
 @property (nonatomic, readonly) NSTimeInterval firstFrameTimeout;
 // 当前倍速（最近一次 setRate: 的值，未调用时为 1.0；供进度采样校验用）。
-@property (nonatomic, readonly) float rate;
+@property (nonatomic) float rate;
 // 显式直播提示：点播为 NO（默认），直播为 YES；避免 prepare 前 duration==0 时将点播误判为直播。
 @property (nonatomic) BOOL liveStreamHint;
 
