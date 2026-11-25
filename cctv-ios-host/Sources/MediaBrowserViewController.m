@@ -1235,7 +1235,7 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
 }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if(self.entries.count){self.tableView.backgroundView=nil;return self.entries.count;}
-    UILabel *empty=[[UILabel alloc] initWithFrame:self.tableView.bounds];empty.text=@"还没有收藏影视\n在影片详情页点按「收藏」即可保存";empty.textAlignment=NSTextAlignmentCenter;empty.numberOfLines=0;empty.textColor=HostSecondaryText();self.tableView.backgroundView=empty;return 0;
+    UILabel *empty=[[UILabel alloc] initWithFrame:self.tableView.bounds];empty.text=@"还没有收藏影视\n在影片详情页点按「收藏」即可保存";empty.textAlignment=NSTextAlignmentCenter;empty.numberOfLines=0;empty.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];empty.adjustsFontForContentSizeCategory=YES;empty.textColor=HostSecondaryText();empty.accessibilityIdentifier=@"media-favorites-empty";self.tableView.backgroundView=empty;return 0;
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     MediaEntryListCell *cell=(MediaEntryListCell *)[tableView dequeueReusableCellWithIdentifier:@"media.favorite"];if(!cell)cell=[[MediaEntryListCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"media.favorite"];
@@ -1313,7 +1313,7 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
 }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if(self.entries.count){self.tableView.backgroundView=nil;return self.entries.count;}
-    UILabel *empty=[[UILabel alloc] initWithFrame:self.tableView.bounds];empty.text=@"还没有观看记录\n播放过的影片会保存在这里";empty.textAlignment=NSTextAlignmentCenter;empty.numberOfLines=0;empty.textColor=HostSecondaryText();self.tableView.backgroundView=empty;return 0;
+    UILabel *empty=[[UILabel alloc] initWithFrame:self.tableView.bounds];empty.text=@"还没有观看记录\n播放过的影片会保存在这里";empty.textAlignment=NSTextAlignmentCenter;empty.numberOfLines=0;empty.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];empty.adjustsFontForContentSizeCategory=YES;empty.textColor=HostSecondaryText();empty.accessibilityIdentifier=@"media-history-empty";self.tableView.backgroundView=empty;return 0;
 }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 1; }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
