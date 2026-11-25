@@ -1,5 +1,6 @@
 #import "HostBackup.h"
 #import "ProfileStore.h"
+#import "HostLibraryStore.h"
 static NSArray<NSString *> *booleanPreferenceKeys(void){return @[@"nativeChannelsEnabled",@"resumeLastChannel",@"rememberLastChannel",@"autoLoadEPG",@"allowBackgroundAudio",@"autoPiP",@"legacyNativePlayback",@"preloadNativeChannel",@"fastNativeStartup",@"nativeSDKVerboseLogs",@"runtimeDiagnosticsEnabled",@"cctv.adaptationMonitor.enabled",@"channelGridMode",@"nativeChannelLogoEnabled",@"nativePlayerCornerLogoEnabled",@"nativeChannelPreviewEnabled",@"nativeChannelTelemetryEnabled",@"cctv.restoreLastTab.v1",@"cctv.mediaAutoPlayNext",@"cctv.mediaAutoSkipIntroOutro",@"cctv.mediaKeepScreenAwake",@"cctv.mediaEpisodeShowBadge.v1",@"cctv.mediaEpisodeAutoExpand.v1",@"media.globalSearchHistoryEnabled.v1",@"hostDarkTheme"];}
 static NSArray<NSString *> *numberPreferenceKeys(void){return @[@"cctv.mediaPlaybackRate",@"cctv.channelGridColumns.v1",@"cctv.channelSortMode.v1",@"cctv.mediaGridColumns.v1",@"cctv.mediaEpisodeLayoutStyle.v1",@"cctv.networkTimeout.v1",@"cctv.appFontSize.v1"];}
 static NSArray<NSString *> *stringPreferenceKeys(void){return @[@"cctv.mediaVideoGravity",@"cctv.mediaPreferredQuality.v1",@"hostThemeMode",@"cctv.themeIdentifier.v1"];}
@@ -14,7 +15,7 @@ static NSArray<NSString *> *stringPreferenceKeys(void){return @[@"cctv.mediaVide
     NSArray *subs=[d arrayForKey:@"subscriptions"]?:@[];NSMutableDictionary *profiles=[NSMutableDictionary dictionary];
     NSArray *profileKeys=@[@"name",@"epgURL",@"detectedEPGURL",@"text",@"status",@"updatedAt",@"cachedChannels",@"unsupportedProtocols",@"managedServiceID",@"tvboxCatalogID",@"tvboxLiveEntryName",@"userAgent",@"inlinePlaylist",@"importFingerprint",@"importSourceFilename",@"count"];
     for(NSString *s in subs){NSDictionary *m=[ProfileStore metadata:s];NSMutableDictionary *saved=[NSMutableDictionary dictionary];for(NSString *key in profileKeys)if(m[key])saved[key]=m[key];if(saved.count)profiles[s]=saved;}
-    NSMutableDictionary *snap=[@{@"format":@"CCTVHost",@"version":@3,@"subscriptions":subs,@"favorites":[d arrayForKey:@"favorites"]?:@[],@"profiles":profiles,@"profileOrder":[d arrayForKey:@"profileOrder"]?:@[],@"disabledSubscriptions":[d arrayForKey:@"disabledSubscriptions"]?:@[],@"epgMappings":[d dictionaryForKey:@"epgMappings"]?:@{},@"preferences":p} mutableCopy];
+    NSMutableDictionary *snap=[@{@"format":@"CCTVHost",@"version":@3,@"subscriptions":subs,@"favorites":[HostLibraryStore.shared allFavorites]?:@[],@"profiles":profiles,@"profileOrder":[d arrayForKey:@"profileOrder"]?:@[],@"disabledSubscriptions":[d arrayForKey:@"disabledSubscriptions"]?:@[],@"epgMappings":[d dictionaryForKey:@"epgMappings"]?:@{},@"preferences":p} mutableCopy];
     NSMutableArray *catalogs=[NSMutableArray array],*dependencies=[NSMutableArray array];
     for(id value in [d arrayForKey:@"tvboxCatalogs"]?:@[]) {
         if(![value isKindOfClass:NSDictionary.class]||![value[@"id"] isKindOfClass:NSString.class]||![value[@"id"] length])continue;
@@ -27,7 +28,7 @@ static NSArray<NSString *> *stringPreferenceKeys(void){return @[@"cctv.mediaVide
         [dependencies addObject:@{@"kind":@"service",@"id":service[@"id"],@"name":[service[@"name"] isKindOfClass:NSString.class]?service[@"name"]:@"脚本资源"}];
     }
     snap[@"catalogs"]=catalogs;snap[@"resourceDependencies"]=dependencies;
-    NSArray *recents=[d arrayForKey:@"recents"];
+    NSArray *recents=[HostLibraryStore.shared recents];
     if([recents isKindOfClass:NSArray.class]&&[NSJSONSerialization isValidJSONObject:recents])snap[@"recents"]=recents;
     NSDictionary *vodFavorites=[d dictionaryForKey:@"cctv.mediaFavorites.v1"];
     if([vodFavorites isKindOfClass:NSDictionary.class]&&[NSJSONSerialization isValidJSONObject:vodFavorites])snap[@"vodFavorites"]=vodFavorites;
@@ -112,7 +113,7 @@ invalid:
 }
 + (BOOL)restore:(NSDictionary *)backup error:(NSError **)error {
     if(![ProfileStore replaceBackupMetadata:backup[@"profiles"]?:@{} error:error])return NO;
-    NSUserDefaults *d=[NSUserDefaults standardUserDefaults];[d setObject:backup[@"subscriptions"] forKey:@"subscriptions"];[d setObject:backup[@"favorites"] forKey:@"favorites"];
+    NSUserDefaults *d=[NSUserDefaults standardUserDefaults];[d setObject:backup[@"subscriptions"] forKey:@"subscriptions"];[d setObject:backup[@"favorites"] forKey:@"favorites"];[HostLibraryStore.shared replaceFavorites:backup[@"favorites"]];
     [d setObject:backup[@"profileOrder"]?:@[] forKey:@"profileOrder"];[d setObject:backup[@"disabledSubscriptions"]?:@[] forKey:@"disabledSubscriptions"];[d setObject:backup[@"epgMappings"]?:@{} forKey:@"epgMappings"];
     if([backup[@"catalogs"] isKindOfClass:NSArray.class]){
         NSMutableArray *catalogs=[[d arrayForKey:@"tvboxCatalogs"] mutableCopy]?:[NSMutableArray array];
@@ -121,6 +122,7 @@ invalid:
         [d setObject:catalogs forKey:@"tvboxCatalogs"];
     }
     if([backup[@"recents"] isKindOfClass:NSArray.class])[d setObject:backup[@"recents"] forKey:@"recents"];else[d removeObjectForKey:@"recents"];
+    [HostLibraryStore.shared replaceRecents:[backup[@"recents"] isKindOfClass:NSArray.class]?backup[@"recents"]:@[]];
     if([backup[@"vodFavorites"] isKindOfClass:NSDictionary.class])[d setObject:backup[@"vodFavorites"] forKey:@"cctv.mediaFavorites.v1"];else[d removeObjectForKey:@"cctv.mediaFavorites.v1"];
     if([backup[@"watchHistory"] isKindOfClass:NSArray.class]){
         NSMutableArray *rows=[NSMutableArray array];

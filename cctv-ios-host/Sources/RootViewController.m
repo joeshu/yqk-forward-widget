@@ -1,6 +1,7 @@
 #import "HostTheme.h"
 #import "HostGlassActionSheetViewController.h"
 #import "RootViewController_Internal.h"
+#import "HostLibraryStore.h"
 #import "MediaEpisodeLayout.h"
 #import "MediaAdaptationMonitor.h"
 #import "HostPerfMetrics.h"
@@ -1529,8 +1530,8 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
     page.onOpenDiagnostics=^{[weakSelf.navigationController pushViewController:[[RuntimeDiagnosticsViewController alloc] initWithSessionID:nil] animated:YES];};
     page.onMediaDisplaySettings=^{RootViewController *owner=weakSelf;if(!owner)return;MediaBrowserViewController *browser=[owner mediaPageCreatingIfNeeded];UIViewController *configuration=[browser mediaDisplaySettingsViewController];if(configuration)[owner.navigationController pushViewController:configuration animated:YES];};
     page.onClearEPG=^{ [[XMLTVStore shared] clear];[weakSelf.epgCache removeAllObjects]; [weakSelf saveEPGCache]; [weakSelf.table reloadData]; };
-    page.onClearWatchHistory=^{[weakSelf.recents removeAllObjects];[NSUserDefaults.standardUserDefaults setObject:@[] forKey:@"recents"];[weakSelf applyFilter];};
-    page.onClearFavorites=^{[weakSelf.favorites removeAllObjects];[NSUserDefaults.standardUserDefaults setObject:@[] forKey:@"favorites"];[weakSelf configureCatalogNavigation];[weakSelf applyFilter];};
+    page.onClearWatchHistory=^{[weakSelf.recents removeAllObjects];[HostLibraryStore.shared clearRecents];[weakSelf applyFilter];};
+    page.onClearFavorites=^{[weakSelf.favorites removeAllObjects];[HostLibraryStore.shared replaceFavorites:@[]];[weakSelf configureCatalogNavigation];[weakSelf applyFilter];};
     page.onOpenTab=^(NSInteger tab){if(tab<0||tab>=weakSelf.bottomBar.arrangedSubviews.count)return;[weakSelf selectBottomTab:(UIButton *)weakSelf.bottomBar.arrangedSubviews[tab]];};
     page.onOpenServices=^{[weakSelf openServicesPage];};
     page.onIntegerPreferenceChanged=^(NSString *key, NSInteger value){

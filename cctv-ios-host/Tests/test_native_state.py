@@ -16,6 +16,7 @@ class NativeStateTests(unittest.TestCase):
                 "-I", str(root / "Sources"),
                 str(root / "Tests" / "native_state_tests.m"),
                 str(root / "Sources" / "HostBackup.m"),
+                str(root / "Sources" / "HostLibraryStore.m"), "-lsqlite3",
                 str(root / "Sources" / "ProfileStore.m"),
                 str(root / "Sources" / "ServiceStore.m"), "-o", executable,
                 str(root / "Sources" / "HostLogBuffer.m"),
