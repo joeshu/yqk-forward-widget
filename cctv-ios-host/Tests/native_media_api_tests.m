@@ -11,6 +11,9 @@
 - (void)recordEvent:(NSString *)event category:(NSString *)category fields:(NSDictionary<NSString *,id> *)fields {}
 @end
 
+// PyHost.m is not linked into this harness; MediaAPIClient only needs the control token.
+NSString *PyHostControlToken(void) {return @"test-control-token";}
+
 static void check(BOOL condition,NSString *message){if(!condition){NSLog(@"FAILED: %@",message);exit(1);}}
 @interface MediaAPIClient (RequestIdentityProbe)
 - (NSURLSession *)sessionForOperation:(NSString *)operation;
