@@ -86,9 +86,13 @@ static NSTimeInterval const HostMemoryMonitorInterval  = 30.0;
 
 - (void)performTrimWithPressure:(HostMemoryBudgetPressure)pressure operation:(NSString *)operation availableBytes:(uint64_t)available {
     self.lastTrimTimestamp = CACurrentMediaTime();
+    // 释放顺序：先裁剪体量最大、重建成本最低的图片位图缓存（NSCache，~32 MiB），
+    // 再在 Critical 时回收元数据内存索引。元数据持久记录（home/category 磁盘缓存）
+    // 须跨重启保留，故仅用 evictMemoryCache 回收内存，不可调用 clear 抹除磁盘状态——
+    // 否则一次瞬时系统内存告警就会摧毁本应持久化的目录缓存，触发昂贵的全量重拉。
     [HostImageLoader.shared clearCache];
     if (pressure == HostMemoryBudgetPressureCritical) {
-        [MediaMetadataCache.shared clear];
+        [MediaMetadataCache.shared evictMemoryCache];
     }
     NSString *level = pressure == HostMemoryBudgetPressureCritical ? @"critical" : @"warning";
     [NSNotificationCenter.defaultCenter postNotificationName:HostMemoryBudgetDidTrimNotification
