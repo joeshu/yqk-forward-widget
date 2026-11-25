@@ -214,7 +214,6 @@ enum {
 @property (nonatomic) NSTimeInterval bufferedPosition;
 @property (nonatomic) BOOL loading;
 @property (nonatomic) BOOL hasVideoTrack;
-@property (nonatomic) float rate;
 @property (nonatomic, readwrite) NSInteger lastErrorCode;
 @property (nonatomic) BOOL muted;
 @property (nonatomic, copy) NSString *pendingGravity;

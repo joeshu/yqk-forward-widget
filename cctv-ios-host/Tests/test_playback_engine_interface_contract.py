@@ -91,3 +91,11 @@ class PlaybackEngineInterfaceContractTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class MPVClassExtensionRedeclarationGuard(unittest.TestCase):
+    def test_mpv_extension_does_not_redeclare_public_readwrite_rate(self):
+        from pathlib import Path
+        src = (Path(__file__).resolve().parents[1] / "Sources" / "MediaPlaybackMPVAdapter.m").read_text(encoding="utf-8")
+        ext = src.split("@interface MediaPlaybackMPVAdapter ()", 1)[1].split("@end", 1)[0]
+        self.assertNotIn("@property (nonatomic) float rate;", ext)
