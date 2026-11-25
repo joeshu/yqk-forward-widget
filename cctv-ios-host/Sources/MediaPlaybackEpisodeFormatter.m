@@ -20,4 +20,3 @@ BOOL MediaPlaybackEpisodeNamesMatch(NSString *left,NSString *right) {
     NSString *leftNumber=MediaPlaybackEpisodeNumber(left),*rightNumber=MediaPlaybackEpisodeNumber(right);
     return leftNumber.length&&[leftNumber isEqualToString:rightNumber];
 }
-
