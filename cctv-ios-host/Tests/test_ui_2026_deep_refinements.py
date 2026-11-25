@@ -57,8 +57,9 @@ class UI2026DeepRefinementsTests(unittest.TestCase):
         self.assertIn("usingSpringWithDamping:0.65 initialSpringVelocity:0.5", playback)
 
     def test_ref10_playback_quality_buttons_press_feedback(self):
-        playback = (SOURCES / "MediaPlaybackViewController.m").read_text(encoding="utf-8")
-        self.assertIn("HostInstallPressFeedback(button);MediaPlaybackApplyScaledPillFont(button);", playback)
+        # b-quality-panel：按压反馈 + 缩放字体随画质按钮构造迁入面板视图。
+        qp = (SOURCES / "MediaPlaybackQualityPanelView.m").read_text(encoding="utf-8")
+        self.assertIn("HostInstallPressFeedback(button);MediaPlaybackApplyScaledPillFont(button);", qp)
 
     def test_ref11_full_app_live_theme_reload_and_interface_style_coverage(self):
         for p in sorted(SOURCES.glob("*.m")):
@@ -109,7 +110,10 @@ class UI2026DeepRefinementsTests(unittest.TestCase):
 
     def test_ref15_media_detail_and_inline_player_dedup_and_unclipped_controls(self):
         mp = (SOURCES / "MediaPlaybackViewController.m").read_text(encoding="utf-8")
-        self.assertIn("qualityScrollHeight.priority=UILayoutPriorityDefaultHigh;", mp)
+        # b-quality-panel：qualityScrollHeight 内部约束随画质面板迁出，
+        # 该守护迁移到面板源；qualityGroup 外部锚仍由控制器持有。
+        qp = (SOURCES / "MediaPlaybackQualityPanelView.m").read_text(encoding="utf-8")
+        self.assertIn("qualityScrollHeight.priority=UILayoutPriorityDefaultHigh;", qp)
         self.assertIn("!MediaPlaybackEpisodeNamesMatch(name,number)", mp)
         self.assertIn("[self.qualityGroup.topAnchor constraintEqualToAnchor:self.controlPanel.topAnchor constant:11]", mp)
 

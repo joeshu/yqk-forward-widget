@@ -23,6 +23,9 @@ PLAYBACK_SOURCE = (SOURCES / "MediaPlaybackViewController.m").read_text(encoding
 # b-route-episode-panel：线路按钮纯呈现迁入 MediaPlaybackRoutePanelView，
 # buildLines 成为门面；a11y 契约随代码迁到新位置继续守护。
 ROUTE_PANEL_SOURCE = (SOURCES / "MediaPlaybackRoutePanelView.m").read_text(encoding="utf-8")
+# b-quality-panel：画质按钮纯呈现迁入 MediaPlaybackQualityPanelView，
+# buildQualityButtons 成为门面；a11y 契约随代码迁到新位置继续守护。
+QUALITY_PANEL_SOURCE = (SOURCES / "MediaPlaybackQualityPanelView.m").read_text(encoding="utf-8")
 EPISODE_SOURCE = (SOURCES / "MediaEpisodeSelectionViewController.m").read_text(encoding="utf-8")
 SERVICES_SOURCE = (SOURCES / "ServicesViewController.m").read_text(encoding="utf-8")
 TVBOX_SOURCE = (SOURCES / "TVBoxCatalogViewController.m").read_text(encoding="utf-8")
@@ -75,8 +78,11 @@ class DynamicTypeContracts(unittest.TestCase):
         self.assertIn("rebuildWithLines:self.lines", PLAYBACK_SOURCE)
 
     def test_playback_quality_buttons_use_scaled_pill_font(self):
-        body = method_body(PLAYBACK_SOURCE, "- (void)buildQualityButtons {")
+        # b-quality-panel：按钮构造迁入 MediaPlaybackQualityPanelView。
+        body = method_body(QUALITY_PANEL_SOURCE, "- (void)rebuildWithAlternates:")
         self.assertIn("MediaPlaybackApplyScaledPillFont(button);", body)
+        # VC 门面仍保留 buildQualityButtons 签名，转发到面板，保证既有调用点不变。
+        self.assertIn("rebuildWithAlternates:alternates", PLAYBACK_SOURCE)
 
     def test_cicada_control_factory_keeps_hud_font_fixed(self):
         # HUD 创建被委托给独立模块；固定字号和动态元素仍在 builder 内。
@@ -135,9 +141,12 @@ class VoiceOverButtonContracts(unittest.TestCase):
         self.assertIn("rebuildWithLines:self.lines", PLAYBACK_SOURCE)
 
     def test_playback_quality_buttons_keep_existing_label_and_hint(self):
-        body = method_body(PLAYBACK_SOURCE, "- (void)buildQualityButtons {")
+        # b-quality-panel：a11y 契约随按钮构造迁入面板视图。
+        body = method_body(QUALITY_PANEL_SOURCE, "- (void)rebuildWithAlternates:")
         self.assertIn("button.accessibilityLabel=name;", body)
         self.assertIn("button.accessibilityHint=alternates.count==1?", body)
+        # VC 门面转发，调用点签名不变。
+        self.assertIn("rebuildWithAlternates:alternates", PLAYBACK_SOURCE)
 
     def test_playback_retry_and_web_buttons_have_hint(self):
         self.assertIn(
