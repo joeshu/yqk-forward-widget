@@ -126,7 +126,9 @@ ALLOWED_EXPORT_PREFIX = '_mpv_'
 # CoreGraphics (libplacebo _CGColorSpace*), CoreText (harfbuzz _CTFont*),
 # IOSurface (MoltenVK _IOSurface*), OpenGLES (libmpv hwdec_ios_gl
 # _CVOpenGLESTextureCache*; still shipped in the iOS 18 SDK on macos-15),
-# Foundation (_NSLocalizedDescriptionKey, referenced from the dep libs).
+# Foundation (_NSLocalizedDescriptionKey, referenced from the dep libs),
+# UIKit (MoltenVK references UIScreen/UIView; the framework is linked from
+# a stub .c file, so nothing else pulls UIKit in).
 LINK_FRAMEWORKS = (
     'AVFoundation',
     'AudioToolbox',
@@ -142,6 +144,7 @@ LINK_FRAMEWORKS = (
     'OpenGLES',
     'QuartzCore',
     'Security',
+    'UIKit',
     'VideoToolbox',
 )
 
