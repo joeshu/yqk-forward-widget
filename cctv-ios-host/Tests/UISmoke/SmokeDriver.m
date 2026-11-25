@@ -838,13 +838,19 @@ static void next(NSArray *steps, NSUInteger index) {
             PluginRunHistoryViewController *history=(id)nav.topViewController;
             check([history isKindOfClass:PluginRunHistoryViewController.class], @"service logs first show independent run records");
             check([PluginLogStore.shared runsForIdentifier:@"ui-smoke-plugin"].count==2, @"plugin store persisted two independent runs");
-            [history performSelector:@selector(refreshRuns)];
-            NSDate *deadline=[NSDate dateWithTimeIntervalSinceNow:15];
-            while([[history valueForKey:@"runs"] count]<2&&deadline.timeIntervalSinceNow>0){
+            // refreshRuns ignores calls while a fetch is in flight, so a stale 1-run snapshot can land last.
+            // Keep re-requesting and require both the model and the table to report two rows (30s for XXXL devices).
+            NSDate *deadline=[NSDate dateWithTimeIntervalSinceNow:30];NSDate *nextRefresh=[NSDate distantPast];
+            NSInteger historyRows=0;
+            while(deadline.timeIntervalSinceNow>0){
+                historyRows=[history tableView:history.tableView numberOfRowsInSection:0];
+                if([[history valueForKey:@"runs"] count]==2&&historyRows==2&&[history.tableView numberOfRowsInSection:0]==2)break;
+                if(nextRefresh.timeIntervalSinceNow<=0){[history performSelector:@selector(refreshRuns)];nextRefresh=[NSDate dateWithTimeIntervalSinceNow:0.5];}
                 [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.025]];
             }
-            check([history tableView:history.tableView numberOfRowsInSection:0]==2, @"two service starts appear as two separate log entries");
-            [history tableView:history.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
+            historyRows=[history tableView:history.tableView numberOfRowsInSection:0];
+            check(historyRows==2, [NSString stringWithFormat:@"two service starts appear as two separate log entries (rows=%ld store=%lu)",(long)historyRows,(unsigned long)[PluginLogStore.shared runsForIdentifier:@"ui-smoke-plugin"].count]);
+            if(historyRows>0)[history tableView:history.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
             LogCenterViewController *logs=(id)nav.topViewController;
             check([logs isKindOfClass:LogCenterViewController.class], @"selecting a run opens its own searchable log page");
             if([logs isKindOfClass:LogCenterViewController.class]){
