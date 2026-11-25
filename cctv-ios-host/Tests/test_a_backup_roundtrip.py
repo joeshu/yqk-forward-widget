@@ -90,7 +90,8 @@ class StoreFallbackNormalizationTests(unittest.TestCase):
         body = self._body("- (void)replaceRecents:(NSArray *)recents {")
         self.assertIn("HostLibraryNormalizedRecents(snapshot)", body)
         self.assertNotIn("setObject:snapshot forKey:HostLibraryLegacyRecentsKey", body)
-        self.assertEqual(body.count("setObject:normalized forKey:HostLibraryLegacyRecentsKey"), 2)
+        self.assertIn("i < HostLibraryRecentsLimit", body)
+        self.assertEqual(body.count("setObject:bounded forKey:HostLibraryLegacyRecentsKey"), 2)
 
     def test_normalizers_dedup_and_drop_invalid(self):
         """实跑归一化逻辑：确认去重 + 过滤空 id/无 id/不可序列化项的语义。"""

@@ -738,7 +738,8 @@ class FallbackPendingFlagTests(unittest.TestCase):
         method = impl[start:end]
         self.assertIn("[self closeLocked];", method)
         self.assertIn("setBool:YES forKey:HostLibraryFallbackPendingKey", method)
-        self.assertIn("setObject:normalized forKey:HostLibraryLegacyRecentsKey", method)
+        self.assertIn("i < HostLibraryRecentsLimit", method)
+        self.assertEqual(method.count("setObject:bounded forKey:HostLibraryLegacyRecentsKey"), 2)
         prepare_idx = method.index("if ([self prepareLocked])")
         else_idx = method.index("else {")
         handler_idx = method.index("[self closeLocked];")
