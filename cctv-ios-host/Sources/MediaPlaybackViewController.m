@@ -1071,6 +1071,11 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     [self playResult:result];
 }
 - (void)dealloc {
+    // teardownAfterScreenExit 释放会话；防止 dealloc 前未经过离场清理
+    // （画中画延迟销毁、导航栈重建、内嵌子控制器未触发 viewDidDisappear 等）
+    // 时锁屏 Now Playing 信息与全局播放所有权残留。此时 coordinator 的弱引用
+    // 尚未在 super -dealloc 阶段被运行时置空，仍能匹配并清空 nowPlayingInfo。
+    [[PlaybackCoordinator shared] releaseSession:(id<PlaybackSession>)self];
     for(MediaKeyRequest *request in self.keyRequests.allValues)[request cancel];
     [self endBackgroundAutoAdvanceTaskIfNeeded];
     [self teardownHiddenStreamSniffer];
@@ -1097,9 +1102,9 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 }
 - (void)stopObservingCurrentPlayback {
     [self.avFirstFrameTimer invalidate];self.avFirstFrameTimer=nil;
-    // 每秒回调的 time observer 只在 dealloc 移除，clearCurrentPlayerItem /
-    // viewDidDisappear 走这里清理时不移除会空转；新 item 由
-    // installProgressObserverIfNeeded 重装。
+    // 每秒回调的 time observer 在此统一移除（dealloc / clearCurrentPlayerItem /
+    // viewDidDisappear 离场清理均经此路径）；新 item 由
+    // installProgressObserverIfNeeded 重装。dealloc 另有显式移除，幂等。
     if(self.progressTimeObserver&&self.player){MediaPlaybackGuardedTeardown(@"timeObserver",self.player,nil,nil,NULL,self.progressTimeObserver);self.progressTimeObserver=nil;}
     if(self.playbackAttemptID.length&&!self.progressSummaryRecorded){
         self.progressSummaryRecorded=YES;
