@@ -2,10 +2,10 @@
 
 审计发现 MediaFavoritesViewController 与 MediaWatchHistoryViewController 的
 空状态标签此前缺少 Dynamic Type 缩放（preferredFontForTextStyle +
-adjustsFontForContentSizeCategory）与稳定 accessibilityIdentifier，与
-MediaSourcePicker 的 media-picker-empty 空状态不一致。本次一致性修复把它们
-对齐到与 picker/全局搜索空状态相同的约定。本测试钉住该约定，避免回归。
-仅做源码文本断言，不编译、不依赖运行环境。
+adjustsFontForContentSizeCategory）与稳定 accessibilityIdentifier。本轮阶段 C
+将收藏/历史/全局搜索/TVBox/资源选择器(picker)空态统一迁移到 HostEmptyStateView，
+对齐到同一套可访问性约定（动态字体由 helper 统一承担，各页只提供文案与标识符）。
+本测试钉住该约定，避免回归。仅做源码文本断言，不编译、不依赖运行环境。
 """
 from pathlib import Path
 import unittest
@@ -82,15 +82,23 @@ class MediaNavEmptyStateConsistency(unittest.TestCase):
         self.assertIn('HostEmptyStateView emptyStateViewWithTitle:@"还没有观看记录" subtitle:@"播放过的影片会保存在这里" symbol:@"clock"', body)
         self.assertIn('accessibilityIdentifier=@"media-history-empty"', body)
 
-    def test_picker_empty_state_remains_the_reference_convention(self):
-        # picker 是本次对齐的参照基准：必须仍具备 Body 字号 + 缩放 + 标识符。
+    def test_picker_empty_state_uses_shared_helper(self):
+        # picker 空态本轮已迁移到 HostEmptyStateView（与收藏/历史/全局搜索一致），
+        # 但原文案来源（emptyMessageForQuery:）与触发条件（!self.shown.count）不变，
+        # 标识符 media-picker-empty 保留以便 UI 自动化定位。
         body = _method_body(
             PICKER_IMPL,
             "- (void)updateSearchResultsForSearchController:(UISearchController *)controller {",
         )
-        self.assertIn("[UIFont preferredFontForTextStyle:UIFontTextStyleBody]", body)
-        self.assertIn("empty.adjustsFontForContentSizeCategory=YES;", body)
-        self.assertIn('empty.accessibilityIdentifier=@"media-picker-empty";', body)
+        self.assertIn("[MediaBrowserQueryBuilder emptyMessageForQuery:query]", body)
+        self.assertIn("if(!self.shown.count)", body)
+        self.assertIn(
+            'HostEmptyStateView emptyStateViewWithTitle:[MediaBrowserQueryBuilder emptyMessageForQuery:query] subtitle:nil symbol:nil',
+            body,
+        )
+        self.assertIn('accessibilityIdentifier=@"media-picker-empty"', body)
+        # 不再手写 UILabel 作为 backgroundView。
+        self.assertNotIn("UILabel *empty=", body)
 
     def test_empty_state_identifiers_are_distinct(self):
         # 三个表格空状态标识符必须互不相同，避免 UISmoke/测试误匹配。

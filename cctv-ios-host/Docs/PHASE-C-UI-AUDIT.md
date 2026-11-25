@@ -103,19 +103,19 @@ App 采用**单一容器 + 自绘底部 Dock** 的导航模型，而非系统 `U
 
 ## 3. 空态审计（核心发现）
 
-全仓 119 处空态相关文案，**手写 `UILabel` 当 `tableView.backgroundView` 的站点至少 12 处**，约定不统一：
+全仓 119 处空态相关文案，**手写 `UILabel` 当 `tableView.backgroundView` 的站点至少 12 处**，约定不统一。下表为审计时原始状态；标注「✅ 已迁移」者为阶段 C 后续提交已迁移到 `HostEmptyStateView`：
 
-| 站点 | 文件 | 动态字体 | a11y label/identifier | 一致性 |
-| --- | --- | --- | --- | --- |
-| 影视收藏 | MediaBrowserViewController.m:1238 | ❌ | ❌ | 不一致 |
-| 影视观看记录 | MediaBrowserViewController.m:1316 | ❌ | ❌ | 不一致 |
-| 全局搜索无源 | MediaGlobalSearchViewController.m:265 | ✅ | ❌ 无 identifier | 部分 |
-| 本地媒体 | LocalMediaViewController.m:161 | ✅ | ❌ 无 identifier | 部分 |
-| 日志中心 | LogCenterViewController.m:110 | ✅ | ❌ 无 identifier | 部分 |
-| 节目单 | EPGViewController.m:127 | ✅ | ❌ 无 identifier | 部分 |
-| 合集浏览 | TVBoxCatalogViewController.m:95 | ✅ | ❌ 仅 2 处 a11y | 部分 |
-| 选集搜索空 | MediaBrowserViewController.m:135 | ✅ | ✅ `media-picker-empty` | ✅ |
-| ConfigCenter empty 容器 | ConfigCenterViewController.m:309 | ✅ | ✅ | ✅（Agent B） |
+| 站点 | 文件 | 动态字体 | a11y label/identifier | 一致性 | 迁移状态 |
+| --- | --- | --- | --- | --- | --- |
+| 影视收藏 | MediaBrowserViewController.m:1238 | ❌ | ❌ | 不一致 | ✅ 已迁移 `media-favorites-empty` |
+| 影视观看记录 | MediaBrowserViewController.m:1316 | ❌ | ❌ | 不一致 | ✅ 已迁移 `media-history-empty` |
+| 全局搜索无源 | MediaGlobalSearchViewController.m:265 | ✅ | ❌ 无 identifier | 部分 | ✅ 已迁移 `media-global-search-empty` |
+| 本地媒体 | LocalMediaViewController.m:161 | ✅ | ❌ 无 identifier | 部分 | ⬜ 待迁移（非本轮范围） |
+| 日志中心 | LogCenterViewController.m:110 | ✅ | ❌ 无 identifier | 部分 | ⬜ 待迁移（非本轮范围） |
+| 节目单 | EPGViewController.m:127 | ✅ | ❌ 无 identifier | 部分 | ⬜ 待迁移（非本轮范围） |
+| 合集浏览 | TVBoxCatalogViewController.m:95 | ✅ | ❌ 仅 2 处 a11y | 部分 | ✅ 已迁移 `tvbox-catalog-empty` |
+| 选集搜索空 | MediaBrowserViewController.m:135 | ✅ | ✅ `media-picker-empty` | ✅ | ✅ 已迁移 `media-picker-empty`（保留文案来源 `emptyMessageForQuery:` 与触发 `!self.shown.count`） |
+| ConfigCenter empty 容器 | ConfigCenterViewController.m:309 | ✅ | ✅ | ✅（Agent B） | ⬜ 不越界 |
 | PlaybackInfo | PlaybackInfoViewController.m:50 | ✅ | ⚠️ | 部分 |
 
 **结论**：空态在「颜色/字号/a11y」三维度高度碎片化，是大字号与 VoiceOver 回归的高发区。本阶段已落地统一 helper（见第 6 节），后续各页可逐步迁移；因 ConfigCenter/Settings 归 Agent B，本轮不迁移其站点。
@@ -166,14 +166,16 @@ App 采用**单一容器 + 自绘底部 Dock** 的导航模型，而非系统 `U
 | `Sources/HostEmptyStateView.h/.m` | 统一空态视图：SF Symbol 图标 + title + subtitle + 可选动作按钮；全文字 `preferredFontForTextStyle`+`adjustsFontForContentSizeCategory`；`HostTheme` 动态颜色；`traitCollectionDidChange` 自动重刷；作为单个 VoiceOver 元素合并朗读 title/subtitle，有按钮时切 `Button` trait；居中 + 水平内边距（iPad 不拉满）。另提供 `+placeholderLabelWithText:` 工厂直接替换既有 `UILabel` 背景模式。含私有方法类扩展前向声明（满足 round17 选择器审计）。 |
 | `Tests/test_host_empty_state_view.py` | 10 个源码契约测试：API 表面、主题色、动态字体、trait 变化、VoiceOver 合并/traits 切换/子元素排除、占位标签 a11y、布局居中与内边距、工厂不强制 frame。 |
 
-### 未迁移既有站点（刻意）
+### 已迁移站点（阶段 C 续一）
 
-本轮仅交付 helper + 测试，**不在 c-interface 分支迁移第 3 节的 12 处空态调用点**，原因：(1) 多数在 MediaBrowser/EPG/LogCenter/LocalMedia/TVBoxCatalog，迁移虽小但属行为改动，需逐页视觉验证，留作后续小步 PR；(2) ConfigCenter/Settings 归 Agent B，不越界。helper 已就绪，迁移是机械替换 `UILabel *empty=[UILabel new]…` → `[HostEmptyStateView emptyStateViewWithTitle:… symbol:…]` 或 `+placeholderLabelWithText:`，零风险。
+阶段 C 已在后续提交中把收藏/历史/全局搜索无源/合集浏览/选集搜索空 5 处迁移到 `HostEmptyStateView`，并各自赋予独立 `accessibilityIdentifier`（`media-favorites-empty`/`media-history-empty`/`media-global-search-empty`/`tvbox-catalog-empty`/`media-picker-empty`）。迁移保持原文案与触发逻辑不变：选集搜索空的文案仍由 `MediaBrowserQueryBuilder emptyMessageForQuery:` 提供、触发仍为 `!self.shown.count`；全局搜索无源仍由 `if(self.sources.count){…backgroundView=nil;return;}` 门控。剩余 LocalMedia/LogCenter/EPG 等站点待后续小步 PR；ConfigCenter/Settings 归 Agent B 不越界。迁移是机械替换 `UILabel *empty=[UILabel new]…` → `[HostEmptyStateView emptyStateViewWithTitle:… symbol:…]` 或 `+placeholderLabelWithText:`，零风险。
+
+注：频道无订阅（RootViewController 目录页 `emptyLabel`「暂无可显示内容」）不在 Favorites/History/GlobalSearch/TVBox 四类范围内，且已有空态——本轮仅核验不重复迁移。
 
 ## 10. 未完成项分级
 
 ### P1（建议尽快，中风险）
-- 迁移第 3 节 12 处空态到 `HostEmptyStateView`（尤其收藏/历史/合集 3 处既无动态字体又无 a11y）。
+- ~~迁移第 3 节收藏/历史/合集/全局搜索/选集搜索空 5 处到 `HostEmptyStateView`~~ ✅ 已完成（阶段 C 续一）。剩余 LocalMedia/LogCenter/EPG 3 处待迁移。
 - Tab 1 无订阅时补空态提示「还没有订阅，去资源页导入」。
 - `ServicesViewController` 服务行/启停按钮补 `accessibilityLabel`（当前仅 5 处）。
 
