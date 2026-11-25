@@ -1324,13 +1324,7 @@
     [HostGlassActionSheetViewController presentOn:self title:tsTitle subtitle:msg badgeText:(inCatchup ? @"↺ 回看中" : @"● 实时直播") badgeColor:(inCatchup ? UIColor.systemOrangeColor : UIColor.systemGreenColor) sections:sections sourceView:(self.moreBtn ?: self.view)];
 }
 - (void)beginNativeTransition:(NSString *)kind {
-    // 时移/回看/返回直播过渡契约：进入过渡即重置 firstRender=NO 并启动 0.5s 周期
-    // watchdog（tick:）。过渡首帧由 SDK stat 事件 3 异步回灌 firstRender=YES；若 SDK
-    // 未在 attemptElapsed>=25s（或 elapsed>=50s）内放行首帧，tick: 必经 failNativeTransition
-    // 终结过渡（nativeTimeShiftActive=NO，保留直播会话时 firstRender=YES，否则
-    // nativePlaybackFailed=YES）。因此过渡期间 {firstRender | nativePlaybackFailed |
-    // !nativeTimeShiftActive} 至多 ~25s 内必然求值成立——任何对这三者的轮询等待都是
-    // 确定性收敛的，UI 冒烟据此用 30s 超时等待取代瞬时断言（见 SmokeDriver 时移段）。
+    // Async native transition: 0.5s watchdog bounds SmokeDriver's terminal-state wait.
     [self.nativePreloader cancel];[self beginPlaybackPriority];self.playbackGeneration++;
     self.nativeUserPaused=NO;self.firstRender=NO;self.nativePlaybackFailed=NO;self.stallReported=NO;self.nativeStartupRecoveryUsed=NO;self.nativeSafeStartupActive=NO;self.nativeTransitionKind=kind;
     self.playStartedAt=CACurrentMediaTime();self.startupTrace=[[PlaybackStartupTrace alloc] initWithStartTime:self.playStartedAt];
