@@ -225,6 +225,8 @@
     }
     UIBarButtonItem *toolsItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"wand.and.stars"] menu:[UIMenu menuWithTitle:@"代码工具" children:toolActions]];
     toolsItem.accessibilityIdentifier = @"service.code.tools";
+    toolsItem.accessibilityLabel=@"代码工具";
+    toolsItem.accessibilityHint=@"搜索、跳行、预检、格式化、复制或插入代码模板";
     if (!self.readOnly) {
         UIBarButtonItem *saveItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemSave target:self action:@selector(save)];
         self.navigationItem.rightBarButtonItems = @[saveItem, toolsItem];
@@ -744,6 +746,9 @@
     autoPortBtn.layer.cornerCurve=kCACornerCurveContinuous;
     HostInstallPressFeedback(autoPortBtn);
     autoPortBtn.frame=CGRectMake(0,0,68,36);
+    autoPortBtn.accessibilityLabel=@"自动分配可用端口";
+    autoPortBtn.accessibilityHint=@"在 1024–65535 范围内分配一个未被占用的端口";
+    autoPortBtn.accessibilityTraits=UIAccessibilityTraitButton;
     [autoPortBtn addTarget:self action:@selector(assignAvailablePort) forControlEvents:UIControlEventTouchUpInside];
     self.portField.rightView=autoPortBtn;
     self.portField.rightViewMode=UITextFieldViewModeAlways;
@@ -765,6 +770,9 @@
     pasteURLBtn.layer.cornerCurve=kCACornerCurveContinuous;
     HostInstallPressFeedback(pasteURLBtn);
     pasteURLBtn.frame=CGRectMake(0,0,48,36);
+    pasteURLBtn.accessibilityLabel=@"粘贴剪贴板中的代码链接";
+    pasteURLBtn.accessibilityHint=@"将剪贴板内容填入远程代码 URL 输入框";
+    pasteURLBtn.accessibilityTraits=UIAccessibilityTraitButton;
     [pasteURLBtn addTarget:self action:@selector(pasteURLIntoField) forControlEvents:UIControlEventTouchUpInside];
     self.urlField.rightView=pasteURLBtn;
     self.urlField.rightViewMode=UITextFieldViewModeUnlessEditing;
@@ -774,9 +782,12 @@
     self.lanSwitch = [UISwitch new];
     self.lanSwitch.onTintColor = HostAccent();
     self.lanSwitch.on = [self.service[@"lan"] boolValue];
+    self.lanSwitch.accessibilityLabel=@"允许局域网访问";
+    self.lanSwitch.accessibilityHint=@"开启后同一局域网内的设备可访问此服务";
     [self.lanSwitch addTarget:self action:@selector(draftChanged) forControlEvents:UIControlEventValueChanged];
     self.sourceControl = [[UISegmentedControl alloc] initWithItems:@[ @"文件", @"链接", @"代码" ]];
     self.sourceControl.accessibilityLabel=@"服务代码来源";
+    self.sourceControl.accessibilityHint=@"选择服务代码来自文件、链接或直接输入代码";
     self.sourceControl.selectedSegmentTintColor=HostAccentFill();
     [self updateSourceControlFont];
     self.sourceControl.selectedSegmentIndex = 1;
@@ -793,6 +804,8 @@
         [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemSave
                                                       target:self
                                                       action:@selector(save)];
+    self.navigationItem.rightBarButtonItem.accessibilityLabel=@"保存资源配置";
+    self.navigationItem.rightBarButtonItem.accessibilityHint=@"校验并保存当前资源名称、端口、代码与网络配置";
 }
 - (void)reloadThemeAppearance {
     if(!self.isViewLoaded)return;
@@ -955,6 +968,7 @@
         c.layer.borderWidth = 0.9;
         HostSetLayerBorderColor(c, [HostAccent() colorWithAlphaComponent:0.45]);
         c.selectionStyle = UITableViewCellSelectionStyleDefault;
+        c.accessibilityHint=@"保存当前资源配置";
     }
     if (input) {
         NSString *rowTitle=[c.textLabel.text copy];
@@ -993,6 +1007,10 @@
         c.detailTextLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
         c.detailTextLabel.adjustsFontForContentSizeCategory=YES;
         c.detailTextLabel.numberOfLines=0;
+    }
+    if(c.selectionStyle!=UITableViewCellSelectionStyleNone){
+        c.accessibilityTraits=UIAccessibilityTraitButton;
+        if(!c.accessibilityHint.length)c.accessibilityHint=@"点按查看或编辑此行配置";
     }
     return c;
 }
