@@ -139,7 +139,7 @@
 }
 - (void)viewDidLoad {
     [super viewDidLoad];self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();NSString *catalogName=[self.catalog[@"name"] isKindOfClass:NSString.class]?self.catalog[@"name"]:@"";self.title=(!catalogName.length||[catalogName isEqual:@"TVBox 资源目录"]||[catalogName isEqual:@"TVBox资源目录"])?@"资源合集":catalogName;self.navigationItem.prompt=@"点按需要的站点按需加载 · 不必全量导入";self.tableView.backgroundColor=HostBackground();self.tableView.keyboardDismissMode=UIScrollViewKeyboardDismissModeOnDrag;self.tableView.rowHeight=UITableViewAutomaticDimension;self.tableView.estimatedRowHeight=88;
-    self.searchController=[[UISearchController alloc] initWithSearchResultsController:nil];self.searchController.searchResultsUpdater=self;self.searchController.obscuresBackgroundDuringPresentation=NO;self.searchController.searchBar.placeholder=@"搜索合集中的站点、协议或 URL";self.searchController.searchBar.autocapitalizationType=UITextAutocapitalizationTypeNone;self.searchController.searchBar.autocorrectionType=UITextAutocorrectionTypeNo;self.navigationItem.searchController=self.searchController;self.navigationItem.hidesSearchBarWhenScrolling=NO;self.definesPresentationContext=YES;
+    self.searchController=[[UISearchController alloc] initWithSearchResultsController:nil];self.searchController.searchResultsUpdater=self;self.searchController.obscuresBackgroundDuringPresentation=NO;self.searchController.searchBar.placeholder=@"搜索合集中的站点、协议或 URL";self.searchController.searchBar.accessibilityLabel=@"搜索资源合集";self.searchController.searchBar.accessibilityHint=@"输入站点名称、协议或 URL 以筛选合集列表";self.searchController.searchBar.autocapitalizationType=UITextAutocapitalizationTypeNone;self.searchController.searchBar.autocorrectionType=UITextAutocorrectionTypeNo;self.navigationItem.searchController=self.searchController;self.navigationItem.hidesSearchBarWhenScrolling=NO;self.definesPresentationContext=YES;
     __weak typeof(self) weakSelf=self;
     NSArray *resourceActions=@[
         @{@"icon":@"square.and.arrow.down",@"title":@"全量导入（较慢）",@"action":[UIAction actionWithHandler:^(UIAction *a){
@@ -172,8 +172,8 @@
     UIMenu *advGroup=[UIMenu menuWithTitle:@"高级操作" image:nil identifier:@"tvbox.catalog.menu.advanced" options:UIMenuOptionsDisplayInline children:@[bulk]];
     UIMenu *dangerGroup=[UIMenu menuWithTitle:@"" image:nil identifier:@"tvbox.catalog.menu.danger" options:UIMenuOptionsDisplayInline children:@[remove]];
     UIBarButtonItem *more=[[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"] style:UIBarButtonItemStylePlain target:nil action:nil];
-    more.accessibilityLabel=@"合集操作";more.menu=[UIMenu menuWithChildren:@[exportGroup,advGroup,dangerGroup]];self.navigationItem.rightBarButtonItem=more;
-    self.contentFilter=[[UISegmentedControl alloc] initWithItems:@[@"全部",@"影视",@"直播",@"不支持"]];self.contentFilter.selectedSegmentIndex=0;self.contentFilter.selectedSegmentTintColor=HostAccent();[self.contentFilter setTitleTextAttributes:@{NSForegroundColorAttributeName:HostText(),NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1]} forState:UIControlStateNormal];[self.contentFilter setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent(),NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1]} forState:UIControlStateSelected];[self.contentFilter addTarget:self action:@selector(filterChanged) forControlEvents:UIControlEventValueChanged];
+    more.accessibilityLabel=@"合集操作";more.accessibilityHint=@"导出、导入或移除本资源合集";more.menu=[UIMenu menuWithChildren:@[exportGroup,advGroup,dangerGroup]];self.navigationItem.rightBarButtonItem=more;
+    self.contentFilter=[[UISegmentedControl alloc] initWithItems:@[@"全部",@"影视",@"直播",@"不支持"]];self.contentFilter.selectedSegmentIndex=0;self.contentFilter.selectedSegmentTintColor=HostAccent();self.contentFilter.accessibilityLabel=@"资源分类筛选";self.contentFilter.accessibilityHint=@"筛选全部、影视、直播或不支持的资源";[self.contentFilter setTitleTextAttributes:@{NSForegroundColorAttributeName:HostText(),NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1]} forState:UIControlStateNormal];[self.contentFilter setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent(),NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1]} forState:UIControlStateSelected];[self.contentFilter addTarget:self action:@selector(filterChanged) forControlEvents:UIControlEventValueChanged];
     UIView *header=[[UIView alloc] initWithFrame:CGRectMake(0,0,MAX(320,self.tableView.bounds.size.width),96)];
     UIView *headerCard=[UIView new];
     headerCard.translatesAutoresizingMaskIntoConstraints=NO;
@@ -287,7 +287,17 @@
     if(!accentBar){accentBar=[[UIView alloc] initWithFrame:CGRectMake(2,10,3,MAX(0,CGRectGetHeight(cell.contentView.bounds)-20))];accentBar.tag=9201;accentBar.autoresizingMask=UIViewAutoresizingFlexibleHeight|UIViewAutoresizingFlexibleRightMargin;accentBar.layer.cornerRadius=1.5;accentBar.userInteractionEnabled=NO;[cell.contentView addSubview:accentBar];}
     accentBar.frame=CGRectMake(2,10,3,MAX(0,CGRectGetHeight(cell.contentView.bounds)-20));
     accentBar.backgroundColor=serviceRunning?UIColor.systemGreenColor:(supported?HostAccent():[HostMutedText() colorWithAlphaComponent:0.35]);
-    cell.accessoryType=supported?UITableViewCellAccessoryDisclosureIndicator:UITableViewCellAccessoryNone;cell.selectionStyle=supported?UITableViewCellSelectionStyleDefault:UITableViewCellSelectionStyleNone;cell.textLabel.textColor=supported?HostText():HostMutedText();return cell;
+    cell.accessoryType=supported?UITableViewCellAccessoryDisclosureIndicator:UITableViewCellAccessoryNone;cell.selectionStyle=supported?UITableViewCellSelectionStyleDefault:UITableViewCellSelectionStyleNone;cell.textLabel.textColor=supported?HostText():HostMutedText();
+    // VoiceOver：可点按的资源行补按钮特征与提示，不支持项保持静态文本。
+    if(supported){
+        cell.accessibilityTraits=UIAccessibilityTraitButton;
+        cell.accessibilityHint=ip.section==0?@"点按打开或导入此站点，长按可导出单项资源":@"点按加载此直播清单，长按可导出单项资源";
+    }else{
+        cell.accessibilityTraits=UIAccessibilityTraitStaticText;
+        cell.accessibilityHint=nil;
+    }
+    cell.imageView.accessibilityElementsHidden=YES;
+    return cell;
 }
 - (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)ip point:(CGPoint)point {
     NSArray *rows=[self filteredRowsForSection:ip.section];if(ip.row<0||ip.row>=rows.count)return nil;

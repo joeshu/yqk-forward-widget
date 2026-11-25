@@ -169,6 +169,7 @@ static NSString *ServiceResolvedVersionText(NSDictionary *service){
     titleLbl.translatesAutoresizingMaskIntoConstraints=NO;
     titleLbl.text=self.service[@"name"]?:@"资源服务";
     titleLbl.font=HostRoundedFont(17.5,UIFontWeightBold,UIFontTextStyleHeadline);
+    titleLbl.adjustsFontForContentSizeCategory=YES;
     titleLbl.textColor=HostText();
     [card addSubview:titleLbl];
 
@@ -176,6 +177,7 @@ static NSString *ServiceResolvedVersionText(NSDictionary *service){
     subLbl.translatesAutoresizingMaskIntoConstraints=NO;
     subLbl.text=[NSString stringWithFormat:@"%@ · %@ · 端口 %@",ServiceEngineName(self.service),ServiceProtocolName(self.service),self.service[@"port"]?:@8767];
     subLbl.font=HostMonospacedDigitFont(11.5,UIFontWeightMedium,UIFontTextStyleCaption1);
+    subLbl.adjustsFontForContentSizeCategory=YES;
     subLbl.textColor=HostSecondaryText();
     subLbl.lineBreakMode=NSLineBreakByTruncatingTail;
     [card addSubview:subLbl];
@@ -184,6 +186,7 @@ static NSString *ServiceResolvedVersionText(NSDictionary *service){
     statusBadge.translatesAutoresizingMaskIntoConstraints=NO;
     statusBadge.text=running?@"  ● 运行中  ":@"  ○ 已停止  ";
     statusBadge.font=HostRoundedFont(11.0,UIFontWeightBold,UIFontTextStyleCaption2);
+    statusBadge.adjustsFontForContentSizeCategory=YES;
     statusBadge.textColor=running?UIColor.systemGreenColor:HostSecondaryText();
     statusBadge.backgroundColor=running?[UIColor.systemGreenColor colorWithAlphaComponent:0.15]:[HostText() colorWithAlphaComponent:0.06];
     statusBadge.layer.cornerRadius=10;
@@ -199,9 +202,9 @@ static NSString *ServiceResolvedVersionText(NSDictionary *service){
     [card addSubview:actionsStack];
 
     NSArray<NSDictionary *> *btnSpecs=@[
-        @{@"title":@"检测接口",@"icon":@"waveform.path.ecg",@"tag":@1},
-        @{@"title":@"查看代码",@"icon":@"chevron.left.forwardslash.chevron.right",@"tag":@2},
-        @{@"title":@"运行日志",@"icon":@"doc.text",@"tag":@3}
+        @{@"title":@"检测接口",@"icon":@"waveform.path.ecg",@"tag":@1,@"hint":@"探测本机端口健康或频道清单"},
+        @{@"title":@"查看代码",@"icon":@"chevron.left.forwardslash.chevron.right",@"tag":@2,@"hint":@"在内置阅读器中查看或编辑脚本源码"},
+        @{@"title":@"运行日志",@"icon":@"doc.text",@"tag":@3,@"hint":@"打开此服务的运行日志"}
     ];
     for(NSDictionary *spec in btnSpecs){
         UIButton *btn=[UIButton buttonWithType:UIButtonTypeSystem];
@@ -210,6 +213,7 @@ static NSString *ServiceResolvedVersionText(NSDictionary *service){
         [btn setImage:img forState:UIControlStateNormal];
         [btn setTitle:[NSString stringWithFormat:@" %@",spec[@"title"]] forState:UIControlStateNormal];
         btn.titleLabel.font=HostRoundedFont(12.0,UIFontWeightSemibold,UIFontTextStyleCaption1);
+        btn.titleLabel.adjustsFontForContentSizeCategory=YES;
         btn.tintColor=HostAccent();
         [btn setTitleColor:HostText() forState:UIControlStateNormal];
         btn.backgroundColor=[HostText() colorWithAlphaComponent:0.05];
@@ -218,6 +222,9 @@ static NSString *ServiceResolvedVersionText(NSDictionary *service){
         btn.layer.borderWidth=0.5;
         HostSetLayerBorderColor(btn,HostBorder());
         HostInstallPressFeedback(btn);
+        btn.accessibilityLabel=spec[@"title"];
+        btn.accessibilityHint=spec[@"hint"];
+        btn.accessibilityTraits=UIAccessibilityTraitButton;
         [btn addTarget:self action:@selector(handleHeroQuickAction:) forControlEvents:UIControlEventTouchUpInside];
         [actionsStack addArrangedSubview:btn];
     }
@@ -473,6 +480,9 @@ static NSString *ServiceResolvedVersionText(NSDictionary *service){
             HostSetLayerBorderColor(control,managed?HostBorder():[HostAccent() colorWithAlphaComponent:0.35]);
             HostInstallPressFeedback(control);
             control.accessibilityLabel=self.changingService?(self.changingServiceTarget?@"正在启动服务":@"正在停止服务"):(starting?@"服务启动中":(uncertain?@"停止并清理不确定会话":(managed?@"停止服务":@"启动服务")));
+            control.accessibilityHint=managed?@"停止此资源服务":@"启动此资源服务";
+            control.accessibilityTraits=UIAccessibilityTraitButton;
+            control.accessibilityValue=isRunning?@"运行中":@"已停止";
             [control addTarget:self action:@selector(changeService:) forControlEvents:UIControlEventTouchUpInside];c.accessoryView=control;
         } else {
             c.textLabel.text = @"允许局域网访问";
@@ -548,6 +558,14 @@ static NSString *ServiceResolvedVersionText(NSDictionary *service){
         c.textLabel.text = @"删除服务";
         c.textLabel.textColor = UIColor.systemRedColor;
     }
+    // VoiceOver：可点按的行补按钮特征与提示，纯展示行保持静态文本特征。
+    if(c.selectionStyle==UITableViewCellSelectionStyleDefault){
+        c.accessibilityTraits=UIAccessibilityTraitButton;
+        if(!c.accessibilityHint.length)c.accessibilityHint=@"点按执行此行操作";
+    }else{
+        c.accessibilityTraits=UIAccessibilityTraitStaticText;
+    }
+    c.imageView.accessibilityElementsHidden=YES;
     return c;
 }
 - (void)changeService:(UIButton *)sender {
@@ -834,8 +852,10 @@ static NSString *ServiceResolvedVersionText(NSDictionary *service){
     self.search.searchResultsUpdater = self;
     self.search.obscuresBackgroundDuringPresentation = NO;
     self.search.searchBar.placeholder = @"搜索名称、端口或协议";
+    self.search.searchBar.accessibilityLabel=@"搜索资源服务";
+    self.search.searchBar.accessibilityHint=@"输入名称、端口、引擎或协议以筛选服务列表";
     self.navigationItem.searchController = self.search;
-    UIView *header=[[UIView alloc] initWithFrame:CGRectMake(0,0,self.view.bounds.size.width,88)];self.runtimeSummary=[[UILabel alloc] initWithFrame:CGRectMake(16,4,MAX(1,header.bounds.size.width-32),28)];self.runtimeSummary.autoresizingMask=UIViewAutoresizingFlexibleWidth;self.runtimeSummary.textColor=HostSecondaryText();self.runtimeSummary.font=HostMonospacedDigitFont(12.5,UIFontWeightMedium,UIFontTextStyleCaption1);[header addSubview:self.runtimeSummary];self.statusFilter=[[UISegmentedControl alloc] initWithItems:@[@"全部",@"运行中",@"待处理",@"已停止"]];self.statusFilter.frame=CGRectMake(16,36,MAX(1,header.bounds.size.width-32),44);self.statusFilter.autoresizingMask=UIViewAutoresizingFlexibleWidth;self.statusFilter.selectedSegmentIndex=0;self.statusFilter.selectedSegmentTintColor=HostAccent();[self.statusFilter setTitleTextAttributes:@{NSForegroundColorAttributeName:HostText(),NSFontAttributeName:[UIFont systemFontOfSize:13 weight:UIFontWeightMedium]} forState:UIControlStateNormal];[self.statusFilter setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent(),NSFontAttributeName:[UIFont systemFontOfSize:13 weight:UIFontWeightSemibold]} forState:UIControlStateSelected];[self.statusFilter addTarget:self action:@selector(statusFilterChanged) forControlEvents:UIControlEventValueChanged];[header addSubview:self.statusFilter];self.table.tableHeaderView=header;
+    UIView *header=[[UIView alloc] initWithFrame:CGRectMake(0,0,self.view.bounds.size.width,88)];self.runtimeSummary=[[UILabel alloc] initWithFrame:CGRectMake(16,4,MAX(1,header.bounds.size.width-32),28)];self.runtimeSummary.autoresizingMask=UIViewAutoresizingFlexibleWidth;self.runtimeSummary.textColor=HostSecondaryText();self.runtimeSummary.font=HostMonospacedDigitFont(12.5,UIFontWeightMedium,UIFontTextStyleCaption1);self.runtimeSummary.adjustsFontForContentSizeCategory=YES;[header addSubview:self.runtimeSummary];self.statusFilter=[[UISegmentedControl alloc] initWithItems:@[@"全部",@"运行中",@"待处理",@"已停止"]];self.statusFilter.frame=CGRectMake(16,36,MAX(1,header.bounds.size.width-32),44);self.statusFilter.autoresizingMask=UIViewAutoresizingFlexibleWidth;self.statusFilter.selectedSegmentIndex=0;self.statusFilter.selectedSegmentTintColor=HostAccent();self.statusFilter.accessibilityLabel=@"服务状态筛选";self.statusFilter.accessibilityHint=@"选择全部、运行中、待处理或已停止分组";[self.statusFilter setTitleTextAttributes:@{NSForegroundColorAttributeName:HostText(),NSFontAttributeName:[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:13 weight:UIFontWeightMedium]]} forState:UIControlStateNormal];[self.statusFilter setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent(),NSFontAttributeName:[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:13 weight:UIFontWeightSemibold]]} forState:UIControlStateSelected];[self.statusFilter addTarget:self action:@selector(statusFilterChanged) forControlEvents:UIControlEventValueChanged];[header addSubview:self.statusFilter];self.table.tableHeaderView=header;
     self.emptyLabel=[UILabel new];self.emptyLabel.text=@"还没有服务\n点右上角 + 添加服务，或从资源页导入脚本";self.emptyLabel.textAlignment=NSTextAlignmentCenter;self.emptyLabel.textColor=HostSecondaryText();self.emptyLabel.numberOfLines=0;self.emptyLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];self.emptyLabel.adjustsFontForContentSizeCategory=YES;self.table.backgroundView=self.emptyLabel;
     [self refresh];
 }
@@ -847,8 +867,8 @@ static NSString *ServiceResolvedVersionText(NSDictionary *service){
     self.table.backgroundColor=HostBackground();
     self.runtimeSummary.textColor=HostSecondaryText();
     self.statusFilter.selectedSegmentTintColor=HostAccent();
-    [self.statusFilter setTitleTextAttributes:@{NSForegroundColorAttributeName:HostText(),NSFontAttributeName:[UIFont systemFontOfSize:13 weight:UIFontWeightMedium]} forState:UIControlStateNormal];
-    [self.statusFilter setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent(),NSFontAttributeName:[UIFont systemFontOfSize:13 weight:UIFontWeightSemibold]} forState:UIControlStateSelected];
+    [self.statusFilter setTitleTextAttributes:@{NSForegroundColorAttributeName:HostText(),NSFontAttributeName:[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:13 weight:UIFontWeightMedium]]} forState:UIControlStateNormal];
+    [self.statusFilter setTitleTextAttributes:@{NSForegroundColorAttributeName:HostOnAccent(),NSFontAttributeName:[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:13 weight:UIFontWeightSemibold]]} forState:UIControlStateSelected];
     self.emptyLabel.textColor=HostSecondaryText();
     [self.table reloadData];
 }
@@ -971,9 +991,15 @@ static NSString *ServiceResolvedVersionText(NSDictionary *service){
     BOOL target=[[self.changingServiceTargets objectForKey:identifier] boolValue];
     NSString *controlTitle=busy?(target?@"正在启动…":@"正在停止…"):(starting?@"启动中…":(uncertain?@"停止并清理":(managed?@"停止":@"启动")));
     [control setTitle:controlTitle forState:UIControlStateNormal];
-    control.titleLabel.font=[UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];control.frame=CGRectMake(0,0,108,44);control.enabled=!busy&&!starting;control.backgroundColor=managed?HostNeutralSurface():HostSelectedSurface();control.tintColor=managed?HostText():HostAccent();control.layer.cornerRadius=14;control.layer.cornerCurve=kCACornerCurveContinuous;control.layer.borderWidth=0.6;HostSetLayerBorderColor(control,managed?HostBorder():[HostAccent() colorWithAlphaComponent:0.35]);HostInstallPressFeedback(control);control.accessibilityIdentifier=identifier;control.accessibilityLabel=busy?(target?@"正在启动服务":@"正在停止服务"):(starting?@"服务启动中":(uncertain?@"停止并清理不确定会话":(managed?@"停止服务":@"启动服务")));
+    control.titleLabel.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont systemFontOfSize:13 weight:UIFontWeightSemibold]];control.titleLabel.adjustsFontForContentSizeCategory=YES;control.frame=CGRectMake(0,0,108,44);control.enabled=!busy&&!starting;control.backgroundColor=managed?HostNeutralSurface():HostSelectedSurface();control.tintColor=managed?HostText():HostAccent();control.layer.cornerRadius=14;control.layer.cornerCurve=kCACornerCurveContinuous;control.layer.borderWidth=0.6;HostSetLayerBorderColor(control,managed?HostBorder():[HostAccent() colorWithAlphaComponent:0.35]);HostInstallPressFeedback(control);control.accessibilityIdentifier=identifier;control.accessibilityLabel=busy?(target?@"正在启动服务":@"正在停止服务"):(starting?@"服务启动中":(uncertain?@"停止并清理不确定会话":(managed?@"停止服务":@"启动服务")));
+    control.accessibilityHint=managed?@"停止此资源服务":@"启动此资源服务";
+    control.accessibilityTraits=UIAccessibilityTraitButton;
+    control.accessibilityValue=[PyHost isRunningServiceIdentifier:identifier]?@"运行中":@"已停止";
     if([PyHost isRunningServiceIdentifier:identifier]){c.layer.borderWidth=1.05;HostSetLayerBorderColor(c,HostAccent());}
     [control addTarget:self action:@selector(changeService:) forControlEvents:UIControlEventTouchUpInside];c.accessoryView=control;
+    c.accessibilityTraits=UIAccessibilityTraitButton;
+    if(!c.accessibilityHint.length)c.accessibilityHint=@"点按查看服务详情，长按可复制访问地址";
+    c.imageView.accessibilityElementsHidden=YES;
     return c;
 }
 - (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)ip point:(CGPoint)point {

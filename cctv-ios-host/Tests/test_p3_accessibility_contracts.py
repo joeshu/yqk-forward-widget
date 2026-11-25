@@ -21,6 +21,8 @@ CATALOG_SOURCE = (SOURCES / "RootViewController+Catalog.m").read_text(encoding="
 BROWSER_SOURCE = (SOURCES / "MediaBrowserViewController.m").read_text(encoding="utf-8")
 PLAYBACK_SOURCE = (SOURCES / "MediaPlaybackViewController.m").read_text(encoding="utf-8")
 EPISODE_SOURCE = (SOURCES / "MediaEpisodeSelectionViewController.m").read_text(encoding="utf-8")
+SERVICES_SOURCE = (SOURCES / "ServicesViewController.m").read_text(encoding="utf-8")
+TVBOX_SOURCE = (SOURCES / "TVBoxCatalogViewController.m").read_text(encoding="utf-8")
 
 
 def method_body(source, signature):
@@ -210,6 +212,57 @@ class VoiceOverButtonContracts(unittest.TestCase):
             'searchBar.accessibilityHint = @"输入频道名称或编号以筛选列表";',
             ROOT_SOURCE,
         )
+
+
+class ResourceServicesVoiceOverContracts(unittest.TestCase):
+    def test_service_hero_actions_have_label_hint_traits_and_dynamic_titles(self):
+        body = method_body(SERVICES_SOURCE, "- (void)setupServiceDetailHeaderView {")
+        self.assertIn('@"hint":@"探测本机端口健康或频道清单"', body)
+        self.assertIn("btn.accessibilityLabel=spec[@\"title\"]", body)
+        self.assertIn("btn.accessibilityHint=spec[@\"hint\"]", body)
+        self.assertIn("btn.accessibilityTraits=UIAccessibilityTraitButton", body)
+        self.assertIn("btn.titleLabel.adjustsFontForContentSizeCategory=YES", body)
+        for label in ("titleLbl", "subLbl", "statusBadge"):
+            self.assertIn(f"{label}.adjustsFontForContentSizeCategory=YES", body)
+
+    def test_service_toggle_button_has_hint_traits_value_and_scaled_title(self):
+        self.assertIn('control.accessibilityHint=managed?@"停止此资源服务":@"启动此资源服务";', SERVICES_SOURCE)
+        self.assertIn("control.accessibilityTraits=UIAccessibilityTraitButton;", SERVICES_SOURCE)
+        self.assertIn('control.accessibilityValue=isRunning?@"运行中":@"已停止";', SERVICES_SOURCE)
+        self.assertIn("control.titleLabel.adjustsFontForContentSizeCategory=YES", SERVICES_SOURCE)
+
+    def test_service_detail_interactive_rows_have_traits_and_hint(self):
+        self.assertIn("c.accessibilityTraits=UIAccessibilityTraitButton;", SERVICES_SOURCE)
+        self.assertIn('c.accessibilityHint=@"点按执行此行操作";', SERVICES_SOURCE)
+
+    def test_services_search_filter_and_summary_are_accessible_and_dynamic(self):
+        self.assertIn('self.search.searchBar.accessibilityLabel=@"搜索资源服务";', SERVICES_SOURCE)
+        self.assertIn('self.search.searchBar.accessibilityHint=@"输入名称、端口、引擎或协议以筛选服务列表";', SERVICES_SOURCE)
+        self.assertIn('self.statusFilter.accessibilityLabel=@"服务状态筛选";', SERVICES_SOURCE)
+        self.assertIn('self.statusFilter.accessibilityHint=@"选择全部、运行中、待处理或已停止分组";', SERVICES_SOURCE)
+        self.assertIn("[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:", SERVICES_SOURCE)
+        self.assertIn("self.runtimeSummary.adjustsFontForContentSizeCategory=YES", SERVICES_SOURCE)
+
+    def test_service_list_control_and_rows_have_voiceover_metadata(self):
+        self.assertIn('control.accessibilityHint=managed?@"停止此资源服务":@"启动此资源服务";', SERVICES_SOURCE)
+        self.assertIn('control.accessibilityValue=[PyHost isRunningServiceIdentifier:identifier]?@"运行中":@"已停止";', SERVICES_SOURCE)
+        self.assertIn('c.accessibilityHint=@"点按查看服务详情，长按可复制访问地址";', SERVICES_SOURCE)
+
+
+class TVBoxCatalogVoiceOverContracts(unittest.TestCase):
+    def test_search_and_filter_controls_have_labels_hints(self):
+        self.assertIn('self.searchController.searchBar.accessibilityLabel=@"搜索资源合集";', TVBOX_SOURCE)
+        self.assertIn('self.searchController.searchBar.accessibilityHint=@"输入站点名称、协议或 URL 以筛选合集列表";', TVBOX_SOURCE)
+        self.assertIn('self.contentFilter.accessibilityLabel=@"资源分类筛选";', TVBOX_SOURCE)
+        self.assertIn('self.contentFilter.accessibilityHint=@"筛选全部、影视、直播或不支持的资源";', TVBOX_SOURCE)
+
+    def test_more_menu_button_has_label_and_hint(self):
+        self.assertIn('more.accessibilityLabel=@"合集操作";more.accessibilityHint=@"导出、导入或移除本资源合集";', TVBOX_SOURCE)
+
+    def test_supported_resource_rows_have_button_trait_and_contextual_hint(self):
+        self.assertIn("cell.accessibilityTraits=UIAccessibilityTraitButton;", TVBOX_SOURCE)
+        self.assertIn('cell.accessibilityHint=ip.section==0?@"点按打开或导入此站点，长按可导出单项资源":@"点按加载此直播清单，长按可导出单项资源";', TVBOX_SOURCE)
+        self.assertIn("cell.imageView.accessibilityElementsHidden=YES;", TVBOX_SOURCE)
 
 
 if __name__ == "__main__":
