@@ -12,9 +12,21 @@ import unittest
 import urllib.request
 from unittest.mock import Mock, patch
 
-SPEC = importlib.util.spec_from_file_location('host_service_runtime', Path(__file__).resolve().parents[1] / 'Scripts/host_service_runtime.py')
-runtime = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(runtime)
+_RUNTIME_PATH = Path(__file__).resolve().parents[1] / 'Scripts/host_service_runtime.py'
+if 'host_service_runtime' in sys.modules:
+    # Another test module already imported the runtime the regular way
+    # (test_live_plugins_*, test_round42_*). Reuse that module object:
+    # executing the file a second time in one interpreter would install
+    # the stdlib hooks twice, registering every server twice and leaving
+    # the two copies with separate locks/sessions (the port-override test
+    # then sees the primary server as servers[1] and its serve loop dies
+    # releasing the other copy's startup lock).
+    runtime = sys.modules['host_service_runtime']
+else:
+    SPEC = importlib.util.spec_from_file_location('host_service_runtime', _RUNTIME_PATH)
+    runtime = importlib.util.module_from_spec(SPEC)
+    SPEC.loader.exec_module(runtime)
+    sys.modules['host_service_runtime'] = runtime
 
 
 class ServiceRuntimeTests(unittest.TestCase):

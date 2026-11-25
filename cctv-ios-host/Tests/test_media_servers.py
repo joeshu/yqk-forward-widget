@@ -150,7 +150,11 @@ class MediaServerTests(unittest.TestCase):
             with self.subTest(address=address),self.assertRaises(ValueError):spider._url(address)
     def test_search_capabilities_are_truthful(self):
         self.assertIn('search',self.spider('emby').supported_operations)
-        self.assertNotIn('search',self.spider('webdav').supported_operations)
+        self.assertIn('search',self.spider('jellyfin').supported_operations)
+        self.assertIn('search',self.spider('xtream').supported_operations)
+        self.assertIn('search',self.spider('alist').supported_operations)
+        self.assertIn('search',self.spider('plex').supported_operations)
+        self.assertIn('search',self.spider('webdav').supported_operations)
     def test_page_credentials_strip_sensitive_custom_headers(self):
         from host_media_runtime import strip_media_credentials
         self.assertEqual(strip_media_credentials({'Cookie':'private','Authorization':'private','X-API-Key':'private','X-Session':'private','User-Agent':'agent'}),{'User-Agent':'agent'})

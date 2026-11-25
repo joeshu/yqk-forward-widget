@@ -35,8 +35,12 @@ class NativeMediaKeyTests(unittest.TestCase):
                 redirected=[headers for port,path,headers in seen if port==second.server_port]
                 self.assertTrue(redirected)
                 for headers in redirected:
-                    for name in ('authorization','x-api-key','x-auth','x-session','referer','origin'):
+                    for name in ('authorization','x-api-key','x-auth','x-session'):
                         self.assertNotIn(name,headers)
+                # Referer/Origin are intentionally preserved across origins:
+                # MediaPlaybackHeadersScopedToURL keeps them as explicit
+                # anti-hotlink headers while credential names are stripped.
+                self.assertEqual(redirected[0].get('referer'),'https://origin.test/watch')
                 same=[headers for port,path,headers in seen if path=='/same-key']
                 self.assertTrue(same)
                 self.assertEqual(same[0].get('x-api-key'),'private')

@@ -1,6 +1,7 @@
 #import "LocalMediaViewController.h"
 #import "LocalMediaStore.h"
 #import "MediaPlaybackViewController.h"
+#import "HostGlassActionSheetViewController.h"
 #import "HostTheme.h"
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
@@ -222,13 +223,17 @@
 }
 - (void)importMedia {
     if([[self.store stateSnapshot][@"importing"] boolValue]){self.navigationItem.prompt=@"已有导入任务进行中";return;}
-    UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"添加本地媒体" message:@"4K/大体积视频推荐选择零拷贝外部挂载，不占用双倍存储空间" preferredStyle:UIAlertControllerStyleActionSheet];
     __weak typeof(self) weakSelf=self;
-    [sheet addAction:[UIAlertAction actionWithTitle:@"零拷贝外部挂载（推荐）" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[weakSelf presentDocumentPickerForBookmark:YES];}]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"复制到本机沙盒" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[weakSelf presentDocumentPickerForBookmark:NO];}]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    if(sheet.popoverPresentationController){sheet.popoverPresentationController.barButtonItem=self.navigationItem.rightBarButtonItem;}
-    [self presentViewController:sheet animated:YES completion:nil];
+    [HostGlassActionSheetViewController presentOn:self
+                                            title:@"添加本地媒体"
+                                         subtitle:@"4K/大体积视频推荐选择零拷贝外部挂载，不占用双倍存储空间"
+                                        badgeText:nil
+                                       badgeColor:nil
+                                         sections:@[[HostGlassSheetSection sectionWithTitle:nil actions:@[
+                                             [HostGlassSheetAction actionWithTitle:@"零拷贝外部挂载（推荐）" subtitle:nil value:nil icon:@"externaldrive" tint:HostAccent() destructive:NO selected:NO handler:^{LocalMediaViewController *owner=weakSelf;if(!owner)return;[owner presentDocumentPickerForBookmark:YES];}],
+                                             [HostGlassSheetAction actionWithTitle:@"复制到本机沙盒" subtitle:nil value:nil icon:@"square.and.arrow.down" tint:UIColor.systemBlueColor destructive:NO selected:NO handler:^{LocalMediaViewController *owner=weakSelf;if(!owner)return;[owner presentDocumentPickerForBookmark:NO];}]
+                                         ]]]
+                                       sourceView:self.view];
 }
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
     if(!urls.count)return;__weak typeof(self) weakSelf=self;

@@ -1,4 +1,5 @@
 #import "ShortDramaVerticalFeedController.h"
+#import "HostGlassActionSheetViewController.h"
 #import "HostTheme.h"
 #import <AVFoundation/AVFoundation.h>
 
@@ -203,13 +204,13 @@
 }
 
 - (void)showEpisodeDrawer {
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:self.dramaTitle message:@"选择分集" preferredStyle:UIAlertControllerStyleActionSheet];
     __weak typeof(self) weakSelf = self;
     NSUInteger maxShow = MIN(self.episodes.count, (NSUInteger)30);
+    NSMutableArray<HostGlassSheetAction *> *rows = [NSMutableArray array];
     for (NSUInteger i = 0; i < maxShow; i++) {
         NSString *name = [self.episodes[i][@"name"] isKindOfClass:NSString.class] ? self.episodes[i][@"name"] : [NSString stringWithFormat:@"第 %lu 集", (unsigned long)i + 1];
-        NSString *label = ((NSInteger)i == self.activeIndex) ? [NSString stringWithFormat:@"▶ %@", name] : name;
-        [sheet addAction:[UIAlertAction actionWithTitle:label style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) {
+        BOOL selected = ((NSInteger)i == self.activeIndex);
+        [rows addObject:[HostGlassSheetAction actionWithTitle:name subtitle:nil value:nil icon:nil tint:(selected ? HostAccent() : UIColor.systemBlueColor) destructive:NO selected:selected handler:^{
             ShortDramaVerticalFeedController *owner = weakSelf;
             if (!owner) return;
             owner.activeIndex = (NSInteger)i;
@@ -219,12 +220,13 @@
             [owner updateSlidingPoolAroundIndex:(NSInteger)i];
         }]];
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    if (sheet.popoverPresentationController) {
-        sheet.popoverPresentationController.sourceView = self.view;
-        sheet.popoverPresentationController.sourceRect = CGRectMake(CGRectGetMidX(self.view.bounds), CGRectGetMaxY(self.view.bounds) - 60, 1, 1);
-    }
-    [self presentViewController:sheet animated:YES completion:nil];
+    [HostGlassActionSheetViewController presentOn:self
+                                            title:self.dramaTitle
+                                         subtitle:@"选择分集"
+                                        badgeText:nil
+                                       badgeColor:nil
+                                         sections:@[[HostGlassSheetSection sectionWithTitle:nil actions:rows]]
+                                       sourceView:self.view];
 }
 
 - (void)updateSlidingPoolAroundIndex:(NSInteger)centerIndex {

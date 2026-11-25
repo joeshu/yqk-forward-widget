@@ -620,19 +620,28 @@ def _bounded_http_response_read1(response, amt=-1):
     return _bounded_http_response_read_using(response, amount, _http_response_read1)
 
 
-threading.Thread.start = _start
-threading.excepthook = _thread_excepthook
-http.client.HTTPResponse.read = _bounded_http_response_read
-http.client.HTTPResponse.read1 = _bounded_http_response_read1
-socketserver.BaseServer.__init__ = _init
-socketserver.BaseServer.serve_forever = _serve
-socketserver.TCPServer.server_close = _close
-socketserver.TCPServer.get_request = _accept
-socketserver.TCPServer.__init__ = _bound
-socketserver.BaseServer.handle_error = _error
-http.server.HTTPServer.server_bind = _bind_http
-socketserver.ThreadingMixIn.process_request = _process
-socketserver.ThreadingMixIn.process_request_thread = _process_worker
+# The suite loads this file twice in one interpreter: a plain
+# `import host_service_runtime` (test_live_plugins_*, test_round42_*)
+# and an importlib spec load that bypasses sys.modules
+# (test_service_runtime.py). Re-installing would wrap the wrappers:
+# _bound would run twice per HTTPServer construction and _init would
+# register every server twice, so session.servers[1] would be the
+# primary server again instead of the auxiliary listener. Install once.
+if not getattr(socketserver.TCPServer.__init__, '_cctvhost_runtime_patched', False):
+    threading.Thread.start = _start
+    threading.excepthook = _thread_excepthook
+    http.client.HTTPResponse.read = _bounded_http_response_read
+    http.client.HTTPResponse.read1 = _bounded_http_response_read1
+    socketserver.BaseServer.__init__ = _init
+    socketserver.BaseServer.serve_forever = _serve
+    socketserver.TCPServer.server_close = _close
+    socketserver.TCPServer.get_request = _accept
+    socketserver.TCPServer.__init__ = _bound
+    socketserver.BaseServer.handle_error = _error
+    http.server.HTTPServer.server_bind = _bind_http
+    socketserver.ThreadingMixIn.process_request = _process
+    socketserver.ThreadingMixIn.process_request_thread = _process_worker
+    _bound._cctvhost_runtime_patched = True
 
 
 def _register_exit(function, *args, **kwargs):
