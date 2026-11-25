@@ -2140,7 +2140,7 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
     [[PlaybackCoordinator shared] acquireSession:(id<PlaybackSession>)self];
     [RuntimeDiagnostics.shared recordEvent:@"playback_owner_acquired" category:@"playback" fields:@{@"owner":@"vod",@"engine":MediaPlaybackDecodeRouteName(initialRoute),@"line_index":@(self.lineIndex),@"episode_index":@(self.episodeIndex),@"service_id":serviceID,@"correlation_id":self.diagnosticTraceID?:@""}];
 
-    if(initialRoute==MediaPlaybackDecodeRouteCicadaPlayer){[self startCicadaPlaybackWithResult:result url:url sourceURL:sourceURL playerGeneration:playerGeneration];return;}
+    if(initialRoute==MediaPlaybackDecodeRouteCicadaPlayer||initialRoute==MediaPlaybackDecodeRouteMPV){[self startCicadaPlaybackWithResult:result url:url sourceURL:sourceURL playerGeneration:playerGeneration];return;}
     self.attemptedRoutes|=MediaPlaybackDecodeRouteAttemptedAVPlayer;
     NSMutableDictionary *handoffFields=[@{@"player":@"avplayer", @"playback_attempt_id":self.playbackAttemptID?:@"", @"line_index":@(self.lineIndex), @"episode_index":@(self.episodeIndex), @"correlation_id":self.diagnosticTraceID?:@""} mutableCopy];[handoffFields addEntriesFromDictionary:MediaPlaybackDiagnosticHeaderFields(MediaPlaybackHeadersFromResult(result))];[handoffFields addEntriesFromDictionary:MediaPlaybackDiagnosticSourceFields(sourceURL)];[RuntimeDiagnostics.shared recordEvent:@"episode_player_handoff" category:@"playback" fields:handoffFields];
     self.hasDiagnosticTimeControlStatus=NO;self.playbackStartedAt=CACurrentMediaTime();self.status.text=@"正在载入媒体…";self.status.accessibilityLabel=self.status.text;[self.spinner startAnimating];[self setRetryAvailable:NO];
@@ -2205,7 +2205,9 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
 
 - (void)startCicadaPlaybackWithResult:(NSDictionary *)result url:(NSURL *)url sourceURL:(NSURL *)sourceURL playerGeneration:(NSUInteger)playerGeneration {
     if(self.playbackSuspendedForVisibility)return;
-    self.attemptedRoutes|=MediaPlaybackDecodeRouteAttemptedCicadaPlayer;
+    NSString *decodeModePref=[[NSUserDefaults standardUserDefaults] stringForKey:@"cctv.mediaDecodeMode.v1"]?:@"auto";
+    BOOL useMPV=[MediaPlaybackMPVAdapter isAvailable]&&![decodeModePref isEqualToString:@"cicada_legacy"]&&!(self.attemptedRoutes&MediaPlaybackDecodeRouteAttemptedMPV);
+    self.attemptedRoutes|=(useMPV?MediaPlaybackDecodeRouteAttemptedMPV:MediaPlaybackDecodeRouteAttemptedCicadaPlayer);
     NSMutableDictionary *handoffFields=[@{@"player":@"cicada", @"playback_attempt_id":self.playbackAttemptID?:@"", @"line_index":@(self.lineIndex), @"episode_index":@(self.episodeIndex), @"correlation_id":self.diagnosticTraceID?:@""} mutableCopy];
     [handoffFields addEntriesFromDictionary:MediaPlaybackDiagnosticHeaderFields(MediaPlaybackHeadersFromResult(result))];
     [handoffFields addEntriesFromDictionary:MediaPlaybackDiagnosticSourceFields(sourceURL)];
@@ -2225,8 +2227,6 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
     // URLs implement headers, cookies, key handling or disguised segment repair.
     if(isLoopbackRelay&&[result[@"dashRemuxed"] boolValue])effectiveURL=sourceURL;
     requestHeaders=MediaPlaybackHeadersScopedToURL(requestHeaders,sourceURL?:url,effectiveURL);
-    NSString *decodeModePref=[[NSUserDefaults standardUserDefaults] stringForKey:@"cctv.mediaDecodeMode.v1"]?:@"auto";
-    BOOL useMPV=[MediaPlaybackMPVAdapter isAvailable]&&![decodeModePref isEqualToString:@"cicada_legacy"];
     MediaPlaybackCicadaAdapter *adapter=useMPV
         ?(MediaPlaybackCicadaAdapter *)[[MediaPlaybackMPVAdapter alloc] initWithURL:effectiveURL headers:requestHeaders networkTimeout:timeout]
         :[[MediaPlaybackCicadaAdapter alloc] initWithURL:effectiveURL headers:requestHeaders networkTimeout:timeout];
@@ -2403,6 +2403,12 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
         NSMutableDictionary *avCandidate=[self.result mutableCopy]?:[NSMutableDictionary dictionary];
         avCandidate[@"playbackEngine"]=@"avplayer";avCandidate[@"requiresWebPlayback"]=@NO;avCandidate[@"parse"]=@0;avCandidate[@"jx"]=@0;
         [self playResult:avCandidate.copy];
+        return;
+    }
+    if(nextRoute==MediaPlaybackDecodeRouteMPV||nextRoute==MediaPlaybackDecodeRouteCicadaPlayer){
+        NSURL *fallbackPlayURL=[NSURL URLWithString:[self.result[@"url"] isKindOfClass:NSString.class]?self.result[@"url"]:@""];
+
+        [self startCicadaPlaybackWithResult:self.result url:fallbackPlayURL sourceURL:MediaPlaybackOriginalSourceURL(self.result) playerGeneration:self.playerGeneration];
         return;
     }
     if(nextRoute==MediaPlaybackDecodeRouteWebView){[self openWebPlaybackFallback];return;}

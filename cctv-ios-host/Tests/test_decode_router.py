@@ -55,12 +55,13 @@ class DecodeRouterContracts(unittest.TestCase):
         # 回退链靠 attempted 位掩码防循环；优先级函数是唯一决策入口。
         for name in ('MediaPlaybackDecodeRouteAttemptedAVPlayer',
                      'MediaPlaybackDecodeRouteAttemptedCicadaPlayer',
-                     'MediaPlaybackDecodeRouteAttemptedWebView'):
+                     'MediaPlaybackDecodeRouteAttemptedWebView',
+                     'MediaPlaybackDecodeRouteAttemptedMPV'):
             self.assertIn(name, self.router_h)
             self.assertIn(name, self.router_m)
         self.assertIn('MediaPlaybackDecodeRouteNextForResult', self.router_h)
         self.assertIn('MediaPlaybackDecodeRouteNone', self.router_h)
-        for route in ('AVPlayer', 'CicadaPlayer', 'WebView'):
+        for route in ('AVPlayer', 'CicadaPlayer', 'WebView', 'MPV'):
             self.assertIn(f'MediaPlaybackDecodeRoute{route}', self.router_h)
 
     def test_router_uses_mime_for_extensionless_urls(self):
@@ -243,6 +244,97 @@ class DecodeRouterContracts(unittest.TestCase):
         inspection_m = read_source('ResourceContentInspection.m')
         self.assertIn('ResourcePythonRegex(void)', inspection_m)
         self.assertIn('ResourceAnchorsRegex(void)', inspection_m)
+
+
+class MPVRouteWiringContracts(unittest.TestCase):
+    """MPV 点播路由接通契约：验证 MediaPlaybackViewController 真正启动 MPV adapter，
+    且 MPV 失败时按候选链 AVPlayer → MPV → Cicada → WebView 正确回退到 Cicada。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.vc = read_source('MediaPlaybackViewController.m')
+        cls.router_m = read_source('MediaPlaybackDecodeRouter.m')
+        cls.mpv_h = read_source('MediaPlaybackMPVAdapter.h')
+        cls.mpv_m = read_source('MediaPlaybackMPVAdapter.m')
+
+    def test_router_candidate_chain_includes_mpv_between_avplayer_and_cicada(self):
+        # 候选链顺序必须是 AVPlayer → MPV → Cicada → WebView。
+        candidates_line = [l for l in self.router_m.split('\n')
+                           if 'MediaPlaybackDecodeRoute candidates' in l]
+        self.assertTrue(candidates_line, '路由候选链声明缺失')
+        chain = candidates_line[0]
+        idx_av = chain.index('AVPlayer')
+        idx_mpv = chain.index('MPV')
+        idx_cicada = chain.index('CicadaPlayer')
+        idx_web = chain.index('WebView')
+        self.assertLess(idx_av, idx_mpv, 'MPV 必须排在 AVPlayer 之后')
+        self.assertLess(idx_mpv, idx_cicada, 'MPV 必须排在 Cicada 之前')
+        self.assertLess(idx_cicada, idx_web, 'Cicada 必须排在 WebView 之前')
+
+    def test_router_skips_mpv_when_disabled(self):
+        # MediaPlaybackMPVRouteEnabled 为 NO 时跳过 MPV 候选。
+        self.assertIn('MediaPlaybackMPVRouteEnabled()', self.router_m)
+        self.assertIn('route == MediaPlaybackDecodeRouteMPV && !MediaPlaybackMPVRouteEnabled()', self.router_m)
+
+    def test_playresult_dispatches_mpv_route_to_cicada_path(self):
+        # playResult: 必须把 MediaPlaybackDecodeRouteMPV 分发到 startCicadaPlaybackWithResult:，
+        # 不能落入 AVPlayer 路径。
+        self.assertIn(
+            'initialRoute==MediaPlaybackDecodeRouteCicadaPlayer||initialRoute==MediaPlaybackDecodeRouteMPV',
+            self.vc, 'playResult: 未把 MPV 路由分发到 startCicadaPlaybackWithResult:')
+
+    def test_cicada_path_sets_correct_attempted_bit_for_mpv(self):
+        # startCicadaPlaybackWithResult: 必须根据 useMPV 设置 MPV 或 Cicada 位掩码，
+        # 不再无条件只设 Cicada 位。
+        self.assertIn('useMPV?MediaPlaybackDecodeRouteAttemptedMPV:MediaPlaybackDecodeRouteAttemptedCicadaPlayer',
+                      self.vc, 'startCicadaPlaybackWithResult: 未按 useMPV 设置正确的路由位掩码')
+
+    def test_cicada_path_avoids_mpv_retry_after_failure(self):
+        # useMPV 必须检查 AttemptedMPV 位，避免 MPV 失败后重复创建 MPV adapter。
+        self.assertIn('!(self.attemptedRoutes&MediaPlaybackDecodeRouteAttemptedMPV)',
+                      self.vc, 'useMPV 未检查 AttemptedMPV 位以防止 MPV 回退后重试')
+
+    def test_cicada_failure_handles_mpv_and_cicada_fallback_routes(self):
+        # advanceFromCicadaFailureWithError: 必须处理 nextRoute==MPV 和 nextRoute==CicadaPlayer，
+        # 调用 startCicadaPlaybackWithResult: 而不是跳过。
+        self.assertIn(
+            'nextRoute==MediaPlaybackDecodeRouteMPV||nextRoute==MediaPlaybackDecodeRouteCicadaPlayer',
+            self.vc, 'advanceFromCicadaFailureWithError: 未处理 MPV/Cicada 回退路由')
+
+    def test_mpv_adapter_implements_full_lifecycle(self):
+        # MPV adapter 必须实现 prepare/start/pause/stop/destroy 完整生命周期。
+        for method in ('- (void)prepare;', '- (void)prepareWithHardwareDecoder:',
+                       '- (void)start;', '- (void)pause;', '- (void)stop;', '- (void)destroy;',
+                       '- (void)seekToTime:', '- (void)setRate:'):
+            self.assertIn(method, self.mpv_h, f'MPV adapter 缺接口 {method}')
+
+    def test_mpv_adapter_has_first_frame_watchdog_and_failure_callback(self):
+        # MPV adapter 必须有首帧看门狗和失败回调，使 VC 能在 MPV 失败时回退。
+        self.assertIn('firstFrameWatchdog', self.mpv_m)
+        self.assertIn('FirstFrameTimeout', self.mpv_m)
+        self.assertIn('handleFirstFrameTimeout', self.mpv_m)
+        self.assertIn('handleFailureWithCode:', self.mpv_m)
+        self.assertIn('didFailWithError:', self.mpv_m)
+
+    def test_mpv_adapter_destroy_releases_handle(self):
+        # destroy 必须摘除 delegate、终止 mpv handle、防止回调落到已释放的 adapter。
+        destroy = self.mpv_m[self.mpv_m.index('- (void)destroy'):][:1200]
+        self.assertIn('self.destroyed = YES', destroy)
+        self.assertIn('self.delegate = nil', destroy)
+        self.assertIn('terminate_destroy', destroy)
+        self.assertIn('cancelFirstFrameWatchdog', destroy)
+
+    def test_mpv_adapter_uses_generation_safe_delegate(self):
+        # VC 的 delegate 回调必须检查 adapter 身份（generation 隔离），
+        # 防止旧 MPV adapter 的回调影响新 adapter。
+        self.assertIn('if(adapter!=self.cicadaAdapter)return;', self.vc,
+                      'VC delegate 回调缺少 adapter 身份检查')
+
+    def test_mpv_adapter_dlopen_isolation(self):
+        # MPV adapter 通过 dlopen RTLD_LOCAL 隔离 C 符号，不静态链接任何 libmpv/FFmpeg 符号。
+        self.assertIn('RTLD_NOW | RTLD_LOCAL', self.mpv_m)
+        self.assertNotIn('#import <mpv/', self.mpv_m)
+        self.assertNotIn('#import "mpv/', self.mpv_m)
 
 
 if __name__ == '__main__':
