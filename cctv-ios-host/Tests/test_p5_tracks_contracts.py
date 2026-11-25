@@ -31,12 +31,17 @@ class P5TracksContractTests(unittest.TestCase):
         cls.cicada_m = read('MediaPlaybackCicadaAdapter.m')
         cls.mpv_h = read('MediaPlaybackMPVAdapter.h')
         cls.mpv_m = read('MediaPlaybackMPVAdapter.m')
+        # 阶段 B-P1：菜单构建迁至协调器；契约测试同时读协调器源。若协调器不存在则回退空串。
+        try:
+            cls.settings = read('MediaPlaybackSettingsCoordinator.m')
+        except FileNotFoundError:
+            cls.settings = ''
 
     # ---- 倍速档位 ----
     def test_rate_gears_are_unified_seven_steps_with_three_x(self):
-        mp = self.playback
-        m = re.search(r'NSArray<NSNumber \*> \*rates=@\[([^\]]*)\];', mp)
-        self.assertIsNotNone(m, 'playback rate gear list literal not found')
+        sc = self.settings  # rate list migrated to coordinator (B-P1)
+        m = re.search(r'NSArray<NSNumber \*> \*rates=@\[([^\]]*)\];', sc)
+        self.assertIsNotNone(m, 'playback rate gear list literal not found in coordinator')
         rates = [float(x) for x in re.findall(r'@([0-9.]+)', m.group(1))]
         self.assertEqual(rates, [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0])
         self.assertNotIn(1.75, rates, 'legacy 1.75x gear must be removed')
@@ -59,9 +64,11 @@ class P5TracksContractTests(unittest.TestCase):
         self.assertIn('return YES;', body)
         # Both menu construction and the standalone speed-menu provider guard
         # unsupported engines (speed button menu is rebuilt through this method).
-        self.assertIn('if([self activeEngineSupportsRateWriting])', mp)
-        self.assertIn('BOOL supportsRate=[self activeEngineSupportsRateWriting];', mp)
-        self.assertIn('if(!supportsRate){self.playbackSpeedButton.menu=nil;return nil;}', mp)
+        # B-P1: rate menu impl migrated to coordinator; guards now reference owner.
+        sc = self.settings
+        self.assertIn('if([owner activeEngineSupportsRateWriting])', sc)
+        self.assertIn('BOOL supportsRate=[owner activeEngineSupportsRateWriting];', sc)
+        self.assertIn('if(!supportsRate){owner.playbackSpeedButton.menu=nil;return nil;}', sc)
 
     def test_speed_button_identifier_preserved(self):
         mp = self.playback
@@ -69,53 +76,52 @@ class P5TracksContractTests(unittest.TestCase):
 
     # ---- 音轨 / 字幕子菜单 ----
     def test_track_menu_uses_respondsToSelector_on_optional_protocol_members(self):
-        mp = self.playback
+        sc = self.settings  # migrated to coordinator (B-P1)
         # availableTracks / canSelectTracks / selectTrackWithIndex: are @optional.
-        self.assertIn('[adapter respondsToSelector:@selector(availableTracks)]', mp)
-        self.assertIn('[adapter respondsToSelector:@selector(canSelectTracks)]', mp)
-        self.assertIn('if(!canSelect)return nil;', mp)
-        self.assertIn('[current respondsToSelector:@selector(selectTrackWithIndex:)]', mp)
+        self.assertIn('[adapter respondsToSelector:@selector(availableTracks)]', sc)
+        self.assertIn('[adapter respondsToSelector:@selector(canSelectTracks)]', sc)
+        self.assertIn('if(!canSelect)return nil;', sc)
+        self.assertIn('[current respondsToSelector:@selector(selectTrackWithIndex:)]', sc)
         # The active engine adapter is treated through the protocol, so the MPV
         # adapter (stored in the same property) is covered too.
-        self.assertIn('id<CCTVPlaybackEngine> adapter=(id<CCTVPlaybackEngine>)self.cicadaAdapter', mp)
+        self.assertIn('id<CCTVPlaybackEngine> adapter=(id<CCTVPlaybackEngine>)owner.cicadaAdapter', sc)
 
     def test_track_menu_hidden_when_no_tracks(self):
-        mp = self.playback
-        # returning nil hides the sub-menu; the old disabled placeholders are gone.
-        self.assertIn('if(!actions.count)return nil;', mp)
-        self.assertIn('if(!group.options.count)return nil;', mp)
-        self.assertNotIn('当前引擎暂不支持轨道选择', mp)
-        self.assertNotIn('当前引擎尚未返回可选轨道', mp)
+        src = self.settings  # migrated to coordinator (B-P1)
+        self.assertIn('if(!actions.count)return nil;', src)
+        self.assertIn('if(!group.options.count)return nil;', src)
+        self.assertNotIn('当前引擎暂不支持轨道选择', src)
+        self.assertNotIn('当前引擎尚未返回可选轨道', src)
         # The track menus must not surface a "无可用轨道" placeholder (danmaku is unrelated).
-        menu = mp.split('- (nullable UIMenu *)mediaSelectionMenuForCharacteristic', 1)[1]
+        menu = src.split('- (nullable UIMenu *)mediaSelectionMenuForCharacteristic', 1)[1]
         menu = menu.split('\n- (UIMenu *)playbackRateMenu', 1)[0]
         self.assertNotIn('无可用轨道', menu)
 
     def test_track_menus_wired_into_av_group_with_characteristics(self):
-        mp = self.playback
-        self.assertIn('AVMediaCharacteristicLegible title:@"字幕"', mp)
-        self.assertIn('AVMediaCharacteristicAudible title:@"音轨"', mp)
+        sc = self.settings  # migrated to coordinator (B-P1)
+        self.assertIn('AVMediaCharacteristicLegible title:@"字幕"', sc)
+        self.assertIn('AVMediaCharacteristicAudible title:@"音轨"', sc)
         # The av group is now built from a mutable children array that skips nil.
-        self.assertIn('NSMutableArray<UIMenuElement *> *avChildren', mp)
-        self.assertIn('if(subtitleMenu)[avChildren insertObject:subtitleMenu atIndex:1];', mp)
-        self.assertIn('if(audioMenu)[avChildren insertObject:audioMenu atIndex:avChildren.count-1];', mp)
+        self.assertIn('NSMutableArray<UIMenuElement *> *avChildren', sc)
+        self.assertIn('if(subtitleMenu)[avChildren insertObject:subtitleMenu atIndex:1];', sc)
+        self.assertIn('if(audioMenu)[avChildren insertObject:audioMenu atIndex:avChildren.count-1];', sc)
 
     def test_avplayer_path_uses_media_selection_group(self):
-        mp = self.playback
-        self.assertIn('mediaSelectionGroupForMediaCharacteristic:characteristic', mp)
-        self.assertIn('selectMediaOption:nil inMediaSelectionGroup:currentGroup', mp)
-        self.assertIn('selectMediaOption:option inMediaSelectionGroup:currentGroup', mp)
+        sc = self.settings  # migrated to coordinator (B-P1)
+        self.assertIn('mediaSelectionGroupForMediaCharacteristic:characteristic', sc)
+        self.assertIn('selectMediaOption:nil inMediaSelectionGroup:currentGroup', sc)
+        self.assertIn('selectMediaOption:option inMediaSelectionGroup:currentGroup', sc)
 
     # ---- 诊断事件 ----
     def test_track_and_rate_selection_record_diagnostics(self):
+        # track selection diagnostics migrated to coordinator; rate diagnostics stay in VC setPlaybackRate (B-P1).
+        sc = self.settings
         mp = self.playback
-        self.assertIn('recordEvent:@"playback_track_selected" category:@"playback"', mp)
+        self.assertIn('recordEvent:@"playback_track_selected" category:@"playback"', sc)
         self.assertIn('recordEvent:@"playback_rate_selected" category:@"playback"', mp)
-        # Track event carries the kind + selection outcome fields.
-        track_event = mp.split('@"playback_track_selected"', 1)[1].split('}];', 1)[0]
+        track_event = sc.split('@"playback_track_selected"', 1)[1].split('}];', 1)[0]
         self.assertIn('"track_kind"', track_event)
         self.assertIn('"selection_succeeded"', track_event)
-        # Rate event carries the resolved rate + engine tag.
         rate_event = mp.split('@"playback_rate_selected"', 1)[1].split('}];', 1)[0]
         self.assertIn('"rate"', rate_event)
         self.assertIn('"engine"', rate_event)
