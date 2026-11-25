@@ -15,6 +15,7 @@
 #import "MediaPlaybackDecodeRouter.h"
 #import "HostPlaybackSession.h"
 #import "MediaPlaybackCicadaAdapter.h"
+#import "MediaPlaybackCicadaControls.h"
 #import "MediaPlaybackMPVAdapter.h"
 #import "MediaProtocolCapabilities.h"
 #import "HostSubtitleOverlayView.h"
@@ -333,16 +334,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 @property(nonatomic,strong) AVPlayer *player;
 @property(nonatomic,strong) AVPlayerViewController *playerController;
 @property(nonatomic,strong) UIView *videoView;
-@property(nonatomic,strong) UIView *cicadaControls;
-@property(nonatomic,strong) UIButton *cicadaPlayPauseButton;
-@property(nonatomic,strong) UIButton *cicadaRewindButton;
-@property(nonatomic,strong) UIButton *cicadaForwardButton;
-@property(nonatomic,strong) UIButton *cicadaRateButton;
-@property(nonatomic,strong) UIButton *cicadaOptionsButton;
-@property(nonatomic,strong) UIButton *cicadaFullscreenButton;
-@property(nonatomic,strong) UISlider *cicadaSeekSlider;
-@property(nonatomic,strong) UILabel *cicadaElapsedLabel;
-@property(nonatomic,strong) UILabel *cicadaDurationLabel;
+@property(nonatomic,strong) MediaPlaybackCicadaControls *cicadaControlsBuilder;
 @property(nonatomic) BOOL cicadaScrubbing;
 @property(nonatomic) BOOL cicadaScrubWasPlaying;
 @property(nonatomic,strong) MediaPlaybackFullscreenHost *cicadaFullscreenHost;
@@ -959,7 +951,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 }
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer shouldReceiveTouch:(UITouch *)touch {
     UIView *control=touch.view;
-    while(control&&control!=self.videoView){if([control isKindOfClass:UIControl.class]||control==self.cicadaControls)return NO;control=control.superview;}
+    while(control&&control!=self.videoView){if([control isKindOfClass:UIControl.class]||control==self.cicadaControlsBuilder.view)return NO;control=control.superview;}
     if(gestureRecognizer!=self.playbackPanGesture)return YES;
     UIView *candidate=touch.view;BOOL belongsToVideo=NO;
     while(candidate){if(candidate==self.gestureSurface){belongsToVideo=YES;break;}if([candidate isKindOfClass:UIControl.class])return NO;candidate=candidate.superview;}
@@ -2228,53 +2220,33 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
     // The adapter owns the first-frame deadline and pauses it with playback.
 
 }
-- (UIButton *)cicadaControlButton:(NSString *)symbol label:(NSString *)label action:(SEL)action {
-    UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];button.tintColor=UIColor.whiteColor;button.titleLabel.font=[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];button.accessibilityLabel=label;
-    if(symbol.length)[button setImage:[UIImage systemImageNamed:symbol] forState:UIControlStateNormal];else[button setTitle:label forState:UIControlStateNormal];
-    if(action)[button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
-    [button.heightAnchor constraintGreaterThanOrEqualToConstant:44].active=YES;return button;
-}
 - (void)installCicadaControls {
-    self.cicadaControls=[UIView new];self.cicadaControls.translatesAutoresizingMaskIntoConstraints=NO;self.cicadaControls.backgroundColor=[UIColor colorWithWhite:0 alpha:0.76];self.cicadaControls.layer.cornerRadius=12;self.cicadaControls.hidden=YES;self.cicadaControls.accessibilityIdentifier=@"media-cicada-controls";[self.videoView addSubview:self.cicadaControls];
-    self.cicadaRewindButton=[self cicadaControlButton:@"gobackward.10" label:@"后退10秒" action:@selector(cicadaRewind)];self.cicadaRewindButton.accessibilityHint=@"回退 10 秒";
-    self.cicadaPlayPauseButton=[self cicadaControlButton:@"pause.fill" label:@"暂停" action:@selector(toggleCicadaPlayback)];self.cicadaPlayPauseButton.accessibilityIdentifier=@"media-cicada-play-pause";self.cicadaPlayPauseButton.accessibilityHint=@"暂停或继续播放";
-    self.cicadaForwardButton=[self cicadaControlButton:@"goforward.10" label:@"快进10秒" action:@selector(cicadaForward)];self.cicadaForwardButton.accessibilityHint=@"快进 10 秒";
-    self.cicadaRateButton=[self cicadaControlButton:nil label:@"倍速" action:NULL];self.cicadaRateButton.showsMenuAsPrimaryAction=YES;self.cicadaRateButton.accessibilityHint=@"调整播放倍速";
-    self.cicadaOptionsButton=[self cicadaControlButton:@"slider.horizontal.3" label:@"画面比例与播放设置" action:NULL];self.cicadaOptionsButton.showsMenuAsPrimaryAction=YES;self.cicadaOptionsButton.accessibilityHint=@"画面比例与播放设置";
-    self.cicadaFullscreenButton=[self cicadaControlButton:@"arrow.up.left.and.arrow.down.right" label:@"全屏" action:@selector(toggleCicadaFullscreen)];self.cicadaFullscreenButton.accessibilityIdentifier=@"media-cicada-fullscreen";self.cicadaFullscreenButton.accessibilityHint=@"进入或退出全屏";
-    UIStackView *buttons=[[UIStackView alloc] initWithArrangedSubviews:@[self.cicadaRewindButton,self.cicadaPlayPauseButton,self.cicadaForwardButton,self.cicadaRateButton,self.cicadaOptionsButton,self.cicadaFullscreenButton]];buttons.distribution=UIStackViewDistributionFillEqually;buttons.spacing=2;
-    self.cicadaElapsedLabel=[UILabel new];self.cicadaDurationLabel=[UILabel new];
-    for(UILabel *label in @[self.cicadaElapsedLabel,self.cicadaDurationLabel]){label.textColor=UIColor.whiteColor;label.font=[UIFont monospacedDigitSystemFontOfSize:11 weight:UIFontWeightMedium];[label setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];}
-    self.cicadaSeekSlider=[UISlider new];self.cicadaSeekSlider.minimumValue=0;self.cicadaSeekSlider.maximumValue=1;self.cicadaSeekSlider.minimumTrackTintColor=UIColor.whiteColor;self.cicadaSeekSlider.accessibilityLabel=@"播放进度";self.cicadaSeekSlider.accessibilityIdentifier=@"media-cicada-progress";
-    [self.cicadaSeekSlider addTarget:self action:@selector(beginCicadaScrubbing) forControlEvents:UIControlEventTouchDown];[self.cicadaSeekSlider addTarget:self action:@selector(changeCicadaScrubbing) forControlEvents:UIControlEventValueChanged];[self.cicadaSeekSlider addTarget:self action:@selector(endCicadaScrubbing) forControlEvents:UIControlEventTouchUpInside|UIControlEventTouchUpOutside];[self.cicadaSeekSlider addTarget:self action:@selector(cancelCicadaScrubbing) forControlEvents:UIControlEventTouchCancel];
-    UIStackView *timeline=[[UIStackView alloc] initWithArrangedSubviews:@[self.cicadaElapsedLabel,self.cicadaSeekSlider,self.cicadaDurationLabel]];timeline.spacing=8;timeline.alignment=UIStackViewAlignmentCenter;[timeline.heightAnchor constraintEqualToConstant:28].active=YES;
-    UIStackView *stack=[[UIStackView alloc] initWithArrangedSubviews:@[buttons,timeline]];stack.translatesAutoresizingMaskIntoConstraints=NO;stack.axis=UILayoutConstraintAxisVertical;[self.cicadaControls addSubview:stack];
-    [NSLayoutConstraint activateConstraints:@[[self.cicadaControls.leadingAnchor constraintEqualToAnchor:self.videoView.safeAreaLayoutGuide.leadingAnchor constant:8],[self.cicadaControls.trailingAnchor constraintEqualToAnchor:self.videoView.safeAreaLayoutGuide.trailingAnchor constant:-8],[self.cicadaControls.bottomAnchor constraintEqualToAnchor:self.videoView.safeAreaLayoutGuide.bottomAnchor constant:-8],[stack.leadingAnchor constraintEqualToAnchor:self.cicadaControls.leadingAnchor constant:8],[stack.trailingAnchor constraintEqualToAnchor:self.cicadaControls.trailingAnchor constant:-8],[stack.topAnchor constraintEqualToAnchor:self.cicadaControls.topAnchor constant:2],[stack.bottomAnchor constraintEqualToAnchor:self.cicadaControls.bottomAnchor constant:-4]]];
+    self.cicadaControlsBuilder=[[MediaPlaybackCicadaControls alloc] initWithVideoView:self.videoView target:self playPauseAction:@selector(toggleCicadaPlayback) rewindAction:@selector(cicadaRewind) forwardAction:@selector(cicadaForward) fullscreenAction:@selector(toggleCicadaFullscreen) beginScrubAction:@selector(beginCicadaScrubbing) changeScrubAction:@selector(changeCicadaScrubbing) endScrubAction:@selector(endCicadaScrubbing) cancelScrubAction:@selector(cancelCicadaScrubbing)];
 }
 - (void)toggleControlsOverlay:(UITapGestureRecognizer *)gesture {if(self.cicadaAdapter&&!self.gestureLockActive)[self.controlsOverlay toggle];}
 - (void)refreshCicadaControls {
     BOOL active=self.cicadaAdapter!=nil;
     if(!self.controlsOverlay){self.controlsOverlay=[PlaybackOverlayController new];__weak typeof(self) weakSelf=self;
-        self.controlsOverlay.onVisibilityChanged=^(BOOL visible){MediaPlaybackViewController *owner=weakSelf;owner.cicadaControls.hidden=!visible||!owner.cicadaAdapter||owner.gestureLockActive;};
+        self.controlsOverlay.onVisibilityChanged=^(BOOL visible){MediaPlaybackViewController *owner=weakSelf;owner.cicadaControlsBuilder.view.hidden=!visible||!owner.cicadaAdapter||owner.gestureLockActive;};
         self.controlsOverlay.canAutoHide=^BOOL{MediaPlaybackViewController *owner=weakSelf;return owner&&owner.videoFrameReady&&owner.cicadaAdapter.state==MediaPlaybackCicadaAdapterStatePlaying&&!owner.cicadaScrubbing&&!owner.resumePromptPending;};
     }
     BOOL playingNow=self.cicadaAdapter.state==MediaPlaybackCicadaAdapterStatePlaying;
     if(!active)[self.controlsOverlay hide];
     else if(playingNow!=self.lastOverlayPlaying||!self.videoFrameReady)[self.controlsOverlay show];
     self.lastOverlayPlaying=playingNow;
-    self.cicadaControls.hidden=!active||!self.controlsOverlay.visible||self.gestureLockActive;
+    self.cicadaControlsBuilder.view.hidden=!active||!self.controlsOverlay.visible||self.gestureLockActive;
     if(!active)return;
-    [self.videoView bringSubviewToFront:self.cicadaControls];[self.videoView bringSubviewToFront:self.screenLockButton];[self.videoView bringSubviewToFront:self.gestureFeedbackLabel];
-    self.cicadaControls.userInteractionEnabled=!self.gestureLockActive;self.cicadaControls.alpha=1;
+    [self.videoView bringSubviewToFront:self.cicadaControlsBuilder.view];[self.videoView bringSubviewToFront:self.screenLockButton];[self.videoView bringSubviewToFront:self.gestureFeedbackLabel];
+    self.cicadaControlsBuilder.view.userInteractionEnabled=!self.gestureLockActive;self.cicadaControlsBuilder.view.alpha=1;
     BOOL ready=self.cicadaAdapter.state==MediaPlaybackCicadaAdapterStatePlaying||self.cicadaAdapter.state==MediaPlaybackCicadaAdapterStatePaused||self.cicadaAdapter.state==MediaPlaybackCicadaAdapterStateCompleted;
     BOOL playing=self.cicadaAdapter.state==MediaPlaybackCicadaAdapterStatePlaying;
-    [self.cicadaPlayPauseButton setImage:[UIImage systemImageNamed:playing?@"pause.fill":@"play.fill"] forState:UIControlStateNormal];self.cicadaPlayPauseButton.accessibilityLabel=playing?@"暂停":@"播放";self.cicadaPlayPauseButton.enabled=ready&&!self.resumePromptPending;
+    [self.cicadaControlsBuilder.playPauseButton setImage:[UIImage systemImageNamed:playing?@"pause.fill":@"play.fill"] forState:UIControlStateNormal];self.cicadaControlsBuilder.playPauseButton.accessibilityLabel=playing?@"暂停":@"播放";self.cicadaControlsBuilder.playPauseButton.enabled=ready&&!self.resumePromptPending;
     double duration=self.cicadaAdapter.duration,position=self.cicadaAdapter.currentPosition;if(!isfinite(position)||position<0)position=0;BOOL seekable=ready&&isfinite(duration)&&duration>0;
-    self.cicadaSeekSlider.enabled=seekable;self.cicadaRewindButton.enabled=seekable;self.cicadaForwardButton.enabled=seekable;
-    if(!self.cicadaScrubbing){self.cicadaSeekSlider.value=seekable?(float)MIN(1,MAX(0,position/duration)):0;self.cicadaElapsedLabel.text=[self formatMediaTime:isfinite(position)?MAX(0,position):0];}
-    self.cicadaDurationLabel.text=seekable?[self formatMediaTime:duration]:(ready?@"直播":@"--:--");
-    if(!self.cicadaRateButton.menu)self.cicadaRateButton.menu=[self playbackRateMenu];[self.cicadaRateButton setTitle:[NSString stringWithFormat:@"%.2g×",self.cicadaAdapter.rate] forState:UIControlStateNormal];self.cicadaRateButton.accessibilityValue=[NSString stringWithFormat:@"%.2g×",self.cicadaAdapter.rate];self.cicadaOptionsButton.menu=self.playbackOptionsItem.menu?:[self playbackOptionsMenu];
-    self.cicadaSeekSlider.accessibilityValue=[NSString stringWithFormat:@"%@ / %@",self.cicadaElapsedLabel.text,self.cicadaDurationLabel.text];
+    self.cicadaControlsBuilder.seekSlider.enabled=seekable;self.cicadaControlsBuilder.rewindButton.enabled=seekable;self.cicadaControlsBuilder.forwardButton.enabled=seekable;
+    if(!self.cicadaScrubbing){self.cicadaControlsBuilder.seekSlider.value=seekable?(float)MIN(1,MAX(0,position/duration)):0;self.cicadaControlsBuilder.elapsedLabel.text=[self formatMediaTime:isfinite(position)?MAX(0,position):0];}
+    self.cicadaControlsBuilder.durationLabel.text=seekable?[self formatMediaTime:duration]:(ready?@"直播":@"--:--");
+    if(!self.cicadaControlsBuilder.rateButton.menu)self.cicadaControlsBuilder.rateButton.menu=[self playbackRateMenu];[self.cicadaControlsBuilder.rateButton setTitle:[NSString stringWithFormat:@"%.2g×",self.cicadaAdapter.rate] forState:UIControlStateNormal];self.cicadaControlsBuilder.rateButton.accessibilityValue=[NSString stringWithFormat:@"%.2g×",self.cicadaAdapter.rate];self.cicadaControlsBuilder.optionsButton.menu=self.playbackOptionsItem.menu?:[self playbackOptionsMenu];
+    self.cicadaControlsBuilder.seekSlider.accessibilityValue=[NSString stringWithFormat:@"%@ / %@",self.cicadaControlsBuilder.elapsedLabel.text,self.cicadaControlsBuilder.durationLabel.text];
 }
 - (void)toggleCicadaPlayback {
     if(!self.cicadaAdapter||self.gestureLockActive)return;
@@ -2282,14 +2254,14 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
     else {self.playbackWantsPlayback=YES;if(self.cicadaAdapter.state==MediaPlaybackCicadaAdapterStateCompleted){id adapter=self.cicadaAdapter;[self seekActiveEngineToTime:0 completion:^(BOOL finished){if(finished&&adapter==self.cicadaAdapter)[self playActiveEngine];}];}else [self playActiveEngine];}
     [self refreshCicadaControls];
 }
-- (void)seekCicadaBy:(NSTimeInterval)delta {if(!self.cicadaAdapter||!self.cicadaSeekSlider.enabled||self.gestureLockActive)return;double duration=self.cicadaAdapter.duration,target=MIN(duration,MAX(0,self.cicadaAdapter.currentPosition+delta));id adapter=self.cicadaAdapter;[self seekActiveEngineToTime:target completion:^(BOOL finished){if(adapter==self.cicadaAdapter)[self refreshCicadaControls];}];}
+- (void)seekCicadaBy:(NSTimeInterval)delta {if(!self.cicadaAdapter||!self.cicadaControlsBuilder.seekSlider.enabled||self.gestureLockActive)return;double duration=self.cicadaAdapter.duration,target=MIN(duration,MAX(0,self.cicadaAdapter.currentPosition+delta));id adapter=self.cicadaAdapter;[self seekActiveEngineToTime:target completion:^(BOOL finished){if(adapter==self.cicadaAdapter)[self refreshCicadaControls];}];}
 - (void)cicadaRewind {[self seekCicadaBy:-10];}
 - (void)cicadaForward {[self seekCicadaBy:10];}
-- (void)beginCicadaScrubbing {if(!self.cicadaSeekSlider.enabled)return;self.cicadaScrubbing=YES;self.cicadaScrubWasPlaying=self.cicadaAdapter.state==MediaPlaybackCicadaAdapterStatePlaying;}
-- (void)changeCicadaScrubbing {if(!self.cicadaSeekSlider.enabled)return;if(!self.cicadaScrubbing)[self beginCicadaScrubbing];self.cicadaElapsedLabel.text=[self formatMediaTime:self.cicadaSeekSlider.value*self.cicadaAdapter.duration];}
+- (void)beginCicadaScrubbing {if(!self.cicadaControlsBuilder.seekSlider.enabled)return;self.cicadaScrubbing=YES;self.cicadaScrubWasPlaying=self.cicadaAdapter.state==MediaPlaybackCicadaAdapterStatePlaying;}
+- (void)changeCicadaScrubbing {if(!self.cicadaControlsBuilder.seekSlider.enabled)return;if(!self.cicadaScrubbing)[self beginCicadaScrubbing];self.cicadaControlsBuilder.elapsedLabel.text=[self formatMediaTime:self.cicadaControlsBuilder.seekSlider.value*self.cicadaAdapter.duration];}
 - (void)cancelCicadaScrubbing {self.cicadaScrubbing=NO;[self refreshCicadaControls];[self.controlsOverlay rearmAutoHide];}
 - (void)endCicadaScrubbing {
-    if(!self.cicadaScrubbing||!self.cicadaAdapter)return;self.cicadaScrubbing=NO;id adapter=self.cicadaAdapter;NSUInteger generation=self.playerGeneration;BOOL wasPlaying=self.cicadaScrubWasPlaying;double target=self.cicadaSeekSlider.value*self.cicadaAdapter.duration;
+    if(!self.cicadaScrubbing||!self.cicadaAdapter)return;self.cicadaScrubbing=NO;id adapter=self.cicadaAdapter;NSUInteger generation=self.playerGeneration;BOOL wasPlaying=self.cicadaScrubWasPlaying;double target=self.cicadaControlsBuilder.seekSlider.value*self.cicadaAdapter.duration;
     [self seekActiveEngineToTime:target completion:^(BOOL finished){if(generation!=self.playerGeneration||adapter!=self.cicadaAdapter)return;if(finished){if(wasPlaying)[self playActiveEngine];else[self pauseActiveEngine];}[self refreshCicadaControls];[self.controlsOverlay rearmAutoHide];}];
 }
 - (void)toggleCicadaFullscreen {

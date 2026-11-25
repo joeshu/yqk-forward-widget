@@ -71,12 +71,9 @@ class DynamicTypeContracts(unittest.TestCase):
         self.assertIn("MediaPlaybackApplyScaledPillFont(button);", body)
 
     def test_cicada_control_factory_keeps_hud_font_fixed(self):
-        # 播放器 HUD 时间码/控制图标允许固定字号：工厂写的是 12pt 固定字体
-        body = method_body(
-            PLAYBACK_SOURCE,
-            "- (UIButton *)cicadaControlButton:(NSString *)symbol label:(NSString *)label action:(SEL)action {",
-        )
-        self.assertIn("systemFontOfSize:12 weight:UIFontWeightSemibold", body)
+        # HUD 创建被委托给独立模块；固定字号和动态元素仍在 builder 内。
+        controls = (SOURCES / "MediaPlaybackCicadaControls.m").read_text(encoding="utf-8")
+        self.assertIn("systemFontOfSize:12 weight:UIFontWeightSemibold", controls)
 
 
 class VoiceOverButtonContracts(unittest.TestCase):
@@ -142,18 +139,19 @@ class VoiceOverButtonContracts(unittest.TestCase):
         )
 
     def test_cicada_control_buttons_have_hints(self):
+        controls = (SOURCES / "MediaPlaybackCicadaControls.m").read_text(encoding="utf-8")
         for fragment in (
-            'cicadaRewindButton.accessibilityHint=@"回退 10 秒"',
-            'cicadaPlayPauseButton.accessibilityHint=@"暂停或继续播放"',
-            'cicadaForwardButton.accessibilityHint=@"快进 10 秒"',
-            'cicadaRateButton.accessibilityHint=@"调整播放倍速"',
-            'cicadaFullscreenButton.accessibilityHint=@"进入或退出全屏"',
+            '_rewindButton.accessibilityHint=@"回退 10 秒"',
+            '_playPauseButton.accessibilityHint=@"暂停或继续播放"',
+            '_forwardButton.accessibilityHint=@"快进 10 秒"',
+            '_rateButton.accessibilityHint=@"调整播放倍速"',
+            '_fullscreenButton.accessibilityHint=@"进入或退出全屏"',
         ):
-            self.assertIn(fragment, PLAYBACK_SOURCE)
+            self.assertIn(fragment, controls)
 
     def test_cicada_rate_button_reports_value(self):
         self.assertIn(
-            "self.cicadaRateButton.accessibilityValue=[NSString "
+            "self.cicadaControlsBuilder.rateButton.accessibilityValue=[NSString "
             'stringWithFormat:@"%.2g×",self.cicadaAdapter.rate];',
             PLAYBACK_SOURCE,
         )
