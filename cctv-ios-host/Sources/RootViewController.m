@@ -209,6 +209,11 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
 
 
 @implementation RootViewController
+// 第三方 SDK 播放器（CNPlayer / Cicada 私有类）与 AVFoundation KVO 的统一异常边界（私有类可能不支持某 key、init 抛异常，或观察者已被 SDK 内部移除）。
+- (BOOL)guardedSetValue:(id)value forKey:(NSString *)key onObject:(id)target {if(!target||!key.length)return NO;@try{[target setValue:value forKey:key];return YES;}@catch(NSException *e){[self log:@"设置播放器属性 %@ 异常 %@",key,e.reason];return NO;}}
+- (id)guardedValueForKey:(NSString *)key ofObject:(id)target {if(!target||!key.length)return nil;@try{return [target valueForKey:key];}@catch(NSException *e){[self log:@"读取播放器属性 %@ 异常 %@",key,e.reason];return nil;}}
+- (id)guardedNewInstanceOfClass:(Class)cls {if(!cls)return nil;@try{return [[cls alloc] init];}@catch(NSException *e){[self log:@"创建播放器异常 %@",e.reason];return nil;}}
+- (void)guardedRemoveObserverFrom:(NSObject *)object keyPath:(NSString *)keyPath context:(void *)context {if(!object||!keyPath.length)return;@try{[object removeObserver:self forKeyPath:keyPath context:context];}@catch(NSException *e){[self log:@"移除观察者 %@ 异常 %@",keyPath,e.reason];}}
 - (BOOL)sessionHasContent {return self.currentPlayer||self.avPlayer||self.remoteAdapter||self.moviePlayer||self.playbackReadiness||(self.channelID.length&&(self.livePlaybackSuspendedForNavigation||self.remotePlaybackFailed||self.nativePlaybackFailed));}
 - (BOOL)sessionWantsPlayback {if(self.livePlaybackSuspendedForNavigation)return NO;if(self.avPlayer||self.remoteAdapter)return self.remotePlaybackWanted;return [self sessionIsPlaying]||(self.currentPlayer&&!self.firstRender&&!self.nativePlaybackFailed);}
 - (BOOL)sessionIsPlaying {
@@ -216,7 +221,7 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
     if(self.remoteAdapter)return self.remoteAdapter.state==MediaPlaybackCicadaAdapterStatePlaying;
     if(self.moviePlayer)return self.moviePlayer.rate>0;
     if(self.avPlayer)return self.remotePlaybackWanted;
-    @try{return [[self.currentPlayer valueForKey:@"isPlaying"] boolValue];}@catch(NSException *e){return NO;}
+    return [[self guardedValueForKey:@"isPlaying" ofObject:self.currentPlayer] boolValue];
 }
 - (void)sessionPlay {if(self.remoteAdapter.state==MediaPlaybackCicadaAdapterStateCompleted){[self playRemote:@{@"remoteURL":self.currentRemoteURL?:@"",@"id":self.channelID?:@"",@"name":self.channelName?:@"直播",@"headers":self.currentRemoteHeaders?:@{}}];return;}if(self.remoteAdapter){self.remotePlaybackWanted=YES;[self.remoteAdapter start];}else if(![self sessionIsPlaying])[self togglePlayPause];[self updateNowPlaying];}
 - (void)sessionPause {
@@ -659,7 +664,7 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
             }
         } @catch(NSException *exception){NSLog(@"[CCTVHost] diagnostic log write failed: %@",exception.name);}
         @finally {
-            @try{[file closeFile];}@catch(NSException *exception){}
+            [file closeAndReturnError:NULL];
             BOOL hasPending=NO;
             @synchronized(self.pendingLogWrites){self.diagnosticWriteInProgress=NO;hasPending=self.pendingLogWrites.length>0;}
             if(hasPending)[self scheduleDiagnosticLogFlush];

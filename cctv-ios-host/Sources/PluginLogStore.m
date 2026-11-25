@@ -52,7 +52,7 @@ static const NSUInteger PluginRunMaximumCount = 20;
 - (void)flushPath:(NSString *)path generation:(NSUInteger)generation {
     [self.lock lock];if([self.generations[path] unsignedIntegerValue]!=generation){[self.lock unlock];return;}[self.scheduled removeObject:path];NSString *batch=[self.pending[path] drain];[self.lock unlock];if(!batch.length)return;
     NSString *parent=path.stringByDeletingLastPathComponent;NSFileManager *fm=NSFileManager.defaultManager;[fm createDirectoryAtPath:parent withIntermediateDirectories:YES attributes:nil error:NULL];if(![fm fileExistsAtPath:path])[fm createFileAtPath:path contents:nil attributes:nil];
-    NSFileHandle *file=[NSFileHandle fileHandleForWritingAtPath:path];@try{[file seekToEndOfFile];[file writeData:[batch dataUsingEncoding:NSUTF8StringEncoding]];[file closeFile];file=nil;}@catch(NSException *exception){@try{[file closeFile];}@catch(NSException *ignored){};return;}
+    NSFileHandle *file=[NSFileHandle fileHandleForWritingAtPath:path];BOOL written=YES;if(file)written=[file seekToEndReturningOffset:NULL error:NULL]&&[file writeData:[batch dataUsingEncoding:NSUTF8StringEncoding] error:NULL];[file closeAndReturnError:NULL];file=nil;if(!written){NSLog(@"[CCTVHost] plugin log append failed %@",path.lastPathComponent);return;}
     unsigned long long size=[[fm attributesOfItemAtPath:path error:NULL][NSFileSize] unsignedLongLongValue];
     // Keep pre-session logs at their historical 512 KiB budget; each new run
     // is independently bounded so one noisy invocation cannot evict another.

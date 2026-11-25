@@ -51,7 +51,7 @@ static const NSUInteger ResourceImportZIPLimit = 24 * 1024 * 1024;
     [session invalidateAndCancel];
 }
 - (void)discardBody {
-    @try {[self.bodyFile closeFile];} @catch (__unused NSException *exception) {}
+    [self.bodyFile closeAndReturnError:NULL];
     self.bodyFile=nil;
     if(self.bodyURL)[NSFileManager.defaultManager removeItemAtURL:self.bodyURL error:NULL];
     self.bodyURL=nil;self.prefix=nil;
@@ -96,8 +96,8 @@ static const NSUInteger ResourceImportZIPLimit = 24 * 1024 * 1024;
             NSString *message=[NSString stringWithFormat:@"%@大小至少 %.1f MiB，超过 %lu MiB 上限%@",self.isZIP?@"ZIP 资源":@"资源",size,(unsigned long)(limit/(1024*1024)),self.isZIP?@"":@"；ZIP 可选择本地文件导入"];
             self.failure=[NSError errorWithDomain:@"ResourceImport" code:2 userInfo:@{NSLocalizedDescriptionKey:message}];stop=YES;
         }else{
-            @try {[self.bodyFile writeData:data];self.receivedBytes+=data.length;}
-            @catch (NSException *exception){self.failure=[NSError errorWithDomain:@"ResourceImport" code:4 userInfo:@{NSLocalizedDescriptionKey:@"资源下载暂存失败，请检查可用空间后重试"}];stop=YES;}
+            if([self.bodyFile writeData:data error:NULL])self.receivedBytes+=data.length;
+            else{self.failure=[NSError errorWithDomain:@"ResourceImport" code:4 userInfo:@{NSLocalizedDescriptionKey:@"资源下载暂存失败，请检查可用空间后重试"}];stop=YES;}
         }
     }
     if(stop)[task cancel];
@@ -114,7 +114,7 @@ static const NSUInteger ResourceImportZIPLimit = 24 * 1024 * 1024;
     @synchronized(self){
         if(self.cancelled||task!=self.task)return;
         response=self.response;failure=self.failure?:error;fallback=[self.fallbackDataProvider copy];origin=self.requestURL;
-        @try {[self.bodyFile closeFile];} @catch (__unused NSException *exception) {if(!failure)failure=[NSError errorWithDomain:@"ResourceImport" code:4 userInfo:@{NSLocalizedDescriptionKey:@"资源下载暂存失败"}];}
+        if(self.bodyFile&&![self.bodyFile closeAndReturnError:NULL]){if(!failure)failure=[NSError errorWithDomain:@"ResourceImport" code:4 userInfo:@{NSLocalizedDescriptionKey:@"资源下载暂存失败"}];}
         self.bodyFile=nil;
         if(!failure){NSError *readError=nil;data=[NSData dataWithContentsOfURL:self.bodyURL options:NSDataReadingMappedIfSafe error:&readError];if(!data)failure=readError?:[NSError errorWithDomain:@"ResourceImport" code:4 userInfo:@{NSLocalizedDescriptionKey:@"无法读取资源下载暂存文件"}];}
         [self discardBody];self.session=nil;self.task=nil;

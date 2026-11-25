@@ -449,14 +449,12 @@ static NSString *RuntimeDiagnosticsISO8601String(NSDate *date) {
             unsigned long long size = [[fm attributesOfItemAtPath:self.logPath error:NULL] fileSize];
             if (size + line.length > RuntimeDiagnosticsMaximumBytes) [self trimLogToTail];
             NSFileHandle *file = [NSFileHandle fileHandleForWritingAtPath:self.logPath];
-            @try {
-                [file seekToEndOfFile];
-                [file writeData:line];
-                if (synchronously) [file synchronizeFile];
-                [file closeFile];
-                if (newSessionFile) [self pruneOldSessions];
-            }
-            @catch (__unused NSException *exception) { @try { [file closeFile]; } @catch (__unused NSException *ignored) {} }
+            // NSError 版文件句柄 API（iOS 13.4+）在磁盘满 / 句柄失效时返回 NO 而非抛异常。
+            BOOL written = YES;
+            if (file) written = [file seekToEndReturningOffset:NULL error:NULL] && [file writeData:line error:NULL];
+            if (written && synchronously) [file synchronizeAndReturnError:NULL];
+            [file closeAndReturnError:NULL];
+            if (written && newSessionFile) [self pruneOldSessions];
         }
     };
     if (!synchronously) dispatch_async(self.queue, write);
@@ -538,8 +536,9 @@ static NSString *RuntimeDiagnosticsISO8601String(NSDate *date) {
             if (pending.length > 8192) [pending setLength:0];
         }
         consumeLine(pending);
-    } @catch (__unused NSException *exception) {
-        @try { [reader closeFile]; } @catch (__unused NSException *ignored) {}
+    } @catch (NSException *exception) {
+        NSLog(@"[CCTVHost] diagnostics session scan raised %@", exception.name);
+        [reader closeAndReturnError:NULL];
         return nil;
     }
     [reader closeFile];

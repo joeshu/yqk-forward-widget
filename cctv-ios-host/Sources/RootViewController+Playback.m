@@ -83,7 +83,7 @@
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (weakSelf.sdkPlayer) return;
         id inst = nil;
-        @try { inst = [[cls alloc] init]; } @catch (NSException *e) {}
+        inst = [weakSelf guardedNewInstanceOfClass:cls];
         if (inst) { weakSelf.sdkPlayer = inst; weakSelf.sdkPlayerUsed=NO; [weakSelf log:@"播放器实例已预热"]; }
     });
 }
@@ -219,13 +219,13 @@
     if(self.currentPlayer){[self stopPlayback];[self recordStartupStage:@"teardown"];}
     [self.nativePreloader cancel];self.sdkPlayer=nil;self.sdkPlayerUsed=NO;
     Class cls=NSClassFromString(@"CNPlayer");SEL selector=NSSelectorFromString(@"playLIVEWithUrl:delegate:configOptions:");
-    id player=nil;@try{player=[[cls alloc] init];}@catch(NSException *exception){[self log:@"创建 SDK 播放器异常 %@",exception.reason];}
+    id player=[self guardedNewInstanceOfClass:cls];
     NSMethodSignature *signature=[player methodSignatureForSelector:selector];
     BOOL supported=player&&[player respondsToSelector:selector]&&signature&&signature.numberOfArguments==5&&signature.methodReturnType[0]=='B'&&strcmp([signature getArgumentTypeAtIndex:2],"@")==0&&strcmp([signature getArgumentTypeAtIndex:3],"@")==0&&strcmp([signature getArgumentTypeAtIndex:4],"@")==0;
     if(!supported){[self displayNativePlaybackFailure:@"SDK 不支持自选地址起播" error:nil];return;}
     self.currentPlayer=player;self.cicadaPlayer=nil;self.nativePlaybackFailed=NO;
     [self rebuildTimeshiftController];
-    @try{[player setValue:@YES forKey:@"autoPlay"];}@catch(NSException *exception){}
+    [self guardedSetValue:@YES forKey:@"autoPlay" onObject:player];
     self.nativeStartupTuner=CCTVBoolPreference(@"fastNativeStartup",YES)?[NativeStartupTuner new]:nil;
     NSMutableDictionary *options=[@{kOptTitle:title?:cid,kOptURLChannelIDForStats:cid,CCTVTimeshiftConfigKeyLivePublicCheck:@NO,CCTVTimeshiftConfigKeyTimeshiftingChannelID:cid} mutableCopy];
     id dataManager=[self call:player sel:@"dataManager"];
@@ -236,7 +236,7 @@
     id accepted=[self invokeTarget:player selector:selector args:@[url,session,options]];
     [self recordStartupStage:@"configure"];
     if(![accepted isKindOfClass:NSNumber.class]||![accepted boolValue]){
-        self.nativeSessionDelegate=nil;self.currentPlayer=nil;@try{[player setValue:nil forKey:@"delegate"];}@catch(NSException *exception){}[self call:player sel:@"stop"];
+        self.nativeSessionDelegate=nil;self.currentPlayer=nil;[self guardedSetValue:nil forKey:@"delegate" onObject:player];[self call:player sel:@"stop"];
         [self log:@"CNPlayer 未接受所选地址；保留线路选择，不回退自动"];
         [self displayNativePlaybackFailure:@"SDK 拒绝所选地址" error:nil];return;
     }
@@ -267,35 +267,35 @@
     if(!prepared && !legacy&&self.sdkPlayerUsed)inst=nil;
     if(!prepared && legacy&&inst&&self.sdkPlayerUsed)[self call:inst sel:@"reset"];
     self.sdkPlayer=nil;
-    if(!inst){@try{inst=[[cls alloc] init];}@catch(NSException *e){[self log:@"创建播放器异常 %@",e.reason];}}
+    if(!inst)inst=[self guardedNewInstanceOfClass:cls];
     if(!inst||![inst respondsToSelector:playSel]){[self displayNativePlaybackFailure:@"SDK 接口不可用" error:nil];return;}
     self.currentPlayer=inst;self.cicadaPlayer=nil;self.sdkPlayer=legacy?inst:nil;self.sdkPlayerUsed=YES;
     [self rebuildTimeshiftController];
     CNPlayerSessionDelegate *session=[self beginNativeSession];
-    @try{[inst setValue:@YES forKey:@"autoPlay"];}@catch(NSException *e){}
+    [self guardedSetValue:@YES forKey:@"autoPlay" onObject:inst];
     self.nativePlaybackFailed=NO;
     self.nativeStartupTuner=!self.nativeSafeStartupActive && CCTVBoolPreference(@"fastNativeStartup",YES)?[NativeStartupTuner new]:nil;
     NSDictionary *options=@{kOptTitle:title?:cid,CCTVTimeshiftConfigKeyLivePublicCheck:@NO,CCTVTimeshiftConfigKeyTimeshiftingChannelID:cid};
     [self log:@"原生起播 %@ · %@",cid,self.nativeSafeStartupActive?@"SDK 默认配置恢复":(legacy?@"0.12 兼容复用":@"独立实例对比")];
     id accepted=@YES;
     if(prepared){
-        @try{[inst setValue:session forKey:@"delegate"];}@catch(NSException *e){prepared=nil;}
+        if(![self guardedSetValue:session forKey:@"delegate" onObject:inst])prepared=nil;
         if(prepared){[self recordStartupStage:@"preloadedVDN"];[self log:@"命中原生预解析 %@，保留播放信息直接 prepare",cid];}
     }
     if(!prepared)accepted=[self invokeTarget:inst selector:playSel args:@[cid,session,options]];
     if(![accepted isKindOfClass:NSNumber.class]||![accepted boolValue]){
         id previous=inst;self.currentPlayer=nil;self.sdkPlayer=nil;self.sdkPlayerUsed=NO;
-        @try{[previous setValue:nil forKey:@"delegate"];}@catch(NSException *e){}
+        [self guardedSetValue:nil forKey:@"delegate" onObject:previous];
         [self call:previous sel:@"stop"];
         [self log:@"SDK 实例未确认起播，使用全新实例重试一次"];
-        @try{inst=[[cls alloc] init];}@catch(NSException *e){inst=nil;}
-        if(inst){self.currentPlayer=inst;self.sdkPlayer=legacy?inst:nil;self.sdkPlayerUsed=YES;self.nativePlaybackFailed=NO;self.nativeRetryPending=NO;[self rebuildTimeshiftController];session=[self beginNativeSession];@try{[inst setValue:@YES forKey:@"autoPlay"];}@catch(NSException *e){}accepted=[self invokeTarget:inst selector:playSel args:@[cid,session,options]];}
+        inst=[self guardedNewInstanceOfClass:cls];
+        if(inst){self.currentPlayer=inst;self.sdkPlayer=legacy?inst:nil;self.sdkPlayerUsed=YES;self.nativePlaybackFailed=NO;self.nativeRetryPending=NO;[self rebuildTimeshiftController];session=[self beginNativeSession];[self guardedSetValue:@YES forKey:@"autoPlay" onObject:inst];accepted=[self invokeTarget:inst selector:playSel args:@[cid,session,options]];}
     }
     [self recordStartupStage:@"configure"];
     if(!inst||![accepted isKindOfClass:NSNumber.class]||![accepted boolValue]){
         self.currentPlayer=nil;self.sdkPlayer=nil;self.sdkPlayerUsed=NO;
         [self.nativeStartupTuner restore];self.nativeStartupTuner=nil;
-        @try{[inst setValue:nil forKey:@"delegate"];}@catch(NSException *e){}
+        [self guardedSetValue:nil forKey:@"delegate" onObject:inst];
         [self call:inst sel:@"stop"];
         [self log:@"SDK 未确认接受起播，停止本次尝试"];[self displayNativePlaybackFailure:@"起播被拒绝" error:nil];return;
     }
@@ -325,9 +325,9 @@
     self.nativeStartupTuner=nil; // Restore before the retained SDK wrapper is stopped or reused.
     self.remotePlaybackWanted=NO;
     self.remoteFailureRecoveryPending=NO;
-    if(self.avKeepUpObserved){@try { [self.avPlayer.currentItem removeObserver:self forKeyPath:@"playbackLikelyToKeepUp" context:kAVItemStatusContext]; } @catch (NSException *e) {} self.avKeepUpObserved=NO;}
+    if(self.avKeepUpObserved){[self guardedRemoveObserverFrom:self.avPlayer.currentItem keyPath:@"playbackLikelyToKeepUp" context:kAVItemStatusContext]; self.avKeepUpObserved=NO;}
     [self.playbackReadiness cancel];self.playbackReadiness=nil;
-    if(self.avLayerObserved){@try { [self.avLayer removeObserver:self forKeyPath:@"readyForDisplay" context:kAVLayerFrameContext]; } @catch (NSException *e) {} self.avLayerObserved=NO;}
+    if(self.avLayerObserved){[self guardedRemoveObserverFrom:self.avLayer keyPath:@"readyForDisplay" context:kAVLayerFrameContext]; self.avLayerObserved=NO;}
 
     self.epgListGeneration++;
     for(NSURLSessionDataTask *task in self.epgListTasks.allValues)[task cancel];[self.epgListTasks removeAllObjects];[self.epgInflight removeAllObjects];
@@ -340,7 +340,7 @@
     // Ignore synchronous teardown callbacks before changing the core.
     self.currentPlayer = nil;
     if (previous) {
-        @try { [previous setValue:nil forKey:@"delegate"]; } @catch (NSException *e) {}
+        [self guardedSetValue:nil forKey:@"delegate" onObject:previous];
         [self call:previous sel:@"stop"];
     }
     if (self.cicadaPlayer) {
@@ -351,7 +351,7 @@
         [NSNotificationCenter.defaultCenter removeObserver:self name:AVPlayerItemPlaybackStalledNotification object:self.avPlayer.currentItem];
         [self.avPlayer pause];
         AVPlayerItem *previousItem=self.avPlayer.currentItem;
-        @try { [previousItem removeObserver:self forKeyPath:@"status" context:kAVItemStatusContext]; } @catch (NSException *e) {}
+        [self guardedRemoveObserverFrom:previousItem keyPath:@"status" context:kAVItemStatusContext];
         [previousItem cancelPendingSeeks];[previousItem.asset cancelLoading];[self.avPlayer replaceCurrentItemWithPlayerItem:nil];
         self.avPlayer = nil;
     }
@@ -384,8 +384,7 @@
 }
 
 - (void)attachVideoView {
-    id view = nil;
-    @try { view = [self.currentPlayer valueForKey:@"view"]; } @catch (NSException *e) { return; }
+    id view = [self guardedValueForKey:@"view" ofObject:self.currentPlayer];
     if (![view isKindOfClass:UIView.class]) return;
     UIView *v = view;
     if (v.superview != self.playerBox) {
@@ -422,7 +421,7 @@
     }
     if (!self.currentPlayer) return;
     BOOL playing = NO;
-    @try { playing = [[self.currentPlayer valueForKey:@"isPlaying"] boolValue]; } @catch (NSException *e) {}
+    playing = [[self guardedValueForKey:@"isPlaying" ofObject:self.currentPlayer] boolValue];
     if ([self.playPauseBtn.currentTitle isEqualToString:@"继续"] || [self.playPauseBtn.currentTitle isEqualToString:@"继续播放"]) playing = NO;
     self.nativeUserPaused = playing;
     [self call:self.currentPlayer sel:(playing ? @"pause" : @"play")];
@@ -440,7 +439,7 @@
         return;
     }
     self.liveMuted = !self.liveMuted;
-    @try { [self.currentPlayer setValue:@(self.liveMuted) forKey:@"muted"]; } @catch (NSException *e) {}
+    [self guardedSetValue:@(self.liveMuted) forKey:@"muted" onObject:self.currentPlayer];
     [self.muteBtn setTitle:(self.liveMuted ? @"发声" : @"静音") forState:UIControlStateNormal];
     [self syncPlayPauseButtonIcon];
 }
@@ -883,7 +882,7 @@
 - (id)invokeTarget:(id)target selector:(SEL)sel args:(NSArray *)args {
     if (!target || ![target respondsToSelector:sel]) return nil;
     NSMethodSignature *sig = [target methodSignatureForSelector:sel];
-    if (!sig) return nil; // @try 只包了 invoke；signature 为 nil 时
+    if (!sig) return nil; // 异常边界只包了 invoke；signature 为 nil 时
     // invocationWithMethodSignature:nil 会直接抛异常，先判空返回。
     NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
     inv.target = target;
@@ -1071,7 +1070,7 @@
 
 - (void)ensureNativeTimeshiftPlayingForTrigger:(NSString *)trigger {
     if (!self.currentPlayer || self.avPlayer || self.nativePlaybackFailed || self.livePlaybackSuspendedForNavigation || self.nativeUserPaused) return;
-    @try { [self.currentPlayer setValue:@YES forKey:@"autoPlay"]; } @catch (NSException *e) {}
+    [self guardedSetValue:@YES forKey:@"autoPlay" onObject:self.currentPlayer];
     [self attachVideoView];
     [self call:self.currentPlayer sel:@"play"];
     self.playPauseBtn.enabled = YES;
@@ -1118,7 +1117,7 @@
     if(self.nativeRetryPending){[self log:@"忽略自动重连期间重复的播放器错误回调"];return;}
     if(self.nativePlaybackFailed)return;
     self.nativeSessionDelegate=nil;self.nativeSessionID++;
-    @try{[player setValue:nil forKey:@"delegate"];}@catch(NSException *e){}
+    [self guardedSetValue:nil forKey:@"delegate" onObject:player];
     if(player!=self.avPlayer)[self call:player sel:@"stop"];
     self.nativePlaybackFailed=YES;[self.nativeStartupTuner restore];[self endPlaybackPriority];
     [self log:@"播放失败 %ld %@", (long)error.code, error.localizedDescription];

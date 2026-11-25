@@ -24,7 +24,7 @@
     @try {
         id value=((id(*)(id,SEL))objc_msgSend)(self.configurationClass,selector);
         if([value isKindOfClass:NSDictionary.class]&&[value count])return [value copy];
-    }@catch(NSException *exception){}
+    }@catch(NSException *exception){NSLog(@"[CCTVHost] CNPlayer CDN read raised %@: %@",exception.name,exception.reason);}
     if(error)*error=[self error:@"SDK 未返回有效 CDN 配置，未切换线路。请使用 SDK 自动线路。"];return nil;
 }
 - (BOOL)canWritePreference:(NSError **)error {
@@ -44,7 +44,7 @@
             if(error)*error=[failure isKindOfClass:NSError.class]?[NSError errorWithDomain:@"CCTVHostCDN" code:2 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"SDK 拒绝 CDN 偏好配置（%@ %ld），请查看 SDK 日志。",[failure domain],(long)[failure code]],NSUnderlyingErrorKey:failure}]:[self error:@"SDK 拒绝 CDN 偏好配置，请查看 SDK 错误日志。"];
             return NO;
         }
-    }@catch(NSException *exception){if(error)*error=[self error:@"SDK CDN 配置调用失败，请使用 SDK 自动线路。"];return NO;}
+    }@catch(NSException *exception){NSLog(@"[CCTVHost] CNPlayer CDN write raised %@: %@",exception.name,exception.reason);if(error)*error=[self error:@"SDK CDN 配置调用失败，请使用 SDK 自动线路。"];return NO;}
     NSError *readError=nil;NSDictionary *actual=[self readPreference:&readError];
     if([actual isEqualToDictionary:preference])return YES;
     if(error)*error=readError?:[self error:@"SDK CDN 配置回读不一致，未确认切换成功。"];return NO;
@@ -53,7 +53,7 @@
     if(![route isKindOfClass:NSDictionary.class]){if(error)*error=[self error:@"线路配置格式无效。"];return nil;}
     NSString *provider=[route[@"provider"] isKindOfClass:NSString.class]?route[@"provider"]:@"";
     NSString *raw=[route[@"url"] isKindOfClass:NSString.class]?route[@"url"]:@"";
-    NSURLComponents *url=nil;@try{if(raw.length<=8192)url=[NSURLComponents componentsWithString:raw];}@catch(NSException *exception){}
+    NSURLComponents *url=raw.length<=8192?[NSURLComponents componentsWithString:raw]:nil;
     NSCharacterSet *invalidProvider=[[NSCharacterSet characterSetWithCharactersInString:@"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"] invertedSet];
     NSInteger defaultPort=[url.scheme.lowercaseString isEqual:@"https"]?443:80;
     if(!provider.length||provider.length>64||[provider rangeOfCharacterFromSet:invalidProvider].location!=NSNotFound||!url.host.length||!url.URL||url.user.length||url.password.length||![@[@"http",@"https"] containsObject:url.scheme.lowercaseString]||(url.port&&url.port.integerValue!=defaultPort)){
@@ -92,6 +92,6 @@
         if(!host.length||host.length>8192)return @"未知（SDK 未返回实际节点）";
         NSURLComponents *url=[NSURLComponents componentsWithString:[host containsString:@"://"]?host:[@"https://" stringByAppendingString:host]];
         return url.host.length?url.host:@"未知（SDK 节点格式不支持）";
-    }@catch(NSException *exception){return @"未知（SDK 未返回实际节点）";}
+    }@catch(NSException *exception){NSLog(@"[CCTVHost] CNPlayer CDN observe raised %@",exception.name);return @"未知（SDK 未返回实际节点）";}
 }
 @end

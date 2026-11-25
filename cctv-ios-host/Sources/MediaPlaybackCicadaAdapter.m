@@ -52,30 +52,42 @@ static const NSTimeInterval MediaPlaybackCicadaFirstFrameTimeout = 20.0;
 static const NSTimeInterval MediaPlaybackCicadaPositionPollInterval = 0.4;
 static const NSTimeInterval MediaPlaybackCicadaSeekCallbackTimeout = 3.0;
 
-// ---------- 运行时调用小工具（全部先 respondsToSelector，再 @try） ----------
+// ---------- 运行时调用小工具（全部先 respondsToSelector，再经 CicadaGuarded 统一异常边界） ----------
 
 static Class MediaPlaybackCicadaClass(NSString *name) {
     return NSClassFromString(name);
 }
 
+// CicadaPlayerSDK 为闭源第三方 SDK，私有实现可能抛 NSException；
+// 所有动态调用统一经此边界，异常时记录日志并按“调用未生效”处理。
+static BOOL CicadaGuarded(SEL sel, void (NS_NOESCAPE ^block)(void)) {
+    @try {
+        block();
+        return YES;
+    } @catch (NSException *e) {
+        NSLog(@"[CCTVHost] Cicada SDK call %@ raised %@: %@", sel ? NSStringFromSelector(sel) : @"init", e.name, e.reason);
+        return NO;
+    }
+}
+
 static void CicadaCallVoid(id target, SEL sel) {
     if (!target || !sel || ![target respondsToSelector:sel]) return;
-    @try { ((void (*)(id, SEL))objc_msgSend)(target, sel); } @catch (NSException *e) {}
+    CicadaGuarded(sel, ^{ ((void (*)(id, SEL))objc_msgSend)(target, sel); });
 }
 
 static void CicadaCallVoidObject(id target, SEL sel, id arg) {
     if (!target || !sel || ![target respondsToSelector:sel]) return;
-    @try { ((void (*)(id, SEL, id))objc_msgSend)(target, sel, arg); } @catch (NSException *e) {}
+    CicadaGuarded(sel, ^{ ((void (*)(id, SEL, id))objc_msgSend)(target, sel, arg); });
 }
 
 static void CicadaCallVoidBool(id target, SEL sel, BOOL arg) {
     if (!target || !sel || ![target respondsToSelector:sel]) return;
-    @try { ((void (*)(id, SEL, BOOL))objc_msgSend)(target, sel, arg); } @catch (NSException *e) {}
+    CicadaGuarded(sel, ^{ ((void (*)(id, SEL, BOOL))objc_msgSend)(target, sel, arg); });
 }
 
 static void CicadaCallVoidDouble(id target, SEL sel, double arg) {
     if (!target || !sel || ![target respondsToSelector:sel]) return;
-    @try {
+    CicadaGuarded(sel, ^{
         NSMethodSignature *sig = [target methodSignatureForSelector:sel];
         const char *argType = (sig && sig.numberOfArguments > 2) ? [sig getArgumentTypeAtIndex:2] : NULL;
         if (argType && argType[0] == 'f') {
@@ -83,12 +95,12 @@ static void CicadaCallVoidDouble(id target, SEL sel, double arg) {
             return;
         }
         ((void (*)(id, SEL, double))objc_msgSend)(target, sel, arg);
-    } @catch (NSException *e) {}
+    });
 }
 
 static void CicadaCallVoidInt(id target, SEL sel, int arg) {
     if (!target || !sel || ![target respondsToSelector:sel]) return;
-    @try {
+    CicadaGuarded(sel, ^{
         NSMethodSignature *sig = [target methodSignatureForSelector:sel];
         const char *argType = (sig && sig.numberOfArguments > 2) ? [sig getArgumentTypeAtIndex:2] : NULL;
         while (argType && (argType[0] == 'r' || argType[0] == 'n' || argType[0] == 'N' || argType[0] == 'o' || argType[0] == 'O' || argType[0] == 'R' || argType[0] == 'V')) argType++;
@@ -97,12 +109,12 @@ static void CicadaCallVoidInt(id target, SEL sel, int arg) {
             return;
         }
         ((void (*)(id, SEL, int))objc_msgSend)(target, sel, arg);
-    } @catch (NSException *e) {}
+    });
 }
 
 static void CicadaCallVoidDoubleLong(id target, SEL sel, double first, long second) {
     if (!target || !sel || ![target respondsToSelector:sel]) return;
-    @try {
+    CicadaGuarded(sel, ^{
         NSMethodSignature *sig = [target methodSignatureForSelector:sel];
         const char *argType = (sig && sig.numberOfArguments > 2) ? [sig getArgumentTypeAtIndex:2] : NULL;
         if (argType && (argType[0] == 'q' || argType[0] == 'Q' || argType[0] == 'l' || argType[0] == 'L')) {
@@ -111,27 +123,32 @@ static void CicadaCallVoidDoubleLong(id target, SEL sel, double first, long seco
             return;
         }
         ((void (*)(id, SEL, double, long))objc_msgSend)(target, sel, first, second);
-    } @catch (NSException *e) {}
+    });
 }
 
 static double CicadaCallDouble(id target, SEL sel) {
     if (!target || !sel || ![target respondsToSelector:sel]) return 0;
-    @try {
+    __block double result = 0;
+    BOOL ok = CicadaGuarded(sel, ^{
         NSMethodSignature *sig = [target methodSignatureForSelector:sel];
         const char *retType = sig ? sig.methodReturnType : NULL;
         if (retType && (retType[0] == 'q' || retType[0] == 'Q' || retType[0] == 'l' || retType[0] == 'L')) {
             int64_t raw = ((int64_t (*)(id, SEL))objc_msgSend)(target, sel);
-            return raw > 0 ? ((double)raw / 1000.0) : 0;
+            result = raw > 0 ? ((double)raw / 1000.0) : 0;
+            return;
         }
         if (retType && (retType[0] == 'i' || retType[0] == 'I')) {
             int raw = ((int (*)(id, SEL))objc_msgSend)(target, sel);
-            return raw > 0 ? ((double)raw / 1000.0) : 0;
+            result = raw > 0 ? ((double)raw / 1000.0) : 0;
+            return;
         }
         if (retType && retType[0] == 'f') {
-            return (double)((float (*)(id, SEL))objc_msgSend)(target, sel);
+            result = (double)((float (*)(id, SEL))objc_msgSend)(target, sel);
+            return;
         }
-        return ((double (*)(id, SEL))objc_msgSend)(target, sel);
-    } @catch (NSException *e) { return 0; }
+        result = ((double (*)(id, SEL))objc_msgSend)(target, sel);
+    });
+    return ok ? result : 0;
 }
 
 static NSTimeInterval MediaPlaybackCicadaNormalizeTimeValue(double seconds) {
@@ -159,7 +176,7 @@ static NSString *MediaPlaybackCicadaStringFromModel(id model, NSArray<NSString *
             if (!retType || retType[0] != '@') continue;
             id value = ((id (*)(id, SEL))objc_msgSend)(model, sel);
             if ([value isKindOfClass:NSString.class] && [(NSString *)value length]) return value;
-        } @catch (NSException *e) {}
+        } @catch (NSException *e) { NSLog(@"[CCTVHost] Cicada model %@ raised %@", key, e.name); }
     }
     return nil;
 }
@@ -193,7 +210,7 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
                 id value = ((id (*)(id, SEL))objc_msgSend)(model, sel);
                 if ([value respondsToSelector:@selector(integerValue)]) return [value integerValue];
             }
-        } @catch (NSException *e) {}
+        } @catch (NSException *e) { NSLog(@"[CCTVHost] Cicada error model %@ raised %@", key, e.name); }
     }
     return -1;
 }
@@ -281,8 +298,8 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
         [self reportErrorWithCode:-1002 message:@"当前构建未包含 CicadaPlayer，无法使用 ffmpeg 回退"];
         return;
     }
-    id player = nil;
-    @try { player = [[playerClass alloc] init]; } @catch (NSException *e) { player = nil; }
+    __block id player = nil;
+    CicadaGuarded(NULL, ^{ player = [[playerClass alloc] init]; });
     if (!player) {
         [self reportErrorWithCode:-1002 message:@"创建 CicadaPlayer 失败"];
         return;
@@ -294,8 +311,8 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
     // 配置：网络超时读设置（调用方传入，已钳制 5–40 秒）；重试 2 次；
     // 请求头 / UA / Referer 由播放结果带入（猫源常需 Referer 才能出流）。
     // 注意：CicadaConfig.networkTimeout 单位是毫秒，公开 API 的秒数要 ×1000。
-    id config = nil;
-    @try { config = [[configClass alloc] init]; } @catch (NSException *e) { config = nil; }
+    __block id config = nil;
+    CicadaGuarded(NULL, ^{ config = [[configClass alloc] init]; });
     self.config = config;
     if (config) {
         CicadaCallVoidInt(config, NSSelectorFromString(@"setNetworkTimeout:"), (int)llround(self.networkTimeout * 1000.0));
@@ -335,7 +352,7 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
                 source = instance;
             }
         }
-    } @catch (NSException *e) { source = nil; }
+    } @catch (NSException *e) { NSLog(@"[CCTVHost] Cicada url source raised %@: %@", e.name, e.reason); source = nil; }
     if (!source) {
         [self reportErrorWithCode:-1002 message:@"创建播放地址失败"];
         return;
@@ -523,7 +540,7 @@ static dispatch_queue_t MediaPlaybackCicadaQuarantineQueue(void) {
         for(id track in tracks){if(result.count>=128)break;NSNumber *index=[track valueForKey:@"trackIndex"],*type=[track valueForKey:@"trackType"];if(![index respondsToSelector:@selector(integerValue)]||![type respondsToSelector:@selector(integerValue)]||index.integerValue<0||index.integerValue>INT_MAX)continue;
             NSString *kind=type.integerValue==1?@"audio":(type.integerValue==2?@"subtitle":@"video");NSString *name=MediaPlaybackCicadaStringFromModel(track,@[@"title",@"audioLang",@"subtitleLang",@"language"]);if(!name.length)name=[NSString stringWithFormat:@"%@ %ld",kind,(long)index.integerValue];[result addObject:@{@"index":index,@"type":kind,@"name":name}];
         }return result.copy;
-    }@catch(NSException *error){return @[];}
+    }@catch(NSException *error){NSLog(@"[CCTVHost] Cicada track list raised %@",error.name);return @[];}
 }
 - (BOOL)selectTrackWithIndex:(NSInteger)index {
     if(![self canSelectTracks])return NO;

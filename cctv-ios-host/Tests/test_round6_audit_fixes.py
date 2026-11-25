@@ -69,12 +69,18 @@ class Round6PrincipalArchitectAuditFixesTests(unittest.TestCase):
     def test_iss48_kvo_removals_guarded_and_root_dealloc_cancels_subscription_edit_tasks(self):
         play_m = (SOURCES / "RootViewController+Playback.m").read_text(encoding="utf-8")
         stop_body = play_m.split("- (void)stopPlayback {", 1)[1].split("\n    self.epgListGeneration++;", 1)[0]
-        self.assertIn('@try { [self.avPlayer.currentItem removeObserver:self forKeyPath:@"playbackLikelyToKeepUp"', stop_body)
-        self.assertIn('@try { [self.avLayer removeObserver:self forKeyPath:@"readyForDisplay"', stop_body)
+        # P1 cleanup: KVO removal goes through the shared guarded helper (still @try/@catch inside).
+        self.assertIn('[self guardedRemoveObserverFrom:self.avPlayer.currentItem keyPath:@"playbackLikelyToKeepUp"', stop_body)
+        self.assertIn('[self guardedRemoveObserverFrom:self.avLayer keyPath:@"readyForDisplay"', stop_body)
+        root_src = (SOURCES / "RootViewController.m").read_text(encoding="utf-8")
+        helper = root_src.split("- (void)guardedRemoveObserverFrom:", 1)[1].split("\n", 1)[0]
+        self.assertIn("@try{[object removeObserver:self forKeyPath:keyPath context:context];}", helper)
+        self.assertIn("@catch(NSException *e){[self log:", helper)
 
         mp_m = (SOURCES / "MediaPlaybackViewController.m").read_text(encoding="utf-8")
         stop_obs = mp_m.split("- (void)stopObservingCurrentPlayback {", 1)[1].split("\n- (void)observePlayerItem:", 1)[0]
-        self.assertIn('@try{[self.playerController removeObserver:self forKeyPath:@"readyForDisplay"', stop_obs)
+        self.assertIn('MediaPlaybackGuardedTeardown(@"controllerReadyForDisplay",self.playerController,self,@"readyForDisplay",CCTVPlayerControllerReadyContext,nil);', stop_obs)
+        self.assertIn('else if (observer && keyPath.length) [(NSObject *)target removeObserver:observer forKeyPath:keyPath context:context];', mp_m)
 
         root_m = (SOURCES / "RootViewController.m").read_text(encoding="utf-8")
         dealloc_body = root_m.split("- (void)dealloc {", 1)[1].split("\n- (void)didReceiveMemoryWarning", 1)[0]

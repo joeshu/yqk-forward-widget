@@ -380,8 +380,7 @@
 
 - (void)refreshSnapshot {
     if (self.summaryProvider) {
-        NSDictionary *summary = nil;
-        @try { summary = self.summaryProvider(); } @catch (NSException *e) { summary = nil; }
+        NSDictionary *summary = self.summaryProvider();
         [self applySummaryData:summary];
     } else {
         [self applySummaryData:nil];
@@ -389,7 +388,7 @@
 
     NSArray<NSDictionary *> *sections = @[];
     if (self.sectionsProvider) {
-        @try { sections = self.sectionsProvider() ?: @[]; } @catch (NSException *e) { sections = @[]; }
+        sections = self.sectionsProvider() ?: @[];
     }
     if ([sections isKindOfClass:NSArray.class] && sections.count) {
         self.snapshotSections = sections;
@@ -398,7 +397,7 @@
         self.snapshotSections = @[];
         NSArray *rows = @[];
         if (self.rowsProvider) {
-            @try { rows = self.rowsProvider() ?: @[]; } @catch (NSException *e) { rows = @[]; }
+            rows = self.rowsProvider() ?: @[];
         }
         self.snapshotRows = [rows isKindOfClass:NSArray.class] ? rows : @[];
     }

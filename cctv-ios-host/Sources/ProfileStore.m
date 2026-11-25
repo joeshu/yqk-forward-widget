@@ -20,7 +20,7 @@ static NSString *const CCTVEnabledChannelTelemetrySourcesKey = @"enabledChannelT
 @implementation ProfileStore
 + (BOOL)isHTTP:(id)source {
     if(![source isKindOfClass:NSString.class]||[source length]>8192)return NO;
-    @try{NSURLComponents *c=[NSURLComponents componentsWithString:source];return c.URL&&c.host.length&&[@[@"http",@"https"] containsObject:c.scheme.lowercaseString];}@catch(NSException *e){return NO;}
+    NSURLComponents *c=[NSURLComponents componentsWithString:source];return c.URL&&c.host.length&&[@[@"http",@"https"] containsObject:c.scheme.lowercaseString];
 }
 + (BOOL)isSource:(id)source {
     if([self isHTTP:source])return YES;

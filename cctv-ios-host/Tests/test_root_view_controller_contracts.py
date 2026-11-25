@@ -541,7 +541,7 @@ class RootViewControllerSourceContracts(unittest.TestCase):
         self.assertIn('self.currentPlayer=nil;self.sdkPlayer=nil;self.sdkPlayerUsed=NO',startup)
         terminal=startup[startup.index('if(!inst||![accepted isKindOfClass:NSNumber.class]||![accepted boolValue])'):]
         self.assertLess(terminal.index('self.currentPlayer=nil;self.sdkPlayer=nil;self.sdkPlayerUsed=NO'),terminal.index('displayNativePlaybackFailure:'))
-        self.assertLess(terminal.index('[inst setValue:nil forKey:@"delegate"]'),terminal.index('[self call:inst sel:@"stop"]'))
+        self.assertLess(terminal.index('[self guardedSetValue:nil forKey:@"delegate" onObject:inst]'),terminal.index('[self call:inst sel:@"stop"]'))
 
     def test_player_toolbar_uses_real_airplay_picker_and_keeps_channel_logos_stable(self):
         self.assertIn('AVRoutePickerView *catalogFloatingAirPlayPicker', TEXT)

@@ -58,6 +58,7 @@
         self.summary=[NSString stringWithFormat:@"起播缓冲 %d→%d ms · 再缓冲 %d→%d ms（首帧后恢复）",self.originalStart,start,self.originalHigh,high];
         return YES;
     } @catch(NSException *exception) {
+        NSLog(@"[CCTVHost] SDK buffer tuning raised %@: %@",exception.name,exception.reason);
         [self restore];self.summary=@"起播缓冲配置不可用，保留 SDK 播放流程";return NO;
     }
 }
@@ -74,6 +75,6 @@
         BOOL restored=effective && effective.startBufferDuration==self.originalStart && effective.highBufferDuration==self.originalHigh;
         self.applied=NO;
         return restored;
-    } @catch(NSException *exception) {self.applied=NO;return NO;}
+    } @catch(NSException *exception) {NSLog(@"[CCTVHost] SDK buffer restore raised %@: %@",exception.name,exception.reason);self.applied=NO;return NO;}
 }
 @end
