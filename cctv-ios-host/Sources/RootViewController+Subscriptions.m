@@ -1,5 +1,6 @@
 #import "HostSyncRequest.h"
 #import "RootViewController_Internal.h"
+#import "HostLibraryStore.h"
 #import "HostGlassActionSheetViewController.h"
 
 @implementation RootViewController (Subscriptions)
@@ -862,7 +863,7 @@
         [rows addObject:[HostGlassSheetAction actionWithTitle:base subtitle:(idx==0?@"已在首位":@"点选置顶到首位") value:tag icon:(idx==0?@"star.fill":@"arrow.up.to.line") tint:(idx==0?UIColor.systemYellowColor:HostAccent()) destructive:NO selected:(idx==0) handler:^{
             RootViewController *owner=weakSelf;if(!owner)return;
             [owner.favorites removeObject:cid];[owner.favorites insertObject:cid atIndex:0];
-            [NSUserDefaults.standardUserDefaults setObject:owner.favorites forKey:@"favorites"];[owner applyFilter];
+            [HostLibraryStore.shared replaceFavorites:owner.favorites];[owner applyFilter];
         }]];
     }
     if(rows.count)[sections addObject:[HostGlassSheetSection sectionWithTitle:@"收藏排序（点选置顶）" actions:rows]];
@@ -873,7 +874,7 @@
                 UIAlertController *confirm=[UIAlertController alertControllerWithTitle:@"清空收藏？" message:@"将移除全部收藏频道，此操作无法撤销。" preferredStyle:UIAlertControllerStyleAlert];
                 [confirm addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
                 [confirm addAction:[UIAlertAction actionWithTitle:@"清空收藏" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *x){
-                    [self.favorites removeAllObjects];[NSUserDefaults.standardUserDefaults setObject:@[] forKey:@"favorites"];[self configureCatalogNavigation];[self applyFilter];
+                    [self.favorites removeAllObjects];[HostLibraryStore.shared replaceFavorites:@[]];[self configureCatalogNavigation];[self applyFilter];
                 }]];
                 [owner presentViewController:confirm animated:YES completion:nil];
             }]

@@ -1,6 +1,7 @@
 #import "RootViewController_Internal.h"
 #import "HostGlassActionSheetViewController.h"
 #import "ChannelSQLiteIndex.h"
+#import "HostLibraryStore.h"
 
 static NSString *CCTVCatchupExplicitEPGID(NSDictionary *channel) {
     NSString *value=[channel[@"epgID"] isKindOfClass:NSString.class]?channel[@"epgID"]:@"";
@@ -30,12 +31,12 @@ static BOOL CCTVCatchupIdentityCompatible(NSDictionary *channel, NSDictionary *c
     }
     self.allChannels = [arr isKindOfClass:NSArray.class] ? arr : @[];
     self.shownChannels = self.allChannels;
-    self.favorites = [NSMutableArray arrayWithArray:[[NSUserDefaults standardUserDefaults] arrayForKey:@"favorites"] ?: @[]];
+    self.favorites = [NSMutableArray arrayWithArray:[HostLibraryStore.shared allFavorites] ?: @[]];
     self.altSources = [NSMutableDictionary dictionary];
     self.epgCache = [NSMutableDictionary dictionary];
     [self loadEPGCache];
     self.epgInflight = [NSMutableSet set];
-    self.recents = [NSMutableArray arrayWithArray:[[NSUserDefaults standardUserDefaults] arrayForKey:@"recents"] ?: @[]];
+    self.recents = [NSMutableArray arrayWithArray:[HostLibraryStore.shared recents] ?: @[]];
     self.subscriptions = [NSMutableArray array];
     self.subscriptionURLs = [NSMutableSet set];
     self.subscriptionRequestVersions = [NSMutableDictionary dictionary];
@@ -71,9 +72,9 @@ static BOOL CCTVCatchupIdentityCompatible(NSDictionary *channel, NSDictionary *c
     }
     if(migratedIDs.count){
         NSUserDefaults *defaults=NSUserDefaults.standardUserDefaults;
-        [defaults setObject:self.recents forKey:@"recents"];
+        [HostLibraryStore.shared replaceRecents:self.recents];
         [self.favorites removeObjectsInArray:migratedIDs.allKeys];
-        [defaults setObject:self.favorites forKey:@"favorites"];
+        [HostLibraryStore.shared replaceFavorites:self.favorites];
         NSDictionary *last=[defaults dictionaryForKey:@"lastChannel"];
         NSString *identifier=migratedIDs[last[@"id"]?:@""];
         if(identifier){NSMutableDictionary *updated=[last mutableCopy];updated[@"id"]=identifier;[defaults setObject:updated forKey:@"lastChannel"];}
@@ -101,7 +102,7 @@ static BOOL CCTVCatchupIdentityCompatible(NSDictionary *channel, NSDictionary *c
     return [UIContextMenuConfiguration configurationWithIdentifier:ch[@"id"] previewProvider:nil actionProvider:^UIMenu *(NSArray *suggested){
         BOOL favorite=[w.favorites containsObject:ch[@"id"]];
         UIAction *play=[UIAction actionWithTitle:@"立即播放" image:[UIImage systemImageNamed:@"play.fill"] identifier:nil handler:^(UIAction *a){[w selectChannel:ch];}];
-        UIAction *fav=[UIAction actionWithTitle:favorite?@"取消收藏":@"收藏频道" image:[UIImage systemImageNamed:favorite?@"heart.slash":@"heart"] identifier:nil handler:^(UIAction *a){if(favorite)[w.favorites removeObject:ch[@"id"]];else[w.favorites addObject:ch[@"id"]];[NSUserDefaults.standardUserDefaults setObject:w.favorites forKey:@"favorites"];[w configureCatalogNavigation];[w applyFilter];}];
+        UIAction *fav=[UIAction actionWithTitle:favorite?@"取消收藏":@"收藏频道" image:[UIImage systemImageNamed:favorite?@"heart.slash":@"heart"] identifier:nil handler:^(UIAction *a){if(favorite){[w.favorites removeObject:ch[@"id"]];[HostLibraryStore.shared removeFavorite:ch[@"id"]];}else{[w.favorites addObject:ch[@"id"]];[HostLibraryStore.shared addFavorite:ch[@"id"]];}[w configureCatalogNavigation];[w applyFilter];}];
         UIAction *route=[UIAction actionWithTitle:[ch[@"remoteURL"] length]?@"节目单与回看":@"线路与节目单" image:[UIImage systemImageNamed:@"list.bullet"] identifier:nil handler:^(UIAction *a){if([ch[@"remoteURL"] length])[w openEPGforChannel:ch[@"id"] name:ch[@"name"]];else[w presentRouteSheetForChannel:ch fromIndexPath:ip];}];
         UIMenu *primary=[UIMenu menuWithTitle:@"" image:nil identifier:@"channel.list.ctx.primary" options:UIMenuOptionsDisplayInline children:@[play,fav,route]];
         NSMutableArray<UIMenuElement *> *tools=[NSMutableArray array];
@@ -129,9 +130,8 @@ static BOOL CCTVCatchupIdentityCompatible(NSDictionary *channel, NSDictionary *c
                                                                        handler:^(UIContextualAction *a, UIView *v, void (^done)(BOOL)) {
         RootViewController *owner = weakSelf;
         if (!owner) { done(NO); return; }
-        if (fav) [owner.favorites removeObject:cid];
-        else [owner.favorites addObject:cid];
-        [[NSUserDefaults standardUserDefaults] setObject:owner.favorites forKey:@"favorites"];
+        if (fav) { [owner.favorites removeObject:cid]; [HostLibraryStore.shared removeFavorite:cid]; }
+        else { [owner.favorites addObject:cid]; [HostLibraryStore.shared addFavorite:cid]; }
         [owner applyFilter];
         done(YES);
     }];
@@ -153,7 +153,7 @@ static BOOL CCTVCatchupIdentityCompatible(NSDictionary *channel, NSDictionary *c
                 return [r[@"id"] isEqualToString:cid];
             }];
             if (toRemove.count) [owner.recents removeObjectsAtIndexes:toRemove];
-            [[NSUserDefaults standardUserDefaults] setObject:owner.recents forKey:@"recents"];
+            [HostLibraryStore.shared replaceRecents:owner.recents];
             [owner applyFilter];
             done(YES);
         }];
@@ -246,9 +246,8 @@ static BOOL CCTVCatchupIdentityCompatible(NSDictionary *channel, NSDictionary *c
 }
 - (void)toggleCurrentFavorite {
     if(!self.channelID.length)return;
-    if([self.favorites containsObject:self.channelID])[self.favorites removeObject:self.channelID];
-    else [self.favorites addObject:self.channelID];
-    [NSUserDefaults.standardUserDefaults setObject:self.favorites forKey:@"favorites"];
+    if([self.favorites containsObject:self.channelID]){[self.favorites removeObject:self.channelID];[HostLibraryStore.shared removeFavorite:self.channelID];}
+    else {[self.favorites addObject:self.channelID];[HostLibraryStore.shared addFavorite:self.channelID];}
     [self configureCatalogNavigation];[self applyFilter];
 }
 - (void)playAdjacentChannel:(NSInteger)direction {
@@ -318,7 +317,7 @@ static BOOL CCTVCatchupIdentityCompatible(NSDictionary *channel, NSDictionary *c
     __weak typeof(self) weakSelf=self;
     [confirmation addAction:[UIAlertAction actionWithTitle:@"清空" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action){
         [weakSelf.recents removeAllObjects];
-        [NSUserDefaults.standardUserDefaults setObject:@[] forKey:@"recents"];
+        [HostLibraryStore.shared clearRecents];
         [weakSelf applyFilter];
     }]];
     [self presentViewController:confirmation animated:YES completion:nil];
@@ -558,7 +557,7 @@ static BOOL CCTVCatchupIdentityCompatible(NSDictionary *channel, NSDictionary *c
         UIAction *playNow=[UIAction actionWithTitle:@"立即播放" image:[UIImage systemImageNamed:@"play.fill"] identifier:nil handler:^(UIAction *a){[w selectChannel:ch];}];
         UIAction *epgAction=[UIAction actionWithTitle:@"节目单与回看" image:[UIImage systemImageNamed:@"clock.arrow.circlepath"] identifier:nil handler:^(UIAction *a){[w openEPGforChannel:ch[@"id"] name:ch[@"name"]];}];
         UIAction *route=[UIAction actionWithTitle:[ch[@"remoteURL"] length]?@"备用源与频道工具":@"线路与节目单" image:[UIImage systemImageNamed:[ch[@"remoteURL"] length]?@"wrench.and.screwdriver":@"antenna.radiowaves.left.and.right"] identifier:nil handler:^(UIAction *a){if([ch[@"remoteURL"] length])[w showRemoteTools:ch];else[w presentRouteSheetForChannel:ch fromIndexPath:nil];}];
-        UIAction *fav=[UIAction actionWithTitle:favorite?@"取消收藏":@"收藏频道" image:[UIImage systemImageNamed:favorite?@"heart.slash":@"heart.fill"] identifier:nil handler:^(UIAction *a){if(favorite)[w.favorites removeObject:ch[@"id"]];else[w.favorites addObject:ch[@"id"]];[NSUserDefaults.standardUserDefaults setObject:w.favorites forKey:@"favorites"];[w configureCatalogNavigation];[w applyFilter];}];
+        UIAction *fav=[UIAction actionWithTitle:favorite?@"取消收藏":@"收藏频道" image:[UIImage systemImageNamed:favorite?@"heart.slash":@"heart.fill"] identifier:nil handler:^(UIAction *a){if(favorite){[w.favorites removeObject:ch[@"id"]];[HostLibraryStore.shared removeFavorite:ch[@"id"]];}else{[w.favorites addObject:ch[@"id"]];[HostLibraryStore.shared addFavorite:ch[@"id"]];}[w configureCatalogNavigation];[w applyFilter];}];
         UIMenu *primaryGroup=[UIMenu menuWithTitle:@"" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:@[playNow,epgAction,route,fav]];
         NSMutableArray<UIAction *> *extra=[NSMutableArray array];
         [extra addObject:[UIAction actionWithTitle:@"电视台增强与同台多源" image:[UIImage systemImageNamed:@"sparkles.tv"] identifier:nil handler:^(UIAction *a){[w presentStationEnhancementSheetForChannel:ch sourceView:collectionView];}]];
@@ -1280,7 +1279,7 @@ static BOOL CCTVCatchupIdentityCompatible(NSDictionary *channel, NSDictionary *c
         if (![r[@"id"] isEqualToString:ch[@"id"]] && m.count < 24) [m addObject:r];
     }
     self.recents = m;
-    [[NSUserDefaults standardUserDefaults] setObject:m forKey:@"recents"];
+    [HostLibraryStore.shared appendRecent:entry];
 }
 
 - (void)onPullRefresh {

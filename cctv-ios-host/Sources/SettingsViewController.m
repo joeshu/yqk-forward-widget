@@ -1,4 +1,5 @@
 #import "SettingsViewController.h"
+#import "HostLibraryStore.h"
 #import "HostTheme.h"
 #import "HostGlassActionSheetViewController.h"
 #import "HostImageLoader.h"
@@ -173,13 +174,13 @@ static NSString *SettingsMediaDisplaySummaryText(void) {
 }
 
 static NSString *SettingsWatchHistorySummaryText(void) {
-    NSUInteger liveCount=[[[NSUserDefaults standardUserDefaults] arrayForKey:@"recents"] count];
+    NSUInteger liveCount=[[HostLibraryStore.shared recents] count];
     NSUInteger vodCount=[MediaPlaybackStateStore.watchHistory count];
     return [NSString stringWithFormat:@"本机最近观看的频道与影视（频道 %lu · 影视 %lu）",(unsigned long)liveCount,(unsigned long)vodCount];
 }
 
 static NSString *SettingsFavoritesSummaryText(void) {
-    NSUInteger liveCount=[[[NSUserDefaults standardUserDefaults] arrayForKey:@"favorites"] count];
+    NSUInteger liveCount=[[HostLibraryStore.shared allFavorites] count];
     NSDictionary *vodFavs=[[NSUserDefaults standardUserDefaults] dictionaryForKey:@"cctv.mediaFavorites.v1"];
     NSUInteger vodCount=[vodFavs isKindOfClass:NSDictionary.class]?vodFavs.count:0;
     return [NSString stringWithFormat:@"全部频道收藏与影视收藏（频道 %lu · 影视 %lu）",(unsigned long)liveCount,(unsigned long)vodCount];

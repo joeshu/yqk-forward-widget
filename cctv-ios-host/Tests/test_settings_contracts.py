@@ -66,17 +66,17 @@ class SettingsContracts(unittest.TestCase):
 
     def test_settings_offer_watch_history_and_favorites_cleanup(self):
         # 观看历史与收藏只能在频道页菜单里清，设置页集中管理；RootViewController
-        # 持有内存副本，必须经回调清内存 + 写 defaults + 刷新列表，不能只清 defaults。
+        # 持有内存副本，必须经回调清内存 + 写 HostLibraryStore(SQLite) + 刷新列表，不能只清存储。
         self.assertIn('@\"action\":@\"clearWatchHistory\"', self.settings)
         self.assertIn('@\"action\":@\"clearFavorites\"', self.settings)
         self.assertIn('onClearWatchHistory', self.settings_h)
         self.assertIn('onClearFavorites', self.settings_h)
         self.assertIn('page.onClearWatchHistory=', self.root)
         self.assertIn('[weakSelf.recents removeAllObjects]', self.root)
-        self.assertIn('setObject:@[] forKey:@"recents"', self.root)
+        self.assertIn('[HostLibraryStore.shared clearRecents]', self.root)
         self.assertIn('page.onClearFavorites=', self.root)
         self.assertIn('[weakSelf.favorites removeAllObjects]', self.root)
-        self.assertIn('setObject:@[] forKey:@"favorites"', self.root)
+        self.assertIn('[HostLibraryStore.shared replaceFavorites:@[]]', self.root)
 
     def test_settings_offer_clear_all_caches(self):
         # 原先三种缓存只能逐项清理；一键清理要同时清节目单文件、台标内存
