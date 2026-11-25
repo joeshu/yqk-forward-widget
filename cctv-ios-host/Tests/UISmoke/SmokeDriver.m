@@ -1102,12 +1102,24 @@ static void next(NSArray *steps, NSUInteger index) {
             preparedWrapper=[root valueForKey:@"currentPlayer"];configuredBeforeHandoff=[CNPlayer smokeConfigureCount];
             [root seekNativeStart:NSDate.date.timeIntervalSince1970-60 end:0];
           },
-          ^{
+          // seekNativeStart → beginNativeTransition 重置 firstRender=NO 并异步驱动
+          // seek（防抖+版权预检+SDK seek+首帧回调）。该回调不是同步完成的：在较慢
+          // 机型（iPhone SE）上 1.2s 步进间隔内首帧尚未回调，会读到 frame=0 而误判。
+          // 改为确定性等待：轮询直到首帧达成（firstRender）或原生明确失败
+          // （nativePlaybackFailed/过渡已被 failNativeTransition 取消），30s 超时兜底，
+          // 与源码契约 RootViewController+Playback watchdog 25s 时移响应超时一致。
+          @{@"timeout":@30,@"until":^BOOL{
+            return [[root valueForKey:@"firstRender"] boolValue] || [[root valueForKey:@"nativePlaybackFailed"] boolValue] || ![[root valueForKey:@"nativeTimeShiftActive"] boolValue];
+          },@"run":^{
             check([[root valueForKey:@"firstRender"] boolValue] && [[root valueForKey:@"nativeTimeShiftActive"] boolValue],[NSString stringWithFormat:@"native timeshift reaches a new frame (frame=%d active=%d failed=%d transition=%@)",[[root valueForKey:@"firstRender"] boolValue],[[root valueForKey:@"nativeTimeShiftActive"] boolValue],[[root valueForKey:@"nativePlaybackFailed"] boolValue],[root valueForKey:@"nativeTransitionKind"]?:@"none"]);
             check([root valueForKey:@"currentPlayer"]==preparedWrapper && [CNPlayer smokeConfigureCount]==configuredBeforeHandoff,@"timeshift keeps SDK session without playLIVE reconfiguration");
             [root returnToNativeLive];
-          },
-          ^{
+          }},
+          // returnToNativeLive 同样经 beginNativeTransition 重置 firstRender=NO，再异步等
+          // SDK 首帧回调；沿用同样的确定性等待，避免在慢机型上再次读到 frame=0。
+          @{@"timeout":@30,@"until":^BOOL{
+            return [[root valueForKey:@"firstRender"] boolValue] || [[root valueForKey:@"nativePlaybackFailed"] boolValue] || [[root valueForKey:@"nativeTimeShiftActive"] boolValue];
+          },@"run":^{
             check([[root valueForKey:@"firstRender"] boolValue] && ![[root valueForKey:@"nativeTimeShiftActive"] boolValue],@"return-to-live reaches a new frame");
             EPGViewController *page=[[EPGViewController alloc] initWithChannelID:@"cctv2" name:@"fixture"];
             __block NSUInteger replays=0;page.onReplay=^(NSDictionary *program){replays++;};
@@ -1117,7 +1129,7 @@ static void next(NSArray *steps, NSUInteger index) {
             check(replays==0,@"future EPG programme cannot replay");
             [(id<UITableViewDelegate>)page tableView:nil didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
             check(replays==1,@"past EPG programme invokes replay callback");
-          },
+          }},
           ^{
             NSArray *arguments=NSProcessInfo.processInfo.arguments;NSUInteger at=[arguments indexOfObject:@"--smoke-port"];
             NSString *base=[NSString stringWithFormat:@"http://127.0.0.1:%@",arguments[at+1]];
