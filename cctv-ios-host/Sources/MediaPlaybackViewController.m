@@ -12,6 +12,7 @@
 #import "MediaEpisodeSelectionViewController.h"
 #import "MediaPlaybackHeaders.h"
 #import "MediaPlaybackEpisodeFormatter.h"
+#import "MediaPlaybackRoutePanelView.h"
 #import "MediaPlaybackSniffFetch.h"
 #import "MediaPlaybackDecodeRouter.h"
 #import "HostPlaybackSession.h"
@@ -350,7 +351,8 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 @property(nonatomic) BOOL tallVideoViewportLayout;
 @property(nonatomic) CGFloat embeddedVideoAspectRatio;
 @property(nonatomic,strong) UIView *controlPanel;
-@property(nonatomic,strong) UIScrollView *lineScroll;
+@property(nonatomic,strong) MediaPlaybackRoutePanelView *routePanel;
+// 仅作 UISmoke KVC `valueForKey:@"lineButtons"` 兼容别名：指向 routePanel.lineButtons。
 @property(nonatomic,strong) UIStackView *lineButtons;
 @property(nonatomic,strong) UIStackView *qualityGroup;
 @property(nonatomic,strong) UILabel *qualityLabel;
@@ -673,8 +675,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
         NSLayoutConstraint *preferredHeight=[self.controlsViewport.heightAnchor constraintEqualToAnchor:self.controlPanel.heightAnchor];preferredHeight.priority=UILayoutPriorityDefaultHigh;preferredHeight.active=YES;
     }
 
-    self.lineScroll=[UIScrollView new];self.lineScroll.translatesAutoresizingMaskIntoConstraints=NO;self.lineScroll.showsHorizontalScrollIndicator=NO;[self.controlPanel addSubview:self.lineScroll];
-    self.lineButtons=[UIStackView new];self.lineButtons.axis=UILayoutConstraintAxisHorizontal;self.lineButtons.spacing=8;self.lineButtons.translatesAutoresizingMaskIntoConstraints=NO;[self.lineScroll addSubview:self.lineButtons];
+    self.routePanel=[MediaPlaybackRoutePanelView new];self.routePanel.translatesAutoresizingMaskIntoConstraints=NO;[self.controlPanel addSubview:self.routePanel];self.lineButtons=self.routePanel.lineButtons;
     self.qualityGroup=[UIStackView new];self.qualityGroup.translatesAutoresizingMaskIntoConstraints=NO;self.qualityGroup.axis=UILayoutConstraintAxisVertical;self.qualityGroup.spacing=3;[self.controlPanel addSubview:self.qualityGroup];
     self.qualityLabel=[UILabel new];self.qualityLabel.text=@"清晰度";self.qualityLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];self.qualityLabel.adjustsFontForContentSizeCategory=YES;self.qualityLabel.textColor=HostSecondaryText();[self.qualityGroup addArrangedSubview:self.qualityLabel];
     self.qualityScroll=[UIScrollView new];self.qualityScroll.translatesAutoresizingMaskIntoConstraints=NO;self.qualityScroll.showsHorizontalScrollIndicator=NO;[self.qualityGroup addArrangedSubview:self.qualityScroll];
@@ -699,16 +700,11 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     self.portraitTallViewportHeightConstraint=[self.videoView.heightAnchor constraintEqualToAnchor:self.view.heightAnchor multiplier:0.50];self.portraitTallViewportHeightConstraint.priority=UILayoutPriorityDefaultHigh;
     self.landscapeTallViewportHeightConstraint=[self.videoView.heightAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.heightAnchor multiplier:0.86];self.landscapeTallViewportHeightConstraint.priority=UILayoutPriorityDefaultHigh;
     self.portraitConstraints=@[
-        [self.lineScroll.topAnchor constraintEqualToAnchor:self.controlPanel.topAnchor constant:10],
-        [self.lineScroll.leadingAnchor constraintEqualToAnchor:self.controlPanel.leadingAnchor constant:12],
-        [self.lineScroll.trailingAnchor constraintEqualToAnchor:self.controlPanel.trailingAnchor constant:-12],
-        [self.lineScroll.heightAnchor constraintEqualToConstant:44],
-        [self.lineButtons.leadingAnchor constraintEqualToAnchor:self.lineScroll.contentLayoutGuide.leadingAnchor],
-        [self.lineButtons.trailingAnchor constraintEqualToAnchor:self.lineScroll.contentLayoutGuide.trailingAnchor],
-        [self.lineButtons.topAnchor constraintEqualToAnchor:self.lineScroll.contentLayoutGuide.topAnchor],
-        [self.lineButtons.bottomAnchor constraintEqualToAnchor:self.lineScroll.contentLayoutGuide.bottomAnchor],
-        [self.lineButtons.heightAnchor constraintEqualToAnchor:self.lineScroll.frameLayoutGuide.heightAnchor],
-        [self.qualityGroup.topAnchor constraintEqualToAnchor:self.lineScroll.bottomAnchor constant:4],
+        [self.routePanel.topAnchor constraintEqualToAnchor:self.controlPanel.topAnchor constant:10],
+        [self.routePanel.leadingAnchor constraintEqualToAnchor:self.controlPanel.leadingAnchor constant:12],
+        [self.routePanel.trailingAnchor constraintEqualToAnchor:self.controlPanel.trailingAnchor constant:-12],
+        [self.routePanel.heightAnchor constraintEqualToConstant:44],
+        [self.qualityGroup.topAnchor constraintEqualToAnchor:self.routePanel.bottomAnchor constant:4],
         [self.qualityGroup.leadingAnchor constraintEqualToAnchor:self.controlPanel.leadingAnchor constant:16],
         [self.qualityGroup.trailingAnchor constraintEqualToAnchor:self.controlPanel.trailingAnchor constant:-16],
         [self.videoView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
@@ -748,16 +744,11 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
         [panelViewport.centerYAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.centerYAnchor],
         landscapePanelWidth,
         [panelViewport.heightAnchor constraintLessThanOrEqualToAnchor:self.view.safeAreaLayoutGuide.heightAnchor multiplier:0.94],
-        [self.lineScroll.topAnchor constraintEqualToAnchor:self.controlPanel.topAnchor constant:10],
-        [self.lineScroll.leadingAnchor constraintEqualToAnchor:self.controlPanel.leadingAnchor constant:10],
-        [self.lineScroll.trailingAnchor constraintEqualToAnchor:self.controlPanel.trailingAnchor constant:-10],
-        [self.lineScroll.heightAnchor constraintEqualToConstant:44],
-        [self.lineButtons.leadingAnchor constraintEqualToAnchor:self.lineScroll.contentLayoutGuide.leadingAnchor],
-        [self.lineButtons.trailingAnchor constraintEqualToAnchor:self.lineScroll.contentLayoutGuide.trailingAnchor],
-        [self.lineButtons.topAnchor constraintEqualToAnchor:self.lineScroll.contentLayoutGuide.topAnchor],
-        [self.lineButtons.bottomAnchor constraintEqualToAnchor:self.lineScroll.contentLayoutGuide.bottomAnchor],
-        [self.lineButtons.heightAnchor constraintEqualToAnchor:self.lineScroll.frameLayoutGuide.heightAnchor],
-        [self.qualityGroup.topAnchor constraintEqualToAnchor:self.lineScroll.bottomAnchor constant:4],
+        [self.routePanel.topAnchor constraintEqualToAnchor:self.controlPanel.topAnchor constant:10],
+        [self.routePanel.leadingAnchor constraintEqualToAnchor:self.controlPanel.leadingAnchor constant:10],
+        [self.routePanel.trailingAnchor constraintEqualToAnchor:self.controlPanel.trailingAnchor constant:-10],
+        [self.routePanel.heightAnchor constraintEqualToConstant:44],
+        [self.qualityGroup.topAnchor constraintEqualToAnchor:self.routePanel.bottomAnchor constant:4],
         [self.qualityGroup.leadingAnchor constraintEqualToAnchor:self.controlPanel.leadingAnchor constant:14],
         [self.qualityGroup.trailingAnchor constraintEqualToAnchor:self.controlPanel.trailingAnchor constant:-14],
         [self.episodeTitle.topAnchor constraintEqualToAnchor:self.qualityGroup.bottomAnchor constant:8],
@@ -776,7 +767,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
         [self.skipButton.heightAnchor constraintGreaterThanOrEqualToConstant:44]
     ];
     if(self.embeddedMode){
-        self.view.backgroundColor=UIColor.clearColor;self.videoView.layer.cornerRadius=14;self.episodeTitle.hidden=NO;self.episodeTitle.numberOfLines=1;self.episodeTitle.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];self.lineScroll.hidden=YES;self.episodeButton.hidden=YES;self.controlPanel.layer.cornerRadius=15;
+        self.view.backgroundColor=UIColor.clearColor;self.videoView.layer.cornerRadius=14;self.episodeTitle.hidden=NO;self.episodeTitle.numberOfLines=1;self.episodeTitle.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];self.routePanel.hidden=YES;self.episodeButton.hidden=YES;self.controlPanel.layer.cornerRadius=15;
         // Keep the controls compact when the video surface is pinned above
         // the scrolling detail content, especially when no alternate stream exists.
         [self.status setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisVertical];
@@ -1352,9 +1343,9 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     }
 }
 - (void)buildLines {
-    for(UIView *view in self.lineButtons.arrangedSubviews.copy){[self.lineButtons removeArrangedSubview:view];[view removeFromSuperview];}
-    NSArray *lines=self.lines;
-    for(NSUInteger idx=0;idx<lines.count;idx++){NSDictionary *line=lines[idx];NSString *lineName=[line[@"name"] isKindOfClass:NSString.class]?line[@"name"]:nil;UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];[button setTitle:lineName.length?lineName:[NSString stringWithFormat:@"线路 %lu",(unsigned long)idx+1] forState:UIControlStateNormal];button.titleLabel.font=[UIFont systemFontOfSize:13 weight:UIFontWeightMedium];HostStylePillButton(button,idx==self.lineIndex);MediaPlaybackApplyScaledPillFont(button);button.tag=idx;button.accessibilityIdentifier=[NSString stringWithFormat:@"media-playback-line-%lu",(unsigned long)idx];button.accessibilityLabel=[NSString stringWithFormat:@"线路 %@",lineName.length?lineName:[NSString stringWithFormat:@"%lu",(unsigned long)idx+1]];button.accessibilityHint=@"切换到此播放线路并重新加载分集";button.accessibilityTraits=UIAccessibilityTraitButton|(idx==self.lineIndex?UIAccessibilityTraitSelected:0);[button addTarget:self action:@selector(selectLine:) forControlEvents:UIControlEventTouchUpInside];[self.lineButtons addArrangedSubview:button];}
+    // 线路面板纯呈现已抽离至 MediaPlaybackRoutePanelView；本方法保留为门面，
+    // 所有既有调用点（含路由回退路径）签名不变，行为等价。
+    [self.routePanel rebuildWithLines:self.lines selectedIndex:self.lineIndex target:self action:@selector(selectLine:)];
 }
 - (void)buildQualityButtons {
     NSArray *alternates=[self.result[@"alternates"] isKindOfClass:NSArray.class]?self.result[@"alternates"]:@[];
