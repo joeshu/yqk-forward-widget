@@ -16,7 +16,7 @@ class NativeImportAuditTests(unittest.TestCase):
         root=Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmp:
             exe=str(Path(tmp)/name)
-            cmd=['xcrun','clang','-fobjc-arc','-framework','Foundation','-framework','Security','-lz','-I',str(root/'Sources')]+[str(root/p) for p in sources]+['-o',exe]
+            cmd=['xcrun','clang','-fobjc-arc','-framework','Foundation','-framework','Security','-lz','-lsqlite3','-I',str(root/'Sources')]+[str(root/p) for p in sources]+['-o',exe]
             build=subprocess.run(cmd,capture_output=True,text=True)
             self.assertEqual(build.returncode,0,build.stdout+build.stderr)
             env=dict(os.environ,CFFIXED_USER_HOME=tmp)
@@ -25,7 +25,10 @@ class NativeImportAuditTests(unittest.TestCase):
     def test_static_resource_page_inspection(self):
         self.build_run('resource-inspection',['Tests/native_resource_inspection_tests.m','Sources/ResourceContentInspection.m'])
     def test_concurrent_resource_storage_and_corrupt_defaults(self):
-        self.build_run('store-concurrency',['Tests/native_store_concurrency_tests.m','Sources/ProfileStore.m','Sources/ServiceStore.m','Sources/TVBoxCatalogStore.m','Sources/MediaPlaybackStateStore.m'])
+        # MediaPlaybackStateStore.m 引用 HostLibraryStore（类 + HostMediaWatchHistoryLimit，
+        # 定义见 Sources/HostLibraryStore.m:9-10）——2026-11-26 CI 45718753390 链接失败后补进夹具；
+        # HostLibraryStore.m 用 sqlite3，-lsqlite3 已加进 build_run 的公共链接参数。
+        self.build_run('store-concurrency',['Tests/native_store_concurrency_tests.m','Sources/ProfileStore.m','Sources/ServiceStore.m','Sources/TVBoxCatalogStore.m','Sources/MediaPlaybackStateStore.m','Sources/HostLibraryStore.m'])
 
     def test_fetcher_is_bounded_and_cancellable(self):
         archive=io.BytesIO()
