@@ -539,9 +539,13 @@ static double HostLibraryWatchedAt(NSDictionary *entry) {
     [self performAsync:^{
         if ([self prepareLocked]) {
             NSArray<NSString *> *normalized = HostLibraryNormalizedFavorites(snapshot);
-            [self transactionLocked:^BOOL{
+            if (![self transactionLocked:^BOOL{
                 return [self writeFavoritesLocked:normalized];
-            }];
+            }]) {
+                [self closeLocked];
+                [self.defaults setBool:YES forKey:HostLibraryFallbackPendingKey];
+                [self.defaults setObject:snapshot forKey:HostLibraryLegacyFavoritesKey];
+            }
         } else {
             [self.defaults setObject:snapshot forKey:HostLibraryLegacyFavoritesKey];
         }
@@ -595,9 +599,13 @@ static double HostLibraryWatchedAt(NSDictionary *entry) {
     [self performAsync:^{
         if ([self prepareLocked]) {
             NSArray<NSDictionary *> *normalized = HostLibraryNormalizedRecents(snapshot);
-            [self transactionLocked:^BOOL{
+            if (![self transactionLocked:^BOOL{
                 return [self writeRecentsLocked:normalized];
-            }];
+            }]) {
+                [self closeLocked];
+                [self.defaults setBool:YES forKey:HostLibraryFallbackPendingKey];
+                [self.defaults setObject:snapshot forKey:HostLibraryLegacyRecentsKey];
+            }
         } else {
             [self.defaults setObject:snapshot forKey:HostLibraryLegacyRecentsKey];
         }

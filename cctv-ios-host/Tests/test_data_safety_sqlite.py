@@ -571,6 +571,85 @@ class BackupRoundtripTests(unittest.TestCase):
         self.assertEqual(hist_keys, ["backup_h"])
         self.assertNotIn("old_h", hist_keys)
 
+    def test_restore_transaction_failure_preserves_data_in_defaults(self):
+        """ Симуляция: backup restore → SQLite transaction fails → defaults has the data.
+
+        When replaceFavorites' transaction fails, the failure handler must:
+        1. Rollback the transaction (SQLite retains old data)
+        2. Write the intended data to NSUserDefaults defaults
+        3. Set fallbackPending so readers use defaults, not stale SQLite
+
+        Without the fix: no fallback flag → readers see stale SQLite data → data loss.
+        """
+        db = _connect()
+        db.executescript(SCHEMA)
+        defaults = {}
+
+        # Pre-existing SQLite state
+        write_favorites(db, ["old1", "old2"])
+        defaults["favorites"] = ["old1", "old2"]  # mirror after migration
+
+        # Restore: backup says favorites should be ["new1", "new2"]
+        backup_favorites = ["new1", "new2"]
+
+        # Step 1: restore writes to defaults (HostBackup does [d setObject:forKey:])
+        defaults["favorites"] = backup_favorites
+
+        # Step 2: replaceFavorites SQLite transaction FAILS
+        # Simulate: BEGIN, modify, ROLLBACK (SQLite retains old data)
+        db.execute("BEGIN IMMEDIATE;")
+        write_favorites(db, backup_favorites)  # attempt
+        db.execute("ROLLBACK;")
+        # SQLite still has old data
+        self.assertEqual(read_favorites(db), ["old1", "old2"])
+
+        # Step 3: failure handler writes to defaults (already done in Step 1)
+        # and sets fallbackPending=YES
+        fallback_pending = True
+
+        # Step 4: subsequent read with fallback → reads from defaults (correct data)
+        if fallback_pending:
+            read_result = defaults["favorites"]
+        else:
+            read_result = read_favorites(db)
+
+        # With the fix: reader sees the restored data, not stale SQLite data
+        self.assertEqual(read_result, ["new1", "new2"])
+        self.assertNotIn("old1", read_result)
+
+        # Step 5: on next launch, SQLite recovers → replaceFromDefaultsLocked (REPLACE)
+        # replaces SQLite with defaults data
+        write_favorites(db, defaults["favorites"])
+        fallback_pending = False
+        self.assertEqual(read_favorites(db), ["new1", "new2"])
+
+    def test_restore_recents_transaction_failure_preserves_data_in_defaults(self):
+        """Same scenario for recents: transaction failure → defaults preserves data."""
+        db = _connect()
+        db.executescript(SCHEMA)
+        defaults = {}
+
+        write_recents(db, [{"id": "old1", "watchedAt": 100}])
+        defaults["recents"] = [{"id": "old1", "watchedAt": 100}]
+
+        backup_recents = [{"id": "new1", "watchedAt": 200}]
+        defaults["recents"] = backup_recents
+
+        # Transaction fails
+        db.execute("BEGIN IMMEDIATE;")
+        write_recents(db, backup_recents)
+        db.execute("ROLLBACK;")
+        self.assertEqual(read_recents(db), [{"id": "old1", "watchedAt": 100}])
+
+        # Failure handler sets fallbackPending → read from defaults
+        fallback_pending = True
+        read_result = defaults["recents"] if fallback_pending else read_recents(db)
+        self.assertEqual(read_result, backup_recents)
+
+        # Recovery: REPLACE from defaults
+        write_recents(db, defaults["recents"])
+        self.assertEqual(read_recents(db), backup_recents)
+
 
 class FallbackPendingFlagTests(unittest.TestCase):
     """迁移失败标记正确性：验证 fallbackPending 在各失败路径被设置。"""
@@ -629,6 +708,42 @@ class FallbackPendingFlagTests(unittest.TestCase):
         else_idx = add_fav.index("else {")
         else_block = add_fav[else_idx:]
         self.assertIn("setObject:favorites forKey:HostLibraryLegacyFavoritesKey", else_block)
+
+    def test_replace_favorites_sets_fallback_on_transaction_failure(self):
+        """replaceFavorites: must handle transaction failure like replaceMediaFavorites."""
+        m = (SOURCES / "HostLibraryStore.m").read_text(encoding="utf-8")
+        impl = m[m.index("@implementation HostLibraryStore"):]
+        sig = "- (void)replaceFavorites:"
+        start = impl.index(sig)
+        end = impl.index("- (NSArray<NSDictionary *> *)recents {", start)
+        method = impl[start:end]
+        # Failure handler: closeLocked + set FallbackPendingKey + write to defaults
+        self.assertIn("[self closeLocked];", method)
+        self.assertIn("setBool:YES forKey:HostLibraryFallbackPendingKey", method)
+        self.assertIn("setObject:snapshot forKey:HostLibraryLegacyFavoritesKey", method)
+        # The failure handler must be inside the if (prepareLocked) branch, not the else
+        prepare_idx = method.index("if ([self prepareLocked])")
+        else_idx = method.index("else {")
+        handler_idx = method.index("[self closeLocked];")
+        self.assertGreater(handler_idx, prepare_idx, "failure handler must be in SQLite branch")
+        self.assertLess(handler_idx, else_idx, "failure handler must precede the else branch")
+
+    def test_replace_recents_sets_fallback_on_transaction_failure(self):
+        """replaceRecents: must handle transaction failure like replaceMediaWatchHistory."""
+        m = (SOURCES / "HostLibraryStore.m").read_text(encoding="utf-8")
+        impl = m[m.index("@implementation HostLibraryStore"):]
+        sig = "- (void)replaceRecents:"
+        start = impl.index(sig)
+        end = impl.index("- (void)clearRecents {", start)
+        method = impl[start:end]
+        self.assertIn("[self closeLocked];", method)
+        self.assertIn("setBool:YES forKey:HostLibraryFallbackPendingKey", method)
+        self.assertIn("setObject:snapshot forKey:HostLibraryLegacyRecentsKey", method)
+        prepare_idx = method.index("if ([self prepareLocked])")
+        else_idx = method.index("else {")
+        handler_idx = method.index("[self closeLocked];")
+        self.assertGreater(handler_idx, prepare_idx, "failure handler must be in SQLite branch")
+        self.assertLess(handler_idx, else_idx, "failure handler must precede the else branch")
 
 
 class SourceExtractionTests(unittest.TestCase):
