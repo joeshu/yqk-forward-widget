@@ -3,6 +3,10 @@
 #import "HostGlassActionSheetViewController.h"
 #import "ChannelSQLiteIndex.h"
 #import "HostLibraryStore.h"
+#import "HostListDiffHelper.h"
+#import <objc/runtime.h>
+
+static char CCTVCatalogIncrementalRefreshKey;
 
 static NSString *CCTVCatchupExplicitEPGID(NSDictionary *channel) {
     NSString *value=[channel[@"epgID"] isKindOfClass:NSString.class]?channel[@"epgID"]:@"";
@@ -157,6 +161,10 @@ static BOOL CCTVCatchupIdentityCompatible(NSDictionary *channel, NSDictionary *c
             }];
             if (toRemove.count) [owner.recents removeObjectsAtIndexes:toRemove];
             [HostLibraryStore.shared replaceRecents:owner.recents];
+            NSArray *groups=[owner currentCatalogGroupTitles];NSInteger selected=owner.groupControl.selectedSegmentIndex;
+            BOOL recentScope=owner.recentsOnly||(selected>=0&&selected<(NSInteger)groups.count&&[groups[selected] isEqualToString:@"最近"]);
+            BOOL canDiff=recentScope&&!owner.gridMode&&!owner.query.length&&!owner.catchupOnlyFilter;
+            objc_setAssociatedObject(owner,&CCTVCatalogIncrementalRefreshKey,@(canDiff),OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             [owner applyFilter];
             done(YES);
         }];
@@ -1149,6 +1157,9 @@ static BOOL CCTVCatchupIdentityCompatible(NSDictionary *channel, NSDictionary *c
 }
 
 - (void)applyFilter {
+    BOOL incremental=[objc_getAssociatedObject(self,&CCTVCatalogIncrementalRefreshKey) boolValue];
+    objc_setAssociatedObject(self,&CCTVCatalogIncrementalRefreshKey,nil,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    NSArray<NSDictionary *> *oldShown=incremental?[self.shownChannels copy]:nil;
     NSSet *disabled=[NSSet setWithArray:[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[]];
     NSArray *groups = [self currentCatalogGroupTitles];
     NSInteger idx = self.groupControl.selectedSegmentIndex;
@@ -1262,7 +1273,17 @@ static BOOL CCTVCatchupIdentityCompatible(NSDictionary *channel, NSDictionary *c
         }];
     }
     self.shownChannels = sorted;
-    if (self.gridMode) [self.channelGrid reloadData];
+    if(incremental&&!self.gridMode&&self.table.window){
+        HostListDiff *diff=[HostListDiffHelper diffFromOld:oldShown toNew:sorted identityBlock:^NSString *(NSDictionary *channel){
+            NSString *cid=[channel[@"id"] isKindOfClass:NSString.class]?channel[@"id"]:@"";
+            return cid.length?cid:[NSString stringWithFormat:@"__channel_ptr:%p",channel];
+        } isEqualBlock:^BOOL(NSDictionary *oldChannel,NSDictionary *newChannel){return [oldChannel isEqualToDictionary:newChannel];}];
+        if(!diff.isEmpty)[self.table performBatchUpdates:^{
+            if(diff.deletedOldIndexes.count){NSMutableArray<NSIndexPath *> *paths=[NSMutableArray array];for(NSNumber *i in diff.deletedOldIndexes)[paths addObject:[NSIndexPath indexPathForRow:i.unsignedIntegerValue inSection:0]];[self.table deleteRowsAtIndexPaths:paths withRowAnimation:UITableViewRowAnimationAutomatic];}
+            if(diff.insertedNewIndexes.count){NSMutableArray<NSIndexPath *> *paths=[NSMutableArray array];for(NSNumber *i in diff.insertedNewIndexes)[paths addObject:[NSIndexPath indexPathForRow:i.unsignedIntegerValue inSection:0]];[self.table insertRowsAtIndexPaths:paths withRowAnimation:UITableViewRowAnimationAutomatic];}
+            for(NSDictionary *move in diff.moves)[self.table moveRowAtIndexPath:[NSIndexPath indexPathForRow:[move[@"from"] unsignedIntegerValue] inSection:0] toIndexPath:[NSIndexPath indexPathForRow:[move[@"to"] unsignedIntegerValue] inSection:0]];
+        } completion:^(__unused BOOL finished){if(self.table.window&&diff.reloadedNewIndexes.count){NSMutableArray<NSIndexPath *> *paths=[NSMutableArray array];for(NSNumber *i in diff.reloadedNewIndexes)[paths addObject:[NSIndexPath indexPathForRow:i.unsignedIntegerValue inSection:0]];[self.table reloadRowsAtIndexPaths:paths withRowAnimation:UITableViewRowAnimationAutomatic];}}];
+    }else if (self.gridMode) [self.channelGrid reloadData];
     else [self.table reloadData];
     NSString *empty=self.query.length?@"没有找到匹配频道":(self.catchupOnlyFilter?@"当前分组下暂无支持回看的频道\n点击下方按钮可查看全部频道":(isRecentsSegment?@"暂无最近观看记录\n点选任意频道即可自动记录上次播放":(self.favoritesOnly?@"还没有收藏频道\n长按或左滑任意频道即可加入收藏":(self.subscriptionCatalog?@"暂无订阅频道\n点击下方按钮或右下角更多 → 添加直播订阅":(!CCTVBoolPreference(@"nativeChannelsEnabled",YES)?@"官方频道已关闭\n点击下方按钮可立即启用央视与卫视频道":@"当前分组下暂无可用频道")))));
     self.channelGrid.backgroundView=sorted.count?nil:[self buildCatalogEmptyBackgroundViewWithMessage:empty];

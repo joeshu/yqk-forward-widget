@@ -1276,6 +1276,7 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
 @property(nonatomic,copy) NSArray<NSDictionary *> *entries;
 @property(nonatomic,copy) void (^onSelect)(NSDictionary *entry);
 -  (void)updateClearHistoryButton;
+- (void)applyHistoryEntriesIncremental;
 @end
 @implementation MediaWatchHistoryViewController
 - (instancetype)init { return [super initWithStyle:UITableViewStyleInsetGrouped]; }
@@ -1288,6 +1289,26 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
 - (void)reloadThemeAppearance {self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();if(!self.isViewLoaded)return;self.view.backgroundColor=HostBackground();self.view.tintColor=HostAccent();self.tableView.backgroundColor=HostBackground();self.tableView.separatorColor=HostSeparator();self.tableView.rowHeight=MAX(92,24+2*[UIFont preferredFontForTextStyle:UIFontTextStyleHeadline].lineHeight+2*[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1].lineHeight);[self.tableView reloadData];}
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {[super traitCollectionDidChange:previousTraitCollection];if([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection])[self reloadThemeAppearance];}
 - (void)updateClearHistoryButton {self.navigationItem.rightBarButtonItem=self.entries.count?[[UIBarButtonItem alloc] initWithTitle:@"清空" style:UIBarButtonItemStylePlain target:self action:@selector(confirmClearHistory)]:nil;}
+- (void)applyHistoryEntriesIncremental {
+    NSArray<NSDictionary *> *oldEntries=self.entries?:@[];
+    NSArray<NSDictionary *> *newEntries=MediaPlaybackStateStore.watchHistory?:@[];
+    self.entries=newEntries;
+    [self updateClearHistoryButton];
+    UITableView *tableView=self.tableView;
+    if(!tableView.window){if(self.isViewLoaded)[tableView reloadData];return;}
+    HostListDiff *diff=[HostListDiffHelper diffFromOld:oldEntries toNew:newEntries identityBlock:^NSString *(NSDictionary *entry){
+        NSString *key=[entry[@"key"] isKindOfClass:NSString.class]?entry[@"key"]:@"";
+        return key.length?key:[NSString stringWithFormat:@"__history_ptr:%p",entry];
+    } isEqualBlock:nil];
+    if(diff.isEmpty)return;
+    [tableView performBatchUpdates:^{
+        if(diff.deletedOldIndexes.count){NSMutableArray<NSIndexPath *> *paths=[NSMutableArray array];for(NSNumber *i in diff.deletedOldIndexes)[paths addObject:[NSIndexPath indexPathForRow:i.unsignedIntegerValue inSection:0]];[tableView deleteRowsAtIndexPaths:paths withRowAnimation:UITableViewRowAnimationAutomatic];}
+        if(diff.insertedNewIndexes.count){NSMutableArray<NSIndexPath *> *paths=[NSMutableArray array];for(NSNumber *i in diff.insertedNewIndexes)[paths addObject:[NSIndexPath indexPathForRow:i.unsignedIntegerValue inSection:0]];[tableView insertRowsAtIndexPaths:paths withRowAnimation:UITableViewRowAnimationAutomatic];}
+        for(NSDictionary *move in diff.moves)[tableView moveRowAtIndexPath:[NSIndexPath indexPathForRow:[move[@"from"] unsignedIntegerValue] inSection:0] toIndexPath:[NSIndexPath indexPathForRow:[move[@"to"] unsignedIntegerValue] inSection:0]];
+    } completion:^(__unused BOOL finished){
+        if(tableView.window&&diff.reloadedNewIndexes.count){NSMutableArray<NSIndexPath *> *paths=[NSMutableArray array];for(NSNumber *i in diff.reloadedNewIndexes)[paths addObject:[NSIndexPath indexPathForRow:i.unsignedIntegerValue inSection:0]];[tableView reloadRowsAtIndexPaths:paths withRowAnimation:UITableViewRowAnimationAutomatic];}
+    }];
+}
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if(self.entries.count){self.tableView.backgroundView=nil;return self.entries.count;}
     UILabel *empty=[[UILabel alloc] initWithFrame:self.tableView.bounds];empty.text=@"还没有观看记录\n播放过的影片会保存在这里";empty.textAlignment=NSTextAlignmentCenter;empty.numberOfLines=0;empty.textColor=HostSecondaryText();self.tableView.backgroundView=empty;return 0;
@@ -1319,7 +1340,7 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
     return [UIContextMenuConfiguration configurationWithIdentifier:@"media.history.context" previewProvider:nil actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggested){
         UIAction *resume=[UIAction actionWithTitle:@"继续观看" image:[UIImage systemImageNamed:@"play.fill"] identifier:nil handler:^(__unused UIAction *a){if(weakSelf.onSelect)weakSelf.onSelect(entry);}];
         UIAction *copy=[UIAction actionWithTitle:@"复制影片与分集" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){UIPasteboard.generalPasteboard.string=ep.length?[NSString stringWithFormat:@"%@ · %@",title,ep]:title;}];
-        UIAction *remove=[UIAction actionWithTitle:@"移除此条记录" image:[UIImage systemImageNamed:@"trash"] identifier:nil handler:^(__unused UIAction *a){[MediaPlaybackStateStore removeHistoryEntryWithKey:entry[@"key"]];weakSelf.entries=MediaPlaybackStateStore.watchHistory;[weakSelf updateClearHistoryButton];[weakSelf.tableView reloadData];}];remove.attributes=UIMenuElementAttributesDestructive;
+        UIAction *remove=[UIAction actionWithTitle:@"移除此条记录" image:[UIImage systemImageNamed:@"trash"] identifier:nil handler:^(__unused UIAction *a){[MediaPlaybackStateStore removeHistoryEntryWithKey:entry[@"key"]];[weakSelf applyHistoryEntriesIncremental];}];remove.attributes=UIMenuElementAttributesDestructive;
         return [UIMenu menuWithTitle:title children:@[resume,copy,remove]];
     }];
 }
@@ -1330,7 +1351,7 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
         MediaWatchHistoryViewController *owner=weakSelf;if(!owner){completion(NO);return;}
         UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"移除此条观看记录？" message:@"只会移除这条本机历史，不会删除收藏、订阅或插件数据。" preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:^(UIAlertAction *cancel){completion(NO);}]];
-        [alert addAction:[UIAlertAction actionWithTitle:@"移除记录" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *confirm){[MediaPlaybackStateStore removeHistoryEntryWithKey:entry[@"key"]];NSMutableArray *updated=[owner.entries mutableCopy];[updated removeObjectAtIndex:indexPath.row];owner.entries=updated;[owner.tableView deleteRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationAutomatic];[owner updateClearHistoryButton];completion(YES);}]];
+        [alert addAction:[UIAlertAction actionWithTitle:@"移除记录" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *confirm){[MediaPlaybackStateStore removeHistoryEntryWithKey:entry[@"key"]];[owner applyHistoryEntriesIncremental];completion(YES);}]];
         [owner presentViewController:alert animated:YES completion:nil];
     }];remove.image=[UIImage systemImageNamed:@"trash"];
     UISwipeActionsConfiguration *configuration=[UISwipeActionsConfiguration configurationWithActions:@[remove]];configuration.performsFirstActionWithFullSwipe=NO;return configuration;
