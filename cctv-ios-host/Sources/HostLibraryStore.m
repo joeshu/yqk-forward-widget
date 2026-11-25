@@ -4,6 +4,8 @@
 NSString *const HostLibraryLegacyFavoritesKey = @"favorites";
 NSString *const HostLibraryLegacyRecentsKey = @"recents";
 NSString *const HostLibraryMigrationMarkerKey = @"cctv.libraryStore.migrated.v1";
+NSString *const HostLibraryFallbackPendingKey = @"cctv.libraryStore.fallbackPending.v1";
+NSString *const HostLibraryRestorePendingKey = @"cctv.libraryStore.restorePending.v1";
 const NSUInteger HostLibraryRecentsLimit = 24;
 const NSUInteger HostMediaWatchHistoryLimit = 100;
 static NSString *const HostMediaFavoritesKey = @"cctv.mediaFavorites.v1"; // mediaFavorites storage key
@@ -83,6 +85,8 @@ static double HostLibraryWatchedAt(NSDictionary *entry) {
 - (BOOL)writeRecentsLocked:(NSArray<NSDictionary *> *)recents;
 - (BOOL)writeMediaFavoritesLocked:(NSDictionary *)favorites;
 - (BOOL)writeMediaHistoryLocked:(NSArray *)history;
+- (BOOL)reconcileFallbackDataLocked;
+- (BOOL)replaceFromDefaultsLocked;
 @end
 
 @implementation HostLibraryStore
@@ -164,6 +168,7 @@ static double HostLibraryWatchedAt(NSDictionary *entry) {
     if (sqlite3_open_v2(self.databasePath.UTF8String, &handle, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, NULL) != SQLITE_OK) {
         if (handle) sqlite3_close(handle);
         NSLog(@"[HostLibraryStore] sqlite open failed, fallback to NSUserDefaults");
+        [self.defaults setBool:YES forKey:HostLibraryFallbackPendingKey];
         return NO;
     }
     self.db = handle;
@@ -189,25 +194,37 @@ static double HostLibraryWatchedAt(NSDictionary *entry) {
     if (!created) {
         [self closeLocked];
         NSLog(@"[HostLibraryStore] schema creation failed, fallback to NSUserDefaults");
+        [self.defaults setBool:YES forKey:HostLibraryFallbackPendingKey];
         return NO;
     }
     if (![self.defaults boolForKey:HostLibraryMigrationMarkerKey]) {
         if (![self migrateFromDefaultsLocked]) {
             [self closeLocked];
             NSLog(@"[HostLibraryStore] migration failed, fallback to NSUserDefaults");
+            [self.defaults setBool:YES forKey:HostLibraryFallbackPendingKey];
             return NO;
         }
         [self.defaults setBool:YES forKey:HostLibraryMigrationMarkerKey];
     }
     if (![self.defaults boolForKey:HostMediaFavoritesMarker]) {
         NSDictionary *legacy=[self.defaults dictionaryForKey:HostMediaFavoritesKey] ?: @{};
-        if (![self transactionLocked:^BOOL{ return [self writeMediaFavoritesLocked:legacy]; }]) { [self closeLocked]; return NO; }
+        if (![self transactionLocked:^BOOL{ return [self writeMediaFavoritesLocked:legacy]; }]) { [self closeLocked]; [self.defaults setBool:YES forKey:HostLibraryFallbackPendingKey]; return NO; }
         [self.defaults setBool:YES forKey:HostMediaFavoritesMarker];
     }
     if (![self.defaults boolForKey:HostMediaHistoryMarker]) {
         NSArray *legacy=[self.defaults arrayForKey:HostMediaHistoryKey] ?: @[];
-        if (![self transactionLocked:^BOOL{ return [self writeMediaHistoryLocked:legacy]; }]) { [self closeLocked]; return NO; }
+        if (![self transactionLocked:^BOOL{ return [self writeMediaHistoryLocked:legacy]; }]) { [self closeLocked]; [self.defaults setBool:YES forKey:HostLibraryFallbackPendingKey]; return NO; }
         [self.defaults setBool:YES forKey:HostMediaHistoryMarker];
+    }
+    // SQLite 恢复后对账：合并 fallback 期间写入 NSUserDefaults 的数据，避免丢失。
+    if ([self.defaults boolForKey:HostLibraryFallbackPendingKey]) {
+        if ([self.defaults boolForKey:HostLibraryRestorePendingKey]) {
+            if (![self replaceFromDefaultsLocked]) { [self closeLocked]; [self.defaults setBool:YES forKey:HostLibraryFallbackPendingKey]; return NO; }
+            [self.defaults setBool:NO forKey:HostLibraryRestorePendingKey];
+        } else {
+            if (![self reconcileFallbackDataLocked]) { [self closeLocked]; [self.defaults setBool:YES forKey:HostLibraryFallbackPendingKey]; return NO; }
+        }
+        [self.defaults setBool:NO forKey:HostLibraryFallbackPendingKey];
     }
     return YES;
 }
@@ -218,6 +235,113 @@ static double HostLibraryWatchedAt(NSDictionary *entry) {
     NSArray<NSDictionary *> *recents = HostLibraryNormalizedRecents([self.defaults objectForKey:HostLibraryLegacyRecentsKey]);
     return [self transactionLocked:^BOOL{
         return [self writeFavoritesLocked:favorites] && [self writeRecentsLocked:recents];
+    }];
+}
+
+/// 备份恢复时 SQLite 不可用 → 用 NSUserDefaults 数据全量替换 SQLite（REPLACE 语义）。
+- (BOOL)replaceFromDefaultsLocked {
+    NSArray<NSString *> *favorites = HostLibraryNormalizedFavorites([self.defaults objectForKey:HostLibraryLegacyFavoritesKey]);
+    NSArray<NSDictionary *> *recents = HostLibraryNormalizedRecents([self.defaults objectForKey:HostLibraryLegacyRecentsKey]);
+    NSDictionary *mediaFav = [self.defaults dictionaryForKey:HostMediaFavoritesKey] ?: @{};
+    NSArray *mediaHist = [self.defaults arrayForKey:HostMediaHistoryKey] ?: @[];
+    return [self transactionLocked:^BOOL{
+        return [self writeFavoritesLocked:favorites] && [self writeRecentsLocked:recents]
+            && [self writeMediaFavoritesLocked:mediaFav] && [self writeMediaHistoryLocked:mediaHist];
+    }];
+}
+
+/// 对账合并：SQLite 恢复后将 fallback 期间写入 NSUserDefaults 的数据合并进 SQLite（MERGE 语义）。
+/// 合并策略为并集——fallback 期间新增的条目追加到 SQLite，不丢弃 SQLite 中已有数据。
+/// 幂等：重复执行结果相同（追加项已存在时跳过）。
+- (BOOL)reconcileFallbackDataLocked {
+    // 收藏：将 defaults 中有但 SQLite 没有的追加到末尾
+    NSArray<NSString *> *defaultsFavorites = HostLibraryNormalizedFavorites([self.defaults objectForKey:HostLibraryLegacyFavoritesKey]);
+    NSArray<NSString *> *sqliteFavorites = [self payloadsLocked:"SELECT payload FROM favorites ORDER BY position ASC;"];
+    NSMutableSet<NSString *> *existingFav = [NSMutableSet set];
+    for (id v in sqliteFavorites) { if ([v isKindOfClass:NSString.class]) [existingFav addObject:v]; }
+    NSMutableArray<NSString *> *mergedFavorites = [NSMutableArray array];
+    for (id v in sqliteFavorites) { if ([v isKindOfClass:NSString.class]) [mergedFavorites addObject:v]; }
+    for (NSString *fav in defaultsFavorites) { if (![existingFav containsObject:fav]) [mergedFavorites addObject:fav]; }
+
+    // 最近观看：按 id 合并，保留 watchedAt 更大者；按 watchedAt 降序排序后裁剪到上限
+    NSMutableArray<NSDictionary *> *mergedRecents = [NSMutableArray array];
+    NSMutableDictionary<NSString *, NSDictionary *> *recentById = [NSMutableDictionary dictionary];
+    // SQLite 现有条目
+    for (id v in [self payloadsLocked:"SELECT payload FROM recents ORDER BY position ASC;"]) {
+        if (![v isKindOfClass:NSDictionary.class]) continue;
+        NSString *key = HostLibraryRecentKey(v);
+        if (!key.length) continue;
+        recentById[key] = v;
+    }
+    // defaults 条目（fallback 期间的写入源）
+    for (id v in HostLibraryNormalizedRecents([self.defaults objectForKey:HostLibraryLegacyRecentsKey])) {
+        NSString *key = HostLibraryRecentKey(v);
+        if (!key.length) continue;
+        NSDictionary *existing = recentById[key];
+        if (!existing || HostLibraryWatchedAt(v) > HostLibraryWatchedAt(existing)) recentById[key] = v;
+    }
+    NSMutableArray *allRecents = [recentById.allValues mutableCopy];
+    [allRecents sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+        double ta = HostLibraryWatchedAt(a), tb = HostLibraryWatchedAt(b);
+        return tb < ta ? NSOrderedAscending : (tb > ta ? NSOrderedDescending : NSOrderedSame);
+    }];
+    for (NSUInteger i = 0; i < allRecents.count && i < HostLibraryRecentsLimit; i++) [mergedRecents addObject:allRecents[i]];
+
+    // 点播收藏：defaults 中有但 SQLite 没有的 key 追加
+    NSMutableDictionary *mergedMediaFav = [NSMutableDictionary dictionary];
+    sqlite3_stmt *mf = NULL;
+    if (sqlite3_prepare_v2(self.db, "SELECT key,payload FROM media_favorites ORDER BY position ASC;", -1, &mf, NULL) == SQLITE_OK) {
+        while (sqlite3_step(mf) == SQLITE_ROW) {
+            const char *k = (const char *)sqlite3_column_text(mf, 0);
+            const void *b = sqlite3_column_blob(mf, 1); int n = sqlite3_column_bytes(mf, 1);
+            if (k && b && n > 0) {
+                NSString *key = [NSString stringWithUTF8String:k];
+                id v = [NSJSONSerialization JSONObjectWithData:[NSData dataWithBytes:b length:(NSUInteger)n] options:NSJSONReadingFragmentsAllowed error:NULL];
+                if (key && [v isKindOfClass:NSDictionary.class]) mergedMediaFav[key] = v;
+            }
+        }
+    }
+    if (mf) sqlite3_finalize(mf);
+    NSDictionary *defaultsMediaFav = [self.defaults dictionaryForKey:HostMediaFavoritesKey] ?: @{};
+    for (NSString *key in defaultsMediaFav) {
+        id v = defaultsMediaFav[key];
+        if ([key isKindOfClass:NSString.class] && [v isKindOfClass:NSDictionary.class] && !mergedMediaFav[key]) mergedMediaFav[key] = v;
+    }
+
+    // 观看历史：按 key 合并，保留 watchedAt 更大者；裁剪到上限
+    NSMutableDictionary<NSString *, NSDictionary *> *histByKey = [NSMutableDictionary dictionary];
+    for (id v in [self payloadsLocked:"SELECT payload FROM media_watch_history ORDER BY position ASC;"]) {
+        if (![v isKindOfClass:NSDictionary.class]) continue;
+        NSString *key = [v[@"key"] isKindOfClass:NSString.class] ? v[@"key"] : nil;
+        if (!key.length) continue;
+        id date = v[@"updatedAt"]; double t = [date isKindOfClass:NSNumber.class] ? [date doubleValue] : 0;
+        NSDictionary *existing = histByKey[key];
+        if (!existing) { histByKey[key] = v; continue; }
+        id ed = existing[@"updatedAt"]; double et = [ed isKindOfClass:NSNumber.class] ? [ed doubleValue] : 0;
+        if (t > et) histByKey[key] = v;
+    }
+    for (id v in ([self.defaults arrayForKey:HostMediaHistoryKey] ?: @[])) {
+        if (![v isKindOfClass:NSDictionary.class]) continue;
+        NSString *key = [v[@"key"] isKindOfClass:NSString.class] ? v[@"key"] : nil;
+        if (!key.length) continue;
+        id date = v[@"updatedAt"]; double t = [date isKindOfClass:NSNumber.class] ? [date doubleValue] : 0;
+        NSDictionary *existing = histByKey[key];
+        if (!existing) { histByKey[key] = v; continue; }
+        id ed = existing[@"updatedAt"]; double et = [ed isKindOfClass:NSNumber.class] ? [ed doubleValue] : 0;
+        if (t > et) histByKey[key] = v;
+    }
+    NSMutableArray *allHist = [histByKey.allValues mutableCopy];
+    [allHist sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+        double ta = [a[@"updatedAt"] isKindOfClass:NSNumber.class] ? [a[@"updatedAt"] doubleValue] : 0;
+        double tb = [b[@"updatedAt"] isKindOfClass:NSNumber.class] ? [b[@"updatedAt"] doubleValue] : 0;
+        return tb < ta ? NSOrderedAscending : (tb > ta ? NSOrderedDescending : NSOrderedSame);
+    }];
+    NSMutableArray *mergedHist = [NSMutableArray array];
+    for (NSUInteger i = 0; i < allHist.count && i < HostMediaWatchHistoryLimit; i++) [mergedHist addObject:allHist[i]];
+
+    return [self transactionLocked:^BOOL{
+        return [self writeFavoritesLocked:mergedFavorites] && [self writeRecentsLocked:mergedRecents]
+            && [self writeMediaFavoritesLocked:mergedMediaFav] && [self writeMediaHistoryLocked:mergedHist];
     }];
 }
 
@@ -338,6 +462,15 @@ static double HostLibraryWatchedAt(NSDictionary *entry) {
         fallback = ![self prepareLocked];
     }];
     return fallback;
+}
+
+- (void)markRestorePendingIfFallback {
+    [self performSync:^{
+        if (![self prepareLocked]) {
+            [self.defaults setBool:YES forKey:HostLibraryRestorePendingKey];
+            [self.defaults setBool:YES forKey:HostLibraryFallbackPendingKey];
+        }
+    }];
 }
 
 - (NSArray<NSString *> *)allFavorites {
@@ -478,11 +611,11 @@ static double HostLibraryWatchedAt(NSDictionary *entry) {
 - (NSDictionary<NSString *,NSDictionary *> *)mediaFavorites {
     __block NSDictionary *out=@{}; [self performSync:^{ if (![self prepareLocked]) { out=[self.defaults dictionaryForKey:HostMediaFavoritesKey] ?: @{}; return; } NSMutableDictionary *rows=[NSMutableDictionary dictionary]; sqlite3_stmt *st=NULL; if(sqlite3_prepare_v2(self.db,"SELECT key,payload FROM media_favorites ORDER BY position ASC;",-1,&st,NULL)==SQLITE_OK){ while(sqlite3_step(st)==SQLITE_ROW){ const char *k=(const char *)sqlite3_column_text(st,0); const void *b=sqlite3_column_blob(st,1); int n=sqlite3_column_bytes(st,1); if(k&&b&&n>0){ NSString *key=[NSString stringWithUTF8String:k]; id v=[NSJSONSerialization JSONObjectWithData:[NSData dataWithBytes:b length:(NSUInteger)n] options:NSJSONReadingFragmentsAllowed error:NULL]; if(key&&[v isKindOfClass:NSDictionary.class])rows[key]=v; } } } if(st)sqlite3_finalize(st); out=rows; }]; return out;
 }
-- (void)replaceMediaFavorites:(NSDictionary *)favorites { NSDictionary *copy=[favorites isKindOfClass:NSDictionary.class]?[favorites copy]:@{}; [self performAsync:^{ if([self prepareLocked]) { if(![self transactionLocked:^BOOL{return [self writeMediaFavoritesLocked:copy];}]){[self closeLocked];[self.defaults setObject:copy forKey:HostMediaFavoritesKey];} } else [self.defaults setObject:copy forKey:HostMediaFavoritesKey]; }]; }
+- (void)replaceMediaFavorites:(NSDictionary *)favorites { NSDictionary *copy=[favorites isKindOfClass:NSDictionary.class]?[favorites copy]:@{}; [self performAsync:^{ if([self prepareLocked]) { if(![self transactionLocked:^BOOL{return [self writeMediaFavoritesLocked:copy];}]){[self closeLocked];[self.defaults setBool:YES forKey:HostLibraryFallbackPendingKey];[self.defaults setObject:copy forKey:HostMediaFavoritesKey];} } else [self.defaults setObject:copy forKey:HostMediaFavoritesKey]; }]; }
 - (NSArray<NSDictionary *> *)mediaWatchHistory {
     __block NSArray *out=@[]; [self performSync:^{ if (![self prepareLocked]) { out=[self.defaults arrayForKey:HostMediaHistoryKey] ?: @[]; return; } NSMutableArray *rows=[NSMutableArray array]; for(id value in [self payloadsLocked:"SELECT payload FROM media_watch_history ORDER BY position ASC;"]){ if([value isKindOfClass:NSDictionary.class]){ NSMutableDictionary *row=[value mutableCopy]; if([row[@"updatedAt"] isKindOfClass:NSNumber.class])row[@"updatedAt"]=[NSDate dateWithTimeIntervalSince1970:[row[@"updatedAt"] doubleValue]]; [rows addObject:row]; } } out=rows; }]; return out;
 }
-- (void)replaceMediaWatchHistory:(NSArray *)history { NSArray *copy=[history isKindOfClass:NSArray.class]?[history copy]:@[]; [self performAsync:^{ NSMutableArray *(^boundedHistory)(void)=^NSMutableArray *{NSMutableArray *bounded=[NSMutableArray array]; NSMutableSet *seen=[NSMutableSet set]; for(id raw in copy){ if(![raw isKindOfClass:NSDictionary.class])continue; NSString *key=[raw[@"key"] isKindOfClass:NSString.class]?raw[@"key"]:nil; if(!key.length||[seen containsObject:key])continue; [seen addObject:key]; [bounded addObject:raw]; if(bounded.count>=HostMediaWatchHistoryLimit)break; } return bounded;}; if([self prepareLocked]) {if(![self transactionLocked:^BOOL{return [self writeMediaHistoryLocked:boundedHistory()];}]){[self closeLocked];[self.defaults setObject:boundedHistory() forKey:HostMediaHistoryKey];}} else [self.defaults setObject:boundedHistory() forKey:HostMediaHistoryKey]; }]; }
+- (void)replaceMediaWatchHistory:(NSArray *)history { NSArray *copy=[history isKindOfClass:NSArray.class]?[history copy]:@[]; [self performAsync:^{ NSMutableArray *(^boundedHistory)(void)=^NSMutableArray *{NSMutableArray *bounded=[NSMutableArray array]; NSMutableSet *seen=[NSMutableSet set]; for(id raw in copy){ if(![raw isKindOfClass:NSDictionary.class])continue; NSString *key=[raw[@"key"] isKindOfClass:NSString.class]?raw[@"key"]:nil; if(!key.length||[seen containsObject:key])continue; [seen addObject:key]; [bounded addObject:raw]; if(bounded.count>=HostMediaWatchHistoryLimit)break; } return bounded;}; if([self prepareLocked]) {if(![self transactionLocked:^BOOL{return [self writeMediaHistoryLocked:boundedHistory()];}]){[self closeLocked];[self.defaults setBool:YES forKey:HostLibraryFallbackPendingKey];[self.defaults setObject:boundedHistory() forKey:HostMediaHistoryKey];}} else [self.defaults setObject:boundedHistory() forKey:HostMediaHistoryKey]; }]; }
 - (void)clearMediaWatchHistory { [self replaceMediaWatchHistory:@[]]; }
 
 @end

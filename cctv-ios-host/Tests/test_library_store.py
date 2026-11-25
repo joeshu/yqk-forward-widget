@@ -127,7 +127,7 @@ class HostLibraryStoreSourceTests(unittest.TestCase):
     def test_fallback_to_defaults_when_sqlite_unavailable(self):
         prepare = self.section("- (BOOL)prepareLocked {", "- (BOOL)migrateFromDefaultsLocked {")
         self.assertIn("fallback to NSUserDefaults", prepare)
-        self.assertEqual(prepare.count("[self closeLocked];"), 4)  # two additional media-store migration failures
+        self.assertEqual(prepare.count("[self closeLocked];"), 6)  # 4 migration failures + 2 reconciliation failures
         self.assertIn("[self.defaults arrayForKey:HostLibraryLegacyFavoritesKey] ?: @[]", self.m)
         self.assertIn("[self.defaults arrayForKey:HostLibraryLegacyRecentsKey] ?: @[]", self.m)
         self.assertIn("[self.defaults setObject:merged forKey:HostLibraryLegacyRecentsKey];", self.m)
@@ -217,9 +217,14 @@ class LibraryCallSiteTests(unittest.TestCase):
     def test_backup_reads_store_and_restore_syncs_store(self):
         backup = read("HostBackup.m")
         self.assertIn('@"favorites":[HostLibraryStore.shared allFavorites]?:@[]', backup)
+        self.assertIn('@"favorites":[HostLibraryStore.shared allFavorites]?:@[]', backup)
         self.assertIn("NSArray *recents=[HostLibraryStore.shared recents];", backup)
         self.assertIn('[HostLibraryStore.shared replaceFavorites:backup[@"favorites"]];', backup)
         self.assertIn('[HostLibraryStore.shared replaceRecents:', backup)
+        # mediaFavorites/mediaHistory restore also writes to NSUserDefaults for two-sided consistency
+        self.assertIn('[d setObject:backup[@"vodFavorites"] forKey:@"cctv.mediaFavorites.v1"]', backup)
+        self.assertIn('[d setObject:defaultsRows forKey:@"cctv.mediaWatchHistory.v1"]', backup)
+        self.assertIn('[HostLibraryStore.shared markRestorePendingIfFallback];', backup)
 
     def test_unrelated_defaults_untouched(self):
         root = read("RootViewController.m")
@@ -228,6 +233,38 @@ class LibraryCallSiteTests(unittest.TestCase):
         catalog = read("RootViewController+Catalog.m")
         self.assertIn('arrayForKey:@"subscriptions"', catalog)
         self.assertIn('forKey:@"channelGridMode"', catalog)
+
+    def test_fallback_pending_and_reconciliation_contracts(self):
+        m = read("HostLibraryStore.m")
+        # fallbackPending key defined and exported
+        self.assertIn('HostLibraryFallbackPendingKey = @"cctv.libraryStore.fallbackPending.v1"', m)
+        self.assertIn('HostLibraryFallbackPendingKey', read("HostLibraryStore.h"))
+        # restorePending key defined and exported
+        self.assertIn('HostLibraryRestorePendingKey = @"cctv.libraryStore.restorePending.v1"', m)
+        self.assertIn('HostLibraryRestorePendingKey', read("HostLibraryStore.h"))
+        # set fallbackPending on every failure path in prepareLocked
+        impl = m[m.index("@implementation HostLibraryStore"):]
+        prepare_start = impl.index("- (BOOL)prepareLocked {")
+        prepare_end = impl.index("- (BOOL)migrateFromDefaultsLocked {")
+        prepare = impl[prepare_start:prepare_end]
+        self.assertGreaterEqual(prepare.count("setBool:YES forKey:HostLibraryFallbackPendingKey"), 5)
+        # reconciliation called in prepareLocked after migration markers
+        self.assertIn("reconcileFallbackDataLocked", prepare)
+        self.assertIn("replaceFromDefaultsLocked", prepare)
+        # fallbackPending cleared after successful reconciliation
+        self.assertIn("setBool:NO forKey:HostLibraryFallbackPendingKey", prepare)
+        # markRestorePendingIfFallback method exists
+        self.assertIn("- (void)markRestorePendingIfFallback {", m)
+        self.assertIn("- (void)markRestorePendingIfFallback;", read("HostLibraryStore.h"))
+        # replaceMediaFavorites/replaceMediaWatchHistory set fallbackPending on transaction failure
+        impl = m[m.index("@implementation HostLibraryStore"):]
+        self.assertIn("setBool:YES forKey:HostLibraryFallbackPendingKey];[self.defaults setObject:copy forKey:HostMediaFavoritesKey]", impl)
+        self.assertIn("setBool:YES forKey:HostLibraryFallbackPendingKey];[self.defaults setObject:boundedHistory() forKey:HostMediaHistoryKey]", impl)
+        # SmokeDriver checks HostLibraryStore.shared.mediaFavorites not legacy NSUserDefaults
+        smoke = (ROOT / "Tests" / "UISmoke" / "SmokeDriver.m").read_text(encoding="utf-8")
+        self.assertIn('#import "HostLibraryStore.h"', smoke)
+        self.assertIn("[HostLibraryStore.shared.mediaFavorites count]>0", smoke)
+        self.assertNotIn('dictionaryForKey:@"cctv.mediaFavorites.v1"]', smoke)
 
 
 if __name__ == "__main__":

@@ -123,7 +123,7 @@ invalid:
     }
     if([backup[@"recents"] isKindOfClass:NSArray.class])[d setObject:backup[@"recents"] forKey:@"recents"];else[d removeObjectForKey:@"recents"];
     [HostLibraryStore.shared replaceRecents:[backup[@"recents"] isKindOfClass:NSArray.class]?backup[@"recents"]:@[]];
-    if([backup[@"vodFavorites"] isKindOfClass:NSDictionary.class])[HostLibraryStore.shared replaceMediaFavorites:backup[@"vodFavorites"]];else[HostLibraryStore.shared replaceMediaFavorites:@{}];
+    if([backup[@"vodFavorites"] isKindOfClass:NSDictionary.class]){[HostLibraryStore.shared replaceMediaFavorites:backup[@"vodFavorites"]];[d setObject:backup[@"vodFavorites"] forKey:@"cctv.mediaFavorites.v1"];}else{[HostLibraryStore.shared replaceMediaFavorites:@{}];[d removeObjectForKey:@"cctv.mediaFavorites.v1"];}
     if([backup[@"watchHistory"] isKindOfClass:NSArray.class]){
         NSMutableArray *rows=[NSMutableArray array];
         for(NSDictionary *entry in backup[@"watchHistory"]){
@@ -131,8 +131,12 @@ invalid:
             if([row[@"updatedAt"] isKindOfClass:NSNumber.class])row[@"updatedAt"]=[NSDate dateWithTimeIntervalSince1970:[row[@"updatedAt"] doubleValue]];
             [rows addObject:row];
         }
+        // defaults 侧存为带时间戳 NSNumber 的 JSON 可序列化形式，保持与 snapshot 一致
+        NSMutableArray *defaultsRows=[NSMutableArray array];
+        for(NSDictionary *entry in rows){NSMutableDictionary *row=[entry mutableCopy];if([row[@"updatedAt"] isKindOfClass:NSDate.class])row[@"updatedAt"]=@([row[@"updatedAt"] timeIntervalSince1970]);[defaultsRows addObject:row];}
         [HostLibraryStore.shared replaceMediaWatchHistory:rows];
-    }else[HostLibraryStore.shared clearMediaWatchHistory];
+        [d setObject:defaultsRows forKey:@"cctv.mediaWatchHistory.v1"];
+    }else{[HostLibraryStore.shared clearMediaWatchHistory];[d removeObjectForKey:@"cctv.mediaWatchHistory.v1"];}
     if([backup[@"skipPoints"] isKindOfClass:NSDictionary.class])[d setObject:backup[@"skipPoints"] forKey:@"cctv.mediaSkipPoints.v1"];else[d removeObjectForKey:@"cctv.mediaSkipPoints.v1"];
     if([backup[@"epgReminders"] isKindOfClass:NSDictionary.class])[d setObject:backup[@"epgReminders"] forKey:@"cctv.epgReminders.v1"];else[d removeObjectForKey:@"cctv.epgReminders.v1"];
     NSDictionary *p=backup[@"preferences"];
@@ -144,6 +148,7 @@ invalid:
     for(NSString *k in numberPreferenceKeys())if(p[k])[d setObject:p[k] forKey:k];
     for(NSString *k in stringPreferenceKeys())if(p[k])[d setObject:p[k] forKey:k];
     for(NSString *k in [self arrayPreferenceKeys])if([p[k] isKindOfClass:NSArray.class])[d setObject:p[k] forKey:k];
+    [HostLibraryStore.shared markRestorePendingIfFallback];
     return YES;
 }
 @end
