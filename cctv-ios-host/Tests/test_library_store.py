@@ -127,7 +127,7 @@ class HostLibraryStoreSourceTests(unittest.TestCase):
     def test_fallback_to_defaults_when_sqlite_unavailable(self):
         prepare = self.section("- (BOOL)prepareLocked {", "- (BOOL)migrateFromDefaultsLocked {")
         self.assertIn("fallback to NSUserDefaults", prepare)
-        self.assertEqual(prepare.count("[self closeLocked];"), 2)
+        self.assertEqual(prepare.count("[self closeLocked];"), 4)  # two additional media-store migration failures
         self.assertIn("[self.defaults arrayForKey:HostLibraryLegacyFavoritesKey] ?: @[]", self.m)
         self.assertIn("[self.defaults arrayForKey:HostLibraryLegacyRecentsKey] ?: @[]", self.m)
         self.assertIn("[self.defaults setObject:merged forKey:HostLibraryLegacyRecentsKey];", self.m)

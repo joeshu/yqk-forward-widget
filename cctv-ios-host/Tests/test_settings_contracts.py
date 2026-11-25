@@ -310,7 +310,7 @@ class SettingsContracts(unittest.TestCase):
         self.assertIn('reloadMediaDisplayConfigurationIfLoaded', self.root)
         self.assertIn('reloadMediaDisplayConfigurationIfLoaded', self.browser)
         self.assertIn('[MediaPlaybackStateStore clearWatchHistory]', self.settings)
-        self.assertIn('removeObjectForKey:@"cctv.mediaFavorites.v1"', self.settings)
+        self.assertIn('replaceMediaFavorites:@{}', self.settings)
         self.assertIn('removeObjectForKey:@"cctv.epgReminders.v1"', self.settings)
 
 

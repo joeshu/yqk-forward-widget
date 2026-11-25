@@ -5,6 +5,11 @@ NSString *const HostLibraryLegacyFavoritesKey = @"favorites";
 NSString *const HostLibraryLegacyRecentsKey = @"recents";
 NSString *const HostLibraryMigrationMarkerKey = @"cctv.libraryStore.migrated.v1";
 const NSUInteger HostLibraryRecentsLimit = 24;
+const NSUInteger HostMediaWatchHistoryLimit = 100;
+static NSString *const HostMediaFavoritesKey = @"cctv.mediaFavorites.v1"; // mediaFavorites storage key
+static NSString *const HostMediaHistoryKey = @"cctv.mediaWatchHistory.v1";
+static NSString *const HostMediaFavoritesMarker = @"cctv.mediaFavoritesStore.migrated.v1";
+static NSString *const HostMediaHistoryMarker = @"cctv.mediaHistoryStore.migrated.v1";
 
 static char kHostLibraryQueueKey;
 
@@ -76,6 +81,8 @@ static double HostLibraryWatchedAt(NSDictionary *entry) {
 - (NSArray *)payloadsLocked:(const char *)sql;
 - (BOOL)writeFavoritesLocked:(NSArray<NSString *> *)favorites;
 - (BOOL)writeRecentsLocked:(NSArray<NSDictionary *> *)recents;
+- (BOOL)writeMediaFavoritesLocked:(NSDictionary *)favorites;
+- (BOOL)writeMediaHistoryLocked:(NSArray *)history;
 @end
 
 @implementation HostLibraryStore
@@ -169,6 +176,8 @@ static double HostLibraryWatchedAt(NSDictionary *entry) {
         "  updated_at REAL NOT NULL,"
         "  position INTEGER NOT NULL DEFAULT 0"
         ");"
+        "CREATE TABLE IF NOT EXISTS media_favorites (key TEXT PRIMARY KEY NOT NULL, payload BLOB NOT NULL, updated_at REAL NOT NULL, position INTEGER NOT NULL DEFAULT 0);"
+        "CREATE TABLE IF NOT EXISTS media_watch_history (key TEXT PRIMARY KEY NOT NULL, payload BLOB NOT NULL, watched_at REAL NOT NULL, position INTEGER NOT NULL DEFAULT 0);"
         "CREATE TABLE IF NOT EXISTS recents ("
         "  key TEXT PRIMARY KEY NOT NULL,"
         "  payload BLOB NOT NULL,"
@@ -189,6 +198,16 @@ static double HostLibraryWatchedAt(NSDictionary *entry) {
             return NO;
         }
         [self.defaults setBool:YES forKey:HostLibraryMigrationMarkerKey];
+    }
+    if (![self.defaults boolForKey:HostMediaFavoritesMarker]) {
+        NSDictionary *legacy=[self.defaults dictionaryForKey:HostMediaFavoritesKey] ?: @{};
+        if (![self transactionLocked:^BOOL{ return [self writeMediaFavoritesLocked:legacy]; }]) { [self closeLocked]; return NO; }
+        [self.defaults setBool:YES forKey:HostMediaFavoritesMarker];
+    }
+    if (![self.defaults boolForKey:HostMediaHistoryMarker]) {
+        NSArray *legacy=[self.defaults arrayForKey:HostMediaHistoryKey] ?: @[];
+        if (![self transactionLocked:^BOOL{ return [self writeMediaHistoryLocked:legacy]; }]) { [self closeLocked]; return NO; }
+        [self.defaults setBool:YES forKey:HostMediaHistoryMarker];
     }
     return YES;
 }
@@ -295,6 +314,19 @@ static double HostLibraryWatchedAt(NSDictionary *entry) {
                             key:key payload:payload time:HostLibraryWatchedAt(entry) position:position]) return NO;
         position++;
     }
+    return YES;
+}
+
+- (BOOL)writeMediaFavoritesLocked:(NSDictionary *)favorites {
+    if (![self execLocked:"DELETE FROM media_favorites;"]) return NO;
+    sqlite3_int64 pos=0; double now=NSDate.date.timeIntervalSince1970;
+    for (id key in favorites) { id value=favorites[key]; if (![key isKindOfClass:NSString.class] || ![value isKindOfClass:NSDictionary.class]) continue; NSData *payload=HostLibraryJSONData(value); if (!payload) continue; if (![self insertLocked:"INSERT OR REPLACE INTO media_favorites(key,payload,updated_at,position) VALUES(?,?,?,?);" key:key payload:payload time:now position:pos++]) return NO; }
+    return YES;
+}
+- (BOOL)writeMediaHistoryLocked:(NSArray *)history {
+    if (![self execLocked:"DELETE FROM media_watch_history;"]) return NO;
+    sqlite3_int64 pos=0; NSMutableSet *seen=[NSMutableSet set];
+    for (id raw in history) { if (![raw isKindOfClass:NSDictionary.class]) continue; NSDictionary *entry=raw; NSString *key=[entry[@"key"] isKindOfClass:NSString.class]?entry[@"key"]:nil; if (!key.length || [seen containsObject:key]) continue; [seen addObject:key]; NSMutableDictionary *serialized=[entry mutableCopy]; id date=serialized[@"updatedAt"]; if ([date isKindOfClass:NSDate.class]) serialized[@"updatedAt"]=@([date timeIntervalSince1970]); NSData *payload=HostLibraryJSONData(serialized); if (!payload) continue; double time=[entry[@"updatedAt"] isKindOfClass:NSDate.class]?[entry[@"updatedAt"] timeIntervalSince1970]:[entry[@"updatedAt"] doubleValue]; if (![self insertLocked:"INSERT OR REPLACE INTO media_watch_history(key,payload,watched_at,position) VALUES(?,?,?,?);" key:key payload:payload time:time position:pos++]) return NO; if (pos>=HostMediaWatchHistoryLimit) break; }
     return YES;
 }
 
@@ -442,5 +474,15 @@ static double HostLibraryWatchedAt(NSDictionary *entry) {
 - (void)clearRecents {
     [self replaceRecents:@[]];
 }
+
+- (NSDictionary<NSString *,NSDictionary *> *)mediaFavorites {
+    __block NSDictionary *out=@{}; [self performSync:^{ if (![self prepareLocked]) { out=[self.defaults dictionaryForKey:HostMediaFavoritesKey] ?: @{}; return; } NSMutableDictionary *rows=[NSMutableDictionary dictionary]; sqlite3_stmt *st=NULL; if(sqlite3_prepare_v2(self.db,"SELECT key,payload FROM media_favorites ORDER BY position ASC;",-1,&st,NULL)==SQLITE_OK){ while(sqlite3_step(st)==SQLITE_ROW){ const char *k=(const char *)sqlite3_column_text(st,0); const void *b=sqlite3_column_blob(st,1); int n=sqlite3_column_bytes(st,1); if(k&&b&&n>0){ NSString *key=[NSString stringWithUTF8String:k]; id v=[NSJSONSerialization JSONObjectWithData:[NSData dataWithBytes:b length:(NSUInteger)n] options:NSJSONReadingFragmentsAllowed error:NULL]; if(key&&[v isKindOfClass:NSDictionary.class])rows[key]=v; } } } if(st)sqlite3_finalize(st); out=rows; }]; return out;
+}
+- (void)replaceMediaFavorites:(NSDictionary *)favorites { NSDictionary *copy=[favorites isKindOfClass:NSDictionary.class]?[favorites copy]:@{}; [self performAsync:^{ if([self prepareLocked]) { if(![self transactionLocked:^BOOL{return [self writeMediaFavoritesLocked:copy];}]){[self closeLocked];[self.defaults setObject:copy forKey:HostMediaFavoritesKey];} } else [self.defaults setObject:copy forKey:HostMediaFavoritesKey]; }]; }
+- (NSArray<NSDictionary *> *)mediaWatchHistory {
+    __block NSArray *out=@[]; [self performSync:^{ if (![self prepareLocked]) { out=[self.defaults arrayForKey:HostMediaHistoryKey] ?: @[]; return; } NSMutableArray *rows=[NSMutableArray array]; for(id value in [self payloadsLocked:"SELECT payload FROM media_watch_history ORDER BY position ASC;"]){ if([value isKindOfClass:NSDictionary.class]){ NSMutableDictionary *row=[value mutableCopy]; if([row[@"updatedAt"] isKindOfClass:NSNumber.class])row[@"updatedAt"]=[NSDate dateWithTimeIntervalSince1970:[row[@"updatedAt"] doubleValue]]; [rows addObject:row]; } } out=rows; }]; return out;
+}
+- (void)replaceMediaWatchHistory:(NSArray *)history { NSArray *copy=[history isKindOfClass:NSArray.class]?[history copy]:@[]; [self performAsync:^{ NSMutableArray *(^boundedHistory)(void)=^NSMutableArray *{NSMutableArray *bounded=[NSMutableArray array]; NSMutableSet *seen=[NSMutableSet set]; for(id raw in copy){ if(![raw isKindOfClass:NSDictionary.class])continue; NSString *key=[raw[@"key"] isKindOfClass:NSString.class]?raw[@"key"]:nil; if(!key.length||[seen containsObject:key])continue; [seen addObject:key]; [bounded addObject:raw]; if(bounded.count>=HostMediaWatchHistoryLimit)break; } return bounded;}; if([self prepareLocked]) {if(![self transactionLocked:^BOOL{return [self writeMediaHistoryLocked:boundedHistory()];}]){[self closeLocked];[self.defaults setObject:boundedHistory() forKey:HostMediaHistoryKey];}} else [self.defaults setObject:boundedHistory() forKey:HostMediaHistoryKey]; }]; }
+- (void)clearMediaWatchHistory { [self replaceMediaWatchHistory:@[]]; }
 
 @end

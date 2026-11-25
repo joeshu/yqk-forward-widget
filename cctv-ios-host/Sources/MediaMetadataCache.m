@@ -153,7 +153,7 @@ static id MediaMetadataPersistentSafeValue(id value, NSString *key, NSUInteger d
         if(!resolvedCost||resolvedCost>MediaMetadataCacheSingleEntryLimit)continue;
         [valid addObject:@{@"key":key,@"record":@{@"source_id":sourceID,@"stored_at":@(storedAt),@"operation":operation,@"result":safeResult,@"cost":@(resolvedCost)},@"cost":@(resolvedCost)}];
     }
-    [valid sortUsingComparator:^NSComparisonResult(NSDictionary *a,NSDictionary *b){return [a[@"record"][@"stored_at"] compare:b[@"record"][@"stored_at"]];}];
+    [valid sortUsingComparator:^NSComparisonResult(NSDictionary *a,NSDictionary *b){return [(a[@"record"][@"last_access"] ?: a[@"record"][@"stored_at"]) compare:(b[@"record"][@"last_access"] ?: b[@"record"][@"stored_at"])];}];
     for(NSDictionary *entry in [valid reverseObjectEnumerator]){NSUInteger cost=[entry[@"cost"] unsignedIntegerValue];if(self.persistentRecords.count>=MediaMetadataPersistentEntryLimit||total+cost>MediaMetadataPersistentByteLimit)continue;self.persistentRecords[entry[@"key"]]=entry[@"record"];total+=cost;}
     if([root[@"version"] integerValue]!=1||self.persistentRecords.count!=records.count)[self schedulePersistentWrite];
 }
@@ -203,7 +203,7 @@ static id MediaMetadataPersistentSafeValue(id value, NSString *key, NSUInteger d
     dispatch_sync(self.queue, ^{
         entry=[self.entries objectForKey:key];
         if(!entry&&[@[@"home",@"category"] containsObject:operation]){NSDictionary *record=self.persistentRecords[key];if(record){entry=[MediaMetadataCacheEntry new];entry.result=record[@"result"];entry.sourceID=record[@"source_id"];entry.storedAt=[record[@"stored_at"] doubleValue];NSUInteger cachedCost=[record[@"cost"] unsignedIntegerValue];if(!cachedCost){NSData *encoded=[NSJSONSerialization dataWithJSONObject:entry.result options:0 error:NULL];cachedCost=encoded.length;}entry.cost=cachedCost;[self.entries setObject:entry forKey:key cost:entry.cost];}}
-        if(entry)self.order[key]=@(NSDate.date.timeIntervalSince1970);
+        if(entry){NSTimeInterval accessed=NSDate.date.timeIntervalSince1970;self.order[key]=@(accessed);NSMutableDictionary *record=[self.persistentRecords[key] mutableCopy];if(record){record[@"last_access"]=@(accessed);self.persistentRecords[key]=record;[self schedulePersistentWrite];}}
     });
     if(!entry)return nil;
     NSTimeInterval age=NSDate.date.timeIntervalSince1970-entry.storedAt;
@@ -232,7 +232,7 @@ static id MediaMetadataPersistentSafeValue(id value, NSString *key, NSUInteger d
             NSString *oldest=[self.order keysSortedByValueUsingSelector:@selector(compare:)].firstObject;
             if(!oldest)break;[self.entries removeObjectForKey:oldest];[self.order removeObjectForKey:oldest];
         }
-        if(persist){self.persistentRecords[key]=@{@"source_id":entry.sourceID,@"stored_at":@(entry.storedAt),@"operation":operation,@"result":persistentResult,@"cost":@(persistentData.length)};persistenceChanged=YES;NSArray *oldestFirst=[self.persistentRecords keysSortedByValueUsingComparator:^NSComparisonResult(NSDictionary *a,NSDictionary *b){return [a[@"stored_at"] compare:b[@"stored_at"]];}];NSUInteger total=0;NSUInteger retained=0;for(NSString *candidate in [oldestFirst reverseObjectEnumerator]){NSDictionary *record=self.persistentRecords[candidate];NSUInteger cost=[record[@"cost"] unsignedIntegerValue];if(!cost){NSData *encoded=[NSJSONSerialization dataWithJSONObject:record[@"result"] options:0 error:NULL];cost=encoded.length;}if(retained>=MediaMetadataPersistentEntryLimit||total+cost>MediaMetadataPersistentByteLimit){[self.persistentRecords removeObjectForKey:candidate];[self.entries removeObjectForKey:candidate];[self.order removeObjectForKey:candidate];persistenceChanged=YES;continue;}retained++;total+=cost;}}
+        if(persist){self.persistentRecords[key]=@{@"source_id":entry.sourceID,@"stored_at":@(entry.storedAt),@"operation":operation,@"result":persistentResult,@"cost":@(persistentData.length)};persistenceChanged=YES;NSArray *oldestFirst=[self.persistentRecords keysSortedByValueUsingComparator:^NSComparisonResult(NSDictionary *a,NSDictionary *b){return [(a[@"last_access"] ?: a[@"stored_at"]) compare:(b[@"last_access"] ?: b[@"stored_at"])];}];NSUInteger total=0;NSUInteger retained=0;for(NSString *candidate in [oldestFirst reverseObjectEnumerator]){NSDictionary *record=self.persistentRecords[candidate];NSUInteger cost=[record[@"cost"] unsignedIntegerValue];if(!cost){NSData *encoded=[NSJSONSerialization dataWithJSONObject:record[@"result"] options:0 error:NULL];cost=encoded.length;}if(retained>=MediaMetadataPersistentEntryLimit||total+cost>MediaMetadataPersistentByteLimit){[self.persistentRecords removeObjectForKey:candidate];[self.entries removeObjectForKey:candidate];[self.order removeObjectForKey:candidate];persistenceChanged=YES;continue;}retained++;total+=cost;}}
         else if(self.persistentRecords[key]){[self.persistentRecords removeObjectForKey:key];persistenceChanged=YES;}
     });
     if(persistenceChanged)[self schedulePersistentWrite];

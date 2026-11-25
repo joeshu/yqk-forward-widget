@@ -181,7 +181,7 @@ static NSString *SettingsWatchHistorySummaryText(void) {
 
 static NSString *SettingsFavoritesSummaryText(void) {
     NSUInteger liveCount=[[HostLibraryStore.shared allFavorites] count];
-    NSDictionary *vodFavs=[[NSUserDefaults standardUserDefaults] dictionaryForKey:@"cctv.mediaFavorites.v1"];
+    NSDictionary *vodFavs=HostLibraryStore.shared.mediaFavorites;
     NSUInteger vodCount=[vodFavs isKindOfClass:NSDictionary.class]?vodFavs.count:0;
     return [NSString stringWithFormat:@"全部频道收藏与影视收藏（频道 %lu · 影视 %lu）",(unsigned long)liveCount,(unsigned long)vodCount];
 }
@@ -2264,7 +2264,7 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     [alert addAction:[UIAlertAction actionWithTitle:@"清除收藏" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action){
         if(self.onClearFavorites)self.onClearFavorites();
-        [NSUserDefaults.standardUserDefaults removeObjectForKey:@"cctv.mediaFavorites.v1"];
+        [HostLibraryStore.shared replaceMediaFavorites:@{}];
         [self.table reloadData];
         UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,@"收藏已清除");
     }]];

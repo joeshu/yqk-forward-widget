@@ -35,6 +35,10 @@
     self.text=[NSMutableString string];
 }
 @end
+static const NSUInteger XMLTVDiskEntryLimit = 16 * 1024 * 1024;
+static const NSUInteger XMLTVDiskTotalLimit = 64 * 1024 * 1024;
+static const NSUInteger XMLTVDiskFileCountLimit = 32;
+
 @interface XMLTVStore ()
 @property(nonatomic,strong) NSMutableDictionary *cache;
 @property(nonatomic,strong) NSMutableDictionary *tasks;
@@ -43,6 +47,7 @@
 @property(nonatomic,assign) NSUInteger generation;
 @property(nonatomic,strong) dispatch_queue_t diskQueue;
 - (void)complete:(NSString *)source cache:(NSDictionary *)cache error:(NSError *)error;
+- (void)evictDiskCacheLocked;
 @end
 @implementation XMLTVStore
 + (instancetype)shared {static XMLTVStore *s;static dispatch_once_t once;dispatch_once(&once,^{s=[self new];s.cache=[NSMutableDictionary dictionary];s.tasks=[NSMutableDictionary dictionary];s.callbacks=[NSMutableDictionary dictionary];s.diskQueue=dispatch_queue_create("com.cctvhost.xmltv",DISPATCH_QUEUE_SERIAL);
@@ -106,7 +111,7 @@ invalid:
     }
     if(joinedExisting)return;
     NSString *path=[self pathForSource:source];
-    dispatch_async(self.diskQueue,^{NSDictionary *cached=memory?:[NSDictionary dictionaryWithContentsOfFile:path];dispatch_async(dispatch_get_main_queue(),^{
+    dispatch_async(self.diskQueue,^{[self evictDiskCacheLocked];NSDictionary *cached=memory?:[NSDictionary dictionaryWithContentsOfFile:path]; if(cached){ [[NSFileManager defaultManager] setAttributes:@{NSFileModificationDate:NSDate.date} ofItemAtPath:path error:NULL]; } dispatch_async(dispatch_get_main_queue(),^{
         if(generation!=self.generation)return;
         if(cached){@synchronized(self){self.cache[source]=cached;}}
         NSTimeInterval age=NSDate.date.timeIntervalSince1970-[cached[@"ts"] doubleValue];
@@ -120,10 +125,16 @@ invalid:
                 if(!error&&status>=200&&status<300)rows=[XMLTVStore parseData:data error:&parseError];
                 else if(!parseError)parseError=[NSError errorWithDomain:@"XMLTV" code:status userInfo:@{NSLocalizedDescriptionKey:@"节目单下载失败，保留上次缓存。"}];
                 NSDictionary *entry=rows?@{@"rows":rows,@"ts":@(NSDate.date.timeIntervalSince1970)}:cached;
-                dispatch_async(dispatch_get_main_queue(),^{if(generation!=self.generation)return;if(entry){@synchronized(self){self.cache[source]=entry;}}[self complete:source cache:entry error:parseError];if(rows)dispatch_async(self.diskQueue,^{[entry writeToFile:path atomically:YES];});});
+                dispatch_async(dispatch_get_main_queue(),^{if(generation!=self.generation)return;if(entry){@synchronized(self){self.cache[source]=entry;}}[self complete:source cache:entry error:parseError];if(rows)dispatch_async(self.diskQueue,^{NSData *encoded=[NSPropertyListSerialization dataWithPropertyList:entry format:NSPropertyListBinaryFormat_v1_0 options:0 error:NULL];if(encoded.length&&encoded.length<=XMLTVDiskEntryLimit){[encoded writeToFile:path options:NSDataWritingAtomic error:NULL];[self evictDiskCacheLocked];}});});
             });
         });@synchronized(self){self.tasks[source]=task;}[task resume];
     });});
+}
+- (void)evictDiskCacheLocked {
+    NSString *dir=[[self pathForSource:@"lru"] stringByDeletingLastPathComponent]; NSArray<NSString *> *files=[NSFileManager.defaultManager contentsOfDirectoryAtPath:dir error:NULL]; NSMutableArray *items=[NSMutableArray array]; unsigned long long total=0;
+    for(NSString *name in files){if(![name.pathExtension isEqualToString:@"plist"])continue;NSString *path=[dir stringByAppendingPathComponent:name];NSDictionary *attrs=[NSFileManager.defaultManager attributesOfItemAtPath:path error:NULL];unsigned long long size=[attrs[NSFileSize] unsignedLongLongValue];if(!size)continue;if(size>XMLTVDiskEntryLimit){[NSFileManager.defaultManager removeItemAtPath:path error:NULL];continue;}[items addObject:@{ @"path":path, @"date":attrs[NSFileModificationDate]?:NSDate.distantPast, @"size":@(size)}];total+=size;}
+    [items sortUsingComparator:^NSComparisonResult(NSDictionary *a,NSDictionary *b){return [a[@"date"] compare:b[@"date"]];}];
+    while(items.count>XMLTVDiskFileCountLimit||total>XMLTVDiskTotalLimit){NSDictionary *oldest=items.firstObject;if(!oldest)break;total-=[oldest[@"size"] unsignedLongLongValue];[NSFileManager.defaultManager removeItemAtPath:oldest[@"path"] error:NULL];[items removeObjectAtIndex:0];}
 }
 - (void)complete:(NSString *)source cache:(NSDictionary *)cache error:(NSError *)error {NSArray *blocks=nil;@synchronized(self){blocks=[self.callbacks[source] copy];[self.callbacks removeObjectForKey:source];[self.tasks removeObjectForKey:source];}for(void (^block)(NSDictionary *,NSError *) in blocks)block(cache,error);}
 - (void)evictMemoryCache {if(NSThread.isMainThread){@synchronized(self){[self.cache removeAllObjects];}}else dispatch_async(dispatch_get_main_queue(),^{@synchronized(self){[self.cache removeAllObjects];}});}
