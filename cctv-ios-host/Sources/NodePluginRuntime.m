@@ -1,4 +1,5 @@
 #import "NodePluginRuntime.h"
+#import "HostRuntimeLifecycleCoordinator.h"
 #include <dlfcn.h>
 #include <stdlib.h>
 
@@ -33,6 +34,8 @@
 - (void)removeManagedSession:(NSString *)session {@synchronized(self){[self.activeSessions removeObjectForKey:session];[self.startingSessions removeObject:session];[self.confirmedSessions removeObject:session];[self.uncertainSessions removeObject:session];}}
 - (BOOL)boot:(NSError **)error {
     NSAssert(!NSThread.isMainThread,@"Node boots on a background worker");
+    // JVM ↔ Node 互斥：拉起 Node 前，若 JVM 无活跃会话则先回收对方空闲会话（非阻塞）。
+    [HostRuntimeLifecycleCoordinator.shared prepareForMutualExclusionBeforeActivating:HostRuntimeKindNode];
     @synchronized(self){
         if(!self.launched){
             NSString *framework=[NSBundle.mainBundle.privateFrameworksPath stringByAppendingPathComponent:@"NodeMobile.framework/NodeMobile"];
@@ -67,6 +70,7 @@
 }
 - (NSString *)callOperation:(NSString *)operation json:(NSString *)json error:(NSError **)error {
     if(NSThread.isMainThread){if(error)*error=[self error:@"Node 服务须从后台调用"];return nil;}
+    [HostRuntimeLifecycleCoordinator.shared noteRuntimeActivity:HostRuntimeKindNode];
     if(![self boot:error])return nil;
     NSData *input=[json dataUsingEncoding:NSUTF8StringEncoding];id payload=input?[NSJSONSerialization JSONObjectWithData:input options:0 error:NULL]:nil;if(![payload isKindOfClass:NSDictionary.class]){if(error)*error=[self error:@"Node 请求参数无效"];return nil;}
     NSString *session=payload[@"session"];
