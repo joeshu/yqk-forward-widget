@@ -180,7 +180,7 @@ class PlaybackOwnershipAndMediaUIContracts(unittest.TestCase):
         self.assertIn("self.playbackWantsPlayback=YES", session_play)
         self.assertIn("self.playbackWantsPlayback=NO", session_pause)
         self.assertLess(play_result.index("NSString *previousURL="), play_result.index("self.result=[result copy]"))
-        reset_routes = play_result.index("if(![incomingURL isEqualToString:previousURL])self.attemptedRoutes=0")
+        reset_routes = play_result.index("if(![incomingURL isEqualToString:previousURL]){self.attemptedRoutes=0;[self.hedgedClient cancel]")
         paused_result = play_result.index("if(!self.playbackWantsPlayback||self.playbackSuspendedForVisibility)")
         self.assertLess(reset_routes, paused_result)
         self.assertIn("[self clearCurrentPlayerItem]", play_result[paused_result:])

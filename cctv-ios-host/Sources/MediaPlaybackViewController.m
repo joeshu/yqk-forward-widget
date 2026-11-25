@@ -620,7 +620,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     if(value)self.ignorePausedTimeControlUntilPlaying=YES;
 }
 - (BOOL)sessionHasContent {return self.resolving||([self.result[@"url"] isKindOfClass:NSString.class]&&[self.result[@"url"] length]>0)||self.player.currentItem!=nil||self.cicadaAdapter!=nil;}
-- (BOOL)sessionWantsPlayback {return self.playbackWantsPlayback&&!self.playbackSuspendedForVisibility;}
+- (BOOL)sessionWantsPlayback {return self.playbackWantsPlayback&&!self.playbackSuspendedForVisibility&&!self.resumePromptPending;}
 - (BOOL)sessionIsPlaying {return self.cicadaAdapter?self.cicadaAdapter.state==MediaPlaybackCicadaAdapterStatePlaying:self.player.timeControlStatus!=AVPlayerTimeControlStatusPaused;}
 - (void)sessionPlay {self.playbackWantsPlayback=YES;self.playbackSuspendedForVisibility=NO;if(!self.resolving&&!self.player.currentItem&&!self.cicadaAdapter&&[self.result[@"url"] length])[self playResult:self.result];else [self playActiveEngine];[self updateNowPlayingInfoCenter];}
 - (void)sessionPause {self.playbackWantsPlayback=NO;[self pauseActiveEngine];[self updateNowPlayingInfoCenter];}
@@ -2098,7 +2098,7 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
     if(![result isKindOfClass:NSDictionary.class])return;
     NSString *previousURL=[self.result[@"url"] isKindOfClass:NSString.class]?self.result[@"url"]:@"";
     NSString *incomingURL=[result[@"url"] isKindOfClass:NSString.class]?result[@"url"]:@"";
-    if(![incomingURL isEqualToString:previousURL])self.attemptedRoutes=0;
+    if(![incomingURL isEqualToString:previousURL]){self.attemptedRoutes=0;[self.hedgedClient cancel];self.hedgedClient=nil;self.hedgedEpisodeResult=nil;self.hedgedLineIndex=-1;self.hedgedEpisodeIndex=-1;self.hedgedAt=0;}
     self.result=[result copy];
     if(!self.playbackWantsPlayback||self.playbackSuspendedForVisibility){self.resolving=NO;[self clearCurrentPlayerItem];[self.spinner stopAnimating];self.status.text=self.playbackSuspendedForVisibility?@"媒体已准备 · 页面暂不可见，等待播放命令":@"媒体已准备 · 当前暂停";self.status.accessibilityLabel=self.status.text;[self updateNowPlayingInfoCenter];return;}
     // 新解析结果（URL 变化）开始时清零回退链状态；同 URL 重放不复位，
