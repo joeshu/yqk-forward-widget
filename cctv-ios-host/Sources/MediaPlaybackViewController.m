@@ -13,6 +13,7 @@
 #import "MediaPlaybackHeaders.h"
 #import "MediaPlaybackEpisodeFormatter.h"
 #import "MediaPlaybackRoutePanelView.h"
+#import "MediaPlaybackQualityPanelView.h"
 #import "MediaPlaybackSniffFetch.h"
 #import "MediaPlaybackDecodeRouter.h"
 #import "HostPlaybackSession.h"
@@ -354,6 +355,10 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 @property(nonatomic,strong) MediaPlaybackRoutePanelView *routePanel;
 // 仅作 UISmoke KVC `valueForKey:@"lineButtons"` 兼容别名：指向 routePanel.lineButtons。
 @property(nonatomic,strong) UIStackView *lineButtons;
+@property(nonatomic,strong) MediaPlaybackQualityPanelView *qualityPanel;
+// qualityGroup/qualityLabel/qualityScroll/qualityButtons 仅为 UISmoke KVC
+// （`valueForKey:@"qualityButtons"` 触发 selectAlternate:）与既有外部约束别名
+// 兼容：均指向 qualityPanel 的同名 readonly 子视图。
 @property(nonatomic,strong) UIStackView *qualityGroup;
 @property(nonatomic,strong) UILabel *qualityLabel;
 @property(nonatomic,strong) UIScrollView *qualityScroll;
@@ -676,12 +681,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     }
 
     self.routePanel=[MediaPlaybackRoutePanelView new];self.routePanel.translatesAutoresizingMaskIntoConstraints=NO;[self.controlPanel addSubview:self.routePanel];self.lineButtons=self.routePanel.lineButtons;
-    self.qualityGroup=[UIStackView new];self.qualityGroup.translatesAutoresizingMaskIntoConstraints=NO;self.qualityGroup.axis=UILayoutConstraintAxisVertical;self.qualityGroup.spacing=3;[self.controlPanel addSubview:self.qualityGroup];
-    self.qualityLabel=[UILabel new];self.qualityLabel.text=@"清晰度";self.qualityLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];self.qualityLabel.adjustsFontForContentSizeCategory=YES;self.qualityLabel.textColor=HostSecondaryText();[self.qualityGroup addArrangedSubview:self.qualityLabel];
-    self.qualityScroll=[UIScrollView new];self.qualityScroll.translatesAutoresizingMaskIntoConstraints=NO;self.qualityScroll.showsHorizontalScrollIndicator=NO;[self.qualityGroup addArrangedSubview:self.qualityScroll];
-    self.qualityButtons=[UIStackView new];self.qualityButtons.translatesAutoresizingMaskIntoConstraints=NO;self.qualityButtons.axis=UILayoutConstraintAxisHorizontal;self.qualityButtons.spacing=8;[self.qualityScroll addSubview:self.qualityButtons];
-    NSLayoutConstraint *qualityScrollHeight=[self.qualityScroll.heightAnchor constraintEqualToConstant:44];qualityScrollHeight.priority=UILayoutPriorityDefaultHigh;
-    [NSLayoutConstraint activateConstraints:@[qualityScrollHeight,[self.qualityButtons.leadingAnchor constraintEqualToAnchor:self.qualityScroll.contentLayoutGuide.leadingAnchor],[self.qualityButtons.trailingAnchor constraintEqualToAnchor:self.qualityScroll.contentLayoutGuide.trailingAnchor],[self.qualityButtons.topAnchor constraintEqualToAnchor:self.qualityScroll.contentLayoutGuide.topAnchor],[self.qualityButtons.bottomAnchor constraintEqualToAnchor:self.qualityScroll.contentLayoutGuide.bottomAnchor],[self.qualityButtons.heightAnchor constraintEqualToAnchor:self.qualityScroll.frameLayoutGuide.heightAnchor]]];
+    self.qualityPanel=[MediaPlaybackQualityPanelView new];self.qualityPanel.translatesAutoresizingMaskIntoConstraints=NO;[self.controlPanel addSubview:self.qualityPanel];self.qualityGroup=self.qualityPanel.qualityGroup;self.qualityLabel=self.qualityPanel.qualityLabel;self.qualityScroll=self.qualityPanel.qualityScroll;self.qualityButtons=self.qualityPanel.qualityButtons;
     self.episodeTitle=[UILabel new];self.episodeTitle.translatesAutoresizingMaskIntoConstraints=NO;self.episodeTitle.font=[UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];self.episodeTitle.adjustsFontForContentSizeCategory=YES;self.episodeTitle.textColor=HostText();self.episodeTitle.numberOfLines=2;self.episodeTitle.accessibilityHint=@"双击画面左侧或右侧可前后跳转 10 秒；按住画面可临时使用 3 倍速";[self.controlPanel addSubview:self.episodeTitle];
     self.status=[UILabel new];self.status.translatesAutoresizingMaskIntoConstraints=NO;self.status.textColor=HostSecondaryText();self.status.font=[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];self.status.numberOfLines=3;self.status.adjustsFontForContentSizeCategory=YES;[self.controlPanel addSubview:self.status];
     self.spinner=[[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];self.spinner.translatesAutoresizingMaskIntoConstraints=NO;[self.controlPanel addSubview:self.spinner];
@@ -1349,15 +1349,10 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 }
 - (void)buildQualityButtons {
     NSArray *alternates=[self.result[@"alternates"] isKindOfClass:NSArray.class]?self.result[@"alternates"]:@[];
-    for(UIView *view in self.qualityButtons.arrangedSubviews.copy){[self.qualityButtons removeArrangedSubview:view];[view removeFromSuperview];}
-    BOOL available=alternates.count>0;self.qualityGroup.spacing=available?3:0;self.qualityLabel.hidden=!available;self.qualityScroll.hidden=!available;self.qualityLabel.text=alternates.count==1?@"清晰度（仅此档可用）":@"清晰度";
-    if(!available){self.selectedAlternateIndex=-1;return;}
+    if(!alternates.count){self.selectedAlternateIndex=-1;[self.qualityPanel rebuildWithAlternates:alternates selectedIndex:self.selectedAlternateIndex target:self action:@selector(selectAlternate:)];return;}
     NSString *currentURL=[self.result[@"originalURL"] isKindOfClass:NSString.class]?self.result[@"originalURL"]:([self.result[@"url"] isKindOfClass:NSString.class]?self.result[@"url"]:@"");
     if(self.selectedAlternateIndex<0||self.selectedAlternateIndex>=alternates.count){self.selectedAlternateIndex=-1;for(NSUInteger index=0;index<alternates.count;index++){NSDictionary *alternate=alternates[index];NSString *original=[alternate[@"originalURL"] isKindOfClass:NSString.class]?alternate[@"originalURL"]:alternate[@"url"];if([original isEqual:currentURL]){self.selectedAlternateIndex=index;break;}}if(self.selectedAlternateIndex<0&&alternates.count==1)self.selectedAlternateIndex=0;}
-    for(NSUInteger index=0;index<alternates.count;index++){
-        NSDictionary *alternate=[alternates[index] isKindOfClass:NSDictionary.class]?alternates[index]:nil;if(!alternate)continue;NSString *name=[alternate[@"name"] isKindOfClass:NSString.class]?alternate[@"name"]:[NSString stringWithFormat:@"清晰度 %lu",(unsigned long)index+1];
-        UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];button.tag=index;button.accessibilityIdentifier=[NSString stringWithFormat:@"media-quality-%lu",(unsigned long)index];[button setTitle:name forState:UIControlStateNormal];button.titleLabel.font=[UIFont systemFontOfSize:13 weight:UIFontWeightMedium];button.enabled=alternates.count>1;if(!button.enabled)[button setTitleColor:HostText() forState:UIControlStateDisabled];button.accessibilityLabel=name;button.accessibilityHint=alternates.count==1?@"当前资源仅提供这一档可播放清晰度":@"切换到此视频清晰度";HostStylePillButton(button,(NSInteger)index==self.selectedAlternateIndex);HostInstallPressFeedback(button);MediaPlaybackApplyScaledPillFont(button);[button addTarget:self action:@selector(selectAlternate:) forControlEvents:UIControlEventTouchUpInside];[self.qualityButtons addArrangedSubview:button];
-    }
+    [self.qualityPanel rebuildWithAlternates:alternates selectedIndex:self.selectedAlternateIndex target:self action:@selector(selectAlternate:)];
 }
 - (void)selectAlternate:(UIButton *)sender {
     NSArray *alternates=[self.result[@"alternates"] isKindOfClass:NSArray.class]?self.result[@"alternates"]:@[];if(alternates.count<2||sender.tag<0||sender.tag>=(NSInteger)alternates.count)return;

@@ -14,6 +14,8 @@ SOURCES = ROOT / "Sources"
 PLAYBACK_SOURCE = (SOURCES / "MediaPlaybackViewController.m").read_text(encoding="utf-8")
 # b-route-episode-panel：线路按钮纯呈现迁入面板视图，a11y/类型守护随之迁移。
 ROUTE_PANEL_SOURCE = (SOURCES / "MediaPlaybackRoutePanelView.m").read_text(encoding="utf-8")
+# b-quality-panel：画质按钮纯呈现迁入面板视图，44pt 触控高度守护随之迁移。
+QUALITY_PANEL_SOURCE = (SOURCES / "MediaPlaybackQualityPanelView.m").read_text(encoding="utf-8")
 WEBVIEW_SOURCE = (SOURCES / "MediaWebViewController.m").read_text(encoding="utf-8")
 SEARCH_SOURCE = (SOURCES / "MediaGlobalSearchViewController.m").read_text(encoding="utf-8")
 EPISODE_SOURCE = (SOURCES / "MediaEpisodeSelectionViewController.m").read_text(encoding="utf-8")
@@ -36,13 +38,14 @@ def method_body(source, signature):
 
 class PlaybackSearchRound2Contracts(unittest.TestCase):
     def test_quality_buttons_meet_44pt_touch_target(self):
+        # b-quality-panel：高度约束随画质面板纯呈现迁入 QualityPanelView。
         self.assertIn(
             "[self.qualityScroll.heightAnchor constraintEqualToConstant:44]",
-            PLAYBACK_SOURCE,
+            QUALITY_PANEL_SOURCE,
         )
         self.assertNotIn(
             "[self.qualityScroll.heightAnchor constraintEqualToConstant:36]",
-            PLAYBACK_SOURCE,
+            QUALITY_PANEL_SOURCE,
         )
 
     def test_embedded_playback_buttons_meet_44pt_touch_target(self):
@@ -109,7 +112,8 @@ class PlaybackSearchRound2Contracts(unittest.TestCase):
         self.assertIn("if(!alternate)return;", body)
 
     def test_quality_buttons_skip_non_dictionary_alternates(self):
-        body = method_body(PLAYBACK_SOURCE, "- (void)buildQualityButtons {")
+        # b-quality-panel：逐档字典清洗迁入面板 rebuildWithAlternates:。
+        body = method_body(QUALITY_PANEL_SOURCE, "- (void)rebuildWithAlternates:")
         self.assertIn(
             "isKindOfClass:NSDictionary.class]?alternates[index]:nil", body
         )
