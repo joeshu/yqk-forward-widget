@@ -16,6 +16,7 @@
 #import "HostPlaybackSession.h"
 #import "MediaPlaybackCicadaAdapter.h"
 #import "MediaPlaybackMPVAdapter.h"
+#import "MediaProtocolCapabilities.h"
 #import "HostSubtitleOverlayView.h"
 #import "MediaPlaybackBufferPolicy.h"
 #import "HostTheme.h"
@@ -451,6 +452,8 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 @property(nonatomic) NSUInteger diagnosticStallCount;
 @property(nonatomic) BOOL progressSummaryRecorded;
 @property(nonatomic,copy) NSString *playbackAttemptID;
+@property(nonatomic,copy) NSString *playbackProtocolCapability;
+@property(nonatomic) BOOL experimentalProtocolNoticeShown;
 @property(nonatomic) BOOL playbackFailureRecorded;
 @property(nonatomic) NSInteger lastDiagnosticTimeControlStatus;
 @property(nonatomic) BOOL hasDiagnosticTimeControlStatus;
@@ -464,7 +467,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 @property(nonatomic,strong) UIBarButtonItem *playbackOptionsItem;
 @property(nonatomic,strong) UIBarButtonItem *retryItem;
 @property(nonatomic,strong) UIBarButtonItem *webFallbackItem;
-@property(nonatomic,copy) NSDictionary<NSString *,NSString *> *basePlaybackHeaders;
+@property(nonatomic,copy) NSDictionary<NSString *,NSString *> *basePlaybackHeaders; // 经自定义存取器转发至 playbackSession。
 @property(nonatomic,strong) id progressTimeObserver;
 @property(nonatomic,copy) NSDictionary *resumeEntry;
 @property(nonatomic,copy) NSDictionary *pendingPlaybackResumeEntry;
@@ -472,8 +475,8 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 @property(nonatomic,strong) NSNumber *pendingQualitySeekTime;
 @property(nonatomic) BOOL pendingQualityRestorePlaybackState;
 @property(nonatomic) BOOL pendingQualityWasPlaying;
-@property(nonatomic) NSUInteger stallRecoveryAttempts;
-@property(nonatomic) NSTimeInterval lastPersistedPosition;
+@property(nonatomic) NSUInteger stallRecoveryAttempts; // KVC 兼容的 playbackSession.retryCount 转发
+@property(nonatomic) NSTimeInterval lastPersistedPosition; // KVC 兼容的 playbackSession.resumePosition 转发
 @property(nonatomic) BOOL resumePromptPending;
 @property(nonatomic) BOOL resumePromptShown;
 @property(nonatomic,copy) NSString *skipButtonAction;
@@ -606,6 +609,12 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 - (HostPlaybackSession *)playbackSession {if(!_playbackSession)_playbackSession=[[HostPlaybackSession alloc] init];return _playbackSession;}
 - (NSUInteger)attemptedRoutes {return self.playbackSession.attemptedRoutes;}
 - (void)setAttemptedRoutes:(NSUInteger)attemptedRoutes {self.playbackSession.attemptedRoutes=attemptedRoutes;}
+- (NSDictionary<NSString *,NSString *> *)basePlaybackHeaders {return self.playbackSession.requestHeaders;}
+- (void)setBasePlaybackHeaders:(NSDictionary<NSString *,NSString *> *)headers {self.playbackSession.requestHeaders=headers;}
+- (NSUInteger)stallRecoveryAttempts {return self.playbackSession.retryCount;}
+- (void)setStallRecoveryAttempts:(NSUInteger)attempts {self.playbackSession.retryCount=attempts;}
+- (NSTimeInterval)lastPersistedPosition {return self.playbackSession.resumePosition;}
+- (void)setLastPersistedPosition:(NSTimeInterval)position {self.playbackSession.resumePosition=position;}
 @synthesize playbackWantsPlayback = _playbackWantsPlayback;
 @synthesize playbackSuspendedForVisibility = _playbackSuspendedForVisibility;
 - (void)setPlaybackWantsPlayback:(BOOL)value {
@@ -1384,7 +1393,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     if(self.terminalPlaybackOutcomeRecorded)return;
     if(terminal)self.terminalPlaybackOutcomeRecorded=YES;
     NSURL *sourceURL=MediaPlaybackOriginalSourceURL(self.result);NSString *serviceID=[self.context[@"source"][@"id"] isKindOfClass:NSString.class]?self.context[@"source"][@"id"]:@"";
-    NSMutableDictionary *fields=[@{@"active_playback_attempt_id":terminal?@"":self.playbackAttemptID, @"active_playback_service_id":terminal?@"":serviceID, @"active_playback_source_host":terminal?@"":(sourceURL.host.lowercaseString?:@""), @"active_playback_outcome":terminal?@"":outcome, @"last_playback_attempt_id":self.playbackAttemptID, @"last_playback_outcome":outcome, @"last_playback_source_host":sourceURL.host.lowercaseString?:@"", @"last_playback_failure_kind":failureKind?:@"", @"last_playback_line_index":@(self.lineIndex), @"last_playback_episode_index":@(self.episodeIndex), @"last_playback_http_status":@(MAX(0,httpStatus))} mutableCopy];
+    NSMutableDictionary *fields=[@{@"protocol_capability":self.playbackProtocolCapability?:@"unknown", @"active_playback_attempt_id":terminal?@"":self.playbackAttemptID, @"active_playback_service_id":terminal?@"":serviceID, @"active_playback_source_host":terminal?@"":(sourceURL.host.lowercaseString?:@""), @"active_playback_outcome":terminal?@"":outcome, @"last_playback_attempt_id":self.playbackAttemptID, @"last_playback_outcome":outcome, @"last_playback_source_host":sourceURL.host.lowercaseString?:@"", @"last_playback_failure_kind":failureKind?:@"", @"last_playback_line_index":@(self.lineIndex), @"last_playback_episode_index":@(self.episodeIndex), @"last_playback_http_status":@(MAX(0,httpStatus))} mutableCopy];
     [RuntimeDiagnostics.shared recordLifecycleCheckpoint:(terminal?@"playback_attempt_finished":@"playback_attempt_progressed") fields:fields];
     if(terminal&&failureKind.length){
         BOOL isMPV=[self.cicadaAdapter isKindOfClass:MediaPlaybackMPVAdapter.class];
@@ -2022,7 +2031,7 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
     if(playerGeneration!=self.playerGeneration)return;
     if([self tryNextLineForAutomaticFallback:@"web_stream_sniff_failed"])return;
     [self.spinner stopAnimating];
-    self.status.text=@"该线路未解析出可播放媒体 · 请重试或切换线路";self.status.accessibilityLabel=self.status.text;
+    self.status.text=[self.playbackProtocolCapability isEqualToString:@"experimental"]?@"该线路未解析出可播放媒体 · 协议为实验支持，可能无法播放 · 请重试或切换线路":@"该线路未解析出可播放媒体 · 请重试或切换线路";self.status.accessibilityLabel=self.status.text;
     [self setRetryAvailable:YES];
     [self recordPlaybackAttemptOutcome:@"failed" failureKind:@"web_stream_sniff_failed" httpStatus:0 terminal:YES];
 }
@@ -2081,7 +2090,13 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
     self.cicadaAdapterSoftwareDecodeFallbackAttempted=forceSoftDecode;self.resolving=NO;self.awaitingWebPlaybackReturn=NO;[self clearCurrentPlayerItem];NSUInteger playerGeneration=self.playerGeneration;self.videoTrackInspectionStarted=NO;self.lastPersistedPosition=0;if(!self.embeddedMode)self.throughputLabel.text=@"  测速中  ";
     self.progressEvidence=(HostPlaybackProgress){0};self.progressMilestone=0;self.progressSummaryRecorded=NO;self.diagnosticStallCount=0;self.cicadaWasLoading=NO;self.hasReportedPlaying=NO;self.playbackAttemptID=NSUUID.UUID.UUIDString.lowercaseString;self.terminalPlaybackOutcomeRecorded=NO;self.playbackFailureRecorded=NO;self.result=result;
     NSString *raw=[result[@"url"] isKindOfClass:NSString.class]?result[@"url"]:@"";NSURL *url=[NSURL URLWithString:raw];NSURL *sourceURL=MediaPlaybackOriginalSourceURL(result);NSString *serviceID=[self.context[@"source"][@"id"] isKindOfClass:NSString.class]?self.context[@"source"][@"id"]:@"";
-    NSMutableDictionary *attemptFields=[@{@"playback_attempt_id":self.playbackAttemptID, @"active_playback_attempt_id":self.playbackAttemptID, @"active_playback_service_id":serviceID, @"active_playback_source_host":sourceURL.host.lowercaseString?:@"", @"active_playback_outcome":@"in_progress", @"last_playback_attempt_id":self.playbackAttemptID, @"last_playback_outcome":@"in_progress", @"last_playback_source_host":sourceURL.host.lowercaseString?:@"", @"last_playback_failure_kind":@"", @"last_playback_http_status":@0, @"last_playback_line_index":@(self.lineIndex), @"last_playback_episode_index":@(self.episodeIndex)} mutableCopy];
+    MediaProtocolCapabilityStatus protocolStatus=MediaProtocolCapabilityStatusForURL(sourceURL?:url);
+    self.playbackProtocolCapability=MediaProtocolCapabilityStatusName(protocolStatus);
+    NSMutableDictionary *protocolFields=[@{@"protocol_capability":self.playbackProtocolCapability, @"playback_attempt_id":self.playbackAttemptID?:@"", @"line_index":@(self.lineIndex), @"episode_index":@(self.episodeIndex), @"correlation_id":self.diagnosticTraceID?:@""} mutableCopy];
+    NSString *protocolName=MediaProtocolIdentifierForURL(sourceURL?:url);if(protocolName.length)protocolFields[@"protocol"]=protocolName;
+    [RuntimeDiagnostics.shared recordEvent:@"protocol_capability" category:@"playback" fields:protocolFields];
+    if(protocolStatus==MediaProtocolCapabilityStatusExperimental&&!self.experimentalProtocolNoticeShown){self.experimentalProtocolNoticeShown=YES;NSUInteger noticeGeneration=self.playerGeneration;dispatch_async(dispatch_get_main_queue(),^{if(!self.view.window||self.isBeingDismissed||noticeGeneration!=self.playerGeneration)return;NSString *statusBeforeNotice=self.status.text?:@"";self.status.text=@"该协议为实验支持，可能无法播放";self.status.accessibilityLabel=self.status.text;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(3*NSEC_PER_SEC)),dispatch_get_main_queue(),^{if(noticeGeneration==self.playerGeneration&&[self.status.text isEqualToString:@"该协议为实验支持，可能无法播放"]){self.status.text=statusBeforeNotice;self.status.accessibilityLabel=statusBeforeNotice;}});});}
+    NSMutableDictionary *attemptFields=[@{@"playback_attempt_id":self.playbackAttemptID, @"protocol_capability":self.playbackProtocolCapability?:@"unknown", @"active_playback_attempt_id":self.playbackAttemptID, @"active_playback_service_id":serviceID, @"active_playback_source_host":sourceURL.host.lowercaseString?:@"", @"active_playback_outcome":@"in_progress", @"last_playback_attempt_id":self.playbackAttemptID, @"last_playback_outcome":@"in_progress", @"last_playback_source_host":sourceURL.host.lowercaseString?:@"", @"last_playback_failure_kind":@"", @"last_playback_http_status":@0, @"last_playback_line_index":@(self.lineIndex), @"last_playback_episode_index":@(self.episodeIndex)} mutableCopy];
     [RuntimeDiagnostics.shared recordLifecycleCheckpoint:@"playback_attempt_started" fields:attemptFields];
     NSString *localRoot=[[NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory,NSUserDomainMask,YES).firstObject stringByAppendingPathComponent:@"CCTVHost/LocalMedia"] stringByAppendingString:@"/"];
     BOOL trustedLocal=[self.context[@"localMedia"] boolValue]&&url.isFileURL&&[url.URLByResolvingSymlinksInPath.path hasPrefix:localRoot];
@@ -2162,7 +2177,7 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
         BOOL tier2AudioOnlyVideoStuck=!isCENCStream&&owner.avFirstFrameActiveWait>=7.5&&item.status==AVPlayerItemStatusReadyToPlay&&isfinite(curPos)&&curPos>=0.8&&!owner.videoFrameReady&&!owner.confirmedAudioOnly;
         if(!tier1DeadLink&&!tier2AudioOnlyVideoStuck&&owner.avFirstFrameActiveWait<timeout)return;
         [timer invalidate];owner.avFirstFrameTimer=nil;
-        NSTimeInterval position=CMTimeGetSeconds(owner.player.currentTime);NSMutableDictionary *fields=[@{@"player":@"AVPlayer", @"playback_attempt_id":owner.playbackAttemptID?:@"", @"elapsed_ms":@(MAX(0,(NSInteger)((CACurrentMediaTime()-owner.playbackStartedAt)*1000))), @"line_index":@(owner.lineIndex), @"episode_index":@(owner.episodeIndex), @"correlation_id":owner.diagnosticTraceID?:@"", @"time_control_status":@(owner.player.timeControlStatus), @"playback_position_seconds":@(isfinite(position)&&position>0?position:0), @"video_track_state":owner.hasVideoTrack?@"confirmed_video":@"unknown", @"video_layer_ready_for_display":@(owner.videoLayer.readyForDisplay), @"video_layer_width":@(MAX(0,(NSInteger)llround(owner.videoLayer.bounds.size.width))), @"video_layer_height":@(MAX(0,(NSInteger)llround(owner.videoLayer.bounds.size.height)))} mutableCopy];fields[@"controller_ready_for_display"]=@(owner.playerController.readyForDisplay);fields[@"controller_player_attached"]=@(owner.playerController.player==owner.player);fields[@"controller_view_in_window"]=@(owner.playerController.isViewLoaded&&owner.playerController.view.window!=nil);fields[@"controller_view_width"]=@(CGRectGetWidth(owner.playerController.view.bounds));fields[@"controller_view_height"]=@(CGRectGetHeight(owner.playerController.view.bounds));fields[@"controller_video_width"]=@(CGRectGetWidth(owner.playerController.videoBounds));fields[@"controller_video_height"]=@(CGRectGetHeight(owner.playerController.videoBounds));fields[@"embedded_mode"]=@(owner.embeddedMode);fields[@"wait_reason"]=owner.player.reasonForWaitingToPlay?:@"";[fields addEntriesFromDictionary:MediaPlaybackDiagnosticSourceFields(MediaPlaybackOriginalSourceURL(owner.result))];MediaPlaybackAddAccessLogFields(fields,item);[RuntimeDiagnostics.shared recordEvent:@"playback_video_frame_timeout" category:@"playback" fields:fields];[owner recordPlaybackAttemptOutcome:@"first_frame_timeout" failureKind:@"first_frame_timeout" httpStatus:0 terminal:NO];if([owner.playbackSession peekNextRouteForResult:owner.result]==MediaPlaybackDecodeRouteCicadaPlayer){if(tier2AudioOnlyVideoStuck&&isfinite(curPos)&&curPos>1.0&&!owner.pendingPlaybackSeekTime)owner.pendingPlaybackSeekTime=@(curPos);[owner clearCurrentPlayerItem];owner.playbackFailureRecorded=NO;owner.terminalPlaybackOutcomeRecorded=NO;[owner startCicadaPlaybackWithResult:owner.result url:url sourceURL:sourceURL playerGeneration:owner.playerGeneration];return;}if([owner tryNextLineForAutomaticFallback:@"first_frame_timeout"])return;[owner.spinner stopAnimating];owner.status.text=@"播放器尚未显示画面 · 可重试或手动切换线路";owner.status.accessibilityLabel=owner.status.text;[owner setRetryAvailable:YES];
+        NSTimeInterval position=CMTimeGetSeconds(owner.player.currentTime);NSMutableDictionary *fields=[@{@"player":@"AVPlayer", @"playback_attempt_id":owner.playbackAttemptID?:@"", @"elapsed_ms":@(MAX(0,(NSInteger)((CACurrentMediaTime()-owner.playbackStartedAt)*1000))), @"line_index":@(owner.lineIndex), @"episode_index":@(owner.episodeIndex), @"correlation_id":owner.diagnosticTraceID?:@"", @"time_control_status":@(owner.player.timeControlStatus), @"playback_position_seconds":@(isfinite(position)&&position>0?position:0), @"video_track_state":owner.hasVideoTrack?@"confirmed_video":@"unknown", @"video_layer_ready_for_display":@(owner.videoLayer.readyForDisplay), @"video_layer_width":@(MAX(0,(NSInteger)llround(owner.videoLayer.bounds.size.width))), @"video_layer_height":@(MAX(0,(NSInteger)llround(owner.videoLayer.bounds.size.height)))} mutableCopy];fields[@"controller_ready_for_display"]=@(owner.playerController.readyForDisplay);fields[@"controller_player_attached"]=@(owner.playerController.player==owner.player);fields[@"controller_view_in_window"]=@(owner.playerController.isViewLoaded&&owner.playerController.view.window!=nil);fields[@"controller_view_width"]=@(CGRectGetWidth(owner.playerController.view.bounds));fields[@"controller_view_height"]=@(CGRectGetHeight(owner.playerController.view.bounds));fields[@"controller_video_width"]=@(CGRectGetWidth(owner.playerController.videoBounds));fields[@"controller_video_height"]=@(CGRectGetHeight(owner.playerController.videoBounds));fields[@"embedded_mode"]=@(owner.embeddedMode);fields[@"wait_reason"]=owner.player.reasonForWaitingToPlay?:@"";[fields addEntriesFromDictionary:MediaPlaybackDiagnosticSourceFields(MediaPlaybackOriginalSourceURL(owner.result))];MediaPlaybackAddAccessLogFields(fields,item);[RuntimeDiagnostics.shared recordEvent:@"playback_video_frame_timeout" category:@"playback" fields:fields];[owner recordPlaybackAttemptOutcome:@"first_frame_timeout" failureKind:@"first_frame_timeout" httpStatus:0 terminal:NO];if([owner.playbackSession peekNextRouteForResult:owner.result]==MediaPlaybackDecodeRouteCicadaPlayer){if(tier2AudioOnlyVideoStuck&&isfinite(curPos)&&curPos>1.0&&!owner.pendingPlaybackSeekTime)owner.pendingPlaybackSeekTime=@(curPos);[owner clearCurrentPlayerItem];owner.playbackFailureRecorded=NO;owner.terminalPlaybackOutcomeRecorded=NO;[owner startCicadaPlaybackWithResult:owner.result url:url sourceURL:sourceURL playerGeneration:owner.playerGeneration];return;}if([owner tryNextLineForAutomaticFallback:@"first_frame_timeout"])return;[owner.spinner stopAnimating];owner.status.text=[owner.playbackProtocolCapability isEqualToString:@"experimental"]?@"播放器尚未显示画面 · 该协议为实验支持，可能无法播放 · 可重试或手动切换线路":@"播放器尚未显示画面 · 可重试或手动切换线路";owner.status.accessibilityLabel=owner.status.text;[owner setRetryAvailable:YES];
     }];
     self.avFirstFrameTimer.tolerance=0.2;
     [NSRunLoop.mainRunLoop addTimer:self.avFirstFrameTimer forMode:NSRunLoopCommonModes];
@@ -2396,7 +2411,7 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
     if([self tryNextLineForAutomaticFallback:@"cicada_playback_failed"])return;
     // 无下一路：显示失败（与 AVPlayer 最终失败同一文案风格）。
     [self.spinner stopAnimating];
-    self.status.text=@"ffmpeg 内核也无法播放此资源 · 可重试或切换线路";self.status.accessibilityLabel=self.status.text;
+    self.status.text=[self.playbackProtocolCapability isEqualToString:@"experimental"]?@"ffmpeg 内核也无法播放此资源 · 协议为实验支持，可能无法播放 · 可重试或切换线路":@"ffmpeg 内核也无法播放此资源 · 可重试或切换线路";self.status.accessibilityLabel=self.status.text;
     [self setRetryAvailable:YES];
     [self recordPlaybackAttemptOutcome:@"failed" failureKind:@"cicada_playback_failed" httpStatus:0 terminal:YES];
 }
@@ -2450,7 +2465,8 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
     [self recordPlaybackAttemptOutcome:@"failed" failureKind:kind httpStatus:networkError.errorStatusCode terminal:YES];
     BOOL offline=[failure.domain isEqualToString:NSURLErrorDomain]&&failure.code==NSURLErrorNotConnectedToInternet;
     if(!offline&&[self tryNextLineForAutomaticFallback:kind])return;
-    self.status.text=MediaPlaybackFailureMessage(failure,networkError);self.status.accessibilityLabel=self.status.text;[self setRetryAvailable:YES];
+    NSString *failureMessage=MediaPlaybackFailureMessage(failure,networkError);if([self.playbackProtocolCapability isEqualToString:@"experimental"])failureMessage=[failureMessage stringByAppendingString:@" · 该协议为实验支持，可能无法播放"];
+    self.status.text=failureMessage;self.status.accessibilityLabel=self.status.text;[self setRetryAvailable:YES];
 }
 - (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary<NSKeyValueChangeKey,id> *)change context:(void *)context {
     if(context==CCTVPlayerItemStatusContext){AVPlayerItem *item=(AVPlayerItem *)object;if(item.status==AVPlayerItemStatusFailed){dispatch_async(dispatch_get_main_queue(),^{if(item!=self.observedItem||item!=self.player.currentItem)return;self.resumePromptPending=NO;if(!self.pendingQualitySeekTime&&self.pendingPlaybackSeekTime)self.pendingQualitySeekTime=self.pendingPlaybackSeekTime;self.pendingPlaybackSeekTime=nil;[self recordPlaybackFailureForItem:item error:item.error stage:@"item_status_failed"];});}else if(item.status==AVPlayerItemStatusReadyToPlay){dispatch_async(dispatch_get_main_queue(),^{if(item!=self.observedItem||item!=self.player.currentItem)return;self.hasVideoTrack=self.videoFrameReady||(item.presentationSize.width>0&&item.presentationSize.height>0);if(!self.hasVideoTrack&&[item.asset statusOfValueForKey:@"tracks" error:NULL]==AVKeyValueStatusLoaded){for(AVPlayerItemTrack *track in item.tracks)if(track.assetTrack.mediaType==AVMediaTypeVideo){self.hasVideoTrack=YES;break;}}NSMutableDictionary *fields=[@{@"player":@"AVPlayer", @"playback_attempt_id":self.playbackAttemptID?:@"", @"video_track_state":self.hasVideoTrack?@"confirmed_video":@"unknown", @"line_index":@(self.lineIndex), @"episode_index":@(self.episodeIndex), @"correlation_id":self.diagnosticTraceID?:@""} mutableCopy];[fields addEntriesFromDictionary:MediaPlaybackDiagnosticSourceFields(MediaPlaybackOriginalSourceURL(self.result))];MediaPlaybackAddAccessLogFields(fields,item);[RuntimeDiagnostics.shared recordEvent:@"media_item_ready" category:@"playback" fields:fields];[self inspectVideoTracksForItem:item generation:self.playerGeneration];self.playbackOptionsItem.menu=[self playbackOptionsMenu];if(self.pendingPlaybackSeekTime)[self applyPendingPlaybackSeekForItem:item];else if(self.resumePromptPending)[self offerResumeForItem:item];else{[self activateBackgroundAudioSessionIfNeeded];{if(!self.playbackSuspendedForVisibility&&self.playbackWantsPlayback)[self.player play];}[self startAVPlayerFromReadyBufferIfNeeded:item];[self updateNowPlayingInfoCenter];}if((self.playerController.readyForDisplay||self.videoLayer.readyForDisplay)&&!self.videoFrameReady)[self markFirstVideoFrameReadyForItem:item];if(self.hasVideoTrack){if(!self.videoFrameReady){self.status.text=@"媒体已准备 · 等待视频首帧显示";self.status.accessibilityLabel=self.status.text;if(self.player.timeControlStatus==AVPlayerTimeControlStatusPaused)[self.spinner stopAnimating];else[self.spinner startAnimating];[self observePlayerLayerIfAvailable];}}else{[self.spinner stopAnimating];self.status.text=@"媒体已准备 · 视频轨道尚未确认";self.status.accessibilityLabel=self.status.text;}});}return;}

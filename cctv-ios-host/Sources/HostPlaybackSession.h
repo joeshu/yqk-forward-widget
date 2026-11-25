@@ -21,7 +21,7 @@ NS_ASSUME_NONNULL_BEGIN
 /// 已尝试路由位掩码（MediaPlaybackDecodeRouteAttempted* 的或）；0 表示从头开始。
 @property (nonatomic) NSUInteger attemptedRoutes;
 /// 本会话内的重试次数。
-@property (nonatomic) NSInteger retryCount;
+@property (nonatomic) NSUInteger retryCount;
 /// 续播进度（秒）；非有限值或负数在写入时归零。
 @property (nonatomic) NSTimeInterval resumePosition;
 
