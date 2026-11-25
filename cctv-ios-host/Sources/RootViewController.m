@@ -931,6 +931,8 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
     self.searchController.searchResultsUpdater = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
     self.searchController.searchBar.placeholder = @"搜索频道";
+    self.searchController.searchBar.accessibilityLabel = @"搜索频道";
+    self.searchController.searchBar.accessibilityHint = @"输入频道名称或编号以筛选列表";
     self.navigationItem.searchController = self.searchController;
     self.definesPresentationContext = YES;
 
