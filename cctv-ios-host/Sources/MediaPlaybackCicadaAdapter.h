@@ -19,7 +19,6 @@
 //         位置轮询兜底）。
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
-#import "CCTVPlaybackEngineProtocol.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -52,7 +51,7 @@ typedef NS_ENUM(NSInteger, MediaPlaybackCicadaAdapterState) {
 
 // Lifecycle and control methods are used on the main thread. SDK callbacks
 // are marshalled to that thread before state changes or delegate delivery.
-@interface MediaPlaybackCicadaAdapter : NSObject <CCTVPlaybackEngine>
+@interface MediaPlaybackCicadaAdapter : NSObject
 
 // SDK 类是否存在（NSClassFromString(@"CicadaPlayer")）。ui-smoke 构建里为 NO。
 + (BOOL)isAvailable;

@@ -32,11 +32,10 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)selectTrackWithIndex:(NSInteger)index;
 - (void)applyVideoGravity:(NSString *)gravity;
 
+@optional
 /// Unified optional telemetry/error surface; adapters expose only data supported by their engine.
 @property (nonatomic, readonly) NSInteger lastErrorCode;
 - (NSDictionary<NSString *, id> *)playbackStatistics;
-
-@optional
 - (BOOL)addExternalSubtitleURL:(NSURL *)subtitleURL;
 - (BOOL)isPictureInPictureSupported;
 - (BOOL)isPictureInPictureActive;
