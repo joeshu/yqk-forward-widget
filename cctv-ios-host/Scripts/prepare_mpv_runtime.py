@@ -146,8 +146,10 @@ LINK_FRAMEWORKS = (
 )
 
 LINK_LIBS = (
+    # NOTE: no -lcommonCrypto here — iOS has no libcommonCrypto.tbd; its
+    # symbols (e.g. _CCRandomGenerateBytes) live in libSystem, which is
+    # linked by default. Adding -lcommonCrypto breaks the ld step.
     '-lbz2',
-    '-lcommonCrypto',
     '-liconv',
     '-lexpat',
     '-lresolv',
