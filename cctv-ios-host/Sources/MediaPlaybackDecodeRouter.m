@@ -198,6 +198,13 @@ MediaPlaybackDecodeRoute MediaPlaybackDecodeRouteNextForResult(NSDictionary *res
     for (NSUInteger i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
         MediaPlaybackDecodeRoute route = candidates[i];
         if (route == MediaPlaybackDecodeRouteMPV && !MediaPlaybackMPVRouteEnabled()) continue;
+        // AVPlayer only leads the chain for formats it can decode. For Cicada-only
+        // containers (FLV/DASH/MKV/WebM/RTMP) MediaPlaybackResultSupportsAVPlayer
+        // returns NO; attempting AVPlayer first wastes a full startup-watchdog
+        // budget on a deterministically-failing leg and contradicts the header's
+        // documented "Cicada专属格式 → [Cicada,WebView]" priority. Skip it so the
+        // ordered chain starts at MPV/Cicada, matching the contract.
+        if (route == MediaPlaybackDecodeRouteAVPlayer && !avSupported) continue;
         NSUInteger bit = route == MediaPlaybackDecodeRouteAVPlayer ? MediaPlaybackDecodeRouteAttemptedAVPlayer :
             route == MediaPlaybackDecodeRouteMPV ? MediaPlaybackDecodeRouteAttemptedMPV :
             route == MediaPlaybackDecodeRouteCicadaPlayer ? MediaPlaybackDecodeRouteAttemptedCicadaPlayer : MediaPlaybackDecodeRouteAttemptedWebView;
