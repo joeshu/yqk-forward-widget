@@ -90,7 +90,8 @@ class Round5PrincipalArchitectAuditFixesTests(unittest.TestCase):
         # 解析前缀改为并发发起、整体 3s 上限，超时统一取消（原为串行各 2.5s）。
         self.assertIn("if(dispatch_group_wait(pGroup,dispatch_time(DISPATCH_TIME_NOW,(int64_t)(3.0*NSEC_PER_SEC)))!=0){for(NSURLSessionDataTask *t in pTasks)[t cancel];}", vip_body)
         self.assertNotIn("[pTask cancel];", vip_body)
-        self.assertIn("if(dispatch_semaphore_wait(sem,dispatch_time(DISPATCH_TIME_NOW,(int64_t)(2.5*NSEC_PER_SEC)))!=0)[cTask cancel];", vip_body)
+        self.assertIn("if(dispatch_group_wait(cGroup,dispatch_time(DISPATCH_TIME_NOW,(int64_t)(4.0*NSEC_PER_SEC)))!=0){for(NSURLSessionDataTask *t in cTasks)[t cancel];}", vip_body)
+        self.assertNotIn("dispatch_semaphore_wait", vip_body)
         self.assertIn("@synchronized(sess)", vip_body)
 
     def test_iss41_python_runtime_strict_loopback_hostname_and_locked_maccms_cache(self):

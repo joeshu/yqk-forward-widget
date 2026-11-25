@@ -1821,12 +1821,11 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
         BOOL hasFound=NO;@synchronized(sess){hasFound=foundStream.length>0;}
         if(!hasFound&&cleanTitle.length>=2&&![@[@"影片",@"未知",@"影视播放"] containsObject:cleanTitle]){
             NSString *kw=[cleanTitle stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet]?:@"";
+            dispatch_group_t cGroup=dispatch_group_create();NSMutableArray<NSURLSessionDataTask *> *cTasks=[NSMutableArray array];
             for(NSString *cms in @[@"https://caiji.dyttzyapi.com/api.php/provide/vod/",@"https://bfzyapi.com/api.php/provide/vod/",@"https://360zy.com/api.php/provide/vod/",@"https://api.ffzyapi.com/api.php/provide/vod/",@"https://suoniapi.com/api.php/provide/vod/",@"https://ikunzyapi.com/api.php/provide/vod/"]){
-                @synchronized(sess){hasFound=foundStream.length>0;}
-                if(hasFound)break;
                 NSURL *cURL=[NSURL URLWithString:[NSString stringWithFormat:@"%@?ac=detail&wd=%@",cms,kw]];
                 if(!cURL)continue;
-                dispatch_semaphore_t sem=dispatch_semaphore_create(0);
+                dispatch_group_enter(cGroup);
                 NSURLSessionDataTask *cTask=[sess dataTaskWithURL:cURL completionHandler:^(NSData *d,NSURLResponse *r,NSError *e){
                     if(!e&&d.length&&d.length<=2*1024*1024){
                         NSDictionary *obj=[NSJSONSerialization JSONObjectWithData:d options:0 error:NULL];
@@ -1857,11 +1856,11 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
                             }
                         }
                     }
-                    dispatch_semaphore_signal(sem);
+                    dispatch_group_leave(cGroup);
                 }];
-                [cTask resume];
-                if(dispatch_semaphore_wait(sem,dispatch_time(DISPATCH_TIME_NOW,(int64_t)(2.5*NSEC_PER_SEC)))!=0)[cTask cancel];
+                [cTask resume];[cTasks addObject:cTask];
             }
+            if(dispatch_group_wait(cGroup,dispatch_time(DISPATCH_TIME_NOW,(int64_t)(4.0*NSEC_PER_SEC)))!=0){for(NSURLSessionDataTask *t in cTasks)[t cancel];}
         }
         [sess finishTasksAndInvalidate];
         dispatch_async(dispatch_get_main_queue(),^{if(completion)completion(foundStream?:@"");});
