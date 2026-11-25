@@ -11,6 +11,7 @@
 @property(nonatomic,copy) NSDictionary *cachedProfile;
 @property(nonatomic) BOOL editingResource;
 @property(nonatomic) BOOL saving;
+@property(nonatomic) BOOL refreshing;
 @property(nonatomic) BOOL hasAppearedOnce;
 @property(nonatomic) BOOL suppressMetadataReload;
 @property(nonatomic,copy) NSString *notice;
@@ -240,9 +241,8 @@
     });
 }
 - (void)handlePullRefresh {
-    if(self.onRefresh){
+    if(self.onRefresh&&[self beginRefreshActionWithPrompt:self.source.length?@"正在刷新订阅…":@"已同步内置官方频道"]){
         self.onRefresh();
-        [self showTransientPrompt:self.source.length?@"已发起订阅刷新":@"已同步内置官方频道"];
     }
     [self loadFields];
     [self.tableView reloadData];
@@ -305,6 +305,23 @@
 - (void)refreshCachedProfile {
     self.cachedProfile=self.profileProvider?(self.profileProvider()?:@{}):@{};
 }
+// 刷新类动作（refresh/recheck/rematch/matchLogos）统一入口：
+//  · loading 时防重复——refreshing/saving 中再点不第二次触发 on*；
+//  · 不覆盖 self.notice——保留已有内联错误（如上次“刷新失败”或保存校验提示），
+//    仅以导航栏瞬态提示反馈“刷新中…”，避免静默清除已有错误状态；
+//  · on* 为 fire-and-forget 且未必回发元数据通知（如台标匹配），故加一个有界
+//    兜底复位，防止刷新态被永久锁住；正常路径由 metadataChanged 解除。
+- (BOOL)beginRefreshActionWithPrompt:(NSString *)prompt {
+    if(self.refreshing||self.saving)return NO;
+    self.refreshing=YES;
+    if(prompt.length)[self showTransientPrompt:prompt];
+    __weak typeof(self) weakSelf=self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(10*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
+        SubscriptionResourceViewController *owner=weakSelf;if(!owner||!owner.refreshing)return;
+        owner.refreshing=NO;[owner loadFields];if(owner.isViewLoaded)[owner.tableView reloadData];
+    });
+    return YES;
+}
 - (void)loadFields {
     [self refreshCachedProfile];
     NSDictionary *metadata=[ProfileStore metadata:self.source],*profile=self.cachedProfile?:@{};
@@ -317,6 +334,7 @@
 - (void)metadataChanged {
     if(!NSThread.isMainThread){__weak typeof(self) weakSelf=self;dispatch_async(dispatch_get_main_queue(),^{[weakSelf metadataChanged];});return;}
     if(self.editingResource||self.saving||self.suppressMetadataReload)return;
+    if(self.refreshing)self.refreshing=NO;   // 任意元数据变更（刷新中/失败/已更新均回发通知）即解除防重复锁
     [self loadFields];
     if(self.isViewLoaded)[self.tableView reloadData];
 }
@@ -411,7 +429,15 @@
 - (void)tableView:(UITableView *)tableView willDisplayHeaderView:(UIView *)view forSection:(NSInteger)section { HostStyleSectionHeaderView(view); }
 - (void)tableView:(UITableView *)tableView willDisplayFooterView:(UIView *)view forSection:(NSInteger)section { HostStyleSectionFooterView(view); }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {return @[@"资源配置",@"内容状态与显示增强",@"使用与管理"][section];}
-- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {if(section==0)return self.notice?:@"修改订阅地址会先读取新清单，验证成功后替换。EPG 留空使用列表自动提供的地址。";return nil;}
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+    if(section!=0)return nil;
+    if(self.notice.length)return self.notice;
+    // 无编辑/保存提示时，把订阅刷新失败状态作为内联错误透出，配合下方
+    // “刷新此订阅”重试入口；刷新中/已合并/等待等非终态不被当作错误显示。
+    NSString *status=[self.cachedProfile isKindOfClass:NSDictionary.class]?self.cachedProfile[@"status"]:nil;
+    if([status isKindOfClass:NSString.class]&&status.length&&([status containsString:@"失败"]||[status containsString:@"异常"]||[status containsString:@"错误"]))return status;
+    return @"修改订阅地址会先读取新清单，验证成功后替换。EPG 留空使用列表自动提供的地址。";
+}
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {
     NSString *reuseID=(ip.section==0&&self.editingResource)?[NSString stringWithFormat:@"subscription.edit.%ld",(long)ip.row]:(ip.section==1&&ip.row>=2?[NSString stringWithFormat:@"subscription.switch.%ld",(long)ip.row]:@"subscription.subtitle.cell");
     UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:reuseID];
@@ -595,10 +621,10 @@
         if(ip.row<0||ip.row>=(NSInteger)rows.count)return;
         NSString *action=rows[ip.row][@"action"];
         if([action isEqual:@"open"]){if(self.onOpen)self.onOpen();}
-        else if([action isEqual:@"refresh"]){if(self.onRefresh){self.onRefresh();self.notice=self.source.length?@"刷新请求已发起":@"已同步内置官方频道与节目单";[self showTransientPrompt:self.notice];[self loadFields];[self.tableView reloadData];}}
-        else if([action isEqual:@"recheck"]){if(self.onRecheckHealth){self.onRecheckHealth();self.notice=self.source.length?@"正在重新检测订阅健康状态…":@"内置官方频道健康状态正常";[self showTransientPrompt:self.notice];[self loadFields];[self.tableView reloadData];}}
-        else if([action isEqual:@"rematch"]){if(self.onRematchEPG){self.onRematchEPG();self.notice=@"已发起节目单（EPG）重新匹配";[self showTransientPrompt:self.notice];[self loadFields];[self.tableView reloadData];}}
-        else if([action isEqual:@"matchLogos"]){if(self.onMatchStationLogos)self.onMatchStationLogos();self.notice=@"已完成官方高清台标与节目单归一匹配";[self showTransientPrompt:self.notice];[self loadFields];[self.tableView reloadData];}
+        else if([action isEqual:@"refresh"]){if(self.onRefresh&&[self beginRefreshActionWithPrompt:self.source.length?@"正在刷新订阅…":@"已同步内置官方频道与节目单"]){self.onRefresh();[self loadFields];[self.tableView reloadData];}}
+        else if([action isEqual:@"recheck"]){if(self.onRecheckHealth&&[self beginRefreshActionWithPrompt:self.source.length?@"正在重新检测订阅健康状态…":@"内置官方频道健康状态正常"]){self.onRecheckHealth();[self loadFields];[self.tableView reloadData];}}
+        else if([action isEqual:@"rematch"]){if(self.onRematchEPG&&[self beginRefreshActionWithPrompt:@"已发起节目单（EPG）重新匹配"]){self.onRematchEPG();[self loadFields];[self.tableView reloadData];}}
+        else if([action isEqual:@"matchLogos"]){if(self.onMatchStationLogos&&[self beginRefreshActionWithPrompt:@"已完成官方高清台标与节目单归一匹配"]){self.onMatchStationLogos();[self loadFields];[self.tableView reloadData];}}
         else if([action isEqual:@"export"]){if(self.onExport)self.onExport();}
         else if([action isEqual:@"udpxy"]){
             NSDictionary *saved=[NSUserDefaults.standardUserDefaults dictionaryForKey:@"cctv.subscription.udpxy.v1"];

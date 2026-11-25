@@ -1743,11 +1743,13 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     else if([profile[@"type"] isEqual:@"tvbox"]){if([source hasPrefix:@"tvbox:"]&&self.onOpenTVBoxCatalog)self.onOpenTVBoxCatalog([source substringFromIndex:6]);}
     else {
         if(self.onOpenSubscription){self.onOpenSubscription(source);return;}
+        NSString *rowStatus=[profile[@"status"] isKindOfClass:NSString.class]?profile[@"status"]:@"";
+        BOOL failed=[rowStatus containsString:@"失败"]||[rowStatus containsString:@"异常"]||[rowStatus containsString:@"错误"];
         NSMutableArray<HostGlassSheetAction *> *primaryActions=[NSMutableArray array];
         if(self.onSelectProfile)[primaryActions addObject:[HostGlassSheetAction actionWithTitle:@"打开频道" subtitle:@"在频道页仅查看此订阅源" value:nil icon:@"tv" tint:HostAccent() destructive:NO selected:NO handler:^{self.onSelectProfile(source);}]];
         if(source.length&&self.onEditProfile)[primaryActions addObject:[HostGlassSheetAction actionWithTitle:@"编辑订阅与节目单" subtitle:@"修改名称、地址、请求头与 EPG" value:nil icon:@"slider.horizontal.3" tint:UIColor.systemBlueColor destructive:NO selected:NO handler:^{self.onEditProfile(source);}]];
         NSMutableArray<HostGlassSheetAction *> *maintActions=[NSMutableArray array];
-        if(source.length&&self.onRefreshProfile)[maintActions addObject:[HostGlassSheetAction actionWithTitle:@"刷新此订阅" subtitle:@"重新拉取最新频道列表" value:nil icon:@"arrow.clockwise" tint:HostAccent() destructive:NO selected:NO handler:^{self.onRefreshProfile(source);}]];
+        if(source.length&&self.onRefreshProfile)[maintActions addObject:[HostGlassSheetAction actionWithTitle:failed?@"重试刷新":@"刷新此订阅" subtitle:failed?@"上次刷新失败，重新拉取最新频道列表":@"重新拉取最新频道列表" value:nil icon:@"arrow.clockwise" tint:failed?UIColor.systemOrangeColor:HostAccent() destructive:NO selected:NO handler:^{self.onRefreshProfile(source);}]];
         if(source.length&&self.onRecheckProfile)[maintActions addObject:[HostGlassSheetAction actionWithTitle:@"重新检测健康" subtitle:@"检测源站可达性与响应状态" value:nil icon:@"waveform.path.ecg" tint:UIColor.systemTealColor destructive:NO selected:NO handler:^{self.onRecheckProfile(source);}]];
         if(source.length&&self.onRematchEPGProfile)[maintActions addObject:[HostGlassSheetAction actionWithTitle:@"重新匹配节目单（EPG）" subtitle:@"自动关联官方台标与节目预告" value:nil icon:@"calendar.badge.clock" tint:UIColor.systemOrangeColor destructive:NO selected:NO handler:^{self.onRematchEPGProfile(source);}]];
         NSMutableArray<HostGlassSheetSection *> *sections=[NSMutableArray array];
@@ -1756,7 +1758,7 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
         UITableViewCell *cell=[tableView cellForRowAtIndexPath:ip];
         [HostGlassActionSheetViewController presentOn:self
                                                 title:profile[@"name"]?:@"订阅"
-                                             subtitle:source.length?source:nil
+                                             subtitle:(failed&&rowStatus.length)?rowStatus:(source.length?source:nil)
                                             badgeText:@"直播订阅"
                                            badgeColor:HostAccent()
                                              sections:sections
