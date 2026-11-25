@@ -1220,8 +1220,9 @@ static NSString *MediaDetailPreferredTitle(NSString *detailName, NSString *itemN
         if(diff.deletedOldIndexes.count){NSMutableArray<NSIndexPath *> *paths=[NSMutableArray array];for(NSNumber *i in diff.deletedOldIndexes)[paths addObject:[NSIndexPath indexPathForRow:i.unsignedIntegerValue inSection:0]];[tableView deleteRowsAtIndexPaths:paths withRowAnimation:UITableViewRowAnimationAutomatic];}
         if(diff.insertedNewIndexes.count){NSMutableArray<NSIndexPath *> *paths=[NSMutableArray array];for(NSNumber *i in diff.insertedNewIndexes)[paths addObject:[NSIndexPath indexPathForRow:i.unsignedIntegerValue inSection:0]];[tableView insertRowsAtIndexPaths:paths withRowAnimation:UITableViewRowAnimationAutomatic];}
         for(NSDictionary *move in diff.moves){[tableView moveRowAtIndexPath:[NSIndexPath indexPathForRow:[move[@"from"] unsignedIntegerValue] inSection:0] toIndexPath:[NSIndexPath indexPathForRow:[move[@"to"] unsignedIntegerValue] inSection:0]];}
-        if(diff.reloadedNewIndexes.count){NSMutableArray<NSIndexPath *> *paths=[NSMutableArray array];for(NSNumber *i in diff.reloadedNewIndexes)[paths addObject:[NSIndexPath indexPathForRow:i.unsignedIntegerValue inSection:0]];[tableView reloadRowsAtIndexPaths:paths withRowAnimation:UITableViewRowAnimationAutomatic];}
-    } completion:nil];
+    } completion:^(__unused BOOL finished){
+        if(tableView.window&&diff.reloadedNewIndexes.count){NSMutableArray<NSIndexPath *> *paths=[NSMutableArray array];for(NSNumber *i in diff.reloadedNewIndexes)[paths addObject:[NSIndexPath indexPathForRow:i.unsignedIntegerValue inSection:0]];[tableView reloadRowsAtIndexPaths:paths withRowAnimation:UITableViewRowAnimationAutomatic];}
+    }];
 }
 - (void)confirmClearFavorites {
     UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"清空影视收藏？" message:@"将移除本机保存的全部影视收藏记录。" preferredStyle:UIAlertControllerStyleAlert];
