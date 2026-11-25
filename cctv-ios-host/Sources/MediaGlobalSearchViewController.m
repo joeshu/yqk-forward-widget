@@ -1,4 +1,5 @@
 #import "MediaGlobalSearchViewController.h"
+#import "HostEmptyStateView.h"
 #import "MediaAPIClient.h"
 #import "LocalServiceReadiness.h"
 #import "HostTheme.h"
@@ -262,7 +263,7 @@ static NSDictionary *MediaSearchPageState(NSString *name, NSArray *items, NSDict
 
 - (void)updateEmptyState {
     if(self.sources.count){self.tableView.backgroundView=nil;return;}
-    UILabel *empty=[[UILabel alloc] initWithFrame:self.tableView.bounds];empty.text=@"尚未导入影视资源\n请先到资源页导入影视包，再回来搜索";empty.numberOfLines=0;empty.textAlignment=NSTextAlignmentCenter;empty.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];empty.adjustsFontForContentSizeCategory=YES;empty.textColor=HostSecondaryText();self.tableView.backgroundView=empty;
+    self.tableView.backgroundView=[HostEmptyStateView emptyStateViewWithTitle:@"尚未导入影视资源" subtitle:@"请先到资源页导入影视包，再回来搜索" symbol:@"tray"];((HostEmptyStateView *)self.tableView.backgroundView).accessibilityIdentifier=@"media-global-search-empty";
 }
 
 - (void)viewDidLayoutSubviews {

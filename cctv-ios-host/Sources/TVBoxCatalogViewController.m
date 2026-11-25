@@ -1,4 +1,5 @@
 #import "TVBoxCatalogViewController.h"
+#import "HostEmptyStateView.h"
 #import "TVBoxCatalogStore.h"
 #import "HostTheme.h"
 #import "HostGlassActionSheetViewController.h"
@@ -92,10 +93,7 @@
 - (void)updateEmptyState {
     NSUInteger total=[self filteredRowsForSection:0].count+[self filteredRowsForSection:1].count;
     if(total){self.tableView.backgroundView=nil;return;}
-    UILabel *empty=[[UILabel alloc] initWithFrame:self.tableView.bounds];
-    NSInteger scope=self.contentFilter?self.contentFilter.selectedSegmentIndex:0;
-    empty.text=self.searchText.length?@"没有匹配的站点或直播源，请修改搜索词":(scope>0?@"当前筛选分类下暂无站点或直播列表":@"此合集暂无站点与直播列表");
-    empty.numberOfLines=0;empty.textAlignment=NSTextAlignmentCenter;empty.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];empty.adjustsFontForContentSizeCategory=YES;empty.textColor=HostSecondaryText();self.tableView.backgroundView=empty;
+    NSInteger scope=self.contentFilter?self.contentFilter.selectedSegmentIndex:0;NSString *emptyTitle=self.searchText.length?@"没有匹配的站点或直播源":(scope>0?@"当前筛选分类下暂无内容":@"此合集暂无内容");NSString *emptySubtitle=self.searchText.length?@"请修改搜索词":@"此合集暂无站点与直播列表";self.tableView.backgroundView=[HostEmptyStateView emptyStateViewWithTitle:emptyTitle subtitle:emptySubtitle symbol:@"rectangle.stack"];((HostEmptyStateView *)self.tableView.backgroundView).accessibilityIdentifier=@"tvbox-catalog-empty";
 }
 - (UIViewController *)visiblePresentationController {
     UIWindow *window=self.viewIfLoaded.window;

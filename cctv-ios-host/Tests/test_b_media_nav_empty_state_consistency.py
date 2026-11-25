@@ -66,13 +66,11 @@ class MediaNavEmptyStateConsistency(unittest.TestCase):
         # 空状态文本保持不变（语义不变）。
         self.assertIn("还没有收藏影视", body)
         self.assertIn("在影片详情页点按「收藏」即可保存", body)
-        # 与 picker/全局搜索一致的 Dynamic Type 约定。
-        self.assertIn("empty.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];", body)
-        self.assertIn("empty.adjustsFontForContentSizeCategory=YES;", body)
-        self.assertIn("empty.numberOfLines=0;", body)
-        self.assertIn("empty.textColor=HostSecondaryText();", body)
-        # 稳定可访问性标识，便于 UISmoke/VoiceOver 定位。
-        self.assertIn('empty.accessibilityIdentifier=@"media-favorites-empty";', body)
+        self.assertIn('HostEmptyStateView emptyStateViewWithTitle:@"还没有收藏影视" subtitle:@"在影片详情页点按「收藏」即可保存" symbol:@"heart"', body)
+        self.assertIn('accessibilityIdentifier=@"media-favorites-empty"', body)
+        helper = (SOURCES / "HostEmptyStateView.m").read_text(encoding="utf-8")
+        self.assertIn("adjustsFontForContentSizeCategory = YES", helper)
+        self.assertIn("isAccessibilityElement = YES", helper)
 
     def test_history_empty_state_uses_dynamic_type_and_identifier(self):
         body = _method_body(
@@ -81,11 +79,8 @@ class MediaNavEmptyStateConsistency(unittest.TestCase):
         )
         self.assertIn("还没有观看记录", body)
         self.assertIn("播放过的影片会保存在这里", body)
-        self.assertIn("empty.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];", body)
-        self.assertIn("empty.adjustsFontForContentSizeCategory=YES;", body)
-        self.assertIn("empty.numberOfLines=0;", body)
-        self.assertIn("empty.textColor=HostSecondaryText();", body)
-        self.assertIn('empty.accessibilityIdentifier=@"media-history-empty";', body)
+        self.assertIn('HostEmptyStateView emptyStateViewWithTitle:@"还没有观看记录" subtitle:@"播放过的影片会保存在这里" symbol:@"clock"', body)
+        self.assertIn('accessibilityIdentifier=@"media-history-empty"', body)
 
     def test_picker_empty_state_remains_the_reference_convention(self):
         # picker 是本次对齐的参照基准：必须仍具备 Body 字号 + 缩放 + 标识符。
