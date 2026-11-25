@@ -579,8 +579,8 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
     // 对齐 MediaWebViewController。full-screen 演示下为兜底保险；一旦以 sheet
     // 呈现即阻止下拉关闭，进度不被误中断。显式取消仍走 cancelWork，语义不变。
     BOOL modal=self.busy&&!self.finished;
-    self.isModalInPresentation=modal;
-    if(self.navigationController)self.navigationController.isModalInPresentation=modal;
+    self.modalInPresentation=modal;
+    if(self.navigationController)self.navigationController.modalInPresentation=modal;
 }
 - (void)updateView {
     for(NSMutableDictionary *row in self.candidates)if([row[@"needsDecoration"] boolValue])[self decorateCandidate:row file:nil origin:row[@"origin"]];

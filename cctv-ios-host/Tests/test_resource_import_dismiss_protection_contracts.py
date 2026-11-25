@@ -33,14 +33,14 @@ class ResourceImportDismissProtectionContracts(unittest.TestCase):
     def test_modal_in_presentation_guard_is_bound_to_busy(self):
         self.assertIn('- (void)applyModalDismissProtection', self.workflow)
         guard = self._body('- (void)applyModalDismissProtection')
-        self.assertIn('self.isModalInPresentation', guard)
-        self.assertIn('self.navigationController.isModalInPresentation', guard)
+        self.assertIn('self.modalInPresentation', guard)
+        self.assertIn('self.navigationController.modalInPresentation', guard)
         self.assertIn('self.busy&&!self.finished', guard)
         # 保护必须在 updateView 内刷新，busy 翻转后即时生效
         update = self._body('- (void)updateView')
         self.assertIn('[self applyModalDismissProtection]', update)
         # 空闲态必须放开保护（modal=NO），否则完成态无法自动收起
-        self.assertNotIn('self.isModalInPresentation=YES', guard)
+        self.assertNotIn('self.modalInPresentation=YES', guard)
 
     # 2. 显式取消语义不变 -------------------------------------------------------
     def test_explicit_cancel_semantics_unchanged(self):

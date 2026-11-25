@@ -90,10 +90,10 @@ class ModalDismissProtectionRegressionTests(CImportIpadSheetContracts):
     def test_apply_modal_protection_bound_to_busy(self):
         self.assertIn("- (void)applyModalDismissProtection", self.workflow)
         guard = self._body("- (void)applyModalDismissProtection")
-        self.assertIn("self.isModalInPresentation", guard)
-        self.assertIn("self.navigationController.isModalInPresentation", guard)
+        self.assertIn("self.modalInPresentation", guard)
+        self.assertIn("self.navigationController.modalInPresentation", guard)
         self.assertIn("self.busy&&!self.finished", guard)
-        self.assertNotIn("self.isModalInPresentation=YES", guard)
+        self.assertNotIn("self.modalInPresentation=YES", guard)
 
     def test_protection_refreshed_in_update_view(self):
         update = self._body("- (void)updateView")

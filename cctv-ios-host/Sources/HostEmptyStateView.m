@@ -39,7 +39,7 @@ static const CGFloat kHostEmptySymbolTopInset = 6.0;
     _symbolView.tintColor = HostSecondaryText();
     _symbolView.preferredSymbolConfiguration = [UIImageSymbolConfiguration configurationWithPointSize:kHostEmptySymbolPointSize weight:UIImageSymbolWeightRegular];
     _symbolView.translatesAutoresizingMaskIntoConstraints = NO;
-    _symbolView.isHidden = YES;
+    _symbolView.hidden = YES;
 
     _titleLabel = [UILabel new];
     _titleLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];
@@ -48,7 +48,7 @@ static const CGFloat kHostEmptySymbolTopInset = 6.0;
     _titleLabel.textAlignment = NSTextAlignmentCenter;
     _titleLabel.numberOfLines = 0;
     _titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    _titleLabel.isHidden = YES;
+    _titleLabel.hidden = YES;
 
     _subtitleLabel = [UILabel new];
     _subtitleLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];
@@ -57,7 +57,7 @@ static const CGFloat kHostEmptySymbolTopInset = 6.0;
     _subtitleLabel.textAlignment = NSTextAlignmentCenter;
     _subtitleLabel.numberOfLines = 0;
     _subtitleLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    _subtitleLabel.isHidden = YES;
+    _subtitleLabel.hidden = YES;
 
     _actionButton = [UIButton buttonWithType:UIButtonTypeSystem];
     _actionButton.titleLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];
@@ -128,7 +128,7 @@ static const CGFloat kHostEmptySymbolTopInset = 6.0;
                                                                                                         weight:UIImageSymbolWeightRegular]];
         _symbolView.image = image;
         _symbolView.accessibilityLabel = symbolName; // 不朗读符号名，由容器合并朗读 title/subtitle。
-        _symbolView.isHidden = NO;
+        _symbolView.hidden = NO;
     } else {
         _symbolView.image = nil;
         _symbolView.hidden = YES;

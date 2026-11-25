@@ -32,6 +32,7 @@
 -  (void)buildHeroHeaderView;
 -  (void)updateHeroSummary;
 -  (void)showTransientPrompt:(NSString *)prompt;
+-  (BOOL)beginRefreshActionWithPrompt:(NSString *)prompt;
 -  (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section;
 @end
 

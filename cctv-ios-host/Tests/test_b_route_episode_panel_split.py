@@ -178,8 +178,10 @@ class RouteEpisodePanelSplitContracts(unittest.TestCase):
 
     def test_vc_line_count_decreased(self):
         # 迁出 buildLines 内部 + lineScroll 创建 + 10 条约束后 VC 应缩减。
+        # 上限 2916 与 formatter split 保持一致（理由同 quality_panel：1.67 菜单方法
+        # 恢复回 VC 后约 2912 行，旧上限 2909 已不适用）。
         n = len(self.vc_m.splitlines())
-        self.assertLess(n, 2909, 'VC 未因迁出而缩减（%d 行）' % n)
+        self.assertLess(n, 2916, 'VC 未因迁出而缩减（%d 行）' % n)
         self.assertGreater(n, 2800, 'VC 不应被过度削减（%d 行）' % n)
 
 

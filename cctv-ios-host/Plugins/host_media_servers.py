@@ -173,7 +173,10 @@ class ServerSpider:
             if _HAS_DEFUSEDXML:
                 xml_root = ET.fromstring(content, forbid_dtd=True, forbid_entities=True, forbid_external=True)
             else:
-                if b'<!DOCTYPE' in content.upper() or b'<!ENTITY' in content.upper():
+                # 无 defusedxml 时的兜底：先去掉 NUL 字节再查 DOCTYPE/ENTITY——
+                # UTF-16 编码下 ASCII 字符之间夹着 \x00，直接按字节查不到。
+                flat = content.upper().replace(b'\x00', b'')
+                if b'<!DOCTYPE' in flat or b'<!ENTITY' in flat:
                     raise ValueError('Unsafe WebDAV XML response')
                 xml_root = ET.fromstring(content)
         except Exception as error:

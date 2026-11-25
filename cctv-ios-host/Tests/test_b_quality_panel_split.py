@@ -211,8 +211,12 @@ class QualityPanelSplitContracts(unittest.TestCase):
 
     def test_vc_line_count_decreased(self):
         # 迁出 buildQualityButtons 按钮构造 + 四件套创建 + 内部约束后 VC 应缩减。
+        # 上限 2916 与 formatter split 保持一致：2026-11-26 恢复 1.67 播放设置菜单方法
+        # （解码/字幕/音轨/弹幕/自动连播/外挂字幕/睡眠定时）回 VC 后，VC 约 2912 行；
+        # 旧上限 2899 按迁出后、无菜单方法的 VC 标定，即使把恢复的方法全压成单行
+        # 也要 2905 行，已无法满足，故对齐到 formatter 的上限。
         n = len(self.vc_m.splitlines())
-        self.assertLess(n, 2899, 'VC 未因迁出而缩减（%d 行）' % n)
+        self.assertLess(n, 2916, 'VC 未因迁出而缩减（%d 行）' % n)
         self.assertGreater(n, 2820, 'VC 不应被过度削减（%d 行）' % n)
 
 

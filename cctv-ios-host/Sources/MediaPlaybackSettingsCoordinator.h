@@ -1,8 +1,9 @@
 // MediaPlaybackSettingsCoordinator.h
 //
 // 播放设置/菜单协调器（阶段 B-P1）：从 MediaPlaybackViewController（约 3070 行）抽出
-// 播放设置菜单的构建职责——倍速、画面比例、音轨、字幕、外挂字幕、睡眠定时、解码模式、
-// 观看偏好（自动连播/常亮/片头片尾跳过）、诊断与监测、分集快捷导航——以及睡眠定时状态。
+// 播放设置菜单的组装职责——倍速、画面比例、通用轨道选择、重力菜单、片头片尾、偏好与诊断、
+// 分集快捷导航——以及睡眠定时状态。其中解码/字幕/音轨/弹幕/自动连播/外挂字幕/睡眠定时
+// 菜单件由宿主经协议提供（1.67 契约），协调器只组装，不再直接实现。
 //
 // 设计：
 //   协调器只负责「菜单构建」与「睡眠定时生命周期」。引擎作用类操作（setPlaybackRate /
@@ -63,6 +64,16 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)updateSkipButtonForCurrentPosition;
 /// 解码模式切换：保存偏好并以新解码重载当前播放（续播进度恢复由宿主负责）。
 - (void)applyDecodeModeChange:(NSString *)mode;
+/// 菜单内容件由宿主构建（1.67 契约恢复）：解码模式、字幕/音轨选择、弹幕占位、自动连播、
+/// 外挂字幕；睡眠定时状态与实现在协调器，宿主以转发保留 1.67 的 VC 方法签名。
+- (UIMenu *)decodeModeMenu;
+- (nullable UIMenu *)subtitleSelectionMenu;
+- (nullable UIMenu *)audioSelectionMenu;
+- (UIAction *)danmakuDisabledAction;
+- (UIAction *)autoPlayNextAction;
+- (UIMenu *)externalSubtitleMenu;
+- (UIMenu *)playbackSleepTimerMenu;
+- (void)configureMediaSleepTimerMinutes:(NSInteger)minutes;
 @end
 
 @interface MediaPlaybackSettingsCoordinator : NSObject
@@ -88,6 +99,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (UIMenu *)playbackSleepTimerMenu;
 /// 轨道选择子菜单（音轨/字幕）；引擎不支持轨道选择或当前无轨道时返回 nil（隐藏该子菜单）。
 - (nullable UIMenu *)mediaSelectionMenuForCharacteristic:(AVMediaCharacteristic)characteristic title:(NSString *)title;
+/// 解码模式切换：转给宿主执行（解码菜单动作经此回调；宿主实现见协议同名方法）。
+- (void)applyDecodeModeChange:(NSString *)mode;
 /// 外挂字幕调节子菜单（显示/隐藏、字号、时间轴偏移）。
 - (UIMenu *)externalSubtitleMenu;
 /// 设置睡眠定时（分钟）；<=0 关闭并清除。到点自动暂停播放并提示。

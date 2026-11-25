@@ -1474,6 +1474,19 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
         [self playResult:self.result];
     }
 }
+- (UIMenu *)decodeModeMenu {__weak typeof(self) weakSelf=self;NSString *currentDecodeMode=[[NSUserDefaults standardUserDefaults] stringForKey:@"cctv.mediaDecodeMode.v1"]?:@"auto";NSArray *decodeModes=@[@{@"title":@"自动（AVPlayer → Cicada 硬解 → 软解）",@"short":@"自动 · 智能回退",@"value":@"auto"},@{@"title":@"优先 CicadaPlayer 硬解",@"short":@"Cicada 硬解",@"value":@"cicada"},@{@"title":@"强制 CicadaPlayer 软解码 (cc)",@"short":@"Cicada 软解",@"value":@"cicada_soft"}];NSMutableArray *decodeActions=[NSMutableArray array];NSString *decodeShort=@"自动 · 智能回退";
+    for(NSDictionary *modeOpt in decodeModes){NSString *val=modeOpt[@"value"];BOOL active=[currentDecodeMode isEqualToString:val];if(active)decodeShort=modeOpt[@"short"];UIAction *decAct=[UIAction actionWithTitle:modeOpt[@"title"] image:nil identifier:nil handler:^(__unused UIAction *a){MediaPlaybackViewController *owner=weakSelf;if(!owner)return;[[NSUserDefaults standardUserDefaults] setObject:val forKey:@"cctv.mediaDecodeMode.v1"];[owner.settingsCoordinator applyDecodeModeChange:val];}];decAct.state=[currentDecodeMode isEqualToString:val]?UIMenuElementStateOn:UIMenuElementStateOff;[decodeActions addObject:decAct];}
+    UIMenu *decodeMenu=[UIMenu menuWithTitle:@"解码模式" image:[UIImage systemImageNamed:@"cpu"] identifier:nil options:0 children:decodeActions];if(@available(iOS 16.0,*))decodeMenu.subtitle=decodeShort;return decodeMenu;
+}
+- (nullable UIMenu *)subtitleSelectionMenu {return [self.settingsCoordinator mediaSelectionMenuForCharacteristic:AVMediaCharacteristicLegible title:@"字幕"];}
+- (nullable UIMenu *)audioSelectionMenu {return [self.settingsCoordinator mediaSelectionMenuForCharacteristic:AVMediaCharacteristicAudible title:@"音轨"];}
+- (UIAction *)danmakuDisabledAction {UIAction *danmaku=[UIAction actionWithTitle:@"弹幕" image:[UIImage systemImageNamed:@"text.bubble"] identifier:nil handler:^(UIAction *action){}];danmaku.subtitle=@"当前视频未提供弹幕轨道";danmaku.attributes=UIMenuElementAttributesDisabled;return danmaku;}
+- (UIAction *)autoPlayNextAction {__weak typeof(self) weakSelf=self;BOOL autoNext=[NSUserDefaults.standardUserDefaults objectForKey:@"cctv.mediaAutoPlayNext"]?[NSUserDefaults.standardUserDefaults boolForKey:@"cctv.mediaAutoPlayNext"]:YES;UIAction *autoNextAction=[UIAction actionWithTitle:@"自动连播下一集" image:[UIImage systemImageNamed:@"play.square.stack"] identifier:nil handler:^(UIAction *action){[NSUserDefaults.standardUserDefaults setBool:!autoNext forKey:@"cctv.mediaAutoPlayNext"];[weakSelf.settingsCoordinator refreshMenus];weakSelf.status.text=!autoNext?@"已开启自动连播下一集":@"已关闭自动连播下一集";}];autoNextAction.state=autoNext?UIMenuElementStateOn:UIMenuElementStateOff;return autoNextAction;}
+- (UIMenu *)externalSubtitleMenu
+{ UIMenu *menu=[self.settingsCoordinator externalSubtitleMenu];NSAssert([menu.identifier isEqualToString:@"media.playback.menu.extsub"],@"外挂字幕菜单标识不应变更");return menu; }
+- (void)configureMediaSleepTimerMinutes:(NSInteger)minutes {[self.settingsCoordinator configureMediaSleepTimerMinutes:minutes];}
+- (UIMenu *)playbackSleepTimerMenu
+{ return [self.settingsCoordinator playbackSleepTimerMenu]; }
 - (void)rememberIntroEnd {
     NSTimeInterval position=[self activeEngineCurrentPosition];if(!isfinite(position)||position<5||position>600){self.status.text=@"片头结束位置需在 5 秒到 10 分钟之间";return;}
     [MediaPlaybackStateStore setIntroEnd:position forContext:self.context?:@{}];self.status.text=[NSString stringWithFormat:@"已记住片头结束位置 %.0f 秒",position];[self.playbackOptionsItem setMenu:[self.settingsCoordinator playbackOptionsMenu]];
@@ -2267,8 +2280,8 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
     NSString *currentPlayHost=[NSURL URLWithString:[self.result[@"url"] isKindOfClass:NSString.class]?self.result[@"url"]:@""].host.lowercaseString?:@"";
     BOOL relayGatewayDead=([@[@"127.0.0.1",@"localhost",@"::1"] containsObject:currentPlayHost]&&(networkError.errorStatusCode==502||networkError.errorStatusCode==504));
     if(relayGatewayDead)self.attemptedRoutes|=MediaPlaybackDecodeRouteAttemptedCicadaPlayer;
-    MediaPlaybackDecodeRoute mpvOrCicadaNextRoute=[self.playbackSession nextRouteForResult:self.result];
-    if(mpvOrCicadaNextRoute==MediaPlaybackDecodeRouteMPV||mpvOrCicadaNextRoute==MediaPlaybackDecodeRouteCicadaPlayer){
+    MediaPlaybackDecodeRoute nextRoute=[self.playbackSession nextRouteForResult:self.result];
+    if(nextRoute==MediaPlaybackDecodeRouteMPV||nextRoute==MediaPlaybackDecodeRouteCicadaPlayer){
         // 新尝试：清掉本次失败标记，让 Cicada/MPV 路径有自己的失败上报。
         // startCicadaPlaybackWithResult: 内部据 attemptedRoutes 自动选用 MPV
         // 或 Cicada 适配器，从而走通路由表声明的 AVPlayer→MPV→Cicada→WebView 链。
@@ -2281,7 +2294,7 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
         [self startCicadaPlaybackWithResult:self.result url:fallbackURL sourceURL:MediaPlaybackOriginalSourceURL(self.result) playerGeneration:self.playerGeneration];
         return;
     }
-    if(mpvOrCicadaNextRoute==MediaPlaybackDecodeRouteWebView){[self openWebPlaybackFallback];return;}
+    if(nextRoute==MediaPlaybackDecodeRouteWebView){[self openWebPlaybackFallback];return;}
     [self recordPlaybackAttemptOutcome:@"failed" failureKind:kind httpStatus:networkError.errorStatusCode terminal:YES];
     BOOL offline=[failure.domain isEqualToString:NSURLErrorDomain]&&failure.code==NSURLErrorNotConnectedToInternet;
     if(!offline&&[self tryNextLineForAutomaticFallback:kind])return;
@@ -2583,6 +2596,11 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
         if(candidateEpisode<0&&episodeName.length)for(NSUInteger index=0;index<candidateEpisodes.count;index++){
             NSString *candidateName=[[candidateEpisodes[index][@"name"] description] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
             if([candidateName localizedCaseInsensitiveCompare:episodeName]==NSOrderedSame){candidateEpisode=(NSInteger)index;break;}
+        }
+        if(candidateEpisode<0&&episodeName.length){ // 集数号兜底：不同线路同一集可能写成 S1E05 / 第5集 / EP05，用与 MediaPlaybackEpisodeNumber 相同的正则抽取集号再比对。
+            NSArray<NSString *> *episodeNumberPatterns=@[@"(?i)s\\d+\\s*e\\s*0*(\\d{1,4})",@"(?i)(?:第\\s*)?0*(\\d{1,4})\\s*(?:集|话|期)",@"(?i)(?:episode|ep)\\s*0*(\\d{1,4})",@"^\\s*0*(\\d{1,4})\\s*$"];
+            NSString *(^episodeNumberOf)(NSString *)=^(NSString *text){for(NSString *pattern in episodeNumberPatterns){NSRegularExpression *expression=[NSRegularExpression regularExpressionWithPattern:pattern options:0 error:NULL];NSTextCheckingResult *match=[expression firstMatchInString:text options:0 range:NSMakeRange(0,text.length)];if(match.numberOfRanges>1)return [NSString stringWithFormat:@"%ld",(long)[[text substringWithRange:[match rangeAtIndex:1]] integerValue]];}return @"";};
+            NSString *wantedNumber=episodeNumberOf(episodeName);if(wantedNumber.length)for(NSUInteger index=0;index<candidateEpisodes.count;index++){NSString *candidateName=[[candidateEpisodes[index][@"name"] description] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];if([episodeNumberOf(candidateName) isEqualToString:wantedNumber]){candidateEpisode=(NSInteger)index;break;}}
         }
         BOOL episodeMatched=candidateEpisode>=0;
 
