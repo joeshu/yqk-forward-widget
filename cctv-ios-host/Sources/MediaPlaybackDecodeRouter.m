@@ -35,6 +35,7 @@
 const NSUInteger MediaPlaybackDecodeRouteAttemptedAVPlayer = 1 << 0;
 const NSUInteger MediaPlaybackDecodeRouteAttemptedCicadaPlayer = 1 << 1;
 const NSUInteger MediaPlaybackDecodeRouteAttemptedWebView = 1 << 2;
+const NSUInteger MediaPlaybackDecodeRouteAttemptedMPV = 1 << 3;
 
 static NSString *MediaPlaybackDecodeLowerString(id value) {
     return [value isKindOfClass:NSString.class] ? [[(NSString *)value stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] lowercaseString] : @"";
@@ -94,6 +95,18 @@ static NSString *MediaPlaybackDecodeResultFormat(NSDictionary *result) {
     return MediaPlaybackDecodeLowerString(result[@"format"] ?: result[@"mediaType"] ?: result[@"playbackType"]);
 }
 
+static BOOL MediaPlaybackMPVUniversalAvailable(void);
+
+BOOL MediaPlaybackMPVRouteEnabled(void) {
+    if ([[NSUserDefaults standardUserDefaults] objectForKey:@"cctv.mediaDecodeMPVEnabled.v1"] &&
+        ![[NSUserDefaults standardUserDefaults] boolForKey:@"cctv.mediaDecodeMPVEnabled.v1"]) return NO;
+#if defined(CCTV_DISABLE_MPV)
+    return NO;
+#else
+    return MediaPlaybackMPVUniversalAvailable();
+#endif
+}
+
 static BOOL MediaPlaybackMPVUniversalAvailable(void) {
     Class cls = NSClassFromString(@"MediaPlaybackMPVAdapter");
     SEL sel = NSSelectorFromString(@"isAvailable");
@@ -149,6 +162,7 @@ NSString *MediaPlaybackDecodeRouteName(MediaPlaybackDecodeRoute route) {
         case MediaPlaybackDecodeRouteAVPlayer: return @"avplayer";
         case MediaPlaybackDecodeRouteCicadaPlayer: return @"cicada";
         case MediaPlaybackDecodeRouteWebView: return @"webview";
+        case MediaPlaybackDecodeRouteMPV: return @"mpv";
         case MediaPlaybackDecodeRouteNone: default: return @"none";
     }
 }
@@ -179,22 +193,14 @@ MediaPlaybackDecodeRoute MediaPlaybackDecodeRouteNextForResult(NSDictionary *res
             ? MediaPlaybackDecodeRouteNone : MediaPlaybackDecodeRouteWebView;
     }
 
-    // Direct media continues through the native AVPlayer/CicadaPlayer routes.
-    // Web documents have already been handed to WebView above.
-    MediaPlaybackDecodeRoute candidates[4];
-    NSUInteger count = 0;
-    if (preferCicada || webOnly || requiresWebPlayback || (cicadaSupported && !avSupported)) {
-        candidates[count++] = MediaPlaybackDecodeRouteCicadaPlayer;
-        candidates[count++] = MediaPlaybackDecodeRouteAVPlayer;
-    } else {
-        candidates[count++] = MediaPlaybackDecodeRouteAVPlayer;
-        candidates[count++] = MediaPlaybackDecodeRouteCicadaPlayer;
-    }
-    for (NSUInteger i = 0; i < count; i++) {
+    // Ordered VOD fallback: AVPlayer → MPV → Cicada → WebView.
+    MediaPlaybackDecodeRoute candidates[] = { MediaPlaybackDecodeRouteAVPlayer, MediaPlaybackDecodeRouteMPV, MediaPlaybackDecodeRouteCicadaPlayer, MediaPlaybackDecodeRouteWebView };
+    for (NSUInteger i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
         MediaPlaybackDecodeRoute route = candidates[i];
-        NSUInteger bit = route == MediaPlaybackDecodeRouteAVPlayer ? MediaPlaybackDecodeRouteAttemptedAVPlayer
-            : route == MediaPlaybackDecodeRouteCicadaPlayer ? MediaPlaybackDecodeRouteAttemptedCicadaPlayer
-            : MediaPlaybackDecodeRouteAttemptedWebView;
+        if (route == MediaPlaybackDecodeRouteMPV && !MediaPlaybackMPVRouteEnabled()) continue;
+        NSUInteger bit = route == MediaPlaybackDecodeRouteAVPlayer ? MediaPlaybackDecodeRouteAttemptedAVPlayer :
+            route == MediaPlaybackDecodeRouteMPV ? MediaPlaybackDecodeRouteAttemptedMPV :
+            route == MediaPlaybackDecodeRouteCicadaPlayer ? MediaPlaybackDecodeRouteAttemptedCicadaPlayer : MediaPlaybackDecodeRouteAttemptedWebView;
         if ((attemptedRoutes & bit) == 0) return route;
     }
     return MediaPlaybackDecodeRouteNone;

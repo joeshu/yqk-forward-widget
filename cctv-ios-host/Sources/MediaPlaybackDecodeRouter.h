@@ -17,12 +17,15 @@ typedef NS_ENUM(NSInteger, MediaPlaybackDecodeRoute) {
     MediaPlaybackDecodeRouteAVPlayer,
     MediaPlaybackDecodeRouteCicadaPlayer,
     MediaPlaybackDecodeRouteWebView,
+    MediaPlaybackDecodeRouteMPV,
 };
 
 // 已尝试过的路由位掩码（传给 MediaPlaybackDecodeRouteNextForResult，防回退循环）。
 FOUNDATION_EXPORT const NSUInteger MediaPlaybackDecodeRouteAttemptedAVPlayer;
 FOUNDATION_EXPORT const NSUInteger MediaPlaybackDecodeRouteAttemptedCicadaPlayer;
 FOUNDATION_EXPORT const NSUInteger MediaPlaybackDecodeRouteAttemptedWebView;
+FOUNDATION_EXPORT const NSUInteger MediaPlaybackDecodeRouteAttemptedMPV;
+FOUNDATION_EXPORT BOOL MediaPlaybackMPVRouteEnabled(void);
 
 // 该结果是否可由 CicadaPlayer（ffmpeg 内核）解码。
 // 判定依据：format / mime / URL 扩展名 / scheme（rtmp）。
