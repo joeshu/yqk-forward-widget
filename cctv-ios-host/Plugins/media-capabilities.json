@@ -61,5 +61,16 @@
     "wmv",
     "rv"
   ],
-  "verifiedNetworkTransports": []
+  "verifiedNetworkTransports": [],
+  "protocolCapabilities": {
+    "hls": "verified",
+    "mp4": "verified",
+    "flv": "engine_dependent",
+    "dash": "engine_dependent",
+    "rtmp": "engine_dependent",
+    "rtsp": "experimental",
+    "srt": "experimental",
+    "smb": "experimental",
+    "udp": "experimental"
+  }
 }
