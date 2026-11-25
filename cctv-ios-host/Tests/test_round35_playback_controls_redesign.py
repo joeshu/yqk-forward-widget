@@ -28,7 +28,7 @@ class Round35PlaybackControlsRedesignTests(unittest.TestCase):
         self.assertNotIn("UIAlertControllerStyleActionSheet", more)
 
     def test_02_vod_playback_menu_has_aligned_sf_symbols_live_subtitles_and_clean_groups(self):
-        mp = (SOURCES / "MediaPlaybackViewController.m").read_text(encoding="utf-8")
+        mp = (SOURCES / "MediaPlaybackViewController.m").read_text(encoding="utf-8") + (SOURCES / "MediaPlaybackSettingsCoordinator.m").read_text(encoding="utf-8")
         for token in (
             'UIImage *icon=[UIImage systemImageNamed:isAudio?@"waveform":@"captions.bubble"];',
             'menuWithTitle:@"播放速度" image:[UIImage systemImageNamed:@"gauge.with.needle"]',

@@ -9,7 +9,7 @@ class TestRound30MediaMenusSearchAndPlaybackPolish(unittest.TestCase):
         return (ROOT / rel_path).read_text(encoding="utf-8")
 
     def test_playback_options_menu_uses_native_state_and_inline_sections(self):
-        src = self._read("Sources/MediaPlaybackViewController.m")
+        src = self._read("Sources/MediaPlaybackViewController.m") + self._read("Sources/MediaPlaybackSettingsCoordinator.m")
         self.assertIn("optAct.state=[selected isEqual:option]?UIMenuElementStateOn:UIMenuElementStateOff;", src)
         self.assertIn("rateAct.state=fabs(currentRate-rate)<0.01?UIMenuElementStateOn:UIMenuElementStateOff;", src)
         self.assertIn("gravAct.state=active?UIMenuElementStateOn:UIMenuElementStateOff;", src)
