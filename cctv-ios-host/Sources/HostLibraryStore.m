@@ -437,6 +437,7 @@ static double HostLibraryWatchedAt(NSDictionary *entry) {
         if (![self insertLocked:"INSERT OR REPLACE INTO recents(key, payload, watched_at, position) VALUES(?, ?, ?, ?);"
                             key:key payload:payload time:HostLibraryWatchedAt(entry) position:position]) return NO;
         position++;
+        if (position >= HostLibraryRecentsLimit) break;
     }
     return YES;
 }
@@ -602,16 +603,20 @@ static double HostLibraryWatchedAt(NSDictionary *entry) {
         // 归一化（按 id 去重/过滤无 id 项/确保可序列化）在两层共用，确保 NSUserDefaults 回退镜像与 SQLite 一致，
         // 避免备份含无 id 或重复 id 条目时回退层保留无效/重复项、与 SQLite 层分叉导致再快照丢数据。
         NSArray<NSDictionary *> *normalized = HostLibraryNormalizedRecents(snapshot);
+        // 与 replaceMediaWatchHistory 一致：按 Store 上限裁剪，确保备份恢复路径与 appendRecent /
+        // reconcileFallbackDataLocked 的 24 条上限一致，避免超大导入在 SQLite 或回退镜像中残留超限条目。
+        NSMutableArray<NSDictionary *> *bounded = [NSMutableArray array];
+        for (NSUInteger i = 0; i < normalized.count && i < HostLibraryRecentsLimit; i++) [bounded addObject:normalized[i]];
         if ([self prepareLocked]) {
             if (![self transactionLocked:^BOOL{
-                return [self writeRecentsLocked:normalized];
+                return [self writeRecentsLocked:bounded];
             }]) {
                 [self closeLocked];
                 [self.defaults setBool:YES forKey:HostLibraryFallbackPendingKey];
-                [self.defaults setObject:normalized forKey:HostLibraryLegacyRecentsKey];
+                [self.defaults setObject:bounded forKey:HostLibraryLegacyRecentsKey];
             }
         } else {
-            [self.defaults setObject:normalized forKey:HostLibraryLegacyRecentsKey];
+            [self.defaults setObject:bounded forKey:HostLibraryLegacyRecentsKey];
         }
     }];
 }
