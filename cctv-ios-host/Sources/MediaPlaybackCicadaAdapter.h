@@ -73,8 +73,8 @@ FOUNDATION_EXPORT NSString * const MediaPlaybackCicadaAdapterErrorDomain;
 - (NSArray<NSDictionary *> *)availableTracks;
 - (BOOL)canSelectTracks;
 - (BOOL)selectTrackWithIndex:(NSInteger)index;
-// 长按手势会请求 3.0x：上限放宽到 3.0（设置菜单的持久倍速仍由调用方
-// 钳制在 2.0 以内，见 MediaPlaybackViewController setPlaybackRate:）。
+// 长按手势会请求 3.0x：上限放宽到 3.0（设置菜单的持久倍速同样由调用方
+// 钳制到 3.0 以内，见 MediaPlaybackViewController setPlaybackRate:）。
 // gravity 取 AVLayerVideoGravityResizeAspect / ResizeAspectFill / Resize；
 // 可在 prepare 之前设置，创建 SDK 播放器后会应用保存的值。
 // 映射到 CicadaPlayer scalingMode（CicadaSDK.h 的 CicadaScalingMode：
