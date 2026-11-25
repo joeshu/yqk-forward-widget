@@ -1,7 +1,19 @@
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
 #import "MediaJARRuntime.h"
+#import "HostRuntimeLifecycleCoordinator.h"
 void RunCicadaAdapterProbe(void (^completion)(BOOL,NSString *));
+
+// Stub: MediaJARRuntime.m now calls HostRuntimeLifecycleCoordinator for JVM/Node
+// mutual exclusion. The real .m pulls in PyHost/JSPluginRuntime/NodePluginRuntime
+// which are not linked into this minimal jar-smoke harness. The smoke test only
+// exercises JAR request operations; no idle reclaim or memory warning paths fire,
+// so a no-op stub is safe and mirrors the pattern in native_media_api_tests.m.
+@implementation HostRuntimeLifecycleCoordinator
++ (instancetype)shared {static HostRuntimeLifecycleCoordinator *instance;static dispatch_once_t once;dispatch_once(&once,^{instance=[self new];});return instance;}
+- (void)prepareForMutualExclusionBeforeActivating:(HostRuntimeKind)kind {}
+- (void)noteRuntimeActivity:(HostRuntimeKind)kind {}
+@end
 @interface JARSmokeApp : UIResponder <UIApplicationDelegate>
 @property(nonatomic,strong) UIWindow *window;
 @property(nonatomic,strong) MediaJARRequest *request;

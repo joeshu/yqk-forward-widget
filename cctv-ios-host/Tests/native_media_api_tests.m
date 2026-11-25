@@ -14,6 +14,16 @@
 // PyHost.m is not linked into this harness; MediaAPIClient only needs the control token.
 NSString *PyHostControlToken(void) {return @"test-control-token";}
 
+// HostRuntimeLifecycleCoordinator stub: MediaJARRuntime.m now calls into it for
+// JVM↔Node mutual exclusion, but the real .m pulls in PyHost/JS/Node runtimes not
+// linked here. This no-op stub mirrors the RuntimeDiagnostics stub above.
+#import "HostRuntimeLifecycleCoordinator.h"
+@implementation HostRuntimeLifecycleCoordinator
++ (instancetype)shared {static HostRuntimeLifecycleCoordinator *instance;static dispatch_once_t once;dispatch_once(&once,^{instance=[self new];});return instance;}
+- (void)prepareForMutualExclusionBeforeActivating:(HostRuntimeKind)kind {}
+- (void)noteRuntimeActivity:(HostRuntimeKind)kind {}
+@end
+
 static void check(BOOL condition,NSString *message){if(!condition){NSLog(@"FAILED: %@",message);exit(1);}}
 @interface MediaAPIClient (RequestIdentityProbe)
 - (NSURLSession *)sessionForOperation:(NSString *)operation;
