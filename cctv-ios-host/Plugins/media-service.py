@@ -110,6 +110,7 @@ class Server(ThreadingHTTPServer):
         self.cenc_entries = collections.OrderedDict()
         self.cenc_sessions = collections.OrderedDict()
         self.host_fetch_token = uuid.uuid4().hex
+        self.control_token = os.environ.get('CCTVHOST_CONTROL_TOKEN', '')
         self.slots = threading.BoundedSemaphore(16)
         self._host_workers = self.slots
         super().__init__(address, Handler)
@@ -741,6 +742,11 @@ class Handler(BaseHTTPRequestHandler):
         operation = 'route'
         try:
             parts = urllib.parse.urlsplit(self.path)
+            if (parts.path in ('/', '/health') or parts.path.startswith('/api/v1/')):
+                supplied = self.headers.get('X-CCTVHost-Token', '')
+                if self.server.control_token and not hmac.compare_digest(supplied, self.server.control_token):
+                    self.send(403, {'ok': False, 'error': 'forbidden'})
+                    return
             if parts.path == '/_cctvhost/host-fetch':
                 if not post:
                     self.send_host_fetch_response(405, b'', [('Allow', 'POST')], 'Method Not Allowed')

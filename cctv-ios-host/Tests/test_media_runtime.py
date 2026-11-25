@@ -39,6 +39,31 @@ class Spider:
 
 
 class MediaTests(unittest.TestCase):
+    def test_control_token_protects_health_and_api_but_not_media_routes(self):
+        token = 'unit-test-control-token'
+        runtime = media.MediaRuntime()
+        with mock.patch.dict(os.environ, {'CCTVHOST_CONTROL_TOKEN': token}):
+            server = transport.Server(('127.0.0.1', 0), runtime)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            def request(path, headers=None):
+                conn = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=3)
+                conn.request('GET', path, headers=headers or {})
+                response = conn.getresponse()
+                body = response.read()
+                conn.close()
+                return response.status, body
+            self.assertEqual(request('/health')[0], 403)
+            self.assertEqual(request('/api/v1/home')[0], 403)
+            self.assertEqual(request('/health', {'X-CCTVHost-Token': token})[0], 200)
+            self.assertNotEqual(request('/media/not-a-token')[0], 403)
+        finally:
+            server.shutdown()
+            server.server_close()
+            runtime.close()
+            thread.join(timeout=2)
+
     def test_nested_playback_aliases_keep_signed_addresses_and_per_choice_headers(self):
         result = media.playback({'url': {'values': [
             {'url': 'http://127.0.0.1:18700/one.m3u8?sig=a%2Bb',

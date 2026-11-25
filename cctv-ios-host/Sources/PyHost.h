@@ -3,6 +3,7 @@
 NS_ASSUME_NONNULL_BEGIN
 
 FOUNDATION_EXPORT NSNotificationName const PyHostRuntimeStateDidChangeNotification;
+FOUNDATION_EXPORT NSString *PyHostControlToken(void);
 
 /// 内置 CPython 宿主：启动后在同一进程内运行 Python 插件脚本（如 ysp-live）
 @interface PyHost : NSObject

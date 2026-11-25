@@ -6,6 +6,7 @@
 #import "MediaPlaybackHeaders.h"
 #import "RuntimeDiagnostics.h"
 #import "TVBoxCatalogStore.h"
+#import "PyHost.h"
 #import <objc/message.h>
 
 static void MediaAPIRecordAdaptationMonitor(NSString *operation, NSDictionary *source, NSString *provider, NSDictionary *arguments, id result, NSError *error, NSInteger elapsedMs) {
@@ -1584,7 +1585,7 @@ static id MediaJARBridgeNormalize(NSString *operation,NSDictionary *arguments,NS
     }
     NSError *requestError=nil;NSURL *url=nil;NSMutableURLRequest *request=nil;
     if(self.tvboxSource){request=[[self tvboxRequestForOperation:operation arguments:arguments?:@{} error:&requestError] mutableCopy];url=request.URL;}
-    else{url=[NSURL URLWithString:[NSString stringWithFormat:@"http://127.0.0.1:%ld/api/v1/%@",(long)self.port,operation]];request=[NSMutableURLRequest requestWithURL:url];request.HTTPMethod=@"POST";request.HTTPBody=[NSJSONSerialization dataWithJSONObject:arguments?:@{} options:0 error:NULL];[request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];[request setValue:requestID forHTTPHeaderField:@"X-CCTVHost-Request-ID"];if(correlationID.length)[request setValue:correlationID forHTTPHeaderField:@"X-CCTVHost-Correlation-ID"];}
+    else{url=[NSURL URLWithString:[NSString stringWithFormat:@"http://127.0.0.1:%ld/api/v1/%@",(long)self.port,operation]];request=[NSMutableURLRequest requestWithURL:url];request.HTTPMethod=@"POST";request.HTTPBody=[NSJSONSerialization dataWithJSONObject:arguments?:@{} options:0 error:NULL];[request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];[request setValue:PyHostControlToken() forHTTPHeaderField:@"X-CCTVHost-Token"];[request setValue:requestID forHTTPHeaderField:@"X-CCTVHost-Request-ID"];if(correlationID.length)[request setValue:correlationID forHTTPHeaderField:@"X-CCTVHost-Correlation-ID"];}
     if(!request){NSError *failure=requestError?:[NSError errorWithDomain:@"CCTVHostMedia" code:5 userInfo:@{NSLocalizedDescriptionKey:@"无法创建资源请求"}];if(diagnosticsEnabled){NSMutableDictionary *fields=[@{@"request_id":requestID,@"operation":operation?:@"unknown",@"protocol":self.tvboxSource[@"protocol"]?:@"plugin",@"failure_stage":@"invalid_request",@"error_domain":failure.domain?:@"",@"error_code":@(failure.code),@"error_message":failure.localizedDescription?:@""} mutableCopy];if(correlationID.length)fields[@"correlation_id"]=correlationID;[RuntimeDiagnostics.shared recordEvent:@"media_api_failed" category:@"media_api" fields:fields];}self.activeRequestID=nil;self.activeCorrelationID=nil;self.activeOperation=nil;if(completion)completion(nil,failure);return;}
     request.timeoutInterval=[operation isEqual:@"play"]?self.playTimeoutMilliseconds/1000.0:self.requestTimeout;
     __weak typeof(self) weakSelf=self;
