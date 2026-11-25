@@ -38,7 +38,7 @@
 - (MPRemoteCommandHandlerStatus)handleTogglePlayPause:(MPRemoteCommandEvent *)event {return [self onMain:^MPRemoteCommandHandlerStatus(void){return [self togglePlayPause];}];}
 - (MPRemoteCommandHandlerStatus)handleNext:(MPRemoteCommandEvent *)event {return [self onMain:^MPRemoteCommandHandlerStatus(void){return [self step:1];}];}
 - (MPRemoteCommandHandlerStatus)handlePrevious:(MPRemoteCommandEvent *)event {return [self onMain:^MPRemoteCommandHandlerStatus(void){return [self step:-1];}];}
-- (MPRemoteCommandHandlerStatus)onMain:(MPRemoteCommandHandlerStatus(^)(void))action {if(NSThread.isMainThread)return action();__block MPRemoteCommandHandlerStatus result;dispatch_sync(dispatch_get_main_queue(),^{result=action();});return result;}
+- (MPRemoteCommandHandlerStatus)onMain:(MPRemoteCommandHandlerStatus(^)(void))action {if(NSThread.isMainThread)return action();if(!self.currentSession)return MPRemoteCommandHandlerStatusNoSuchContent;dispatch_async(dispatch_get_main_queue(),^{(void)action();});return MPRemoteCommandHandlerStatusSuccess;}
 - (void)interruption:(NSNotification *)note {
     NSDictionary *info=note.userInfo;
     void (^apply)(void)=^{

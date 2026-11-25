@@ -1796,13 +1796,13 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
         NSURLSession *sess=[NSURLSession sessionWithConfiguration:cfg];
         __block NSString *foundStream=@"";
         NSString *encoded=[unwrapped stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet characterSetWithCharactersInString:@"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"]]?:@"";
+        dispatch_group_t pGroup=dispatch_group_create();NSMutableArray<NSURLSessionDataTask *> *pTasks=[NSMutableArray array];
         for(NSString *prefix in @[@"https://zy.qiaoji8.com/neibu.php?url=",@"https://zy.qiaoji8.com/gouzi.php?url=",@"https://zy.qiaoji8.com/xiafan.php?url="]){
-            if(foundStream.length)break;
             NSURL *pURL=[NSURL URLWithString:[prefix stringByAppendingString:encoded]];
             if(!pURL)continue;
             NSMutableURLRequest *pReq=[NSMutableURLRequest requestWithURL:pURL cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:3.0];
             [pReq setValue:@"okhttp/4.9.1" forHTTPHeaderField:@"User-Agent"];
-            dispatch_semaphore_t sem=dispatch_semaphore_create(0);
+            dispatch_group_enter(pGroup);
             NSURLSessionDataTask *pTask=[sess dataTaskWithRequest:pReq completionHandler:^(NSData *d,NSURLResponse *r,NSError *e){
                 if(!e&&d.length&&d.length<=2*1024*1024){
                     NSString *txt=[[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding];
@@ -1811,11 +1811,11 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
                         @synchronized(sess){if(!foundStream.length)foundStream=cand;}
                     }
                 }
-                dispatch_semaphore_signal(sem);
+                dispatch_group_leave(pGroup);
             }];
-            [pTask resume];
-            if(dispatch_semaphore_wait(sem,dispatch_time(DISPATCH_TIME_NOW,(int64_t)(2.5*NSEC_PER_SEC)))!=0)[pTask cancel];
+            [pTask resume];[pTasks addObject:pTask];
         }
+        if(dispatch_group_wait(pGroup,dispatch_time(DISPATCH_TIME_NOW,(int64_t)(3.0*NSEC_PER_SEC)))!=0){for(NSURLSessionDataTask *t in pTasks)[t cancel];}
         NSString *cleanTitle=[[vodTitle?:@"" stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] stringByReplacingOccurrencesOfString:@"《" withString:@""];
         cleanTitle=[cleanTitle stringByReplacingOccurrencesOfString:@"》" withString:@""];
         BOOL hasFound=NO;@synchronized(sess){hasFound=foundStream.length>0;}
