@@ -236,7 +236,13 @@
         workflow.onSaveCandidate=^(NSDictionary *candidate,BOOL update,void (^completion)(NSError *)){RootViewController *owner=weakSelf;if(owner)[owner saveImportCandidate:candidate update:update completion:completion];else completion([NSError errorWithDomain:@"ResourceImport" code:1 userInfo:@{NSLocalizedDescriptionKey:@"资源页面已关闭"}]);};
         [workflow refreshExistingResourceMatches];
     }
-    UINavigationController *navigation=[[UINavigationController alloc] initWithRootViewController:self.resourceImportWorkflow];navigation.modalPresentationStyle=UIModalPresentationFullScreen;HostStyleNavigation(navigation);[self.navigationController.topViewController presentViewController:navigation animated:YES completion:nil];
+    UINavigationController *navigation=[[UINavigationController alloc] initWithRootViewController:self.resourceImportWorkflow];
+    // iPad regular 尺寸采用 formSheet 弹出（居中卡片 + sheet detents + grabber）；
+    // iPhone compact 维持既有 full-screen 演示，样式不变。
+    UIViewController *presenter=self.navigationController.topViewController;
+    BOOL regularWidth=presenter.traitCollection.horizontalSizeClass==UIUserInterfaceSizeClassRegular;
+    navigation.modalPresentationStyle=regularWidth?UIModalPresentationFormSheet:UIModalPresentationFullScreen;
+    HostStyleNavigation(navigation);[presenter presentViewController:navigation animated:YES completion:nil];
 }
 - (void)saveImportCandidate:(NSDictionary *)candidate update:(BOOL)update completion:(void (^)(NSError *error))completion {
     NSError *failure=nil;NSString *kind=candidate[@"kind"],*sourceFilename=[candidate[@"localFileName"] isKindOfClass:NSString.class]?candidate[@"localFileName"]:@"";
