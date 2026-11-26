@@ -70,6 +70,10 @@ FOUNDATION_EXPORT const NSUInteger HostLibraryRecentsLimit;
 /// 等待所有已排队的写入完成。
 - (void)flush;
 
+/// 外部直接改了底层 NSUserDefaults 回退数据（如备份恢复的两面写）后调用：
+/// 只自增快照 epoch 使快照失效，下次读重建；不碰队列、不读盘。
+- (void)invalidateSnapshots;
+
 /// 若当前处于回退模式，标记备份恢复待对账（下次 SQLite 恢复时以 REPLACE 语义合并）。
 - (void)markRestorePendingIfFallback;
 

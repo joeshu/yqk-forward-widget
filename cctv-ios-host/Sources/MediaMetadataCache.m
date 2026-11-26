@@ -1,4 +1,5 @@
 #import "MediaMetadataCache.h"
+#import "RuntimeDiagnostics.h"
 #import <TargetConditionals.h>
 #if TARGET_OS_IOS
 #import <UIKit/UIKit.h>
@@ -105,6 +106,7 @@ static id MediaMetadataPersistentSafeValue(id value, NSString *key, NSUInteger d
 @property(nonatomic, strong) NSMutableDictionary<NSString *, NSDictionary *> *persistentRecords;
 @property(nonatomic, copy) NSString *persistentPath;
 @property(nonatomic) BOOL persistenceWriteScheduled;
+-  (void)loadPersistentRecordsAsync;
 -  (void)loadPersistentRecords;
 -  (void)schedulePersistentWrite;
 @end
@@ -125,12 +127,17 @@ static id MediaMetadataPersistentSafeValue(id value, NSString *key, NSUInteger d
         NSURL *support=[NSFileManager.defaultManager URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask].firstObject;
         NSURL *directory=[support URLByAppendingPathComponent:@"CCTVHost" isDirectory:YES];
         if(directory){[NSFileManager.defaultManager createDirectoryAtURL:directory withIntermediateDirectories:YES attributes:nil error:NULL];[NSFileManager.defaultManager removeItemAtURL:[directory URLByAppendingPathComponent:@"MediaMetadataCache-v1.json"] error:NULL];[NSFileManager.defaultManager removeItemAtURL:[directory URLByAppendingPathComponent:@"MediaMetadataCache-v2.json"] error:NULL];_persistentPath=[[directory URLByAppendingPathComponent:@"MediaMetadataCache-v3.json"] path];}
-        [self loadPersistentRecords];
+        [self loadPersistentRecordsAsync];
 #if TARGET_OS_IOS
         [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(evictMemoryCache) name:UIApplicationDidReceiveMemoryWarningNotification object:nil];
 #endif
     }
     return self;
+}
+- (void)loadPersistentRecordsAsync {
+    // T19/PERF-09：冷启动持久化加载（读文件 + JSON 解析 + 逐条校验/序列化 + 排序）
+    // 不再阻塞首次访问的调用线程；加载完成前读缓存只会 miss（缓存语义安全）。
+    dispatch_async(self.persistenceQueue, ^{ [self loadPersistentRecords]; });
 }
 - (void)loadPersistentRecords {
     if(!self.persistentPath.length)return;
@@ -154,8 +161,12 @@ static id MediaMetadataPersistentSafeValue(id value, NSString *key, NSUInteger d
         [valid addObject:@{@"key":key,@"record":@{@"source_id":sourceID,@"stored_at":@(storedAt),@"operation":operation,@"result":safeResult,@"cost":@(resolvedCost)},@"cost":@(resolvedCost)}];
     }
     [valid sortUsingComparator:^NSComparisonResult(NSDictionary *a,NSDictionary *b){return [(a[@"record"][@"last_access"] ?: a[@"record"][@"stored_at"]) compare:(b[@"record"][@"last_access"] ?: b[@"record"][@"stored_at"])];}];
-    for(NSDictionary *entry in [valid reverseObjectEnumerator]){NSUInteger cost=[entry[@"cost"] unsignedIntegerValue];if(self.persistentRecords.count>=MediaMetadataPersistentEntryLimit||total+cost>MediaMetadataPersistentByteLimit)continue;self.persistentRecords[entry[@"key"]]=entry[@"record"];total+=cost;}
-    if([root[@"version"] integerValue]!=1||self.persistentRecords.count!=records.count)[self schedulePersistentWrite];
+    NSMutableDictionary *loaded=[NSMutableDictionary dictionary];
+    for(NSDictionary *entry in [valid reverseObjectEnumerator]){NSUInteger cost=[entry[@"cost"] unsignedIntegerValue];if(loaded.count>=MediaMetadataPersistentEntryLimit||total+cost>MediaMetadataPersistentByteLimit)continue;loaded[entry[@"key"]]=entry[@"record"];total+=cost;}
+    // T19/PERF-09：发布走协调队列，且只补不存在的 key——加载期间 storeResult 已写入
+    // 的新记录不被磁盘旧值覆盖。
+    dispatch_sync(self.queue, ^{for(NSString *key in loaded)if(!self.persistentRecords[key])self.persistentRecords[key]=loaded[key];});
+    if([root[@"version"] integerValue]!=1||loaded.count!=records.count)[self schedulePersistentWrite];
 }
 - (void)schedulePersistentWrite {
     if(!self.persistentPath.length)return;
@@ -223,11 +234,17 @@ NSUInteger MediaSourceConnectionRevision(NSDictionary *source) {
     if(![@[@"home",@"category",@"search",@"detail"] containsObject:operation])return nil;
     NSString *key=[self keyForSource:source operation:operation arguments:arguments];if(!key.length)return nil;
     __block MediaMetadataCacheEntry *entry=nil;
+    // T19/PERF-09：先测——记录同步等待耗时与命中/未命中（诊断开启时才记，平时只有一次时钟读取）。
+    CFTimeInterval readStartedAt=CACurrentMediaTime();
     dispatch_sync(self.queue, ^{
         entry=[self.entries objectForKey:key];
-        if(!entry&&[@[@"home",@"category"] containsObject:operation]){NSDictionary *record=self.persistentRecords[key];if(record){entry=[MediaMetadataCacheEntry new];entry.result=record[@"result"];entry.sourceID=record[@"source_id"];entry.storedAt=[record[@"stored_at"] doubleValue];NSUInteger cachedCost=[record[@"cost"] unsignedIntegerValue];if(!cachedCost){NSData *encoded=[NSJSONSerialization dataWithJSONObject:entry.result options:0 error:NULL];cachedCost=encoded.length;}entry.cost=cachedCost;[self.entries setObject:entry forKey:key cost:entry.cost];}}
-        if(entry){NSTimeInterval accessed=NSDate.date.timeIntervalSince1970;self.order[key]=@(accessed);NSMutableDictionary *record=[self.persistentRecords[key] mutableCopy];if(record){record[@"last_access"]=@(accessed);self.persistentRecords[key]=record;[self schedulePersistentWrite];}}
+        if(!entry&&[@[@"home",@"category"] containsObject:operation]){NSDictionary *record=self.persistentRecords[key];if(record){entry=[MediaMetadataCacheEntry new];entry.result=record[@"result"];entry.sourceID=record[@"source_id"];entry.storedAt=[record[@"stored_at"] doubleValue];NSUInteger cachedCost=[record[@"cost"] unsignedIntegerValue];if(cachedCost){entry.cost=cachedCost;[self.entries setObject:entry forKey:key cost:entry.cost];}}}
+        // T19/PERF-09：cost 未知的持久记录不再在同步块里序列化求 cost（调用线程
+        // 等待），只返回结果、不提升进内存缓存；cost 总是由 store/load 路径写入，
+        // 未知只出现在损坏记录上。order 只记已提升的条目。
+        if(entry){NSTimeInterval accessed=NSDate.date.timeIntervalSince1970;if([self.entries objectForKey:key])self.order[key]=@(accessed);NSMutableDictionary *record=[self.persistentRecords[key] mutableCopy];if(record){record[@"last_access"]=@(accessed);self.persistentRecords[key]=record;[self schedulePersistentWrite];}}
     });
+    if(RuntimeDiagnostics.shared.enabled){[RuntimeDiagnostics.shared recordEvent:@"media_metadata_cache_read" category:@"media_api" fields:@{@"operation":operation?:@"",@"hit":@(entry!=nil),@"elapsed_ms":@((NSInteger)(MAX(0,CACurrentMediaTime()-readStartedAt)*1000))}];}
     if(!entry)return nil;
     NSTimeInterval age=NSDate.date.timeIntervalSince1970-entry.storedAt;
     if(age<0||age>MAX(0,maximumAge))return nil;
@@ -241,6 +258,8 @@ NSUInteger MediaSourceConnectionRevision(NSDictionary *source) {
         dispatch_sync(self.queue,^{[self.entries removeObjectForKey:key];[self.order removeObjectForKey:key];});
         return;
     }
+    // T19/PERF-09：先测——序列化 + 同步等待耗时（诊断开启时才记）。
+    CFTimeInterval storeStartedAt=CACurrentMediaTime();
     NSData *data=[NSJSONSerialization isValidJSONObject:result]?[NSJSONSerialization dataWithJSONObject:result options:0 error:NULL]:nil;
     if(!data.length||data.length>MediaMetadataCacheSingleEntryLimit){
         if([operation isEqual:@"detail"])dispatch_sync(self.queue,^{[self.entries removeObjectForKey:key];[self.order removeObjectForKey:key];});
@@ -255,10 +274,12 @@ NSUInteger MediaSourceConnectionRevision(NSDictionary *source) {
             NSString *oldest=[self.order keysSortedByValueUsingSelector:@selector(compare:)].firstObject;
             if(!oldest)break;[self.entries removeObjectForKey:oldest];[self.order removeObjectForKey:oldest];
         }
-        if(persist){self.persistentRecords[key]=@{@"source_id":entry.sourceID,@"stored_at":@(entry.storedAt),@"operation":operation,@"result":persistentResult,@"cost":@(persistentData.length)};persistenceChanged=YES;NSArray *oldestFirst=[self.persistentRecords keysSortedByValueUsingComparator:^NSComparisonResult(NSDictionary *a,NSDictionary *b){return [(a[@"last_access"] ?: a[@"stored_at"]) compare:(b[@"last_access"] ?: b[@"stored_at"])];}];NSUInteger total=0;NSUInteger retained=0;for(NSString *candidate in [oldestFirst reverseObjectEnumerator]){NSDictionary *record=self.persistentRecords[candidate];NSUInteger cost=[record[@"cost"] unsignedIntegerValue];if(!cost){NSData *encoded=[NSJSONSerialization dataWithJSONObject:record[@"result"] options:0 error:NULL];cost=encoded.length;}if(retained>=MediaMetadataPersistentEntryLimit||total+cost>MediaMetadataPersistentByteLimit){[self.persistentRecords removeObjectForKey:candidate];[self.entries removeObjectForKey:candidate];[self.order removeObjectForKey:candidate];persistenceChanged=YES;continue;}retained++;total+=cost;}}
+        if(persist){self.persistentRecords[key]=@{@"source_id":entry.sourceID,@"stored_at":@(entry.storedAt),@"operation":operation,@"result":persistentResult,@"cost":@(persistentData.length)};persistenceChanged=YES;NSArray *oldestFirst=[self.persistentRecords keysSortedByValueUsingComparator:^NSComparisonResult(NSDictionary *a,NSDictionary *b){return [(a[@"last_access"] ?: a[@"stored_at"]) compare:(b[@"last_access"] ?: b[@"stored_at"])];}];NSUInteger total=0;NSUInteger retained=0;for(NSString *candidate in [oldestFirst reverseObjectEnumerator]){NSDictionary *record=self.persistentRecords[candidate];NSUInteger cost=[record[@"cost"] unsignedIntegerValue];if(!cost){[self.persistentRecords removeObjectForKey:candidate];[self.entries removeObjectForKey:candidate];[self.order removeObjectForKey:candidate];persistenceChanged=YES;continue;}if(retained>=MediaMetadataPersistentEntryLimit||total+cost>MediaMetadataPersistentByteLimit){[self.persistentRecords removeObjectForKey:candidate];[self.entries removeObjectForKey:candidate];[self.order removeObjectForKey:candidate];persistenceChanged=YES;continue;}retained++;total+=cost;}}
         else if(self.persistentRecords[key]){[self.persistentRecords removeObjectForKey:key];persistenceChanged=YES;}
     });
     if(persistenceChanged)[self schedulePersistentWrite];
+    // T19/PERF-09：先测——序列化 + 同步等待耗时（诊断开启时才记）。
+    if(RuntimeDiagnostics.shared.enabled){[RuntimeDiagnostics.shared recordEvent:@"media_metadata_cache_store" category:@"media_api" fields:@{@"operation":operation?:@"",@"bytes":@(data.length),@"elapsed_ms":@((NSInteger)(MAX(0,CACurrentMediaTime()-storeStartedAt)*1000))}];}
 }
 - (NSTimeInterval)ageOfResultForSource:(NSDictionary *)source operation:(NSString *)operation arguments:(NSDictionary *)arguments {
     if(![@[@"home",@"category",@"search",@"detail"] containsObject:operation])return -1;

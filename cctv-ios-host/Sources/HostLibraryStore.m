@@ -1,4 +1,5 @@
 #import "HostLibraryStore.h"
+#import "RuntimeDiagnostics.h"
 #import <sqlite3.h>
 
 NSString *const HostLibraryLegacyFavoritesKey = @"favorites";
@@ -87,8 +88,23 @@ static NSArray *HostLibraryHistoryRowsByUpserting(NSArray *rows, NSDictionary *e
 @property (nonatomic, strong) dispatch_queue_t queue;
 @property (nonatomic, assign) sqlite3 *db;
 @property (nonatomic, assign) BOOL openAttempted;
+// T19/PERF-10：读用不可变快照。快照只在串行队列上构建（与写同一队列），读到
+// loadedSnapshotEpoch==snapshotEpoch 的线程直接取快照，不用 dispatch_sync 等
+// SQLite 查询 + 全量 JSON 解析；写块开始先自增 epoch（脏标记），结束时刷新快照。
+@property (atomic, strong) NSArray<NSString *> *snapshotFavorites;
+@property (atomic, strong) NSArray<NSDictionary *> *snapshotRecents;
+@property (atomic, strong) NSDictionary<NSString *, NSDictionary *> *snapshotMediaFavorites;
+@property (atomic, strong) NSArray<NSDictionary *> *snapshotMediaHistory;
+@property (atomic) NSUInteger snapshotEpoch;
+@property (atomic) NSUInteger loadedSnapshotEpoch;
 - (void)performSync:(dispatch_block_t)block;
 - (void)performAsync:(dispatch_block_t)block;
+- (void)performWrite:(dispatch_block_t)block;
+- (void)refreshSnapshotsLocked;
+- (NSArray<NSString *> *)favoritesLockedWithPrepared:(BOOL)prepared;
+- (NSArray<NSDictionary *> *)recentsLockedWithPrepared:(BOOL)prepared;
+- (NSDictionary<NSString *, NSDictionary *> *)mediaFavoritesLockedWithPrepared:(BOOL)prepared;
+- (NSArray<NSDictionary *> *)mediaWatchHistoryLockedWithPrepared:(BOOL)prepared;
 - (BOOL)execLocked:(const char *)sql;
 - (void)closeLocked;
 - (BOOL)prepareLocked;
@@ -126,6 +142,7 @@ static NSArray *HostLibraryHistoryRowsByUpserting(NSArray *rows, NSDictionary *e
         _defaults = defaults ?: NSUserDefaults.standardUserDefaults;
         _queue = dispatch_queue_create("com.cctvhost.library.sqlite", DISPATCH_QUEUE_SERIAL);
         dispatch_queue_set_specific(_queue, &kHostLibraryQueueKey, (__bridge void *)self, NULL);
+        _loadedSnapshotEpoch = NSUIntegerMax; // 无快照：首次读走 performSync 构建
     }
     return self;
 }
@@ -153,6 +170,88 @@ static NSArray *HostLibraryHistoryRowsByUpserting(NSArray *rows, NSDictionary *e
 
 - (void)flush {
     [self performSync:^{}];
+}
+
+/// 外部直接改了底层 NSUserDefaults 回退数据（如备份恢复的两面写）后调用：
+/// 只自增 epoch 使快照失效，下次读重建；不碰队列、不读盘。
+- (void)invalidateSnapshots {
+    self.snapshotEpoch++;
+}
+
+- (void)performWrite:(dispatch_block_t)block {
+    // T19/PERF-10：写块开始先自增 epoch（脏标记——块执行期间的读会走 performSync
+    // 等本块完成，不会拿到写了一半的快照），结束时刷新快照再发布。
+    [self performAsync:^{
+        self.snapshotEpoch++;
+        block();
+        [self refreshSnapshotsLocked];
+    }];
+}
+
+/// 只在串行队列上调用。按当前有效源（SQLite 优先，回退时 NSUserDefaults）
+/// 重建四个集合的不可变快照；先发布集合，最后更新 loadedSnapshotEpoch。
+- (void)refreshSnapshotsLocked {
+    BOOL prepared = [self prepareLocked];
+    self.snapshotFavorites = [self favoritesLockedWithPrepared:prepared];
+    self.snapshotRecents = [self recentsLockedWithPrepared:prepared];
+    self.snapshotMediaFavorites = [self mediaFavoritesLockedWithPrepared:prepared];
+    self.snapshotMediaHistory = [self mediaWatchHistoryLockedWithPrepared:prepared];
+    self.loadedSnapshotEpoch = self.snapshotEpoch;
+}
+
+- (NSArray<NSString *> *)favoritesLockedWithPrepared:(BOOL)prepared {
+    if (prepared) {
+        NSMutableArray<NSString *> *rows = [NSMutableArray array];
+        for (id value in [self payloadsLocked:"SELECT payload FROM favorites ORDER BY position ASC;"]) {
+            if ([value isKindOfClass:NSString.class]) [rows addObject:value];
+        }
+        return [rows copy];
+    }
+    return [self.defaults arrayForKey:HostLibraryLegacyFavoritesKey] ?: @[];
+}
+
+- (NSArray<NSDictionary *> *)recentsLockedWithPrepared:(BOOL)prepared {
+    if (prepared) {
+        NSMutableArray<NSDictionary *> *rows = [NSMutableArray array];
+        for (id value in [self payloadsLocked:"SELECT payload FROM recents ORDER BY position ASC;"]) {
+            if ([value isKindOfClass:NSDictionary.class]) [rows addObject:value];
+        }
+        return [rows copy];
+    }
+    return [self.defaults arrayForKey:HostLibraryLegacyRecentsKey] ?: @[];
+}
+
+- (NSDictionary<NSString *, NSDictionary *> *)mediaFavoritesLockedWithPrepared:(BOOL)prepared {
+    if (!prepared) return [self.defaults dictionaryForKey:HostMediaFavoritesKey] ?: @{};
+    NSMutableDictionary *rows = [NSMutableDictionary dictionary];
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(self.db, "SELECT key,payload FROM media_favorites ORDER BY position ASC;", -1, &st, NULL) == SQLITE_OK) {
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            const char *k = (const char *)sqlite3_column_text(st, 0);
+            const void *b = sqlite3_column_blob(st, 1);
+            int n = sqlite3_column_bytes(st, 1);
+            if (k && b && n > 0) {
+                NSString *key = [NSString stringWithUTF8String:k];
+                id v = [NSJSONSerialization JSONObjectWithData:[NSData dataWithBytes:b length:(NSUInteger)n] options:NSJSONReadingFragmentsAllowed error:NULL];
+                if (key && [v isKindOfClass:NSDictionary.class]) rows[key] = v;
+            }
+        }
+    }
+    if (st) sqlite3_finalize(st);
+    return [rows copy];
+}
+
+- (NSArray<NSDictionary *> *)mediaWatchHistoryLockedWithPrepared:(BOOL)prepared {
+    if (!prepared) return [self.defaults arrayForKey:HostMediaHistoryKey] ?: @[];
+    NSMutableArray *rows = [NSMutableArray array];
+    for (id value in [self payloadsLocked:"SELECT payload FROM media_watch_history ORDER BY position ASC;"]) {
+        if ([value isKindOfClass:NSDictionary.class]) {
+            NSMutableDictionary *row = [value mutableCopy];
+            if ([row[@"updatedAt"] isKindOfClass:NSNumber.class]) row[@"updatedAt"] = [NSDate dateWithTimeIntervalSince1970:[row[@"updatedAt"] doubleValue]];
+            [rows addObject:row];
+        }
+    }
+    return [rows copy];
 }
 
 #pragma mark - SQLite (queue only)
@@ -492,30 +591,30 @@ static NSArray *HostLibraryHistoryRowsByUpserting(NSArray *rows, NSDictionary *e
 }
 
 - (NSArray<NSString *> *)allFavorites {
+    // T19/PERF-10：快照命中直接返回（可变副本，保持旧返回类型），不进队列等 SQLite
+    // 查询 + 全量 JSON 解析。
+    NSArray<NSString *> *snapshot = self.snapshotFavorites;
+    if (snapshot && self.loadedSnapshotEpoch == self.snapshotEpoch) return [snapshot mutableCopy];
     __block NSArray<NSString *> *result = @[];
+    CFTimeInterval rebuildStartedAt = CACurrentMediaTime();
     [self performSync:^{
-        if ([self prepareLocked]) {
-            NSMutableArray<NSString *> *rows = [NSMutableArray array];
-            for (id value in [self payloadsLocked:"SELECT payload FROM favorites ORDER BY position ASC;"]) {
-                if ([value isKindOfClass:NSString.class]) [rows addObject:value];
-            }
-            result = rows;
-        } else {
-            result = [self.defaults arrayForKey:HostLibraryLegacyFavoritesKey] ?: @[];
-        }
+        [self refreshSnapshotsLocked];
+        result = self.snapshotFavorites ?: @[];
     }];
-    return result;
+    if (RuntimeDiagnostics.shared.enabled) {
+        [RuntimeDiagnostics.shared recordEvent:@"library_store_snapshot_rebuild" category:@"media_api" fields:@{@"collection":@"favorites",@"elapsed_ms":@((NSInteger)(MAX(0, CACurrentMediaTime() - rebuildStartedAt) * 1000))}];
+    }
+    return [result mutableCopy];
 }
 
 - (BOOL)isFavorite:(NSString *)key {
     if (![key isKindOfClass:NSString.class] || !key.length) return NO;
+    NSArray<NSString *> *snapshot = self.snapshotFavorites;
+    if (snapshot && self.loadedSnapshotEpoch == self.snapshotEpoch) return [snapshot containsObject:key];
     __block BOOL found = NO;
     [self performSync:^{
-        if ([self prepareLocked]) {
-            found = [self stepLocked:"SELECT 1 FROM favorites WHERE key = ? LIMIT 1;" text:key] == SQLITE_ROW;
-        } else {
-            found = [[self.defaults arrayForKey:HostLibraryLegacyFavoritesKey] containsObject:key];
-        }
+        [self refreshSnapshotsLocked];
+        found = [self.snapshotFavorites containsObject:key];
     }];
     return found;
 }
@@ -523,7 +622,7 @@ static NSArray *HostLibraryHistoryRowsByUpserting(NSArray *rows, NSDictionary *e
 - (void)addFavorite:(NSString *)key {
     if (![key isKindOfClass:NSString.class] || !key.length) return;
     NSString *favoriteKey = [key copy];
-    [self performAsync:^{
+    [self performWrite:^{
         if ([self prepareLocked]) {
             if ([self stepLocked:"SELECT 1 FROM favorites WHERE key = ? LIMIT 1;" text:favoriteKey] == SQLITE_ROW) return;
             sqlite3_int64 position = [self int64Locked:"SELECT COALESCE(MAX(position), -1) + 1 FROM favorites;"];
@@ -541,7 +640,7 @@ static NSArray *HostLibraryHistoryRowsByUpserting(NSArray *rows, NSDictionary *e
 - (void)removeFavorite:(NSString *)key {
     if (![key isKindOfClass:NSString.class] || !key.length) return;
     NSString *favoriteKey = [key copy];
-    [self performAsync:^{
+    [self performWrite:^{
         if ([self prepareLocked]) {
             [self stepLocked:"DELETE FROM favorites WHERE key = ?;" text:favoriteKey];
         } else {
@@ -554,7 +653,7 @@ static NSArray *HostLibraryHistoryRowsByUpserting(NSArray *rows, NSDictionary *e
 
 - (void)replaceFavorites:(NSArray *)favorites {
     NSArray *snapshot = [favorites isKindOfClass:NSArray.class] ? [favorites copy] : @[];
-    [self performAsync:^{
+    [self performWrite:^{
         // 归一化（去重/过滤空串）在两层共用，确保 NSUserDefaults 回退镜像与 SQLite 一致，
         // 避免备份含重复收藏时回退层出现重复条目、与 SQLite 层分叉。
         NSArray<NSString *> *normalized = HostLibraryNormalizedFavorites(snapshot);
@@ -573,26 +672,21 @@ static NSArray *HostLibraryHistoryRowsByUpserting(NSArray *rows, NSDictionary *e
 }
 
 - (NSArray<NSDictionary *> *)recents {
+    NSArray<NSDictionary *> *snapshot = self.snapshotRecents;
+    if (snapshot && self.loadedSnapshotEpoch == self.snapshotEpoch) return [snapshot mutableCopy];
     __block NSArray<NSDictionary *> *result = @[];
     [self performSync:^{
-        if ([self prepareLocked]) {
-            NSMutableArray<NSDictionary *> *rows = [NSMutableArray array];
-            for (id value in [self payloadsLocked:"SELECT payload FROM recents ORDER BY position ASC;"]) {
-                if ([value isKindOfClass:NSDictionary.class]) [rows addObject:value];
-            }
-            result = rows;
-        } else {
-            result = [self.defaults arrayForKey:HostLibraryLegacyRecentsKey] ?: @[];
-        }
+        [self refreshSnapshotsLocked];
+        result = self.snapshotRecents ?: @[];
     }];
-    return result;
+    return [result mutableCopy];
 }
 
 - (void)appendRecent:(NSDictionary *)entry {
     NSString *key = HostLibraryRecentKey(entry);
     if (!key.length) return;
     NSDictionary *snapshot = [entry copy];
-    [self performAsync:^{
+    [self performWrite:^{
         if ([self prepareLocked]) {
             NSData *payload = HostLibraryJSONData(snapshot);
             if (!payload) return;
@@ -616,7 +710,7 @@ static NSArray *HostLibraryHistoryRowsByUpserting(NSArray *rows, NSDictionary *e
 
 - (void)replaceRecents:(NSArray *)recents {
     NSArray *snapshot = [recents isKindOfClass:NSArray.class] ? [recents copy] : @[];
-    [self performAsync:^{
+    [self performWrite:^{
         // 归一化（按 id 去重/过滤无 id 项/确保可序列化）在两层共用，确保 NSUserDefaults 回退镜像与 SQLite 一致，
         // 避免备份含无 id 或重复 id 条目时回退层保留无效/重复项、与 SQLite 层分叉导致再快照丢数据。
         NSArray<NSDictionary *> *normalized = HostLibraryNormalizedRecents(snapshot);
@@ -643,13 +737,27 @@ static NSArray *HostLibraryHistoryRowsByUpserting(NSArray *rows, NSDictionary *e
 }
 
 - (NSDictionary<NSString *,NSDictionary *> *)mediaFavorites {
-    __block NSDictionary *out=@{}; [self performSync:^{ if (![self prepareLocked]) { out=[self.defaults dictionaryForKey:HostMediaFavoritesKey] ?: @{}; return; } NSMutableDictionary *rows=[NSMutableDictionary dictionary]; sqlite3_stmt *st=NULL; if(sqlite3_prepare_v2(self.db,"SELECT key,payload FROM media_favorites ORDER BY position ASC;",-1,&st,NULL)==SQLITE_OK){ while(sqlite3_step(st)==SQLITE_ROW){ const char *k=(const char *)sqlite3_column_text(st,0); const void *b=sqlite3_column_blob(st,1); int n=sqlite3_column_bytes(st,1); if(k&&b&&n>0){ NSString *key=[NSString stringWithUTF8String:k]; id v=[NSJSONSerialization JSONObjectWithData:[NSData dataWithBytes:b length:(NSUInteger)n] options:NSJSONReadingFragmentsAllowed error:NULL]; if(key&&[v isKindOfClass:NSDictionary.class])rows[key]=v; } } } if(st)sqlite3_finalize(st); out=rows; }]; return out;
+    NSDictionary *snapshot = self.snapshotMediaFavorites;
+    if (snapshot && self.loadedSnapshotEpoch == self.snapshotEpoch) return [snapshot mutableCopy];
+    __block NSDictionary *out = @{};
+    [self performSync:^{
+        [self refreshSnapshotsLocked];
+        out = self.snapshotMediaFavorites ?: @{};
+    }];
+    return [out mutableCopy];
 }
-- (void)replaceMediaFavorites:(NSDictionary *)favorites { NSDictionary *copy=[favorites isKindOfClass:NSDictionary.class]?[favorites copy]:@{}; [self performAsync:^{ if([self prepareLocked]) { if(![self transactionLocked:^BOOL{return [self writeMediaFavoritesLocked:copy];}]){[self closeLocked];[self.defaults setBool:YES forKey:HostLibraryFallbackPendingKey];[self.defaults setObject:copy forKey:HostMediaFavoritesKey];} } else [self.defaults setObject:copy forKey:HostMediaFavoritesKey]; }]; }
+- (void)replaceMediaFavorites:(NSDictionary *)favorites { NSDictionary *copy=[favorites isKindOfClass:NSDictionary.class]?[favorites copy]:@{}; [self performWrite:^{ if([self prepareLocked]) { if(![self transactionLocked:^BOOL{return [self writeMediaFavoritesLocked:copy];}]){[self closeLocked];[self.defaults setBool:YES forKey:HostLibraryFallbackPendingKey];[self.defaults setObject:copy forKey:HostMediaFavoritesKey];} } else [self.defaults setObject:copy forKey:HostMediaFavoritesKey]; }]; }
 - (NSArray<NSDictionary *> *)mediaWatchHistory {
-    __block NSArray *out=@[]; [self performSync:^{ if (![self prepareLocked]) { out=[self.defaults arrayForKey:HostMediaHistoryKey] ?: @[]; return; } NSMutableArray *rows=[NSMutableArray array]; for(id value in [self payloadsLocked:"SELECT payload FROM media_watch_history ORDER BY position ASC;"]){ if([value isKindOfClass:NSDictionary.class]){ NSMutableDictionary *row=[value mutableCopy]; if([row[@"updatedAt"] isKindOfClass:NSNumber.class])row[@"updatedAt"]=[NSDate dateWithTimeIntervalSince1970:[row[@"updatedAt"] doubleValue]]; [rows addObject:row]; } } out=rows; }]; return out;
+    NSArray *snapshot = self.snapshotMediaHistory;
+    if (snapshot && self.loadedSnapshotEpoch == self.snapshotEpoch) return [snapshot mutableCopy];
+    __block NSArray *out = @[];
+    [self performSync:^{
+        [self refreshSnapshotsLocked];
+        out = self.snapshotMediaHistory ?: @[];
+    }];
+    return [out mutableCopy];
 }
-- (void)replaceMediaWatchHistory:(NSArray *)history { NSArray *copy=[history isKindOfClass:NSArray.class]?[history copy]:@[]; [self performAsync:^{ NSMutableArray *(^boundedHistory)(void)=^NSMutableArray *{NSMutableArray *bounded=[NSMutableArray array]; NSMutableSet *seen=[NSMutableSet set]; for(id raw in copy){ if(![raw isKindOfClass:NSDictionary.class])continue; NSString *key=[raw[@"key"] isKindOfClass:NSString.class]?raw[@"key"]:nil; if(!key.length||[seen containsObject:key])continue; [seen addObject:key]; [bounded addObject:raw]; if(bounded.count>=HostMediaWatchHistoryLimit)break; } return bounded;}; if([self prepareLocked]) {if(![self transactionLocked:^BOOL{return [self writeMediaHistoryLocked:boundedHistory()];}]){[self closeLocked];[self.defaults setBool:YES forKey:HostLibraryFallbackPendingKey];[self.defaults setObject:boundedHistory() forKey:HostMediaHistoryKey];}} else [self.defaults setObject:boundedHistory() forKey:HostMediaHistoryKey]; }]; }
+- (void)replaceMediaWatchHistory:(NSArray *)history { NSArray *copy=[history isKindOfClass:NSArray.class]?[history copy]:@[]; [self performWrite:^{ NSMutableArray *(^boundedHistory)(void)=^NSMutableArray *{NSMutableArray *bounded=[NSMutableArray array]; NSMutableSet *seen=[NSMutableSet set]; for(id raw in copy){ if(![raw isKindOfClass:NSDictionary.class])continue; NSString *key=[raw[@"key"] isKindOfClass:NSString.class]?raw[@"key"]:nil; if(!key.length||[seen containsObject:key])continue; [seen addObject:key]; [bounded addObject:raw]; if(bounded.count>=HostMediaWatchHistoryLimit)break; } return bounded;}; if([self prepareLocked]) {if(![self transactionLocked:^BOOL{return [self writeMediaHistoryLocked:boundedHistory()];}]){[self closeLocked];[self.defaults setBool:YES forKey:HostLibraryFallbackPendingKey];[self.defaults setObject:boundedHistory() forKey:HostMediaHistoryKey];}} else [self.defaults setObject:boundedHistory() forKey:HostMediaHistoryKey]; }]; }
 - (void)clearMediaWatchHistory { [self replaceMediaWatchHistory:@[]]; }
 - (void)upsertMediaWatchHistoryEntry:(NSDictionary *)entry replacingKey:(NSString *)previousKey {
     if (![entry isKindOfClass:NSDictionary.class]) return;
@@ -658,7 +766,7 @@ static NSArray *HostLibraryHistoryRowsByUpserting(NSArray *rows, NSDictionary *e
     NSDictionary *snapshot = [entry copy];
     NSString *previous = [previousKey isKindOfClass:NSString.class] ? [previousKey copy] : nil;
     if ([previous isEqualToString:key]) previous = nil;
-    [self performAsync:^{
+    [self performWrite:^{
         NSMutableDictionary *serialized = [snapshot mutableCopy];
         id date = serialized[@"updatedAt"];
         double time = [date isKindOfClass:NSDate.class] ? [date timeIntervalSince1970] : [date doubleValue];
@@ -690,7 +798,7 @@ static NSArray *HostLibraryHistoryRowsByUpserting(NSArray *rows, NSDictionary *e
 - (void)removeMediaWatchHistoryEntryWithKey:(NSString *)key {
     if (![key isKindOfClass:NSString.class] || !key.length) return;
     NSString *historyKey = [key copy];
-    [self performAsync:^{
+    [self performWrite:^{
         if ([self prepareLocked]) {
             [self stepLocked:"DELETE FROM media_watch_history WHERE key = ?;" text:historyKey];
         } else {
@@ -709,7 +817,7 @@ static NSArray *HostLibraryHistoryRowsByUpserting(NSArray *rows, NSDictionary *e
     if (![payload isKindOfClass:NSDictionary.class]) return;
     NSString *favoriteKey = [key copy];
     NSDictionary *snapshot = [payload copy];
-    [self performAsync:^{
+    [self performWrite:^{
         NSData *data = HostLibraryJSONData(snapshot);
         if (!data) return;
         if ([self prepareLocked]) {
@@ -734,7 +842,7 @@ static NSArray *HostLibraryHistoryRowsByUpserting(NSArray *rows, NSDictionary *e
 - (void)removeMediaFavoriteWithKey:(NSString *)key {
     if (![key isKindOfClass:NSString.class] || !key.length) return;
     NSString *favoriteKey = [key copy];
-    [self performAsync:^{
+    [self performWrite:^{
         if ([self prepareLocked]) {
             [self stepLocked:"DELETE FROM media_favorites WHERE key = ?;" text:favoriteKey];
         } else {

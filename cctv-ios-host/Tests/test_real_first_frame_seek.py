@@ -384,9 +384,12 @@ class TestRealFirstFrameContracts(unittest.TestCase):
         # 旧行为（重启无条件报首帧 + 无条件完成 seek）必须消失。
         self.assertNotIn('[self finishPendingSeek:YES];', restart[:1200])
         time_pos = self.mpv[self.mpv.index('CCTVMPVReplyTimePos && prop->format'):]
-        self.assertIn('self.hasVideoTrack && pos > 0.05', time_pos[:2000])
+        # T20：time-pos 分支只做 4Hz 节流，首帧判定抽进 dispatchPositionUpdate:。
+        self.assertIn('[self dispatchPositionUpdate:pos];', time_pos[:2000])
+        position = self.mpv[self.mpv.index('- (void)dispatchPositionUpdate:(double)pos {'):]
+        self.assertIn('self.hasVideoTrack && pos > 0.05', position[:2000])
         self.assertIn('pos > MediaPlaybackMPVAudioOnlyPositionThreshold',
-                      time_pos[:2000])
+                      position[:2000])
 
     def test_mpv_audio_only_delegate_is_wired(self):
         self.assertIn('cicadaAdapterDidStartAudioOnly:', self.types)

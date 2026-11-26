@@ -1212,13 +1212,18 @@ static NSArray<NSDictionary *> *gCachedCatalogs = nil;
     return result.copy;
 }
 + (void)saveCatalog:(NSDictionary *)catalog {
-    @synchronized(self){
     if(![catalog isKindOfClass:NSDictionary.class]||![catalog[@"id"] isKindOfClass:NSString.class]||![catalog[@"id"] length])return;
     NSString *identifier=[catalog[@"id"] isKindOfClass:NSString.class]?catalog[@"id"]:@"";
     NSData *sourceData=[catalog[@"_sourceConfigData"] isKindOfClass:NSData.class]?catalog[@"_sourceConfigData"]:nil;
+    // T19/PERF-10：sidecar 文件写（整份 provider JSON，原子写）在锁外做，不在
+    // @synchronized 里占调用线程；行更新仍在锁内。注：同 id 并发 save 时文件与行
+    // 的胜出顺序可能不一致（原子写保证文件不撕裂），导入流程由 UI 串行，不依赖该顺序。
+    BOOL sidecarSaved=NO;
+    if(sourceData.length&&TVBoxSafeCatalogID(identifier)){NSString *path=[TVBoxCatalogStorageDirectory() stringByAppendingPathComponent:[identifier stringByAppendingPathExtension:@"json"]];sidecarSaved=[sourceData writeToFile:path options:NSDataWritingAtomic error:NULL];}
     NSMutableDictionary *storedCatalog=[catalog mutableCopy];
-    if(sourceData.length){BOOL saved=NO;if(TVBoxSafeCatalogID(identifier)){NSString *path=[TVBoxCatalogStorageDirectory() stringByAppendingPathComponent:[identifier stringByAppendingPathExtension:@"json"]];saved=[sourceData writeToFile:path options:NSDataWritingAtomic error:NULL];}if(saved)[storedCatalog removeObjectForKey:@"_sourceConfigData"];else storedCatalog[@"_sourceConfigData"]=sourceData;}
+    if(sourceData.length){if(sidecarSaved)[storedCatalog removeObjectForKey:@"_sourceConfigData"];else storedCatalog[@"_sourceConfigData"]=sourceData;}
     else [storedCatalog removeObjectForKey:@"_sourceConfigData"];
+    @synchronized(self){
     NSMutableArray *rows=[[self catalogs] mutableCopy];
     for(NSUInteger i=0;i<rows.count;i++) if([rows[i][@"id"] isEqual:identifier]) { NSMutableDictionary *merged=[rows[i] mutableCopy]; [merged addEntriesFromDictionary:storedCatalog]; rows[i]=merged; [NSUserDefaults.standardUserDefaults setObject:rows forKey:@"tvboxCatalogs"]; [self invalidateCatalogsCache]; return; }
     [rows addObject:storedCatalog];
@@ -1230,8 +1235,11 @@ static NSArray<NSDictionary *> *gCachedCatalogs = nil;
 }
 + (NSDictionary *)catalogForID:(NSString *)identifier { for(NSDictionary *row in [self catalogs])if([row[@"id"] isEqual:identifier])return row; return nil; }
 + (void)removeCatalog:(NSString *)identifier {
-    @synchronized(self){ NSMutableArray *rows=[[self catalogs] mutableCopy]; NSIndexSet *remove=[rows indexesOfObjectsPassingTest:^BOOL(NSDictionary *row,NSUInteger idx,BOOL *stop){return [row[@"id"] isEqual:identifier];}]; [rows removeObjectsAtIndexes:remove]; [NSUserDefaults.standardUserDefaults setObject:rows forKey:@"tvboxCatalogs"]; [self invalidateCatalogsCache];if(TVBoxSafeCatalogID(identifier)){NSString *path=[TVBoxCatalogStorageDirectory() stringByAppendingPathComponent:[identifier stringByAppendingPathExtension:@"json"]];[NSFileManager.defaultManager removeItemAtPath:path error:NULL];NSString *bundleDir=[TVBoxCatalogBundlesDirectory() stringByAppendingPathComponent:identifier];[NSFileManager.defaultManager removeItemAtPath:bundleDir error:NULL];}
+    @synchronized(self){ NSMutableArray *rows=[[self catalogs] mutableCopy]; NSIndexSet *remove=[rows indexesOfObjectsPassingTest:^BOOL(NSDictionary *row,NSUInteger idx,BOOL *stop){return [row[@"id"] isEqual:identifier];}]; [rows removeObjectsAtIndexes:remove]; [NSUserDefaults.standardUserDefaults setObject:rows forKey:@"tvboxCatalogs"]; [self invalidateCatalogsCache];
     }
+    // T19/PERF-10：文件删除在锁外做。行已删，originalConfigForCatalogID 先查
+    // 行、查不到不读 sidecar，删除滞后不会被读到。
+    if(TVBoxSafeCatalogID(identifier)){NSString *path=[TVBoxCatalogStorageDirectory() stringByAppendingPathComponent:[identifier stringByAppendingPathExtension:@"json"]];[NSFileManager.defaultManager removeItemAtPath:path error:NULL];NSString *bundleDir=[TVBoxCatalogBundlesDirectory() stringByAppendingPathComponent:identifier];[NSFileManager.defaultManager removeItemAtPath:bundleDir error:NULL];}
 }
 + (NSArray<NSDictionary *> *)liveSourcesInCatalog:(NSDictionary *)catalog { return [catalog[@"lives"] isKindOfClass:NSArray.class]?catalog[@"lives"]:@[]; }
 + (NSDictionary *)reconstructedConfigForCatalog:(NSDictionary *)catalog {

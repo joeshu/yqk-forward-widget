@@ -1,5 +1,6 @@
 #import "MediaPlaybackMPVAdapter.h"
 #import "HostMPVLifecycle.h"
+#import "RuntimeDiagnostics.h"
 #import <AVFoundation/AVFoundation.h>
 #import <AVKit/AVKit.h>
 #import <QuartzCore/QuartzCore.h>
@@ -22,6 +23,13 @@ static NSTimeInterval const MediaPlaybackMPVFirstFrameTimeout = 20.0;
 static NSTimeInterval const MediaPlaybackMPVSeekTimeout = 3.0;
 static NSTimeInterval const MediaPlaybackMPVAudioOnlyPositionThreshold = 1.0;
 static NSTimeInterval const MediaPlaybackMPVSeekPositionTolerance = 1.0;
+// T20/S4：高频事件（time-pos / cache-speed / demuxer-cache-time）向主队
+// 列合并的窗口：约 4Hz（方案 §8.1）。终态、首帧、seek 完成、缓冲状态
+// 变化不受此窗口影响，始终即时派发。
+// T20：命令队列重入守卫 key——runOnCommandQueueSync 在队列上调用时
+// 直接执行，不 dispatch_sync（否则自锁）。
+static const void *kMediaPlaybackMPVCommandQueueKey = &kMediaPlaybackMPVCommandQueueKey;
+static NSTimeInterval const MediaPlaybackMPVEventCoalesceInterval = 0.25;
 // Bounded wait for the event thread to leave mpv_wait_event before the
 // handle is released in destroy (T02/S1). The wait never blocks the
 // caller: on timeout teardown proceeds anyway and the state still closes.
@@ -216,6 +224,9 @@ enum {
     CCTVMPVReplyVideoHeight = 7,
     CCTVMPVReplyVideoRotate = 8,
     CCTVMPVReplyEOFReached = 9,
+    // T20：轨道数变化——轨道缓存重建的触发器（选中态变化不改总数，
+    // 由 selectTrack 成功后乐观更新缓存，见 rebuildCachedTracks）。
+    CCTVMPVReplyTrackListCount = 10,
 };
 
 @interface MediaPlaybackMPVAdapter () <AVPictureInPictureSampleBufferPlaybackDelegate> {
@@ -258,8 +269,53 @@ enum {
 @property (nonatomic, strong) NSLock *mpvLock;
 @property (nonatomic, assign) mpv_handle *mpvHandle;
 @property (nonatomic, assign) const CCTVMPVSymbolTable *syms;
+// T20/S4：串行命令队列——全部 handle 触碰（创建/初始化/属性/命令/
+// 轨道枚举/统计读取）只在这里执行，调用线程（常为主线程）不再同步
+// 碰 handle。fire-and-forget 控制用 dispatch_async；需返回值的
+// selectTrack / 统计读取 / addExternalSubtitle 用
+// runOnCommandQueueSync（handle 未发布时走 fast path 直接返回，
+// 不等队列）。destroy 的 quit/terminate 仍走 T02 原有路径，不经此队列。
+@property (nonatomic, strong) dispatch_queue_t commandQueue;
+// T20：轨道缓存——availableTracks 只读此缓存，不再每次枚举（旧实现
+// 每读一次做约 300 次 mpv IPC 往返）。缓存只在命令队列上写
+// （FILE_LOADED 与 track-list/count 变化时重建；select 成功后乐观
+// 更新选中态），读经 mpvLock；元素形态与旧枚举完全一致
+// （type/index/name/selected），T09 菜单验证直接复用。
+@property (nonatomic, strong, nullable) NSArray<NSDictionary *> *cachedTracks;
+// T20：本次 prepare 里被引擎拒绝的 option 名（仅命令队列触碰）。
+// 初始化成功后一次性记 mpv_option_failed 诊断事件，不阻塞 prepare。
+@property (nonatomic, strong, nullable) NSMutableArray<NSString *> *failedOptionNames;
+// T20：高频事件合并状态——只由事件线程读写（事件循环与 flush 共用），
+// runOnMain 的 block 只按值捕获待派发的数据，不共享这些字段。
+@property (nonatomic) CFTimeInterval lastPositionDispatchAt;
+@property (nonatomic) double pendingPosition;
+@property (nonatomic) BOOL hasPendingPosition;
+@property (nonatomic) CFTimeInterval lastSpeedDispatchAt;
+@property (nonatomic) double pendingSpeedBytesPerSec;
+@property (nonatomic) BOOL hasPendingSpeed;
+@property (nonatomic) CFTimeInterval lastCacheTimeDispatchAt;
+@property (nonatomic) double pendingCacheTime;
+@property (nonatomic) BOOL hasPendingCacheTime;
+@property (nonatomic) double lastForwardedDuration;
+@property (nonatomic) BOOL hasForwardedDuration;
 
 - (void)runOnMain:(dispatch_block_t)block;
+- (void)prepareHandleWithSymbols:(const CCTVMPVSymbolTable *)syms enableHardwareDecoder:(BOOL)enableHardwareDecoder;
+- (void)runOnCommandQueue:(dispatch_block_t)block;
+- (void)runOnCommandQueueSync:(dispatch_block_t)block;
+- (void)rebuildCachedTracksOnCommandQueue;
+- (NSArray<NSDictionary *> *)enumerateTracksFromHandle:(mpv_handle *)ctx syms:(const CCTVMPVSymbolTable *)syms;
+- (void)updateCachedTrackSelectionForIndex:(NSInteger)index kind:(NSString *)kind selected:(BOOL)selected;
+- (int)mpvSetOptionString:(mpv_handle *)ctx name:(const char *)name value:(const char *)value;
+- (int)mpvSetOptionInt:(mpv_handle *)ctx name:(const char *)name value:(int64_t)value;
+- (int)mpvObserveProperty:(mpv_handle *)ctx tag:(uint64_t)tag name:(const char *)name format:(int)format;
+- (int)mpvSetProperty:(mpv_handle *)ctx name:(const char *)name format:(int)format value:(void *)value operation:(NSString *)operation;
+- (int)mpvSetPropertyString:(mpv_handle *)ctx name:(const char *)name value:(const char *)value operation:(NSString *)operation;
+- (void)recordMPVControlFailure:(NSString *)operation property:(NSString *)property;
+- (void)dispatchPositionUpdate:(double)pos;
+- (void)dispatchDownloadSpeedUpdate:(double)bytesPerSec;
+- (void)dispatchCacheTimeUpdate:(double)buf;
+- (void)flushPendingCoalescedEventsIfDue;
 - (void)armFirstFrameWatchdog;
 - (void)cancelFirstFrameWatchdog;
 - (void)handleFirstFrameTimeout;
@@ -302,6 +358,10 @@ enum {
         _pendingGravity = AVLayerVideoGravityResizeAspect;
         _mpvLock = [NSLock new];
         _lifecycle = host_mpv_lifecycle_create();
+        // T20/S4：串行命令队列（见扩展注释）。
+        _commandQueue = dispatch_queue_create("com.cctvhost.mpv.command", DISPATCH_QUEUE_SERIAL);
+        dispatch_queue_set_specific(_commandQueue, kMediaPlaybackMPVCommandQueueKey,
+                                    (void *)kMediaPlaybackMPVCommandQueueKey, NULL);
     }
     return self;
 }
@@ -324,6 +384,80 @@ enum {
 - (void)runOnMain:(dispatch_block_t)block {
     if (NSThread.isMainThread) block();
     else dispatch_async(dispatch_get_main_queue(), block);
+}
+
+- (void)runOnCommandQueue:(dispatch_block_t)block {
+    dispatch_async(self.commandQueue, block);
+}
+
+- (void)runOnCommandQueueSync:(dispatch_block_t)block {
+    // 队列上直接执行（重入守卫）；队列外 dispatch_sync 等前面的
+    // 短命令排空——prepare 的 loadfile 已是 async，队列无长任务。
+    if (dispatch_get_specific(kMediaPlaybackMPVCommandQueueKey)) block();
+    else dispatch_sync(self.commandQueue, block);
+}
+
+// T20/S4：受检的 option/observe 调用——失败只记录（failedOptionNames
+// 供 prepare 末尾一次性上报 mpv_option_failed），不改变旧的"静默
+// 忽略并继续"策略；失败策略变更不在 T20 范围。
+- (int)mpvSetOptionString:(mpv_handle *)ctx name:(const char *)name value:(const char *)value {
+    const CCTVMPVSymbolTable *syms = self.syms;
+    if (!syms || !ctx) return -1;
+    int err = syms->set_option_string(ctx, name, value);
+    if (err < 0) {
+        NSLog(@"[CCTVHost] MPV option %s rejected (%d)", name, err);
+        [self.failedOptionNames addObject:[NSString stringWithUTF8String:name] ?: @"?"];
+    }
+    return err;
+}
+
+- (int)mpvSetOptionInt:(mpv_handle *)ctx name:(const char *)name value:(int64_t)value {
+    const CCTVMPVSymbolTable *syms = self.syms;
+    if (!syms || !ctx) return -1;
+    int64_t v = value;
+    int err = syms->set_option(ctx, name, MPV_FORMAT_INT64, &v);
+    if (err < 0) {
+        NSLog(@"[CCTVHost] MPV option %s rejected (%d)", name, err);
+        [self.failedOptionNames addObject:[NSString stringWithUTF8String:name] ?: @"?"];
+    }
+    return err;
+}
+
+- (int)mpvObserveProperty:(mpv_handle *)ctx tag:(uint64_t)tag name:(const char *)name format:(int)format {
+    const CCTVMPVSymbolTable *syms = self.syms;
+    if (!syms || !ctx) return -1;
+    int err = syms->observe_property(ctx, tag, name, format);
+    if (err < 0) {
+        NSLog(@"[CCTVHost] MPV observe %s rejected (%d)", name, err);
+        [self.failedOptionNames addObject:[NSString stringWithFormat:@"observe:%s", name]];
+    }
+    return err;
+}
+
+// T20：受检的 set_property / set_property_string——失败记
+// mpv_control_failed 诊断事件（诊断开启时）+ NSLog；调用方仍按
+// 旧语义处理返回值（不新增失败分支）。
+- (int)mpvSetProperty:(mpv_handle *)ctx name:(const char *)name format:(int)format value:(void *)value operation:(NSString *)operation {
+    const CCTVMPVSymbolTable *syms = self.syms;
+    if (!syms || !ctx) return -1;
+    int err = syms->set_property(ctx, name, format, value);
+    if (err < 0) [self recordMPVControlFailure:operation property:[NSString stringWithUTF8String:name] ?: @"?"];
+    return err;
+}
+
+- (int)mpvSetPropertyString:(mpv_handle *)ctx name:(const char *)name value:(const char *)value operation:(NSString *)operation {
+    const CCTVMPVSymbolTable *syms = self.syms;
+    if (!syms || !ctx) return -1;
+    int err = syms->set_property_string(ctx, name, value);
+    if (err < 0) [self recordMPVControlFailure:operation property:[NSString stringWithUTF8String:name] ?: @"?"];
+    return err;
+}
+
+- (void)recordMPVControlFailure:(NSString *)operation property:(NSString *)property {
+    NSLog(@"[CCTVHost] MPV control %@ failed on %@", operation, property);
+    if (RuntimeDiagnostics.shared.enabled) {
+        [RuntimeDiagnostics.shared recordEvent:@"mpv_control_failed" category:@"playback" fields:@{@"engine": @"mpv", @"operation": operation ?: @"", @"property": property ?: @""}];
+    }
 }
 
 - (void)prepare {
@@ -363,7 +497,34 @@ enum {
     self.pendingSeekTarget = 0;
     self.completionNotified = NO;
     self.hasVideoTrack = NO;
+    self.failedOptionNames = [NSMutableArray array];
+    self.hasForwardedDuration = NO;
 
+    // T20/S4：创建句柄、全部 set_option、initialize、observe 与 loadfile
+    // 不再在调用线程（常为主线程）同步执行——mpv_initialize 与网络
+    // open 都可能耗时。重活进串行命令队列；状态复位已在上面完成，
+    // 失败仍经 handleFailure（主线程）上报，语义与旧同步版一致。
+    // loadfile 改 command_async：命令队列永不因网络 open 而堵住，
+    // 加载失败由 MPV_EVENT_END_FILE（ERROR）上报（原同步 loadErr
+    // 路径只剩句柄本身被拒的极少数情况）。
+    __weak typeof(self) weakSelf = self;
+    dispatch_async(self.commandQueue, ^{
+        MediaPlaybackMPVAdapter *strongSelf = weakSelf;
+        if (!strongSelf) return;
+        // Gate 1：排队期间 destroy 可能已认领 teardown（此时 lifecycle
+        // 不再是 PREPARED，destroy 认领时句柄尚未发布、已直接收尾）——
+        // 此时绝不创建句柄，静默返回；不要调 abandon_prepare（teardown
+        // 已归 destroy 所有）。
+        if (host_mpv_lifecycle_state(strongSelf->_lifecycle) != HOST_MPV_LC_PREPARED) return;
+        [strongSelf prepareHandleWithSymbols:syms enableHardwareDecoder:enableHardwareDecoder];
+    });
+}
+
+// T20：prepare 的重活（只在命令队列上跑）。Gate 2 在 initialize 之后、
+// 发布句柄之前再查一次 lifecycle：destroy 若在 init 期间认领了
+// teardown，刚建好的 ctx 由本块自行 terminate_destroy（destroy 那
+// 边认领时句柄还是 NULL，不会再释放它）。
+- (void)prepareHandleWithSymbols:(const CCTVMPVSymbolTable *)syms enableHardwareDecoder:(BOOL)enableHardwareDecoder {
     mpv_handle *ctx = syms->create();
     if (!ctx) {
         host_mpv_lifecycle_abandon_prepare(_lifecycle);
@@ -373,20 +534,20 @@ enum {
 
     // Video output: Metal via libplacebo + MoltenVK (CAMetalLayer wid)
     int64_t wid = (int64_t)(uintptr_t)(__bridge void *)self.metalView.layer;
-    syms->set_option(ctx, "wid", MPV_FORMAT_INT64, &wid);
-    syms->set_option_string(ctx, "vo", "gpu-next");
-    syms->set_option_string(ctx, "gpu-api", "vulkan");
-    syms->set_option_string(ctx, "gpu-context", "moltenvk");
-    syms->set_option_string(ctx, "ao", "avfoundation");
-    syms->set_option_string(ctx, "hwdec", enableHardwareDecoder ? "videotoolbox" : "no");
-    syms->set_option_string(ctx, "hwdec-codecs", "all");
-    syms->set_option_string(ctx, "deinterlace", "auto");
-    syms->set_option_string(ctx, "ytdl", "no");
-    syms->set_option_string(ctx, "keep-open", "no");
-    syms->set_option_string(ctx, "sub-auto", "no");
-    syms->set_option_string(ctx, "subs-with-matching-audio", "yes");
-    syms->set_option_string(ctx, "sub-ass", "yes");
-    syms->set_option_string(ctx, "pause", "yes");
+    [self mpvSetOptionInt:ctx name:"wid" value:wid];
+    [self mpvSetOptionString:ctx name:"vo" value:"gpu-next"];
+    [self mpvSetOptionString:ctx name:"gpu-api" value:"vulkan"];
+    [self mpvSetOptionString:ctx name:"gpu-context" value:"moltenvk"];
+    [self mpvSetOptionString:ctx name:"ao" value:"avfoundation"];
+    [self mpvSetOptionString:ctx name:"hwdec" value:(enableHardwareDecoder ? "videotoolbox" : "no")];
+    [self mpvSetOptionString:ctx name:"hwdec-codecs" value:"all"];
+    [self mpvSetOptionString:ctx name:"deinterlace" value:"auto"];
+    [self mpvSetOptionString:ctx name:"ytdl" value:"no"];
+    [self mpvSetOptionString:ctx name:"keep-open" value:"no"];
+    [self mpvSetOptionString:ctx name:"sub-auto" value:"no"];
+    [self mpvSetOptionString:ctx name:"subs-with-matching-audio" value:"yes"];
+    [self mpvSetOptionString:ctx name:"sub-ass" value:"yes"];
+    [self mpvSetOptionString:ctx name:"pause" value:"yes"];
 
     [self applyBufferOptionsOnHandle:ctx];
     [self configureHTTPHeadersOnHandle:ctx];
@@ -404,15 +565,31 @@ enum {
         return;
     }
 
-    syms->observe_property(ctx, CCTVMPVReplyTimePos, "time-pos", MPV_FORMAT_DOUBLE);
-    syms->observe_property(ctx, CCTVMPVReplyDuration, "duration", MPV_FORMAT_DOUBLE);
-    syms->observe_property(ctx, CCTVMPVReplyCacheTime, "demuxer-cache-time", MPV_FORMAT_DOUBLE);
-    syms->observe_property(ctx, CCTVMPVReplyPausedForCache, "paused-for-cache", MPV_FORMAT_FLAG);
-    syms->observe_property(ctx, CCTVMPVReplyCacheSpeed, "cache-speed", MPV_FORMAT_INT64);
-    syms->observe_property(ctx, CCTVMPVReplyVideoWidth, "video-params/w", MPV_FORMAT_INT64);
-    syms->observe_property(ctx, CCTVMPVReplyVideoHeight, "video-params/h", MPV_FORMAT_INT64);
-    syms->observe_property(ctx, CCTVMPVReplyVideoRotate, "video-params/rotate", MPV_FORMAT_INT64);
-    syms->observe_property(ctx, CCTVMPVReplyEOFReached, "eof-reached", MPV_FORMAT_FLAG);
+    // Gate 2（见方法注释）。
+    if (host_mpv_lifecycle_state(_lifecycle) != HOST_MPV_LC_PREPARED) {
+        syms->terminate_destroy(ctx);
+        return;
+    }
+
+    [self mpvObserveProperty:ctx tag:CCTVMPVReplyTimePos name:"time-pos" format:MPV_FORMAT_DOUBLE];
+    [self mpvObserveProperty:ctx tag:CCTVMPVReplyDuration name:"duration" format:MPV_FORMAT_DOUBLE];
+    [self mpvObserveProperty:ctx tag:CCTVMPVReplyCacheTime name:"demuxer-cache-time" format:MPV_FORMAT_DOUBLE];
+    [self mpvObserveProperty:ctx tag:CCTVMPVReplyPausedForCache name:"paused-for-cache" format:MPV_FORMAT_FLAG];
+    [self mpvObserveProperty:ctx tag:CCTVMPVReplyCacheSpeed name:"cache-speed" format:MPV_FORMAT_INT64];
+    [self mpvObserveProperty:ctx tag:CCTVMPVReplyVideoWidth name:"video-params/w" format:MPV_FORMAT_INT64];
+    [self mpvObserveProperty:ctx tag:CCTVMPVReplyVideoHeight name:"video-params/h" format:MPV_FORMAT_INT64];
+    [self mpvObserveProperty:ctx tag:CCTVMPVReplyVideoRotate name:"video-params/rotate" format:MPV_FORMAT_INT64];
+    [self mpvObserveProperty:ctx tag:CCTVMPVReplyEOFReached name:"eof-reached" format:MPV_FORMAT_FLAG];
+    [self mpvObserveProperty:ctx tag:CCTVMPVReplyTrackListCount name:"track-list/count" format:MPV_FORMAT_INT64];
+
+    // T20：初始化成功后一次性上报本次被拒的 option/observe（诊断开启
+    // 时），不阻塞 prepare——被拒项只是记录，不改失败策略（旧行为是
+    // 静默忽略；失败策略变更不在 T20 范围）。放 observe 之后上报，
+    // observe 的失败也进同一事件。
+    if (self.failedOptionNames.count && RuntimeDiagnostics.shared.enabled) {
+        [RuntimeDiagnostics.shared recordEvent:@"mpv_option_failed" category:@"playback" fields:@{@"engine": @"mpv", @"options": [self.failedOptionNames componentsJoinedByString:@","]}];
+    }
+    [self.failedOptionNames removeAllObjects];
 
     [self.mpvLock lock];
     self.mpvHandle = ctx;
@@ -428,7 +605,7 @@ enum {
     [thread start];
 
     const char *loadCmd[] = {"loadfile", self.url.absoluteString.UTF8String, "replace", NULL};
-    int loadErr = syms->command(ctx, loadCmd);
+    int loadErr = syms->command_async(ctx, 0, loadCmd);
     if (loadErr < 0) {
         const char *errStr = syms->error_string(loadErr);
         [self handleFailureWithCode:loadErr message:(errStr ? [NSString stringWithUTF8String:errStr] : @"加载媒体失败")];
@@ -437,22 +614,24 @@ enum {
 
     if (self.rate != 1.0f) [self setRate:self.rate];
     if (self.muted) [self setMuted:YES];
-    [self armFirstFrameWatchdog];
+    // NSTimer 必须挂在有 runloop 的线程——命令队列没有 runloop，
+    // 故回主线程 arm（旧语义：loadfile 发出后开始计首帧预算）。
+    [self runOnMain:^{ [self armFirstFrameWatchdog]; }];
 }
 
 - (void)applyBufferOptionsOnHandle:(mpv_handle *)ctx {
     const CCTVMPVSymbolTable *syms = self.syms;
     if (!syms || !ctx) return;
     NSString *timeoutStr = [NSString stringWithFormat:@"%.0f", MAX(5.0, self.networkTimeout)];
-    syms->set_option_string(ctx, "network-timeout", timeoutStr.UTF8String);
-    syms->set_option_string(ctx, "cache", "yes");
+    [self mpvSetOptionString:ctx name:"network-timeout" value:timeoutStr.UTF8String];
+    [self mpvSetOptionString:ctx name:"cache" value:"yes"];
     if (self.liveStreamHint) {
-        syms->set_option_string(ctx, "profile", "low-latency");
-        syms->set_option_string(ctx, "demuxer-max-bytes", "16MiB");
-        syms->set_option_string(ctx, "demuxer-readahead-secs", "12");
+        [self mpvSetOptionString:ctx name:"profile" value:"low-latency"];
+        [self mpvSetOptionString:ctx name:"demuxer-max-bytes" value:"16MiB"];
+        [self mpvSetOptionString:ctx name:"demuxer-readahead-secs" value:"12"];
     } else {
-        syms->set_option_string(ctx, "demuxer-max-bytes", "64MiB");
-        syms->set_option_string(ctx, "demuxer-readahead-secs", "45");
+        [self mpvSetOptionString:ctx name:"demuxer-max-bytes" value:"64MiB"];
+        [self mpvSetOptionString:ctx name:"demuxer-readahead-secs" value:"45"];
     }
 }
 
@@ -468,16 +647,16 @@ enum {
         if (!key.length || !val.length) continue;
         NSString *lower = key.lowercaseString;
         if ([lower isEqualToString:@"user-agent"]) {
-            syms->set_option_string(ctx, "user-agent", val.UTF8String);
+            [self mpvSetOptionString:ctx name:"user-agent" value:val.UTF8String];
         } else if ([lower isEqualToString:@"referer"]) {
-            syms->set_option_string(ctx, "referrer", val.UTF8String);
+            [self mpvSetOptionString:ctx name:"referrer" value:val.UTF8String];
         } else {
             [extraFields addObject:[NSString stringWithFormat:@"%@: %@", key, val]];
         }
     }
     if (extraFields.count) {
         NSString *joined = [extraFields componentsJoinedByString:@","];
-        syms->set_option_string(ctx, "http-header-fields", joined.UTF8String);
+        [self mpvSetOptionString:ctx name:"http-header-fields" value:joined.UTF8String];
     }
 }
 
@@ -490,17 +669,28 @@ enum {
     // Media commands may only touch the handle while the lifecycle is
     // PREPARED (T02/S1): after destroy the handle is gone.
     if (!host_mpv_lifecycle_command_allowed(_lifecycle)) return;
+    // T20：状态转移仍在调用方同步做（旧语义：句柄未发布时不置 Playing，
+    // 交给 FILE_LOADED 后的 start 再置）；set_property 进命令队列，
+    // 锁内取句柄、锁内调用（与 destroy 的认领互斥，见旧代码纪律）。
+    BOOL handleLive = NO;
     [self.mpvLock lock];
-    mpv_handle *ctx = self.mpvHandle;
-    const CCTVMPVSymbolTable *syms = self.syms;
-    if (ctx && syms) {
-        int flag = 0;
-        syms->set_property(ctx, "pause", MPV_FORMAT_FLAG, &flag);
-        if (self.state == MediaPlaybackCicadaAdapterStatePaused || self.preparedNotified) {
-            self.state = MediaPlaybackCicadaAdapterStatePlaying;
-        }
-    }
+    handleLive = (self.mpvHandle != NULL);
     [self.mpvLock unlock];
+    if (handleLive && (self.state == MediaPlaybackCicadaAdapterStatePaused || self.preparedNotified)) {
+        self.state = MediaPlaybackCicadaAdapterStatePlaying;
+    }
+    __weak typeof(self) weakSelf = self;
+    [self runOnCommandQueue:^{
+        MediaPlaybackMPVAdapter *strongSelf = weakSelf;
+        if (!strongSelf || !host_mpv_lifecycle_command_allowed(strongSelf->_lifecycle)) return;
+        [strongSelf.mpvLock lock];
+        mpv_handle *ctx = strongSelf.mpvHandle;
+        if (ctx) {
+            int flag = 0;
+            [strongSelf mpvSetProperty:ctx name:"pause" format:MPV_FORMAT_FLAG value:&flag operation:@"start"];
+        }
+        [strongSelf.mpvLock unlock];
+    }];
 }
 
 - (void)pause {
@@ -513,31 +703,46 @@ enum {
         [self cancelFirstFrameWatchdog];
     }
     if (!host_mpv_lifecycle_command_allowed(_lifecycle)) return;
+    BOOL handleLive = NO;
     [self.mpvLock lock];
-    mpv_handle *ctx = self.mpvHandle;
-    const CCTVMPVSymbolTable *syms = self.syms;
-    if (ctx && syms) {
-        int flag = 1;
-        syms->set_property(ctx, "pause", MPV_FORMAT_FLAG, &flag);
-        if (self.state == MediaPlaybackCicadaAdapterStatePlaying) {
-            self.state = MediaPlaybackCicadaAdapterStatePaused;
-        }
-    }
+    handleLive = (self.mpvHandle != NULL);
     [self.mpvLock unlock];
+    if (handleLive && self.state == MediaPlaybackCicadaAdapterStatePlaying) {
+        self.state = MediaPlaybackCicadaAdapterStatePaused;
+    }
+    __weak typeof(self) weakSelf = self;
+    [self runOnCommandQueue:^{
+        MediaPlaybackMPVAdapter *strongSelf = weakSelf;
+        if (!strongSelf || !host_mpv_lifecycle_command_allowed(strongSelf->_lifecycle)) return;
+        [strongSelf.mpvLock lock];
+        mpv_handle *ctx = strongSelf.mpvHandle;
+        if (ctx) {
+            int flag = 1;
+            [strongSelf mpvSetProperty:ctx name:"pause" format:MPV_FORMAT_FLAG value:&flag operation:@"pause"];
+        }
+        [strongSelf.mpvLock unlock];
+    }];
 }
 
 - (void)stop {
     if (self.destroyed) return;
     [self cancelFirstFrameWatchdog];
     [self finishPendingSeek:NO];
-    [self.mpvLock lock];
-    mpv_handle *ctx = self.mpvHandle;
-    const CCTVMPVSymbolTable *syms = self.syms;
-    if (ctx && syms) {
-        const char *stopCmd[] = {"stop", NULL};
-        syms->command_async(ctx, 0, stopCmd);
-    }
-    [self.mpvLock unlock];
+    // T20：stop 命令进命令队列（排在已发出的 seek/控制之后有序执行）；
+    // 状态仍在调用方同步置 Idle（旧语义）。
+    __weak typeof(self) weakSelf = self;
+    [self runOnCommandQueue:^{
+        MediaPlaybackMPVAdapter *strongSelf = weakSelf;
+        if (!strongSelf || !host_mpv_lifecycle_command_allowed(strongSelf->_lifecycle)) return;
+        [strongSelf.mpvLock lock];
+        mpv_handle *ctx = strongSelf.mpvHandle;
+        const CCTVMPVSymbolTable *syms = strongSelf.syms;
+        if (ctx && syms) {
+            const char *stopCmd[] = {"stop", NULL};
+            syms->command_async(ctx, 0, stopCmd);
+        }
+        [strongSelf.mpvLock unlock];
+    }];
     self.state = MediaPlaybackCicadaAdapterStateIdle;
 }
 
@@ -554,6 +759,11 @@ enum {
     }
     self.destroyed = YES;
     self.delegate = nil;
+    // T20：轨道缓存随 teardown 失效（availableTracks 本就以 lifecycle
+    // 门禁，destroy 后返回 @[]；清缓存不让旧轨道名残留）。
+    [self.mpvLock lock];
+    self.cachedTracks = nil;
+    [self.mpvLock unlock];
     [self cancelFirstFrameWatchdog];
     [self finishPendingSeek:NO];
 
@@ -608,45 +818,67 @@ enum {
     }];
     NSTimeInterval clamped = MAX(0.0, time);
     NSString *target = [NSString stringWithFormat:@"%.3f", clamped];
-    [self.mpvLock lock];
-    mpv_handle *ctx = self.mpvHandle;
-    const CCTVMPVSymbolTable *syms = self.syms;
-    int err = -1;
-    if (ctx && syms) {
-        const char *seekCmd[] = {"seek", target.UTF8String, "absolute+exact", NULL};
-        err = syms->command_async(ctx, 0, seekCmd);
-    }
-    [self.mpvLock unlock];
-    if (err < 0) {
-        [self finishPendingSeek:NO];
-    }
+    // T20：seek 命令进命令队列（与其它控制有序执行）。命令被拒时在主线
+    // 程按 seekID 守卫完成 NO——排队期间新请求可能已替换本次请求，
+    // 不得误完成新请求（旧同步版无此窗口）。
+    [self runOnCommandQueue:^{
+        MediaPlaybackMPVAdapter *strongSelf = weakSelf;
+        if (!strongSelf || !host_mpv_lifecycle_command_allowed(strongSelf->_lifecycle)) {
+            if (strongSelf) [strongSelf runOnMain:^{
+                if (!strongSelf.destroyed && strongSelf.pendingSeekID == seekID) [strongSelf finishPendingSeek:NO];
+            }];
+            return;
+        }
+        [strongSelf.mpvLock lock];
+        mpv_handle *ctx = strongSelf.mpvHandle;
+        const CCTVMPVSymbolTable *syms = strongSelf.syms;
+        int err = -1;
+        if (ctx && syms) {
+            const char *seekCmd[] = {"seek", target.UTF8String, "absolute+exact", NULL};
+            err = syms->command_async(ctx, 0, seekCmd);
+        }
+        [strongSelf.mpvLock unlock];
+        if (err < 0) {
+            [strongSelf runOnMain:^{
+                if (!strongSelf.destroyed && strongSelf.pendingSeekID == seekID) [strongSelf finishPendingSeek:NO];
+            }];
+        }
+    }];
 }
 
 - (void)setRate:(float)rate {
     float clamped = MIN(3.0f, MAX(0.5f, isfinite(rate) ? rate : 1.0f));
     self.rate = clamped;
     if (!host_mpv_lifecycle_command_allowed(_lifecycle)) return;
-    [self.mpvLock lock];
-    mpv_handle *ctx = self.mpvHandle;
-    const CCTVMPVSymbolTable *syms = self.syms;
-    if (ctx && syms) {
-        double speed = (double)clamped;
-        syms->set_property(ctx, "speed", MPV_FORMAT_DOUBLE, &speed);
-    }
-    [self.mpvLock unlock];
+    __weak typeof(self) weakSelf = self;
+    [self runOnCommandQueue:^{
+        MediaPlaybackMPVAdapter *strongSelf = weakSelf;
+        if (!strongSelf || !host_mpv_lifecycle_command_allowed(strongSelf->_lifecycle)) return;
+        [strongSelf.mpvLock lock];
+        mpv_handle *ctx = strongSelf.mpvHandle;
+        if (ctx) {
+            double speed = (double)clamped;
+            [strongSelf mpvSetProperty:ctx name:"speed" format:MPV_FORMAT_DOUBLE value:&speed operation:@"setRate"];
+        }
+        [strongSelf.mpvLock unlock];
+    }];
 }
 
 - (void)setMuted:(BOOL)muted {
     self.muted = muted;
     if (!host_mpv_lifecycle_command_allowed(_lifecycle)) return;
-    [self.mpvLock lock];
-    mpv_handle *ctx = self.mpvHandle;
-    const CCTVMPVSymbolTable *syms = self.syms;
-    if (ctx && syms) {
-        int flag = muted ? 1 : 0;
-        syms->set_property(ctx, "mute", MPV_FORMAT_FLAG, &flag);
-    }
-    [self.mpvLock unlock];
+    __weak typeof(self) weakSelf = self;
+    [self runOnCommandQueue:^{
+        MediaPlaybackMPVAdapter *strongSelf = weakSelf;
+        if (!strongSelf || !host_mpv_lifecycle_command_allowed(strongSelf->_lifecycle)) return;
+        [strongSelf.mpvLock lock];
+        mpv_handle *ctx = strongSelf.mpvHandle;
+        if (ctx) {
+            int flag = muted ? 1 : 0;
+            [strongSelf mpvSetProperty:ctx name:"mute" format:MPV_FORMAT_FLAG value:&flag operation:@"setMuted"];
+        }
+        [strongSelf.mpvLock unlock];
+    }];
 }
 
 - (BOOL)canSelectTracks {
@@ -655,13 +887,19 @@ enum {
 
 - (NSArray<NSDictionary *> *)availableTracks {
     if (!host_mpv_lifecycle_command_allowed(_lifecycle)) return @[];
+    // T20：只读缓存（见扩展注释）——旧实现每次读都做约 300 次 mpv
+    // IPC 往返（64 条 × type/id/title/lang/codec/selected），菜单
+    // 打开时直接跑在主线程；现在重建只在命令队列上发生。
     [self.mpvLock lock];
-    mpv_handle *ctx = self.mpvHandle;
-    const CCTVMPVSymbolTable *syms = self.syms;
-    if (!ctx || !syms) {
-        [self.mpvLock unlock];
-        return @[];
-    }
+    NSArray<NSDictionary *> *cached = self.cachedTracks ?: @[];
+    [self.mpvLock unlock];
+    return cached;
+}
+
+// T20：轨道枚举（旧 availableTracks 的本体，现只在命令队列上跑）。
+// 仍是最多 64 条、同一字典形态；选中态取引擎同步值。
+- (NSArray<NSDictionary *> *)enumerateTracksFromHandle:(mpv_handle *)ctx syms:(const CCTVMPVSymbolTable *)syms {
+    if (!ctx || !syms) return @[];
     int64_t count = 0;
     syms->get_property(ctx, "track-list/count", MPV_FORMAT_INT64, &count);
     NSMutableArray<NSDictionary *> *tracks = [NSMutableArray array];
@@ -704,86 +942,152 @@ enum {
         else if ([kind isEqualToString:@"video"]) encodedIndex += 20000;
         [tracks addObject:@{@"type": kind, @"index": @(encodedIndex), @"name": display, @"selected": @(selectedFlag != 0)}];
     }
-    [self.mpvLock unlock];
     return tracks.copy;
+}
+
+// T20：FILE_LOADED 与 track-list/count 变化时在命令队列上重建缓存
+// （与控制命令串行，不与 select 的乐观更新交错）。
+- (void)rebuildCachedTracksOnCommandQueue {
+    __weak typeof(self) weakSelf = self;
+    [self runOnCommandQueue:^{
+        MediaPlaybackMPVAdapter *strongSelf = weakSelf;
+        if (!strongSelf || !host_mpv_lifecycle_command_allowed(strongSelf->_lifecycle)) return;
+        [strongSelf.mpvLock lock];
+        mpv_handle *ctx = strongSelf.mpvHandle;
+        const CCTVMPVSymbolTable *syms = strongSelf.syms;
+        NSArray<NSDictionary *> *tracks = [strongSelf enumerateTracksFromHandle:ctx syms:syms];
+        if (ctx && syms) strongSelf.cachedTracks = tracks;
+        [strongSelf.mpvLock unlock];
+    }];
+}
+
+// T20：select 成功后乐观更新缓存选中态——T09 验证（verifyTrack*）
+// 重查 availableTracks，必须看到本次切换的结果；只改同 kind 的
+// selected 位，其它字段不动。下一次重建（轨道数变化时）再与引擎
+// 同步一次，收敛残余偏差。
+- (void)updateCachedTrackSelectionForIndex:(NSInteger)index kind:(NSString *)kind selected:(BOOL)selected {
+    [self.mpvLock lock];
+    NSArray<NSDictionary *> *cached = self.cachedTracks;
+    [self.mpvLock unlock];
+    if (!cached.count) return;
+    NSMutableArray<NSDictionary *> *updated = [NSMutableArray arrayWithCapacity:cached.count];
+    for (NSDictionary *track in cached) {
+        if (![track[@"type"] isEqual:kind]) { [updated addObject:track]; continue; }
+        NSMutableDictionary *copy = [track mutableCopy];
+        BOOL isTarget = [track[@"index"] integerValue] == index;
+        copy[@"selected"] = @(selected && isTarget);
+        [updated addObject:copy];
+    }
+    [self.mpvLock lock];
+    self.cachedTracks = updated.copy;
+    [self.mpvLock unlock];
 }
 
 - (BOOL)selectTrackWithIndex:(NSInteger)index {
     if (!host_mpv_lifecycle_command_allowed(_lifecycle)) return NO;
+    // T20：set_property 在命令队列上同步执行（runOnCommandQueueSync），
+    // 返回时切换已下发——T09 验证（verifyTrack*，重查 availableTracks）
+    // 的时序与旧同步版一致。句柄未发布时直接 NO，不等队列。
+    // 成功后乐观更新缓存选中态（见 updateCachedTrackSelection…）。
+    [self.mpvLock lock];
+    BOOL handleLive = (self.mpvHandle != NULL);
+    [self.mpvLock unlock];
+    if (!handleLive) return NO;
     // T09：关闭哨兵——0 = 关闭音频轨道，10000 = 关闭字幕轨道（mpv 的
     // aid/sid 设为 "no"；set_property_string 同步返回即实际切换结果）。
+    __block int err = -1;
     if (index == 0 || index == 10000) {
         const char *prop = (index == 0) ? "aid" : "sid";
-        [self.mpvLock lock];
-        mpv_handle *ctx = self.mpvHandle;
-        const CCTVMPVSymbolTable *syms = self.syms;
-        int err = -1;
-        if (ctx && syms) {
-            err = syms->set_property_string(ctx, prop, "no");
-        }
-        [self.mpvLock unlock];
+        NSString *kind = (index == 0) ? @"audio" : @"subtitle";
+        [self runOnCommandQueueSync:^{
+            [self.mpvLock lock];
+            mpv_handle *ctx = self.mpvHandle;
+            if (ctx) err = [self mpvSetPropertyString:ctx name:prop value:"no" operation:@"selectTrack"];
+            [self.mpvLock unlock];
+        }];
+        if (err >= 0) [self updateCachedTrackSelectionForIndex:index kind:kind selected:NO];
         return err >= 0;
     }
     if (index < 0) return NO;
     const char *prop = "aid";
     int64_t trackId = index;
+    NSString *kind = @"audio";
     if (index >= 20000) {
         prop = "vid";
         trackId = index - 20000;
+        kind = @"video";
     } else if (index >= 10000) {
         prop = "sid";
         trackId = index - 10000;
+        kind = @"subtitle";
     }
-    [self.mpvLock lock];
-    mpv_handle *ctx = self.mpvHandle;
-    const CCTVMPVSymbolTable *syms = self.syms;
-    int err = -1;
-    if (ctx && syms) {
-        err = syms->set_property(ctx, prop, MPV_FORMAT_INT64, &trackId);
-    }
-    [self.mpvLock unlock];
+    [self runOnCommandQueueSync:^{
+        [self.mpvLock lock];
+        mpv_handle *ctx = self.mpvHandle;
+        if (ctx) err = [self mpvSetProperty:ctx name:prop format:MPV_FORMAT_INT64 value:&trackId operation:@"selectTrack"];
+        [self.mpvLock unlock];
+    }];
+    if (err >= 0) [self updateCachedTrackSelectionForIndex:index kind:kind selected:YES];
     return err >= 0;
 }
 
 - (BOOL)addExternalSubtitleURL:(NSURL *)subtitleURL {
     if (!subtitleURL.absoluteString.length || self.destroyed) return NO;
     if (!host_mpv_lifecycle_command_allowed(_lifecycle)) return NO;
+    // T20：唯一调用方（VC 外挂字幕）不读返回值；sub-add 进命令队列
+    // 异步下发，返回值只表示"已接受下发"（与 Cicada 的约定同款）。
+    // 句柄未发布时直接 NO。
     [self.mpvLock lock];
-    mpv_handle *ctx = self.mpvHandle;
-    const CCTVMPVSymbolTable *syms = self.syms;
-    int err = -1;
-    if (ctx && syms) {
-        const char *cmd[] = {"sub-add", subtitleURL.absoluteString.UTF8String, "select", NULL};
-        err = syms->command_async(ctx, 0, cmd);
-    }
+    BOOL handleLive = (self.mpvHandle != NULL);
     [self.mpvLock unlock];
-    return err >= 0;
+    if (!handleLive) return NO;
+    NSURL *urlCopy = subtitleURL;
+    __weak typeof(self) weakSelf = self;
+    [self runOnCommandQueue:^{
+        MediaPlaybackMPVAdapter *strongSelf = weakSelf;
+        if (!strongSelf || !host_mpv_lifecycle_command_allowed(strongSelf->_lifecycle)) return;
+        [strongSelf.mpvLock lock];
+        mpv_handle *ctx = strongSelf.mpvHandle;
+        const CCTVMPVSymbolTable *syms = strongSelf.syms;
+        if (ctx && syms) {
+            const char *cmd[] = {"sub-add", urlCopy.absoluteString.UTF8String, "select", NULL};
+            int err = syms->command_async(ctx, 0, cmd);
+            if (err < 0) [strongSelf recordMPVControlFailure:@"addExternalSubtitle" property:@"sub-add"];
+        }
+        [strongSelf.mpvLock unlock];
+    }];
+    return YES;
 }
 
 - (void)applyVideoGravity:(NSString *)gravity {
     self.pendingGravity = gravity ?: AVLayerVideoGravityResizeAspect;
     if (!host_mpv_lifecycle_command_allowed(_lifecycle)) return;
-    [self.mpvLock lock];
-    mpv_handle *ctx = self.mpvHandle;
-    if (ctx) [self applyGravity:self.pendingGravity onHandle:ctx];
-    [self.mpvLock unlock];
+    NSString *gravityCopy = self.pendingGravity;
+    __weak typeof(self) weakSelf = self;
+    [self runOnCommandQueue:^{
+        MediaPlaybackMPVAdapter *strongSelf = weakSelf;
+        if (!strongSelf || !host_mpv_lifecycle_command_allowed(strongSelf->_lifecycle)) return;
+        [strongSelf.mpvLock lock];
+        mpv_handle *ctx = strongSelf.mpvHandle;
+        if (ctx) [strongSelf applyGravity:gravityCopy onHandle:ctx];
+        [strongSelf.mpvLock unlock];
+    }];
 }
 
 - (void)applyGravity:(NSString *)gravity onHandle:(mpv_handle *)ctx {
-    const CCTVMPVSymbolTable *syms = self.syms;
-    if (!syms || !ctx) return;
+    if (!ctx) return;
     if ([gravity isEqualToString:AVLayerVideoGravityResizeAspectFill]) {
-        syms->set_property_string(ctx, "keepaspect", "yes");
+        [self mpvSetPropertyString:ctx name:"keepaspect" value:"yes" operation:@"applyGravity"];
         double panscan = 1.0;
-        syms->set_property(ctx, "panscan", MPV_FORMAT_DOUBLE, &panscan);
+        [self mpvSetProperty:ctx name:"panscan" format:MPV_FORMAT_DOUBLE value:&panscan operation:@"applyGravity"];
     } else if ([gravity isEqualToString:AVLayerVideoGravityResize]) {
-        syms->set_property_string(ctx, "keepaspect", "no");
+        [self mpvSetPropertyString:ctx name:"keepaspect" value:"no" operation:@"applyGravity"];
         double panscan = 0.0;
-        syms->set_property(ctx, "panscan", MPV_FORMAT_DOUBLE, &panscan);
+        [self mpvSetProperty:ctx name:"panscan" format:MPV_FORMAT_DOUBLE value:&panscan operation:@"applyGravity"];
     } else {
-        syms->set_property_string(ctx, "keepaspect", "yes");
+        [self mpvSetPropertyString:ctx name:"keepaspect" value:"yes" operation:@"applyGravity"];
         double panscan = 0.0;
-        syms->set_property(ctx, "panscan", MPV_FORMAT_DOUBLE, &panscan);
+        [self mpvSetProperty:ctx name:"panscan" format:MPV_FORMAT_DOUBLE value:&panscan operation:@"applyGravity"];
     }
 }
 
@@ -836,6 +1140,74 @@ enum {
     [self finishPendingSeek:NO];
 }
 
+// T20/S4：高频事件向主线程的合并派发——三个 helper 与旧分支内的
+// runOnMain block 本体完全一致，只是调用点受 250ms 窗口节流；
+// 终态/首帧/seek 完成/缓冲状态变化不走这里，始终即时派发。
+- (void)dispatchPositionUpdate:(double)pos {
+    [self runOnMain:^{
+        if (self.destroyed || !isfinite(pos) || pos < 0) return;
+        self.currentPosition = pos;
+        // S2：time-pos 前进 ≠ 视频首帧——只有观测到视频
+        // 轨道时才报首帧；无视频轨道且位置超过 1.0 秒
+        // 时报纯音频。
+        if (!self.firstFrameNotified && self.hasVideoTrack && pos > 0.05) {
+            [self handleFirstFrameOnMain];
+        } else if (!self.firstFrameNotified && !self.audioOnlyNotified && !self.hasVideoTrack && pos > MediaPlaybackMPVAudioOnlyPositionThreshold) {
+            [self handleAudioOnlyOnMain];
+        }
+        // S3：time-pos 落在目标附近也算 seek 完成。
+        [self maybeCompletePendingSeek];
+        id<MediaPlaybackCicadaAdapterDelegate> d = self.delegate;
+        if ([d respondsToSelector:@selector(cicadaAdapter:didUpdatePosition:duration:)]) {
+            [d cicadaAdapter:self didUpdatePosition:self.currentPosition duration:self.duration];
+        }
+    }];
+}
+
+- (void)dispatchDownloadSpeedUpdate:(double)bytesPerSec {
+    [self runOnMain:^{
+        if (self.destroyed || bytesPerSec < 0) return;
+        id<MediaPlaybackCicadaAdapterDelegate> d = self.delegate;
+        if ([d respondsToSelector:@selector(cicadaAdapter:didUpdateDownloadSpeed:)]) {
+            [d cicadaAdapter:self didUpdateDownloadSpeed:bytesPerSec * 8.0];
+        }
+    }];
+}
+
+- (void)dispatchCacheTimeUpdate:(double)buf {
+    [self runOnMain:^{
+        if (self.destroyed || !isfinite(buf) || buf < 0) return;
+        // S5：demuxer-cache-time 是缓存末尾包的绝对媒体
+        // 时间戳（缓存结束点），不是"已缓冲时长"；上层
+        // 用 bufferedPosition - currentPosition 算 ahead。
+        self.bufferedPosition = buf;
+    }];
+}
+
+// T20：事件循环每次 wake（wait_event 返回，含 0.25s 超时空转）都调
+// 一次——把窗口内攒下的最新值刷到主线程。只由事件线程调用。
+- (void)flushPendingCoalescedEventsIfDue {
+    CFTimeInterval now = CACurrentMediaTime();
+    if (self.hasPendingPosition && now - self.lastPositionDispatchAt >= MediaPlaybackMPVEventCoalesceInterval) {
+        self.lastPositionDispatchAt = now;
+        double pos = self.pendingPosition;
+        self.hasPendingPosition = NO;
+        [self dispatchPositionUpdate:pos];
+    }
+    if (self.hasPendingSpeed && now - self.lastSpeedDispatchAt >= MediaPlaybackMPVEventCoalesceInterval) {
+        self.lastSpeedDispatchAt = now;
+        double bytesPerSec = self.pendingSpeedBytesPerSec;
+        self.hasPendingSpeed = NO;
+        [self dispatchDownloadSpeedUpdate:bytesPerSec];
+    }
+    if (self.hasPendingCacheTime && now - self.lastCacheTimeDispatchAt >= MediaPlaybackMPVEventCoalesceInterval) {
+        self.lastCacheTimeDispatchAt = now;
+        double buf = self.pendingCacheTime;
+        self.hasPendingCacheTime = NO;
+        [self dispatchCacheTimeUpdate:buf];
+    }
+}
+
 - (void)eventLoopMain:(NSValue *)handleValue {
     @autoreleasepool {
         mpv_handle *ctx = (mpv_handle *)handleValue.pointerValue;
@@ -854,13 +1226,21 @@ enum {
         }
 
         while (!self.destroyed) {
-            cctv_mpv_event *ev = syms->wait_event(ctx, 0.25);
-            if (!ev) continue;
-            if (ev->event_id == MPV_EVENT_NONE) continue;
-            if (ev->event_id == MPV_EVENT_SHUTDOWN) break;
+            // T20：每轮一个 autoreleasepool——旧外层 pool 覆盖整个长时
+            // 循环，事件 payload 的临时对象攒到线程退出才释放。
+            @autoreleasepool {
+                cctv_mpv_event *ev = syms->wait_event(ctx, 0.25);
+                // T20：每次 wake 都刷一次攒下的高频值（含超时空转），
+                // 保证最新位置/速度/缓冲在 250ms 内到达主线程。
+                [self flushPendingCoalescedEventsIfDue];
+                if (!ev) continue;
+                if (ev->event_id == MPV_EVENT_NONE) continue;
+                if (ev->event_id == MPV_EVENT_SHUTDOWN) break;
 
             switch (ev->event_id) {
                 case MPV_EVENT_FILE_LOADED: {
+                    // T20：文件加载完成即重建轨道缓存（命令队列上枚举）。
+                    [self rebuildCachedTracksOnCommandQueue];
                     [self runOnMain:^{ [self handleFileLoadedOnMain]; }];
                     break;
                 }
@@ -896,39 +1276,41 @@ enum {
                     uint64_t tag = ev->reply_userdata;
                     if (tag == CCTVMPVReplyTimePos && prop->format == MPV_FORMAT_DOUBLE) {
                         double pos = *(double *)prop->data;
-                        [self runOnMain:^{
-                            if (self.destroyed || !isfinite(pos) || pos < 0) return;
-                            self.currentPosition = pos;
-                            // S2：time-pos 前进 ≠ 视频首帧——只有观测到视频
-                            // 轨道时才报首帧；无视频轨道且位置超过 1.0 秒
-                            // 时报纯音频。
-                            if (!self.firstFrameNotified && self.hasVideoTrack && pos > 0.05) {
-                                [self handleFirstFrameOnMain];
-                            } else if (!self.firstFrameNotified && !self.audioOnlyNotified && !self.hasVideoTrack && pos > MediaPlaybackMPVAudioOnlyPositionThreshold) {
-                                [self handleAudioOnlyOnMain];
-                            }
-                            // S3：time-pos 落在目标附近也算 seek 完成。
-                            [self maybeCompletePendingSeek];
-                            id<MediaPlaybackCicadaAdapterDelegate> d = self.delegate;
-                            if ([d respondsToSelector:@selector(cicadaAdapter:didUpdatePosition:duration:)]) {
-                                [d cicadaAdapter:self didUpdatePosition:self.currentPosition duration:self.duration];
-                            }
-                        }];
+                        // T20：time-pos 可达每帧一次——主线程派发节流到
+                        // 4Hz，窗口内只留最新值（flush 在每次 wake 时刷）。
+                        CFTimeInterval now = CACurrentMediaTime();
+                        if (now - self.lastPositionDispatchAt >= MediaPlaybackMPVEventCoalesceInterval) {
+                            self.lastPositionDispatchAt = now;
+                            self.hasPendingPosition = NO;
+                            [self dispatchPositionUpdate:pos];
+                        } else {
+                            self.pendingPosition = pos;
+                            self.hasPendingPosition = YES;
+                        }
                     } else if (tag == CCTVMPVReplyDuration && prop->format == MPV_FORMAT_DOUBLE) {
                         double dur = *(double *)prop->data;
-                        [self runOnMain:^{
-                            if (self.destroyed || !isfinite(dur) || dur < 0) return;
-                            self.duration = dur;
-                        }];
+                        // T20：时长只在变化时转发（加载/切流时变一次，
+                        // 旧实现每次事件都派发主线程）。
+                        if (isfinite(dur) && dur >= 0 && (!self.hasForwardedDuration || dur != self.lastForwardedDuration)) {
+                            self.hasForwardedDuration = YES;
+                            self.lastForwardedDuration = dur;
+                            [self runOnMain:^{
+                                if (self.destroyed) return;
+                                self.duration = dur;
+                            }];
+                        }
                     } else if (tag == CCTVMPVReplyCacheTime && prop->format == MPV_FORMAT_DOUBLE) {
                         double buf = *(double *)prop->data;
-                        [self runOnMain:^{
-                            if (self.destroyed || !isfinite(buf) || buf < 0) return;
-                            // S5：demuxer-cache-time 是缓存末尾包的绝对媒体
-                            // 时间戳（缓存结束点），不是"已缓冲时长"；上层
-                            // 用 bufferedPosition - currentPosition 算 ahead。
-                            self.bufferedPosition = buf;
-                        }];
+                        // T20：与 time-pos 同款 4Hz 合并。
+                        CFTimeInterval now = CACurrentMediaTime();
+                        if (now - self.lastCacheTimeDispatchAt >= MediaPlaybackMPVEventCoalesceInterval) {
+                            self.lastCacheTimeDispatchAt = now;
+                            self.hasPendingCacheTime = NO;
+                            [self dispatchCacheTimeUpdate:buf];
+                        } else {
+                            self.pendingCacheTime = buf;
+                            self.hasPendingCacheTime = YES;
+                        }
                     } else if (tag == CCTVMPVReplyPausedForCache && prop->format == MPV_FORMAT_FLAG) {
                         BOOL isBuffering = (*(int *)prop->data) != 0;
                         [self runOnMain:^{
@@ -941,13 +1323,16 @@ enum {
                         }];
                     } else if (tag == CCTVMPVReplyCacheSpeed && prop->format == MPV_FORMAT_INT64) {
                         int64_t bytesPerSec = *(int64_t *)prop->data;
-                        [self runOnMain:^{
-                            if (self.destroyed || bytesPerSec < 0) return;
-                            id<MediaPlaybackCicadaAdapterDelegate> d = self.delegate;
-                            if ([d respondsToSelector:@selector(cicadaAdapter:didUpdateDownloadSpeed:)]) {
-                                [d cicadaAdapter:self didUpdateDownloadSpeed:(double)bytesPerSec * 8.0];
-                            }
-                        }];
+                        // T20：网速回调与 time-pos 同款 4Hz 合并。
+                        CFTimeInterval now = CACurrentMediaTime();
+                        if (now - self.lastSpeedDispatchAt >= MediaPlaybackMPVEventCoalesceInterval) {
+                            self.lastSpeedDispatchAt = now;
+                            self.hasPendingSpeed = NO;
+                            [self dispatchDownloadSpeedUpdate:(double)bytesPerSec];
+                        } else {
+                            self.pendingSpeedBytesPerSec = (double)bytesPerSec;
+                            self.hasPendingSpeed = YES;
+                        }
                     } else if (tag == CCTVMPVReplyVideoWidth && prop->format == MPV_FORMAT_INT64) {
                         int64_t w = *(int64_t *)prop->data;
                         [self runOnMain:^{
@@ -974,12 +1359,16 @@ enum {
                     } else if (tag == CCTVMPVReplyEOFReached && prop->format == MPV_FORMAT_FLAG) {
                         BOOL reached = (*(int *)prop->data) != 0;
                         if (reached) [self runOnMain:^{ [self handleCompletionOnMain]; }];
+                    } else if (tag == CCTVMPVReplyTrackListCount && prop->format == MPV_FORMAT_INT64) {
+                        // T20：轨道数变了——重建缓存（命令队列上枚举）。
+                        [self rebuildCachedTracksOnCommandQueue];
                     }
                     break;
                 }
                 default:
                     break;
             }
+            } // per-iteration pool (T20)
         }
     }
     // Every exit path signals the destroy handshake, so the teardown
@@ -1037,27 +1426,41 @@ enum {
     // 位置之差，下限钳到 0。
     id hwdec = @"unknown", videoBitrate = @"unknown", audioBitrate = @"unknown";
     id fps = @"unknown", droppedFrames = @"unknown", cacheSeconds = @"unknown";
+    // T20：7 次属性读取进命令队列同步执行（与控制命令串行；prepare
+    // 的 loadfile 已是 async，队列无长任务）。句柄未发布时直接返回
+    // unknown，不等队列——与旧行为一致。
     [self.mpvLock lock];
-    mpv_handle *ctx = self.mpvHandle;
-    const CCTVMPVSymbolTable *syms = self.syms;
-    if (ctx && syms) {
-        char *hw = syms->get_property_string(ctx, "hwdec-current");
-        if (hw) {
-            hwdec = [NSString stringWithUTF8String:hw] ?: @"unknown";
-            syms->free_mem(hw);
-        }
-        int64_t vbr = -1;
-        if (syms->get_property(ctx, "video-bitrate", MPV_FORMAT_INT64, &vbr) >= 0 && vbr >= 0) videoBitrate = @(vbr);
-        int64_t abr = -1;
-        if (syms->get_property(ctx, "audio-bitrate", MPV_FORMAT_INT64, &abr) >= 0 && abr >= 0) audioBitrate = @(abr);
-        double f = 0;
-        if (syms->get_property(ctx, "estimated-vf-fps", MPV_FORMAT_DOUBLE, &f) >= 0 && f > 0) fps = @(f);
-        int64_t drop = -1;
-        if (syms->get_property(ctx, "decoder-frame-drop-count", MPV_FORMAT_INT64, &drop) >= 0 && drop >= 0) droppedFrames = @(drop);
-        double cache = 0;
-        if (syms->get_property(ctx, "demuxer-cache-duration", MPV_FORMAT_DOUBLE, &cache) >= 0 && cache >= 0) cacheSeconds = @(cache);
-    }
+    BOOL handleLive = (self.mpvHandle != NULL);
     [self.mpvLock unlock];
+    if (handleLive) {
+        __block id blockHwdec = @"unknown", blockVideoBitrate = @"unknown", blockAudioBitrate = @"unknown";
+        __block id blockFps = @"unknown", blockDroppedFrames = @"unknown", blockCacheSeconds = @"unknown";
+        [self runOnCommandQueueSync:^{
+            [self.mpvLock lock];
+            mpv_handle *ctx = self.mpvHandle;
+            const CCTVMPVSymbolTable *syms = self.syms;
+            if (ctx && syms) {
+                char *hw = syms->get_property_string(ctx, "hwdec-current");
+                if (hw) {
+                    blockHwdec = [NSString stringWithUTF8String:hw] ?: @"unknown";
+                    syms->free_mem(hw);
+                }
+                int64_t vbr = -1;
+                if (syms->get_property(ctx, "video-bitrate", MPV_FORMAT_INT64, &vbr) >= 0 && vbr >= 0) blockVideoBitrate = @(vbr);
+                int64_t abr = -1;
+                if (syms->get_property(ctx, "audio-bitrate", MPV_FORMAT_INT64, &abr) >= 0 && abr >= 0) blockAudioBitrate = @(abr);
+                double f = 0;
+                if (syms->get_property(ctx, "estimated-vf-fps", MPV_FORMAT_DOUBLE, &f) >= 0 && f > 0) blockFps = @(f);
+                int64_t drop = -1;
+                if (syms->get_property(ctx, "decoder-frame-drop-count", MPV_FORMAT_INT64, &drop) >= 0 && drop >= 0) blockDroppedFrames = @(drop);
+                double cache = 0;
+                if (syms->get_property(ctx, "demuxer-cache-duration", MPV_FORMAT_DOUBLE, &cache) >= 0 && cache >= 0) blockCacheSeconds = @(cache);
+            }
+            [self.mpvLock unlock];
+        }];
+        hwdec = blockHwdec; videoBitrate = blockVideoBitrate; audioBitrate = blockAudioBitrate;
+        fps = blockFps; droppedFrames = blockDroppedFrames; cacheSeconds = blockCacheSeconds;
+    }
     NSTimeInterval ahead = MAX(0, self.bufferedPosition - self.currentPosition);
     return @{@"engine": @"mpv",
              @"hwdec": hwdec,

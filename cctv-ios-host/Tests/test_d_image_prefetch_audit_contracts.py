@@ -8,7 +8,8 @@
 
 1. 并发：图片队列串行 + delegate 队列单并发且绑定同一串行队列；generation 为原子。
 2. 取消：cancelPending 先在主线程自增 generation，再在串行队列取消任务并清空全部容器；
-   finish 以 generation 守卫丢弃被取消的陈旧结果。
+   finish 以 generation 守卫丢弃被取消的陈旧结果的图片与失败记录；T18/PERF-04 后取消的
+   观察者仍被终结（image=nil、retryAfter=0，不触发重试），不再静默丢弃。
 3. 陈旧覆盖：finish 主线程派发再次校验 generation，并以 view.accessibilityIdentifier
    二次比对 record.url，杜绝视图已切换后旧图覆盖新视图。
 4. 内存预算：NSCache count/totalCost 上限 + 内存告警清缓存；并发任务上限 8、待办上限 160；
@@ -70,7 +71,10 @@ class DImagePrefetchAuditContracts(unittest.TestCase):
     def test_finish_main_dispatch_rechecks_generation_and_view_identity(self):
         body = self.impl.split("- (void)finish:", 1)[1]
         self.assertIn("if(image||observers.count)dispatch_async(dispatch_get_main_queue(), ^{", body)
-        self.assertIn("if(record.generation!=self.generation)return;", body)
+        # T18/PERF-04：陈旧结果不再在主线程派发前直接丢弃（取消的观察者也要终结），
+        # 而是在 finishRequest 里把图片与 retryAfter 强制清零——旧图绝不覆盖新视图，
+        # 取消也不会让调用方永远等不到结果。
+        self.assertIn("if(record.generation!=self.generation){image=nil;retryAfter=0;}", body)
         # 视图绑定与 completion 回调都二次比对 accessibilityIdentifier==record.url。
         self.assertIn(
             "for(UIImageView *view in views)if([view.accessibilityIdentifier isEqualToString:record.url])",

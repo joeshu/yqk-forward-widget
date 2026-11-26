@@ -30,7 +30,11 @@ class PrincipalArchitectAuditFixesTests(unittest.TestCase):
     def test_profile_store_synchronizes_reads_offloads_large_payloads_and_optimizes_sort(self):
         prof = (SOURCES / "ProfileStore.m").read_text(encoding="utf-8")
         self.assertIn("+ (NSString *)payloadFilePathForSource:(NSString *)source", prof)
-        self.assertIn('if(![dict[@"_hasDiskPayload"] boolValue])return dict;', prof)
+        # T19/PERF-10：无落盘 payload 时仍直接返回 defaults 字典（不合并磁盘内容），
+        # 只是多一步写快照；大 payload 落盘阈值不变。
+        self.assertIn('if(![dict[@"_hasDiskPayload"] boolValue]){', prof)
+        self.assertIn("gProfileMetadataCache[source]=dict;", prof)
+        self.assertIn("return dict;", prof)
         self.assertIn("NSMutableDictionary<NSString *,NSNumber *> *rankMap=[NSMutableDictionary dictionaryWithCapacity:order.count];", prof)
 
     def test_media_playback_sniffer_mutes_offscreen_media_and_blocks_ad_domains(self):

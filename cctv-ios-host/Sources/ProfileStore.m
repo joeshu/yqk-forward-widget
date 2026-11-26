@@ -17,6 +17,10 @@ static NSString *const CCTVEnabledPlayerCornerLogoSourcesKey = @"enabledPlayerCo
 static NSString *const CCTVEnabledChannelPreviewSourcesKey = @"enabledChannelPreviewSources";
 static NSString *const CCTVEnabledChannelTelemetrySourcesKey = @"enabledChannelTelemetrySources";
 
+// T19/PERF-10：合并后元数据的只读快照（source → 合并后字典），与 @synchronized(self)
+// 同锁读写。命中直接返回，不再每次读 NSUserDefaults + 磁盘 plist。
+static NSMutableDictionary<NSString *, NSDictionary *> *gProfileMetadataCache = nil;
+
 @implementation ProfileStore
 + (BOOL)isHTTP:(id)source {
     if(![source isKindOfClass:NSString.class]||[source length]>8192)return NO;
@@ -45,10 +49,16 @@ static NSString *const CCTVEnabledChannelTelemetrySourcesKey = @"enabledChannelT
 + (NSDictionary *)metadata:(NSString *)source {
     if(![source isKindOfClass:NSString.class]||!source.length)return @{};
     @synchronized(self){
+        NSDictionary *cached=gProfileMetadataCache[source];
+        if(cached)return cached;
         id value=ProfileMetadataDefaultsSnapshot()[source];
         if(![value isKindOfClass:NSDictionary.class])return @{};
         NSDictionary *dict=(NSDictionary *)value;
-        if(![dict[@"_hasDiskPayload"] boolValue])return dict;
+        if(![dict[@"_hasDiskPayload"] boolValue]){
+            if(!gProfileMetadataCache)gProfileMetadataCache=[NSMutableDictionary dictionary];
+            gProfileMetadataCache[source]=dict;
+            return dict;
+        }
         NSMutableDictionary *merged=[dict mutableCopy];
         NSString *payloadName=[dict[@"_payloadFile"] isKindOfClass:NSString.class]?dict[@"_payloadFile"]:nil;
         NSString *payloadPath=(payloadName.length && [payloadName.lastPathComponent isEqual:payloadName])?[[[self payloadFilePathForSource:source] stringByDeletingLastPathComponent] stringByAppendingPathComponent:payloadName]:[self payloadFilePathForSource:source];
@@ -57,7 +67,11 @@ static NSString *const CCTVEnabledChannelTelemetrySourcesKey = @"enabledChannelT
         [merged removeObjectForKey:@"_hasDiskPayload"];
         [merged removeObjectForKey:@"_payloadFile"];
         for(NSString *key in @[@"text",@"cachedChannels"])if(!merged[key]&&disk[key])merged[key]=disk[key];
-        return [merged copy];
+        NSDictionary *result=[merged copy];
+        // 大条目不缓存：text/cachedChannels 超落盘阈值时每次读盘，不把大数组常驻内存。
+        BOOL heavy=([result[@"text"] length]>65536)||([result[@"cachedChannels"] count]>200);
+        if(!heavy){if(!gProfileMetadataCache)gProfileMetadataCache=[NSMutableDictionary dictionary];gProfileMetadataCache[source]=result;}
+        return result;
     }
 }
 + (BOOL)replaceBackupMetadata:(NSDictionary *)profiles error:(NSError **)error {
@@ -92,6 +106,8 @@ static NSString *const CCTVEnabledChannelTelemetrySourcesKey = @"enabledChannelT
         }
         NSDictionary *previous=ProfileMetadataDefaultsSnapshot();
         [NSUserDefaults.standardUserDefaults setObject:replacement forKey:@"profileMetadata"];
+        // T19/PERF-10：整表替换，快照全失效。
+        [gProfileMetadataCache removeAllObjects];
         for(NSString *source in previous) {
             NSDictionary *old=[previous[source] isKindOfClass:NSDictionary.class]?previous[source]:@{};
             NSString *name=[old[@"_payloadFile"] isKindOfClass:NSString.class]?old[@"_payloadFile"]:nil;
@@ -118,6 +134,8 @@ static NSString *const CCTVEnabledChannelTelemetrySourcesKey = @"enabledChannelT
     all[source]=profile;
     [NSUserDefaults.standardUserDefaults setObject:all forKey:@"profileMetadata"];
     if(oldName.length&&[oldName.lastPathComponent isEqual:oldName])[NSFileManager.defaultManager removeItemAtPath:[[path stringByDeletingLastPathComponent] stringByAppendingPathComponent:oldName] error:NULL];
+    // T19/PERF-10：本源快照失效（调用方 update:/removeValueForKey: 均持有 @synchronized(self)）。
+    [gProfileMetadataCache removeObjectForKey:source];
 }
 + (void)update:(NSString *)source values:(NSDictionary *)values {
     @synchronized(self){
@@ -148,6 +166,8 @@ static NSString *const CCTVEnabledChannelTelemetrySourcesKey = @"enabledChannelT
     if([name isKindOfClass:NSString.class]&&name.length&&[name.lastPathComponent isEqual:name]){NSString *directory=[[self payloadFilePathForSource:source] stringByDeletingLastPathComponent];[NSFileManager.defaultManager removeItemAtPath:[directory stringByAppendingPathComponent:name] error:NULL];}
     if([source isKindOfClass:NSString.class]&&source.length)[NSFileManager.defaultManager removeItemAtPath:[self payloadFilePathForSource:source] error:NULL];
     NSMutableDictionary *all=[ProfileMetadataDefaultsSnapshot() mutableCopy];[all removeObjectForKey:source];[NSUserDefaults.standardUserDefaults setObject:all forKey:@"profileMetadata"];
+    // T19/PERF-10：本源快照失效。
+    [gProfileMetadataCache removeObjectForKey:source];
     for(NSString *key in @[@"profileOrder",@"disabledSubscriptions",CCTVDisabledChannelLogoSourcesKey,CCTVDisabledPlayerCornerLogoSourcesKey,CCTVDisabledChannelPreviewSourcesKey,CCTVDisabledChannelTelemetrySourcesKey,CCTVEnabledChannelLogoSourcesKey,CCTVEnabledPlayerCornerLogoSourcesKey,CCTVEnabledChannelPreviewSourcesKey,CCTVEnabledChannelTelemetrySourcesKey]){NSMutableArray *a=[[NSUserDefaults.standardUserDefaults arrayForKey:key]?:@[] mutableCopy];[a removeObject:source];[NSUserDefaults.standardUserDefaults setObject:a forKey:key];}
 
     }

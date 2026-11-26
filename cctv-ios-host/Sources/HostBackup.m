@@ -149,6 +149,9 @@ invalid:
     for(NSString *k in stringPreferenceKeys())if(p[k])[d setObject:p[k] forKey:k];
     for(NSString *k in [self arrayPreferenceKeys])if([p[k] isKindOfClass:NSArray.class])[d setObject:p[k] forKey:k];
     [HostLibraryStore.shared markRestorePendingIfFallback];
+    // T19/PERF-10：恢复直接写了 NSUserDefaults 回退键（两面写），使 LibraryStore
+    // 快照失效，下次读重建——回退模式下异步写块可能先于直接写执行。
+    [HostLibraryStore.shared invalidateSnapshots];
     return YES;
 }
 @end

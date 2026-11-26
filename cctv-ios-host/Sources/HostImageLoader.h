@@ -13,4 +13,6 @@ typedef void (^HostImageLoadCompletion)(BOOL succeeded, NSTimeInterval retryAfte
 - (void)cancelPending;
 - (void)clearCache;
 - (void)clearDiskCache;
+// T18/PERF-03：分别计费的快照（内存缓存/在途压缩体/磁盘缓存各一栏 + 命中与淘汰计数）。
+- (NSDictionary<NSString *, id> *)statisticsSnapshot;
 @end

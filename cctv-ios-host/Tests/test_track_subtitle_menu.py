@@ -290,7 +290,9 @@ class TestTrackSubtitleContracts(unittest.TestCase):
     def test_mpv_off_sentinels_disable_aid_sid(self):
         select = self.mpv[self.mpv.index('- (BOOL)selectTrackWithIndex:'):]
         self.assertIn('index == 0 || index == 10000', select[:1500])
-        self.assertIn('set_property_string(ctx, prop, "no")', select[:1500])
+        # T20：set_property_string 经受检 helper（mpvSetPropertyString）
+        # 下发，哨兵语义不变（aid/sid 设 "no"）。
+        self.assertIn('mpvSetPropertyString:ctx name:prop value:"no"', select[:1500])
 
     def test_cicada_tracks_report_selected_unknown(self):
         self.assertIn('@"selected":@"unknown"', self.cicada)

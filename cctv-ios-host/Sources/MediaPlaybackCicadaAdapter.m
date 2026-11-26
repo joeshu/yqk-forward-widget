@@ -237,6 +237,8 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
 @property (nonatomic, readwrite) NSInteger lastErrorCode;
 @property (nonatomic) NSTimeInterval bufferedTime;
 @property (nonatomic) CFTimeInterval lastPositionEmission;
+@property (nonatomic) CFTimeInterval lastSpeedEmission;
+@property (nonatomic) CFTimeInterval lastLoadingProgressEmission;
 @property (nonatomic) BOOL playbackRequested;
 @property (nonatomic) float pendingRate;
 @property (nonatomic) BOOL hasPendingRate;
@@ -794,6 +796,11 @@ static dispatch_queue_t MediaPlaybackCicadaQuarantineQueue(void) {
         if (![self acceptsCallbacksFromPlayer:player]) return;
         float clamped = isfinite(progress) ? MAX(0.0f, MIN(1.0f, progress / 100.0f)) : 0.0f;
         self.loading=clamped<1.0f;
+        // T20：缓冲进度转发节流到 0.35s（只丢中间值）；progress 到 1.0
+        // 是加载结束，必须即时转发（调用方据此隐藏加载指示）。
+        CFTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+        if (clamped < 1.0f && now - self.lastLoadingProgressEmission < 0.35) return;
+        self.lastLoadingProgressEmission = now;
         if ([self.delegate respondsToSelector:@selector(cicadaAdapter:didUpdateLoading:progress:)]) {
             [self.delegate cicadaAdapter:self didUpdateLoading:self.loading progress:clamped];
         }
@@ -818,6 +825,11 @@ static dispatch_queue_t MediaPlaybackCicadaQuarantineQueue(void) {
     // 会因 unrecognized selector 崩溃；现在实现并转发给调用方更新测速。
     dispatch_async(dispatch_get_main_queue(), ^{
         if (![self acceptsCallbacksFromPlayer:player]) return;
+        // T20：SDK 回调频率不受控——测速转发节流到 0.5s（只丢中间值，
+        // 测速只做展示；与 reportPosition 的 0.35s 节流同款）。
+        CFTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+        if (now - self.lastSpeedEmission < 0.5) return;
+        self.lastSpeedEmission = now;
         if ([self.delegate respondsToSelector:@selector(cicadaAdapter:didUpdateDownloadSpeed:)]) {
             [self.delegate cicadaAdapter:self didUpdateDownloadSpeed:isfinite(speed) ? MAX(0, (double)speed) : 0];
         }
