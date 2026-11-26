@@ -130,7 +130,7 @@
     self.nativeAttemptStartedAt = 0;
     self.retryCount = 0;
     self.playStartedAt = self.selectionRequestedAt?:CACurrentMediaTime();self.selectionRequestedAt=0;
-    self.startupTrace=[[PlaybackStartupTrace alloc] initWithStartTime:self.playStartedAt];
+    if(!self.currentRemotePlaybackAttemptID.length)self.currentRemotePlaybackAttemptID=NSUUID.UUID.UUIDString.lowercaseString;self.startupTrace=[[PlaybackStartupTrace alloc] initWithStartTime:self.playStartedAt attemptID:self.currentRemotePlaybackAttemptID generation:self.playbackGeneration];[HostPerfMetrics.shared beginPlaybackAttemptWithSessionID:self.currentPlaybackTraceID attemptID:self.currentRemotePlaybackAttemptID generation:self.playbackGeneration sourceRevision:self.selectionVersion engine:nil userAction:@"select" expectsVideo:YES];
     self.firstFrameSeconds = 0;
     self.titleLabel.text = [NSString stringWithFormat:@"%@ · 连接中", self.channelName];
     self.titleLabel.hidden = NO;
@@ -306,7 +306,7 @@
 
 - (void)recordStartupStage:(NSString *)stage {
     if(![self.startupTrace record:stage atTime:CACurrentMediaTime()])return;
-    [self log:@"起播阶段 %@ [%lu] %@ +%.2fs",self.channelID?:@"—",(unsigned long)self.playbackGeneration,stage,[self.startupTrace.stages[stage] doubleValue]];if([stage isEqualToString:@"frame"])[HostPerfMetrics.shared recordFirstFrameWithEngine:(self.remoteAdapter?@"cicada":(self.currentRemoteURL.length?@"avplayer":@"cnplayer")) channelID:self.channelID elapsedSeconds:[self.startupTrace.stages[@"frame"] doubleValue] stages:self.startupTrace.stages]; // 首帧按内核分类写入 perf_first_frame
+    [self log:@"起播阶段 %@ [%lu] %@ +%.2fs",self.channelID?:@"—",(unsigned long)self.playbackGeneration,stage,[self.startupTrace.stages[stage] doubleValue]];if([stage isEqualToString:@"frame"])[HostPerfMetrics.shared recordFirstFrameWithEngine:(self.remoteAdapter?@"cicada":(self.currentRemoteURL.length?@"avplayer":@"cnplayer")) channelID:self.channelID elapsedSeconds:[self.startupTrace.stages[@"frame"] doubleValue] stages:self.startupTrace.stages attemptID:self.currentRemotePlaybackAttemptID generation:self.playbackGeneration sourceRevision:self.selectionVersion]; // 首帧按内核分类写入 perf_first_frame，并归属到当前 attempt（T01）
 }
 
 - (void)stopPlayback {
@@ -531,7 +531,7 @@
     self.currentRemoteURL=u;self.channelID=ch[@"id"]?:u;self.channelName=ch[@"name"]?:u;self.routeName=self.nativePlainRouteActive?[NSString stringWithFormat:@"%@ · AVPlayer 明文线路",self.requestedNativeRoute[@"provider"]?:@"自选"]:@"订阅";
     if(self.playerTabs.selectedSegmentIndex!=3)self.playerTabs.selectedSegmentIndex=1;[self updatePlayerChannelLogoForChannel:ch];[self selectPlayerPanel];
     self.firstRender=NO;self.retryCount=0;self.playStartedAt=requestedAt;self.firstFrameSeconds=0;
-    self.startupTrace=[[PlaybackStartupTrace alloc] initWithStartTime:self.playStartedAt];
+    self.startupTrace=[[PlaybackStartupTrace alloc] initWithStartTime:self.playStartedAt attemptID:self.currentRemotePlaybackAttemptID generation:self.playbackGeneration];[HostPerfMetrics.shared beginPlaybackAttemptWithSessionID:self.currentPlaybackTraceID attemptID:self.currentRemotePlaybackAttemptID generation:self.playbackGeneration sourceRevision:self.selectionVersion engine:nil userAction:@"select" expectsVideo:YES];
     [self recordStartupStage:@"teardown"];
     self.titleLabel.text=[NSString stringWithFormat:@"%@ · 连接中",self.channelName];self.titleLabel.hidden=NO;self.infoLabel.hidden=NO;self.infoLabel.text=@"";[self.spinner startAnimating];
     [self reloadActiveCatalogView];[self log:@"订阅起播 %@ [%lu]",CCTVServiceLogAddress(u),(unsigned long)generation];
@@ -586,7 +586,7 @@
     }];
 }
 - (void)failRemoteReadiness:(NSError *)error generation:(NSUInteger)generation {
-    if(generation!=self.playbackGeneration)return;NSDictionary *service=[self localServiceForURL:[NSURL URLWithString:self.currentRemoteURL?:@""]];NSMutableDictionary *fields=[@{@"correlation_id":self.currentPlaybackTraceID?:@"", @"playback_generation":@(generation), @"failure_stage":error.code==1?@"health_probe_timeout":@"service_start_or_state", @"service_id":service[@"id"]?:@"", @"service_name":service[@"name"]?:@"", @"engine":service[@"engine"]?:@"unknown", @"port":service[@"port"]?:@0, @"error_domain":error.domain?:@"", @"error_code":@(error.code), @"error_message":error.localizedDescription?:@""} mutableCopy];[fields addEntriesFromDictionary:CCTVDiagnosticURLFields([NSURL URLWithString:self.currentRemoteURL?:@""])];[RuntimeDiagnostics.shared recordEvent:@"playback_readiness_failed" category:@"service" fields:fields];self.remotePlaybackFailed=YES;[self endPlaybackPriority];[self.spinner stopAnimating];self.titleLabel.text=[NSString stringWithFormat:@"%@ · 服务未就绪",self.channelName];self.titleLabel.hidden=NO;self.infoLabel.hidden=NO;[self.playPauseBtn setTitle:@"重试" forState:UIControlStateNormal];self.playPauseBtn.enabled=YES;NSString *reason=[HostLogRedactor redactText:error.localizedDescription?:@""];if(service)[self logPluginLine:[NSString stringWithFormat:@"播放接口未就绪 · %@",reason.length?reason:@"无可用错误详情"] identifier:service[@"id"] name:service[@"name"]];[self log:@"本机续播失败 %@",reason];self.infoLabel.text=reason.length?[NSString stringWithFormat:@"%@\n查看该服务日志后重试。",reason]:@"服务未就绪。查看该服务日志后重试。";
+    if(generation!=self.playbackGeneration)return;NSDictionary *service=[self localServiceForURL:[NSURL URLWithString:self.currentRemoteURL?:@""]];NSMutableDictionary *fields=[@{@"correlation_id":self.currentPlaybackTraceID?:@"", @"playback_generation":@(generation), @"failure_stage":error.code==1?@"health_probe_timeout":@"service_start_or_state", @"service_id":service[@"id"]?:@"", @"service_name":service[@"name"]?:@"", @"engine":service[@"engine"]?:@"unknown", @"port":service[@"port"]?:@0, @"error_domain":error.domain?:@"", @"error_code":@(error.code), @"error_message":error.localizedDescription?:@""} mutableCopy];[fields addEntriesFromDictionary:CCTVDiagnosticURLFields([NSURL URLWithString:self.currentRemoteURL?:@""])];[RuntimeDiagnostics.shared recordEvent:@"playback_readiness_failed" category:@"service" fields:fields];[HostPerfMetrics.shared recordPlaybackAttemptFailed:self.currentRemotePlaybackAttemptID generation:generation engine:service[@"engine"] stage:error.code==1?@"health_probe_timeout":@"service_start_or_state"];self.remotePlaybackFailed=YES;[self endPlaybackPriority];[self.spinner stopAnimating];self.titleLabel.text=[NSString stringWithFormat:@"%@ · 服务未就绪",self.channelName];self.titleLabel.hidden=NO;self.infoLabel.hidden=NO;[self.playPauseBtn setTitle:@"重试" forState:UIControlStateNormal];self.playPauseBtn.enabled=YES;NSString *reason=[HostLogRedactor redactText:error.localizedDescription?:@""];if(service)[self logPluginLine:[NSString stringWithFormat:@"播放接口未就绪 · %@",reason.length?reason:@"无可用错误详情"] identifier:service[@"id"] name:service[@"name"]];[self log:@"本机续播失败 %@",reason];self.infoLabel.text=reason.length?[NSString stringWithFormat:@"%@\n查看该服务日志后重试。",reason]:@"服务未就绪。查看该服务日志后重试。";
 }
 - (BOOL)startRemoteCicada:(NSString *)address generation:(NSUInteger)generation {
     if(generation!=self.playbackGeneration||self.remoteTriedCicada||![MediaPlaybackCicadaAdapter isAvailable])return NO;
@@ -612,7 +612,7 @@
     self.livePeakBitrateBps=MAX(self.livePeakBitrateBps,bitsPerSecond);
 }
 - (void)cicadaAdapter:(id)adapter didFailWithError:(NSError *)error {
-    if(adapter!=self.remoteAdapter)return;[RuntimeDiagnostics.shared recordEvent:@"playback_failed" category:@"playback" fields:@{@"player":@"CicadaPlayer",@"playback_attempt_id":self.currentRemotePlaybackAttemptID?:@"",@"error_domain":error.domain?:@"",@"error_code":@(error.code)}];self.remotePlaybackFailed=YES;self.remotePlaybackWanted=NO;[self.spinner stopAnimating];
+    if(adapter!=self.remoteAdapter)return;[RuntimeDiagnostics.shared recordEvent:@"playback_failed" category:@"playback" fields:@{@"player":@"CicadaPlayer",@"playback_attempt_id":self.currentRemotePlaybackAttemptID?:@"",@"error_domain":error.domain?:@"",@"error_code":@(error.code)}];[HostPerfMetrics.shared recordPlaybackAttemptFailed:self.currentRemotePlaybackAttemptID generation:self.playbackGeneration engine:@"cicada" stage:@"playback_failed"];self.remotePlaybackFailed=YES;self.remotePlaybackWanted=NO;[self.spinner stopAnimating];
     self.titleLabel.hidden=NO;self.titleLabel.text=@"播放失败 · 可重试或切换线路";self.infoLabel.hidden=NO;self.infoLabel.text=error.localizedDescription;self.playPauseBtn.enabled=YES;[self.playPauseBtn setTitle:@"重试" forState:UIControlStateNormal];
     self.remoteAdapter.delegate=nil;[self.remoteAdapter destroy];self.remoteAdapter=nil;[self setLiveOverlayHidden:NO];[self endPlaybackPriority];
     if(self.remoteRetryCount==0&&CCTVRemotePlaybackErrorCanRetrySameURL(error)){
@@ -827,7 +827,7 @@
     [self.nativePreloader cancel];
     self.sdkPlayer=nil;
     self.sdkPlayerUsed=NO;
-    self.startupTrace=[[PlaybackStartupTrace alloc] initWithStartTime:self.playStartedAt];
+    self.currentRemotePlaybackAttemptID=NSUUID.UUID.UUIDString.lowercaseString;self.startupTrace=[[PlaybackStartupTrace alloc] initWithStartTime:self.playStartedAt attemptID:self.currentRemotePlaybackAttemptID generation:self.playbackGeneration];[HostPerfMetrics.shared beginPlaybackAttemptWithSessionID:self.currentPlaybackTraceID attemptID:self.currentRemotePlaybackAttemptID generation:self.playbackGeneration sourceRevision:self.selectionVersion engine:nil userAction:@"auto_recovery" expectsVideo:YES];
     [self recordStartupStage:@"recovery"];
     self.stallReported=NO;
     [self playViaSDK:channelID title:self.channelName?:channelID];

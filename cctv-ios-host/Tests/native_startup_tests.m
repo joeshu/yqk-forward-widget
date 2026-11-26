@@ -61,6 +61,16 @@ int main(int argc, const char **argv) {
         [repeatedVDN record:@"preloadedVDN" atTime:100];[repeatedVDN record:@"vdn" atTime:107];
         check(![repeatedVDN shouldRecoverMissingSetupAtTime:108 alreadyRetried:NO failed:NO], @"a new VDN callback receives its full core-creation grace period");
         check([repeatedVDN shouldRecoverMissingSetupAtTime:113 alreadyRetried:NO failed:NO], @"repeated VDN still permits bounded missing-core recovery");
+        // T01: attempt identity — an identified trace rejects stale callbacks.
+        PlaybackStartupTrace *identified = [[PlaybackStartupTrace alloc] initWithStartTime:100 attemptID:@"attempt-1" generation:3];
+        check([identified record:@"vdn" atTime:101 attemptID:@"attempt-1" generation:3], @"matching attempt records");
+        check(![identified record:@"setup" atTime:102 attemptID:@"attempt-1" generation:2], @"old generation cannot write into a new attempt");
+        check(![identified record:@"setup" atTime:102 attemptID:@"attempt-2" generation:3], @"another attempt cannot write into this trace");
+        check([identified record:@"setup" atTime:102 attemptID:@"attempt-1" generation:3], @"current attempt still records after stale rejects");
+        check([identified record:@"frame" atTime:103], @"legacy record keeps the trace's own identity");
+        PlaybackStartupTrace *legacy = [[PlaybackStartupTrace alloc] initWithStartTime:100];
+        check(!legacy.attemptID && legacy.generation == 0, @"legacy init stays unattributed");
+        check([legacy record:@"vdn" atTime:101], @"unattributed trace keeps old behavior");
         __block BOOL done = NO;
         __block NSInteger calls = 0;
         LocalServiceReadiness *ready = [[LocalServiceReadiness alloc]

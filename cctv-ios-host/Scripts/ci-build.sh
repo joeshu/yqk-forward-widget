@@ -134,7 +134,7 @@ for f in Frameworks/*.framework; do
   cp -R "$f" "$APP/Frameworks/"
 done
 
-SOURCES=$(find Sources -maxdepth 1 -name '*.m' -print | sort | tr '\n' ' ')
+SOURCES=$(find Sources -maxdepth 1 \( -name '*.m' -o -name '*.c' \) -print | sort | tr '\n' ' ')
 
 # The release app always embeds the real JAR runtime. A missing runtime fails the build.
 JAR_ROOT="${CCTV_JAR_CACHE:-$PWD/.jar-runtime}/iphoneos"

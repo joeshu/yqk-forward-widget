@@ -108,8 +108,8 @@ class RuntimeIdleReclaimContractTests(unittest.TestCase):
     def test_build_scripts_collect_new_sources(self):
         ci = (SCRIPTS / "ci-build.sh").read_text(encoding="utf-8")
         ui = (SCRIPTS / "ui-smoke.sh").read_text(encoding="utf-8")
-        self.assertIn("find Sources -maxdepth 1 -name '*.m'", ci)
-        self.assertIn("Sources/*.m", ui)
+        self.assertIn(r"find Sources -maxdepth 1 \( -name '*.m' -o -name '*.c' \)", ci)
+        self.assertIn("Sources/*.m Sources/*.c", ui)
 
     def test_runtimes_wire_activity_and_mutual_exclusion(self):
         pyhost = (SOURCES / "PyHost.m").read_text(encoding="utf-8")

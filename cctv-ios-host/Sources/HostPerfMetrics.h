@@ -36,12 +36,59 @@ FOUNDATION_EXPORT NSUInteger const HostPerfMetricsRingCapacity;
                          channelID:(nullable NSString *)channelID
                     elapsedSeconds:(NSTimeInterval)elapsedSeconds
                             stages:(nullable NSDictionary<NSString *, NSNumber *> *)stages;
+/// Same as above, but also attributes the frame to a playback attempt for the
+/// T01 attempt ledger (first-video milestone; duplicate frames for the same
+/// attempt are ignored, stale callbacks for older attempts are ignored).
+/// `attemptID` is the controller's currentRemotePlaybackAttemptID,
+/// `generation` its playbackGeneration, `sourceRevision` its selectionVersion
+/// (the revision of the selection that started this attempt; the true
+/// source-config revision wiring arrives with T04).
+- (void)recordFirstFrameWithEngine:(NSString *)engine
+                         channelID:(nullable NSString *)channelID
+                    elapsedSeconds:(NSTimeInterval)elapsedSeconds
+                            stages:(nullable NSDictionary<NSString *, NSNumber *> *)stages
+                         attemptID:(nullable NSString *)attemptID
+                        generation:(NSUInteger)generation
+                    sourceRevision:(NSUInteger)sourceRevision;
+/// Playback attempt lifecycle (T01 / PERF-07). Identifiers are the same
+/// correlation ids the playback controller already mints: session =
+/// currentPlaybackTraceID, attempt = currentRemotePlaybackAttemptID,
+/// generation = playbackGeneration. All methods are thread-safe and never
+/// block on disk I/O; they feed the bounded in-memory attempt ledger and
+/// emit perf_attempt_* events through RuntimeDiagnostics (dropped when
+/// diagnostics is disabled). No URL, header or media content is recorded.
+/// `engine` is the playback core name (avplayer / cicada / mpv / cnplayer);
+/// `userAction` is select / retry / auto_recovery / resume.
+- (void)beginPlaybackAttemptWithSessionID:(nullable NSString *)sessionID
+                                attemptID:(nullable NSString *)attemptID
+                               generation:(NSUInteger)generation
+                           sourceRevision:(NSUInteger)sourceRevision
+                                   engine:(nullable NSString *)engine
+                               userAction:(nullable NSString *)userAction
+                             expectsVideo:(BOOL)expectsVideo;
+- (void)recordPlaybackAttemptFirstAudio:(nullable NSString *)attemptID
+                             generation:(NSUInteger)generation
+                                 engine:(nullable NSString *)engine;
+- (void)recordPlaybackAttemptFirstVideo:(nullable NSString *)attemptID
+                             generation:(NSUInteger)generation
+                                 engine:(nullable NSString *)engine;
+- (void)recordPlaybackAttemptFailed:(nullable NSString *)attemptID
+                         generation:(NSUInteger)generation
+                             engine:(nullable NSString *)engine
+                              stage:(nullable NSString *)stage;
+- (void)recordPlaybackAttemptCancelled:(nullable NSString *)attemptID
+                            generation:(NSUInteger)generation;
+/// Cancels the most recently begun attempt when it is still pending.
+/// Used by navigation suspension, where the generation has already advanced.
+- (void)cancelPendingPlaybackAttempt;
 /// Generic perf mark (name is prefixed with "perf_" when missing).
 - (void)recordMark:(NSString *)name fields:(nullable NSDictionary<NSString *, id> *)fields;
 
 /// Snapshot of the ring buffer, oldest first.
 - (NSArray<NSDictionary<NSString *, id> *> *)recentEntries;
-/// Summary dictionary: launch milestones, per-engine first-frame stats, switch stats and recent entries.
+/// Summary dictionary: launch milestones, per-engine first-frame stats, switch stats,
+/// the T01 attempt ledger (counts, success rate, P50/P95 latencies) and recent entries.
+/// The schema stays `cctvhost.perf.v1`; `attempts` is additive.
 - (NSDictionary<NSString *, id> *)summary;
 /// JSON-encoded summary (pretty printed, sorted keys); nil only if serialization fails.
 - (nullable NSData *)exportJSONData;

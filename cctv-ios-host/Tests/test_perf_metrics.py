@@ -13,6 +13,10 @@ EPG = (SOURCES / "RootViewController+EPG.m").read_text(encoding="utf-8")
 PLAYBACK = (SOURCES / "RootViewController+Playback.m").read_text(encoding="utf-8")
 DIAGNOSTICS = (SOURCES / "RuntimeDiagnostics.m").read_text(encoding="utf-8")
 PROJECT = (ROOT / "project.yml").read_text(encoding="utf-8")
+TRACE_H = (SOURCES / "PlaybackStartupTrace.h").read_text(encoding="utf-8")
+TRACE_M = (SOURCES / "PlaybackStartupTrace.m").read_text(encoding="utf-8")
+LEDGER_H = (SOURCES / "HostPerfAttemptLedger.h").read_text(encoding="utf-8")
+LEDGER_C = (SOURCES / "HostPerfAttemptLedger.c").read_text(encoding="utf-8")
 
 
 def method_body(text, signature):
@@ -187,6 +191,83 @@ class MetricKitContractTests(unittest.TestCase):
         for marker in ("payload.applicationLaunchMetrics", "histogrammedTimeToFirstDraw", "bucketEnumerator",
                        "MXHistogramBucket<NSUnitDuration *>", "perf_metrickit_launch_metrics", "report_is_aggregate"):
             self.assertIn(marker, body)
+
+
+class AttemptLedgerContractTests(unittest.TestCase):
+    """T01 (PERF-07) wiring contracts. The accounting behavior itself is
+    executed by Tests/test_perf_metrics_attempt_accounting.py against the
+    production C ledger; these tests pin the ObjC integration points."""
+
+    def test_header_declares_attempt_lifecycle(self):
+        for marker in (
+            "beginPlaybackAttemptWithSessionID:(nullable NSString *)sessionID",
+            "attemptID:(nullable NSString *)attemptID",
+            "generation:(NSUInteger)generation",
+            "sourceRevision:(NSUInteger)sourceRevision",
+            "recordPlaybackAttemptFirstAudio:",
+            "recordPlaybackAttemptFirstVideo:",
+            "recordPlaybackAttemptFailed:",
+            "recordPlaybackAttemptCancelled:",
+            "cancelPendingPlaybackAttempt;",
+        ):
+            self.assertIn(marker, HEADER)
+
+    def test_ledger_is_pure_c_bounded_and_io_free(self):
+        self.assertNotIn("Foundation", LEDGER_H)
+        self.assertNotIn("Foundation", LEDGER_C)
+        self.assertIn("#define HOST_PERF_LEDGER_MAX_ATTEMPTS 128", LEDGER_H)
+        self.assertIn("#define HOST_PERF_LEDGER_HISTOGRAM_BUCKETS 11", LEDGER_H)
+        for banned in ("fopen", "malloc", "NSLog", "NSURL", "NSDictionary"):
+            self.assertNotIn(banned, LEDGER_C)
+        for marker in ("HostPerfLedgerQuantileMs", "HostPerfLedgerSuccessRate",
+                       "HostPerfLedgerHashString", "stale_ignored",
+                       "duplicate_ignored", "superseded"):
+            self.assertIn(marker, LEDGER_H)
+
+    def test_metrics_feeds_ledger_and_emits_attempt_events(self):
+        for marker in ('#import "HostPerfAttemptLedger.h"', "HostPerfLedgerInit",
+                       "HostPerfLedgerBegin", "HostPerfLedgerMarkFirstVideo",
+                       "HostPerfLedgerMarkFailed", "HostPerfLedgerMarkCancelled",
+                       '@"perf_attempt_started"', '@"perf_attempt_first_video"',
+                       '@"perf_attempt_first_audio"', '@"perf_attempt_failed"',
+                       '@"perf_attempt_cancelled"', '@"attempts"',
+                       "CACurrentMediaTime() * 1000.0"):
+            self.assertIn(marker, IMPL)
+        summary = method_body(IMPL, "- (NSDictionary<NSString *, id> *)summary")
+        self.assertIn('summary[@"attempts"] = [self attemptSummary];', summary)
+
+    def test_attempt_events_carry_no_url_or_header(self):
+        # Attempt events must never contain URLs, headers or media content.
+        for signature in (
+            "- (void)beginPlaybackAttemptWithSessionID:",
+            "- (void)recordPlaybackAttemptFailed:",
+            "- (void)recordPlaybackAttemptFirstVideo:",
+        ):
+            body = method_body(IMPL, signature).lower()
+            self.assertNotIn("url", body)
+            self.assertNotIn("header", body)
+            self.assertNotIn("media", body)
+
+    def test_legacy_first_frame_still_works_unattributed(self):
+        wrapper = method_body(IMPL, "- (void)recordFirstFrameWithEngine:(NSString *)engine\n                         channelID:(NSString *)channelID\n                    elapsedSeconds:(NSTimeInterval)elapsedSeconds\n                            stages:(NSDictionary<NSString *, NSNumber *> *)stages {")
+        self.assertIn("attemptID:nil generation:0 sourceRevision:0", wrapper)
+
+    def test_trace_rejects_stale_identity(self):
+        for marker in ("@property(nonatomic, readonly, copy, nullable) NSString *attemptID;",
+                       "@property(nonatomic, readonly) NSUInteger generation;",
+                       "initWithStartTime:(NSTimeInterval)time\n                        attemptID:(nullable NSString *)attemptID",
+                       "record:(NSString *)stage\n        atTime:(NSTimeInterval)time\n     attemptID:"):
+            self.assertIn(marker, TRACE_H)
+        body = method_body(TRACE_M, "- (BOOL)record:(NSString *)stage\n        atTime:(NSTimeInterval)time\n     attemptID:(NSString *)attemptID")
+        self.assertIn("if (self.attemptID.length &&", body)
+        self.assertIn("generation != self.generation", body)
+
+    def test_controller_wires_attempt_lifecycle(self):
+        self.assertGreaterEqual(PLAYBACK.count("beginPlaybackAttemptWithSessionID:"), 3)
+        self.assertIn("attemptID:self.currentRemotePlaybackAttemptID generation:self.playbackGeneration sourceRevision:self.selectionVersion", PLAYBACK)
+        self.assertGreaterEqual(PLAYBACK.count("recordPlaybackAttemptFailed:"), 2)
+        self.assertIn("userAction:@\"auto_recovery\"", PLAYBACK)
+        self.assertIn("[HostPerfMetrics.shared cancelPendingPlaybackAttempt]", ROOT_VC)
 
 
 if __name__ == "__main__":

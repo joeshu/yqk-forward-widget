@@ -20,7 +20,7 @@ SMOKE_LAUNCH_EPOCH=$(date +%s)
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
 ARCH=$(uname -m)
 xcrun --sdk iphonesimulator clang -fobjc-arc -target "$ARCH-apple-ios15.0-simulator" -isysroot "$SDK" \
-  -I Sources/Include -I Sources Sources/*.m Tests/UISmoke/*.m \
+  -I Sources/Include -I Sources Sources/*.m Sources/*.c Tests/UISmoke/*.m \
   -framework WebKit -framework JavaScriptCore -framework Security -framework Foundation -framework UIKit -framework ImageIO -framework CoreGraphics -framework CoreMedia -framework AVFoundation -framework AVKit \
   -framework MediaPlayer -framework QuartzCore -framework UniformTypeIdentifiers -framework MetricKit -framework UserNotifications -lz -lsqlite3 \
   -o "$APP/CCTVHost" 2>&1 | tee "$OUT/compile.log"

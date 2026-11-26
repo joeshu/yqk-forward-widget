@@ -1098,7 +1098,7 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
     BOOL hasActivePlayback=hasLivePlayback||self.moviePlayer!=nil;
     if(!hasActivePlayback)return;
     NSString *engine=self.avPlayer?@"avplayer":(self.cicadaPlayer?@"cicada":(self.currentPlayer?@"cnplayersdk":(self.moviePlayer?@"avplayer_controller":@"pending")));
-    self.playbackGeneration++;
+    if(hasLivePlayback)[HostPerfMetrics.shared cancelPendingPlaybackAttempt];self.playbackGeneration++; // T01: 挂起直播时把未终态的 attempt 记为取消（单列，不进成功率分母）
     self.livePlaybackSuspendedForNavigation=hasLivePlayback;
     NSString *previousOwner=hasLivePlayback?@"live":@"vod";
     [RuntimeDiagnostics.shared recordEvent:hasLivePlayback?@"live_playback_suspended":@"playback_owner_released" category:@"playback" fields:@{@"reason":reason?:@"navigation",@"previous_owner":previousOwner,@"next_owner":@"none",@"engine":engine,@"previous_tab":@(self.activeTab),@"playback_generation":@(self.playbackGeneration),@"correlation_id":self.currentPlaybackTraceID?:@"",@"background_live_exception":@NO}];
