@@ -170,6 +170,39 @@ static id MediaMetadataPersistentSafeValue(id value, NSString *key, NSUInteger d
         });
     });
 }
+/// 连接配置身份（T04/M04：统一 revision 的唯一定义）。只取决定连接行为的字段，
+/// 显示名等展示字段不参与。keyForSource 与指纹函数共用它，缓存键字节保持不变。
+static NSDictionary *MediaSourceConnectionIdentity(NSDictionary *source) {
+    if(![source isKindOfClass:NSDictionary.class])source=@{};
+    return @{ @"id":[source[@"id"] isKindOfClass:NSString.class]?source[@"id"]:@"",
+        @"port":[source[@"port"] respondsToSelector:@selector(stringValue)]?[source[@"port"] stringValue]:@"",
+        @"protocol":[source[@"protocol"] isKindOfClass:NSString.class]?source[@"protocol"]:@"",
+        @"packageRoot":[source[@"packageRoot"] isKindOfClass:NSString.class]?source[@"packageRoot"]:@"",
+        @"api":[source[@"api"] isKindOfClass:NSString.class]?source[@"api"]:@"",
+        @"header":source[@"header"]?:@{},@"headers":source[@"headers"]?:@{},@"manifest":source[@"manifest"]?:@{},@"playUrl":[source[@"playUrl"] isKindOfClass:NSString.class]?source[@"playUrl"]:@"",
+        @"options":source[@"options"]?:@"",@"tvboxType":source[@"tvboxType"]?:@0,
+        @"jar":[source[@"jar"] isKindOfClass:NSDictionary.class]?source[@"jar"]:@{},
+        @"subscriptionURL":[source[@"subscriptionURL"] isKindOfClass:NSString.class]?source[@"subscriptionURL"]:@"" };
+}
+static NSString *MediaSourceSHA256Hex(NSData *data) {
+    if(!data.length)return @"";
+    unsigned char digest[CC_SHA256_DIGEST_LENGTH];CC_SHA256(data.bytes,(CC_LONG)data.length,digest);
+    NSMutableString *hex=[NSMutableString stringWithCapacity:CC_SHA256_DIGEST_LENGTH*2];
+    for(NSUInteger i=0;i<CC_SHA256_DIGEST_LENGTH;i++)[hex appendFormat:@"%02x",digest[i]];
+    return hex;
+}
+NSString *MediaSourceConnectionFingerprint(NSDictionary *source) {
+    if(![source isKindOfClass:NSDictionary.class])return @"";
+    NSData *data=[NSJSONSerialization dataWithJSONObject:MediaSourceConnectionIdentity(source) options:NSJSONWritingSortedKeys error:NULL];
+    return MediaSourceSHA256Hex(data);
+}
+NSUInteger MediaSourceConnectionRevision(NSDictionary *source) {
+    NSString *fingerprint=MediaSourceConnectionFingerprint(source);
+    if(fingerprint.length<8)return 0;
+    unsigned long long value=0;NSScanner *scanner=[NSScanner scannerWithString:[fingerprint substringToIndex:8]];
+    if(![scanner scanHexLongLong:&value])return 0;
+    return (NSUInteger)value;
+}
 - (NSString *)keyForSource:(NSDictionary *)source operation:(NSString *)operation arguments:(NSDictionary *)arguments {
     NSMutableDictionary *cleanArgs=[NSMutableDictionary dictionary];
     if([arguments isKindOfClass:NSDictionary.class]){
@@ -178,22 +211,12 @@ static id MediaMetadataPersistentSafeValue(id value, NSString *key, NSUInteger d
             cleanArgs[k]=arguments[k];
         }
     }
-    NSDictionary *identity=@{ @"id":[source[@"id"] isKindOfClass:NSString.class]?source[@"id"]:@"",
-        @"port":[source[@"port"] respondsToSelector:@selector(stringValue)]?[source[@"port"] stringValue]:@"",
-        @"protocol":[source[@"protocol"] isKindOfClass:NSString.class]?source[@"protocol"]:@"",
-        @"packageRoot":[source[@"packageRoot"] isKindOfClass:NSString.class]?source[@"packageRoot"]:@"",
-        @"api":[source[@"api"] isKindOfClass:NSString.class]?source[@"api"]:@"",
-        @"header":source[@"header"]?:@{},@"headers":source[@"headers"]?:@{},@"manifest":source[@"manifest"]?:@{},@"playUrl":[source[@"playUrl"] isKindOfClass:NSString.class]?source[@"playUrl"]:@"",
-        @"options":source[@"options"]?:@"",@"tvboxType":source[@"tvboxType"]?:@0,
-        @"jar":[source[@"jar"] isKindOfClass:NSDictionary.class]?source[@"jar"]:@{},
-        @"subscriptionURL":[source[@"subscriptionURL"] isKindOfClass:NSString.class]?source[@"subscriptionURL"]:@"",
-        @"operation":operation?:@"", @"arguments":cleanArgs };
+    NSMutableDictionary *identity=[MediaSourceConnectionIdentity(source) mutableCopy];
+    identity[@"operation"]=operation?:@"";
+    identity[@"arguments"]=cleanArgs;
     NSData *data=[NSJSONSerialization dataWithJSONObject:identity options:NSJSONWritingSortedKeys error:NULL];
     if(!data.length)return nil;
-    unsigned char digest[CC_SHA256_DIGEST_LENGTH];CC_SHA256(data.bytes,(CC_LONG)data.length,digest);
-    NSMutableString *hex=[NSMutableString stringWithCapacity:CC_SHA256_DIGEST_LENGTH*2];
-    for(NSUInteger i=0;i<CC_SHA256_DIGEST_LENGTH;i++)[hex appendFormat:@"%02x",digest[i]];
-    return hex;
+    return MediaSourceSHA256Hex(data);
 }
 - (id)resultForSource:(NSDictionary *)source operation:(NSString *)operation arguments:(NSDictionary *)arguments maximumAge:(NSTimeInterval)maximumAge isStale:(BOOL *)isStale {
     if(isStale)*isStale=NO;

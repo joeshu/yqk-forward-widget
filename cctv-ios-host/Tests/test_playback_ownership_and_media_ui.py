@@ -287,8 +287,10 @@ class PlaybackOwnershipAndMediaUIContracts(unittest.TestCase):
     def test_home_and_listing_payloads_filter_bad_rows_and_never_insert_nil_ids(self):
         listing = method_body(BROWSER_SOURCE, "- (void)loadListing:(BOOL)append")
         home = method_body(BROWSER_SOURCE, "- (void)applyHomeResult:(NSDictionary *)result")
-        self.assertIn('![result isKindOfClass:NSDictionary.class]', listing)
-        self.assertIn('![result[@"items"] isKindOfClass:NSArray.class]', listing)
+        # T05：形状校验已统一进 MediaSearchClassifyResult（字典 + items 数组），
+        # loadListing 内不再保留内联写法；契约本身由 test_search_state 锁定。
+        self.assertIn('MediaSearchClassifyResult(result,error)', listing)
+        self.assertIn('resultKind!=MediaSearchResultKindValid', listing)
         self.assertIn('MediaBrowserDictionaryRows(result[@"items"]', listing)
         self.assertIn('MediaBrowserItemIdentity(item)', listing)
         self.assertNotIn('addObject:item[@"id"]', listing)

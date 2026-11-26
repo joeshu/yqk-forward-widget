@@ -1,13 +1,25 @@
 #import "ShortDramaVerticalFeedController.h"
 #import "HostGlassActionSheetViewController.h"
 #import "HostTheme.h"
+#import "PlaybackCoordinator.h"
 #import <AVFoundation/AVFoundation.h>
+
+/// 短剧槽位解析状态（M01）：resolving/ready/failed/cancelled 四态显式收敛，
+/// 完成与取消都必须落到终态，不再用单个 BOOL 猜测。
+typedef NS_ENUM(NSInteger, ShortDramaSlotState) {
+    ShortDramaSlotStateIdle = 0,
+    ShortDramaSlotStateResolving,
+    ShortDramaSlotStateReady,
+    ShortDramaSlotStateFailed,
+    ShortDramaSlotStateCancelled
+};
 
 @interface ShortDramaPlayerSlot : NSObject
 @property (nonatomic, assign) NSInteger episodeIndex;
 @property (nonatomic, strong) AVPlayer *player;
 @property (nonatomic, strong) AVPlayerLayer *playerLayer;
-@property (nonatomic, assign) BOOL resolving;
+@property (nonatomic, assign) ShortDramaSlotState state;
+@property (nonatomic, copy, nullable) ShortDramaResolveCancel resolveCancel;
 @end
 
 @implementation ShortDramaPlayerSlot
@@ -88,17 +100,20 @@
 }
 @end
 
-@interface ShortDramaVerticalFeedController () <UICollectionViewDataSource, UICollectionViewDelegateFlowLayout>
+@interface ShortDramaVerticalFeedController () <UICollectionViewDataSource, UICollectionViewDelegateFlowLayout, PlaybackSession>
 @property (nonatomic, copy) NSString *dramaTitle;
 @property (nonatomic, copy) NSArray<NSDictionary *> *episodes;
 @property (nonatomic, assign) NSInteger activeIndex;
-@property (nonatomic, copy, nullable) void (^episodeResolver)(NSInteger index, void (^completion)(NSURL * _Nullable url, NSDictionary<NSString *, NSString *> * _Nullable headers));
+@property (nonatomic, copy, nullable) ShortDramaEpisodeResolver episodeResolver;
 @property (nonatomic, strong) UICollectionView *collectionView;
 @property (nonatomic, strong) NSMutableDictionary<NSNumber *, ShortDramaPlayerSlot *> *playerPool;
+/// 退场后为 NO：关闭后到达的异步解析回调一律丢弃，不再触发播放（M02）。
+@property (nonatomic, assign) BOOL feedActive;
 - (void)closeFeed;
 - (void)showEpisodeDrawer;
 - (void)updateSlidingPoolAroundIndex:(NSInteger)centerIndex;
 - (void)prepareSlotForIndex:(NSInteger)index autoPlay:(BOOL)autoPlay;
+- (void)startResolveForSlot:(ShortDramaPlayerSlot *)slot index:(NSInteger)index;
 - (void)handlePlaybackEnded:(NSNotification *)note;
 @end
 
@@ -107,13 +122,14 @@
 - (instancetype)initWithTitle:(NSString *)dramaTitle
                      episodes:(NSArray<NSDictionary *> *)episodes
                  initialIndex:(NSInteger)initialIndex
-               episodeResolver:(void (^)(NSInteger, void (^)(NSURL * _Nullable, NSDictionary<NSString *,NSString *> * _Nullable)))resolver {
+               episodeResolver:(ShortDramaEpisodeResolver)resolver {
     if ((self = [super initWithNibName:nil bundle:nil])) {
         _dramaTitle = [dramaTitle copy] ?: @"短剧";
         _episodes = [episodes copy] ?: @[];
         _activeIndex = MAX(0, MIN(initialIndex, (NSInteger)_episodes.count - 1));
         _episodeResolver = [resolver copy];
         _playerPool = [NSMutableDictionary dictionaryWithCapacity:3];
+        _feedActive = YES;
         self.modalPresentationStyle = UIModalPresentationFullScreen;
     }
     return self;
@@ -180,6 +196,9 @@
 
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
+    // M02/S6：短剧流是前台唯一有声 owner，进场即收编到统一播放会话，
+    // 遥控/耳机/中断只应落到它身上，离开时释放（见 closeFeed）。
+    [[PlaybackCoordinator shared] acquireSession:(id<PlaybackSession>)self];
     if (self.episodes.count > 0 && self.activeIndex < (NSInteger)self.episodes.count) {
         [self.collectionView scrollToItemAtIndexPath:[NSIndexPath indexPathForItem:self.activeIndex inSection:0]
                                     atScrollPosition:UICollectionViewScrollPositionTop
@@ -188,18 +207,73 @@
     }
 }
 
+- (void)viewDidDisappear:(BOOL)animated {
+    [super viewDidDisappear:animated];
+    // 被其它方式解散（如手势）时同样释放会话；正常 closeFeed 已释放，
+    // releaseSession 对非当前会话是 no-op，可安全重入。
+    if (!self.feedActive) [[PlaybackCoordinator shared] releaseSession:(id<PlaybackSession>)self];
+}
+
+#pragma mark - PlaybackSession（统一播放会话，M02/S6）
+
+- (BOOL)sessionHasContent {
+    ShortDramaPlayerSlot *current = self.playerPool[@(self.activeIndex)];
+    return current && current.player.currentItem != nil;
+}
+
+- (BOOL)sessionIsPlaying {
+    ShortDramaPlayerSlot *current = self.playerPool[@(self.activeIndex)];
+    return current && current.player.rate > 0;
+}
+
+- (void)sessionPlay {
+    if (!self.feedActive) return;
+    [self prepareSlotForIndex:self.activeIndex autoPlay:YES];
+}
+
+- (void)sessionPause {
+    for (ShortDramaPlayerSlot *slot in self.playerPool.allValues) [slot.player pause];
+}
+
+- (BOOL)sessionStep:(NSInteger)direction {
+    if (!self.feedActive || direction == 0) return NO;
+    NSInteger target = self.activeIndex + (direction > 0 ? 1 : -1);
+    if (target < 0 || target >= (NSInteger)self.episodes.count) return NO;
+    [self.collectionView scrollToItemAtIndexPath:[NSIndexPath indexPathForItem:target inSection:0]
+                                atScrollPosition:UICollectionViewScrollPositionTop
+                                        animated:YES];
+    [self updateSlidingPoolAroundIndex:target];
+    return YES;
+}
+
+- (BOOL)sessionWantsPlayback {
+    return self.feedActive;
+}
+
+- (void)sessionMediaServicesReset {
+    [self sessionPause];
+}
+
 - (void)dealloc {
     [NSNotificationCenter.defaultCenter removeObserver:self];
     for (ShortDramaPlayerSlot *slot in self.playerPool.allValues) {
+        if (slot.resolveCancel) { slot.resolveCancel(); slot.resolveCancel = nil; }
+        slot.state = ShortDramaSlotStateCancelled;
         [slot.player pause];
         [slot.player replaceCurrentItemWithPlayerItem:nil];
     }
 }
 
 - (void)closeFeed {
+    // M02：退场先立 flag 再取消解析、暂停全部槽位、释放会话，最后才解散。
+    // 此后到达的异步解析回调在 applyURL 里按 feedActive 丢弃，杜绝退场后出声。
+    self.feedActive = NO;
     for (ShortDramaPlayerSlot *slot in self.playerPool.allValues) {
+        if (slot.resolveCancel) { slot.resolveCancel(); slot.resolveCancel = nil; }
+        slot.state = ShortDramaSlotStateCancelled;
         [slot.player pause];
     }
+    [[PlaybackCoordinator shared] releaseSession:(id<PlaybackSession>)self];
     [self dismissViewControllerAnimated:YES completion:nil];
 }
 
@@ -236,6 +310,9 @@
     for (NSNumber *key in self.playerPool.allKeys.copy) {
         if (![keepKeys containsObject:key]) {
             ShortDramaPlayerSlot *evicted = self.playerPool[key];
+            // M01：逐出即取消未完成的解析，回调不再落地，槽位进入终态。
+            if (evicted.resolveCancel) { evicted.resolveCancel(); evicted.resolveCancel = nil; }
+            evicted.state = ShortDramaSlotStateCancelled;
             [evicted.player pause];
             [evicted.player replaceCurrentItemWithPlayerItem:nil];
             [evicted.playerLayer removeFromSuperlayer];
@@ -244,6 +321,7 @@
             [self.playerPool[key].player pause];
         }
     }
+    // Centre-first：先发当前集解析，再发邻集；邻集只预热、不抢当前集的解析。
     [self prepareSlotForIndex:centerIndex autoPlay:YES];
     if (centerIndex + 1 < (NSInteger)self.episodes.count) [self prepareSlotForIndex:centerIndex + 1 autoPlay:NO];
     if (centerIndex - 1 >= 0) [self prepareSlotForIndex:centerIndex - 1 autoPlay:NO];
@@ -251,13 +329,28 @@
 
 - (void)prepareSlotForIndex:(NSInteger)index autoPlay:(BOOL)autoPlay {
     if (index < 0 || index >= (NSInteger)self.episodes.count) return;
+    ShortDramaFeedCell *cell = (ShortDramaFeedCell *)[self.collectionView cellForItemAtIndexPath:[NSIndexPath indexPathForItem:index inSection:0]];
     ShortDramaPlayerSlot *existing = self.playerPool[@(index)];
     if (existing) {
-        if (autoPlay) [existing.player play];
-        ShortDramaFeedCell *cell = (ShortDramaFeedCell *)[self.collectionView cellForItemAtIndexPath:[NSIndexPath indexPathForItem:index inSection:0]];
-        if (cell) {
-            [cell attachPlayerLayer:existing.playerLayer];
-            [cell.spinner stopAnimating];
+        switch (existing.state) {
+            case ShortDramaSlotStateReady:
+                if (autoPlay) [existing.player play];
+                if (cell) { [cell attachPlayerLayer:existing.playerLayer]; [cell.spinner stopAnimating]; }
+                break;
+            case ShortDramaSlotStateResolving:
+                // M01：解析中重遇只挂层、不播、不停 spinner；回调到达时再由 applyURL 播放。
+                // 旧行为在这里 play（无 item）并停 spinner，等于把卡住的槽判成已就绪。
+                if (cell) { [cell attachPlayerLayer:existing.playerLayer]; [cell.spinner startAnimating]; }
+                break;
+            case ShortDramaSlotStateFailed:
+            case ShortDramaSlotStateCancelled:
+                // M01：失败/已取消的槽再次成为当前集时重试；邻集不后台空转重试。
+                if (autoPlay) { [self startResolveForSlot:existing index:index]; if (cell) [cell.spinner startAnimating]; }
+                else if (cell) { [cell attachPlayerLayer:existing.playerLayer]; [cell.spinner stopAnimating]; }
+                break;
+            case ShortDramaSlotStateIdle:
+                if (autoPlay) { [self startResolveForSlot:existing index:index]; if (cell) [cell.spinner startAnimating]; }
+                break;
         }
         return;
     }
@@ -266,23 +359,42 @@
     slot.episodeIndex = index;
     slot.player = [AVPlayer new];
     slot.playerLayer = [AVPlayerLayer playerLayerWithPlayer:slot.player];
-    slot.resolving = YES;
+    slot.state = ShortDramaSlotStateResolving;
     self.playerPool[@(index)] = slot;
+    if (cell) [cell.spinner startAnimating];
+    [self startResolveForSlot:slot index:index];
+}
 
+/// 为槽位发起一次解析：直链直接落地，否则走 resolver；返回的取消令牌记在槽位上。
+- (void)startResolveForSlot:(ShortDramaPlayerSlot *)slot index:(NSInteger)index {
+    slot.state = ShortDramaSlotStateResolving;
+    slot.resolveCancel = nil;
+    __weak typeof(self) weakSelf = self;
     void (^applyURL)(NSURL *, NSDictionary<NSString *, NSString *> *) = ^(NSURL *url, NSDictionary<NSString *, NSString *> *headers) {
         dispatch_async(dispatch_get_main_queue(), ^{
-            slot.resolving = NO;
-            if (!url || self.playerPool[@(index)] != slot) return;
+            ShortDramaVerticalFeedController *owner = weakSelf;
+            // M02：退场后到达的回调一律丢弃；已被逐出/取消的槽位同样丢弃。
+            if (!owner || !owner.feedActive) return;
+            if (owner.playerPool[@(index)] != slot || slot.state != ShortDramaSlotStateResolving) return;
+            slot.resolveCancel = nil;
+            if (!url) {
+                slot.state = ShortDramaSlotStateFailed;
+                ShortDramaFeedCell *cell = (ShortDramaFeedCell *)[owner.collectionView cellForItemAtIndexPath:[NSIndexPath indexPathForItem:index inSection:0]];
+                if (cell) [cell.spinner stopAnimating];
+                return;
+            }
             AVURLAsset *asset = headers.count ? [AVURLAsset URLAssetWithURL:url options:@{@"AVURLAssetHTTPHeaderFieldsKey": headers}] : [AVURLAsset URLAssetWithURL:url options:nil];
             AVPlayerItem *item = [AVPlayerItem playerItemWithAsset:asset];
-            item.preferredForwardBufferDuration = (index == self.activeIndex) ? 10.0 : 4.0;
+            // S6：邻集资源上限——当前集 10s 前向缓冲，邻集只给 4s。
+            item.preferredForwardBufferDuration = (index == owner.activeIndex) ? 10.0 : 4.0;
             [slot.player replaceCurrentItemWithPlayerItem:item];
-            ShortDramaFeedCell *cell = (ShortDramaFeedCell *)[self.collectionView cellForItemAtIndexPath:[NSIndexPath indexPathForItem:index inSection:0]];
+            slot.state = ShortDramaSlotStateReady;
+            ShortDramaFeedCell *cell = (ShortDramaFeedCell *)[owner.collectionView cellForItemAtIndexPath:[NSIndexPath indexPathForItem:index inSection:0]];
             if (cell) {
                 [cell attachPlayerLayer:slot.playerLayer];
                 [cell.spinner stopAnimating];
             }
-            if (index == self.activeIndex) [slot.player play];
+            if (index == owner.activeIndex) [slot.player play];
         });
     };
 
@@ -290,11 +402,14 @@
     if (directURL.length && [NSURL URLWithString:directURL]) {
         applyURL([NSURL URLWithString:directURL], nil);
     } else if (self.episodeResolver) {
-        self.episodeResolver(index, applyURL);
+        slot.resolveCancel = self.episodeResolver(index, applyURL);
+    } else {
+        slot.state = ShortDramaSlotStateFailed;
     }
 }
 
 - (void)handlePlaybackEnded:(NSNotification *)note {
+    if (!self.feedActive) return;
     ShortDramaPlayerSlot *current = self.playerPool[@(self.activeIndex)];
     if (!current || note.object != current.player.currentItem) return;
     NSInteger nextIdx = self.activeIndex + 1;
@@ -322,7 +437,8 @@
     ShortDramaPlayerSlot *slot = self.playerPool[@(indexPath.item)];
     if (slot) {
         [cell attachPlayerLayer:slot.playerLayer];
-        if (slot.resolving) [cell.spinner startAnimating];
+        // M01：spinner 跟随槽位状态——解析中转，失败/已取消停（T17 再补失败卡片）。
+        if (slot.state == ShortDramaSlotStateResolving) [cell.spinner startAnimating];
         else [cell.spinner stopAnimating];
     } else {
         [cell.spinner startAnimating];

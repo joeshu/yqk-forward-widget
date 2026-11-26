@@ -318,7 +318,10 @@ class MPVRouteWiringContracts(unittest.TestCase):
 
     def test_mpv_adapter_destroy_releases_handle(self):
         # destroy 必须摘除 delegate、终止 mpv handle、防止回调落到已释放的 adapter。
-        destroy = self.mpv_m[self.mpv_m.index('- (void)destroy'):][:1200]
+        # 按完整方法体取数，不用固定字符窗口（方法因生命周期接线变长时窗口会截断）。
+        start = self.mpv_m.index('- (void)destroy {')
+        end = self.mpv_m.index('\n}\n', start) + 3
+        destroy = self.mpv_m[start:end]
         self.assertIn('self.destroyed = YES', destroy)
         self.assertIn('self.delegate = nil', destroy)
         self.assertIn('terminate_destroy', destroy)

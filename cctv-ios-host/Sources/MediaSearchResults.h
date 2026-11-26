@@ -28,3 +28,28 @@ static inline NSUInteger MediaSearchAppend(NSMutableArray *stored, NSArray *item
     }
     return added;
 }
+
+// T05/M05：搜索/列表结果统一契约。Valid = 字典且 items 为数组（可能为空 =
+// 真正零条）；Malformed = 非字典，或 items 缺失/非数组（不得计为成功、不得
+// 记健康成功、不得展示为"无结果"）；Failed = NSError 非空。取消由调用方的
+// 代际/任务校验处理，不属于结果分类。
+typedef NS_ENUM(NSInteger, MediaSearchResultKind) {
+    MediaSearchResultKindValid = 0,
+    MediaSearchResultKindMalformed,
+    MediaSearchResultKindFailed
+};
+static inline MediaSearchResultKind MediaSearchClassifyResult(id result, NSError *error) {
+    if(error)return MediaSearchResultKindFailed;
+    if(![result isKindOfClass:NSDictionary.class])return MediaSearchResultKindMalformed;
+    if(![result[@"items"] isKindOfClass:NSArray.class])return MediaSearchResultKindMalformed;
+    return MediaSearchResultKindValid;
+}
+static inline NSString *MediaSearchMalformedMessage(id result) {
+    if([result isKindOfClass:NSDictionary.class]){
+        for(NSString *key in @[@"error",@"errMsg",@"message",@"msg"]){
+            NSString *text=MediaSearchText(result[key]);
+            if(text.length)return text;
+        }
+    }
+    return @"来源返回的数据格式不完整";
+}

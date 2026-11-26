@@ -696,8 +696,10 @@ static NSDictionary *MediaSearchPageState(NSString *name, NSArray *items, NSDict
     [job.client call:@"search" arguments:arguments completion:^(id result, NSError *error) {
         MediaGlobalSearchViewController *owner = weakSelf;
         if (!owner || ![owner isCurrentJob:job]) return;
-        if (error) {
-            NSString *message = error.localizedDescription.length ? error.localizedDescription : @"影视搜索失败。";
+        // T05/M05：先统一校验再计成功——格式不完整的响应按来源失败计，不计入
+        // 成功数、不记健康成功、不展示为"无结果"；取消由 isCurrentJob 代际校验处理。
+        if (error||MediaSearchClassifyResult(result,error)!=MediaSearchResultKindValid) {
+            NSString *message = error ? (error.localizedDescription.length ? error.localizedDescription : @"影视搜索失败。") : MediaSearchMalformedMessage(result);
             NSMutableDictionary *row = owner.rows[job.section];
             NSDictionary *failedProvider=@{@"id":providerID,@"name":providerName};NSMutableArray *failed=[job.failedProviders mutableCopy]?:[NSMutableArray array];[failed addObject:failedProvider];job.failedProviders=failed;
             NSMutableArray *rowFailures=[row[@"failedProviders"] mutableCopy]?:[NSMutableArray array];[rowFailures addObject:failedProvider];row[@"failedProviders"]=rowFailures;
@@ -927,8 +929,9 @@ static NSDictionary *MediaSearchPageState(NSString *name, NSArray *items, NSDict
         MediaGlobalSearchViewController *owner=weakSelf;
         if(!owner||![owner isCurrentJob:job])return;
         NSMutableDictionary *currentRow=owner.rows[section];
-        if(error){
-            NSMutableDictionary *failed=[state mutableCopy];failed[@"state"]=@"加载更多失败 · 点按重试";failed[@"error"]=error.localizedDescription?:@"请求失败";
+        // T05/M05：格式不完整按加载失败计（可点按重试），不冒充"没有更多结果"。
+        if(error||MediaSearchClassifyResult(result,error)!=MediaSearchResultKindValid){
+            NSMutableDictionary *failed=[state mutableCopy];failed[@"state"]=@"加载更多失败 · 点按重试";failed[@"error"]=error?(error.localizedDescription?:@"请求失败"):MediaSearchMalformedMessage(result);
             currentRow[@"providerStates"][providerID]=failed;
         }else{
             NSDictionary *payload=[result isKindOfClass:NSDictionary.class]?result:@{};

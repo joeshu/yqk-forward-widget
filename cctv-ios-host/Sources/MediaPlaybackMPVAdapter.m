@@ -1,4 +1,5 @@
 #import "MediaPlaybackMPVAdapter.h"
+#import "HostMPVLifecycle.h"
 #import <AVFoundation/AVFoundation.h>
 #import <AVKit/AVKit.h>
 #import <QuartzCore/QuartzCore.h>
@@ -9,6 +10,10 @@
 NSString * const MediaPlaybackMPVAdapterErrorDomain = @"CCTVHost.MediaPlaybackMPVAdapter";
 
 static NSTimeInterval const MediaPlaybackMPVFirstFrameTimeout = 20.0;
+// Bounded wait for the event thread to leave mpv_wait_event before the
+// handle is released in destroy (T02/S1). The wait never blocks the
+// caller: on timeout teardown proceeds anyway and the state still closes.
+static int const MediaPlaybackMPVDestroyEventExitTimeoutMs = 2000;
 
 // ---- Minimal libmpv v2 C ABI declarations (loaded dynamically via dlopen RTLD_LOCAL) ----
 typedef struct mpv_handle mpv_handle;
@@ -201,7 +206,12 @@ enum {
     CCTVMPVReplyEOFReached = 9,
 };
 
-@interface MediaPlaybackMPVAdapter () <AVPictureInPictureSampleBufferPlaybackDelegate>
+@interface MediaPlaybackMPVAdapter () <AVPictureInPictureSampleBufferPlaybackDelegate> {
+    // Terminal lifecycle core (T02/S1): heap-allocated and atomically
+    // refcounted so the background teardown in destroy can outlive the
+    // adapter object; the adapter holds one reference, released in dealloc.
+    host_mpv_lifecycle_t *_lifecycle;
+}
 @property (nonatomic, strong) NSURL *url;
 @property (nonatomic, copy) NSDictionary<NSString *, NSString *> *headers;
 @property (nonatomic) NSTimeInterval networkTimeout;
@@ -270,12 +280,16 @@ enum {
         _rate = 1.0f;
         _pendingGravity = AVLayerVideoGravityResizeAspect;
         _mpvLock = [NSLock new];
+        _lifecycle = host_mpv_lifecycle_create();
     }
     return self;
 }
 
 - (void)dealloc {
     [self destroy];
+    // Drop the adapter's own lifecycle reference; a teardown block that
+    // is still waiting holds its own reference and frees the object.
+    if (_lifecycle) host_mpv_lifecycle_release(_lifecycle);
 }
 
 - (UIView *)playerView {
@@ -297,12 +311,18 @@ enum {
 
 - (void)prepareWithHardwareDecoder:(BOOL)enableHardwareDecoder {
     if (self.destroyed) return;
+    // Single-owner prepare (T02/S1): a second prepare while a handle is
+    // live is a silent no-op instead of orphaning the first handle and
+    // its event thread. Prepare after destroy is rejected the same way.
+    if (!host_mpv_lifecycle_begin_prepare(_lifecycle)) return;
     const CCTVMPVSymbolTable *syms = CCTVMPVLoadSymbols();
     if (!syms) {
+        host_mpv_lifecycle_abandon_prepare(_lifecycle);
         [self handleFailureWithCode:-1000 message:@"CCTVMPVCore 全能内核未打包或不可用"];
         return;
     }
     if (!self.url.absoluteString.length) {
+        host_mpv_lifecycle_abandon_prepare(_lifecycle);
         [self handleFailureWithCode:-1001 message:@"播放地址为空"];
         return;
     }
@@ -317,6 +337,7 @@ enum {
 
     mpv_handle *ctx = syms->create();
     if (!ctx) {
+        host_mpv_lifecycle_abandon_prepare(_lifecycle);
         [self handleFailureWithCode:-1002 message:@"无法创建 libmpv 播放上下文"];
         return;
     }
@@ -347,6 +368,9 @@ enum {
         const char *errStr = syms->error_string(initStatus);
         NSString *msg = errStr ? [NSString stringWithUTF8String:errStr] : @"libmpv 初始化失败";
         syms->terminate_destroy(ctx);
+        // Handle already released inline; no event thread was started,
+        // so the lifecycle returns to IDLE (a fresh prepare may retry).
+        host_mpv_lifecycle_abandon_prepare(_lifecycle);
         [self handleFailureWithCode:initStatus message:msg];
         return;
     }
@@ -371,6 +395,7 @@ enum {
                                                  object:[NSValue valueWithPointer:ctx]];
     thread.name = @"com.cctvhost.mpv.events";
     self.eventThread = thread;
+    host_mpv_lifecycle_note_event_thread_started(_lifecycle);
     [thread start];
 
     const char *loadCmd[] = {"loadfile", self.url.absoluteString.UTF8String, "replace", NULL};
@@ -430,6 +455,9 @@ enum {
 - (void)start {
     if (self.destroyed) return;
     self.wantStartAfterPrepare = YES;
+    // Media commands may only touch the handle while the lifecycle is
+    // PREPARED (T02/S1): after destroy the handle is gone.
+    if (!host_mpv_lifecycle_command_allowed(_lifecycle)) return;
     [self.mpvLock lock];
     mpv_handle *ctx = self.mpvHandle;
     const CCTVMPVSymbolTable *syms = self.syms;
@@ -446,6 +474,7 @@ enum {
 - (void)pause {
     if (self.destroyed) return;
     self.wantStartAfterPrepare = NO;
+    if (!host_mpv_lifecycle_command_allowed(_lifecycle)) return;
     [self.mpvLock lock];
     mpv_handle *ctx = self.mpvHandle;
     const CCTVMPVSymbolTable *syms = self.syms;
@@ -475,7 +504,16 @@ enum {
 }
 
 - (void)destroy {
-    if (self.destroyed) return;
+    // Single-owner, idempotent teardown (T02/S1): exactly one caller
+    // owns the release; concurrent or repeated destroy calls return
+    // immediately. The teardown reference keeps the lifecycle object
+    // alive until the background release finishes, so this block never
+    // touches the adapter itself and may outlive it.
+    host_mpv_lifecycle_t *lc = host_mpv_lifecycle_retain(_lifecycle);
+    if (!host_mpv_lifecycle_begin_destroy(lc)) {
+        host_mpv_lifecycle_release(lc);
+        return;
+    }
     self.destroyed = YES;
     self.delegate = nil;
     [self cancelFirstFrameWatchdog];
@@ -491,15 +529,28 @@ enum {
         const char *quitCmd[] = {"quit", NULL};
         syms->command_async(ctx, 0, quitCmd);
         syms->wakeup(ctx);
-        // Destroy asynchronously off the main thread so teardown never blocks UI.
+        // Release the handle only after the event consumer has left
+        // wait_event, on a background queue so teardown never blocks
+        // the caller or the UI. The wait is bounded: if the consumer
+        // is stuck, teardown still proceeds and the state still closes.
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+            host_mpv_lifecycle_wait_event_thread_exit(lc, MediaPlaybackMPVDestroyEventExitTimeoutMs);
             syms->terminate_destroy(ctx);
+            host_mpv_lifecycle_finish_destroy(lc);
+            host_mpv_lifecycle_release(lc);
         });
+    } else {
+        host_mpv_lifecycle_finish_destroy(lc);
+        host_mpv_lifecycle_release(lc);
     }
 }
 
 - (void)seekToTime:(NSTimeInterval)time completion:(void (^)(BOOL finished))completion {
     if (self.destroyed) {
+        if (completion) completion(NO);
+        return;
+    }
+    if (!host_mpv_lifecycle_command_allowed(_lifecycle)) {
         if (completion) completion(NO);
         return;
     }
@@ -524,6 +575,7 @@ enum {
 - (void)setRate:(float)rate {
     float clamped = MIN(3.0f, MAX(0.5f, isfinite(rate) ? rate : 1.0f));
     self.rate = clamped;
+    if (!host_mpv_lifecycle_command_allowed(_lifecycle)) return;
     [self.mpvLock lock];
     mpv_handle *ctx = self.mpvHandle;
     const CCTVMPVSymbolTable *syms = self.syms;
@@ -536,6 +588,7 @@ enum {
 
 - (void)setMuted:(BOOL)muted {
     self.muted = muted;
+    if (!host_mpv_lifecycle_command_allowed(_lifecycle)) return;
     [self.mpvLock lock];
     mpv_handle *ctx = self.mpvHandle;
     const CCTVMPVSymbolTable *syms = self.syms;
@@ -547,10 +600,11 @@ enum {
 }
 
 - (BOOL)canSelectTracks {
-    return self.mpvHandle != NULL && !self.destroyed;
+    return host_mpv_lifecycle_command_allowed(_lifecycle);
 }
 
 - (NSArray<NSDictionary *> *)availableTracks {
+    if (!host_mpv_lifecycle_command_allowed(_lifecycle)) return @[];
     [self.mpvLock lock];
     mpv_handle *ctx = self.mpvHandle;
     const CCTVMPVSymbolTable *syms = self.syms;
@@ -602,6 +656,7 @@ enum {
 
 - (BOOL)selectTrackWithIndex:(NSInteger)index {
     if (index <= 0) return NO;
+    if (!host_mpv_lifecycle_command_allowed(_lifecycle)) return NO;
     const char *prop = "aid";
     int64_t trackId = index;
     if (index >= 20000) {
@@ -624,6 +679,7 @@ enum {
 
 - (BOOL)addExternalSubtitleURL:(NSURL *)subtitleURL {
     if (!subtitleURL.absoluteString.length || self.destroyed) return NO;
+    if (!host_mpv_lifecycle_command_allowed(_lifecycle)) return NO;
     [self.mpvLock lock];
     mpv_handle *ctx = self.mpvHandle;
     const CCTVMPVSymbolTable *syms = self.syms;
@@ -638,6 +694,7 @@ enum {
 
 - (void)applyVideoGravity:(NSString *)gravity {
     self.pendingGravity = gravity ?: AVLayerVideoGravityResizeAspect;
+    if (!host_mpv_lifecycle_command_allowed(_lifecycle)) return;
     [self.mpvLock lock];
     mpv_handle *ctx = self.mpvHandle;
     if (ctx) [self applyGravity:self.pendingGravity onHandle:ctx];
@@ -686,7 +743,18 @@ enum {
     @autoreleasepool {
         mpv_handle *ctx = (mpv_handle *)handleValue.pointerValue;
         const CCTVMPVSymbolTable *syms = self.syms;
-        if (!ctx || !syms) return;
+        if (!ctx || !syms) {
+            host_mpv_lifecycle_note_event_thread_exited(_lifecycle);
+            return;
+        }
+        // Never touch the handle if teardown already claimed it: the
+        // destroy path waits for this exit note before terminate_destroy,
+        // so leaving here without a wait_event call is always safe
+        // (covers a thread that starts after destroy was requested).
+        if (!host_mpv_lifecycle_command_allowed(_lifecycle)) {
+            host_mpv_lifecycle_note_event_thread_exited(_lifecycle);
+            return;
+        }
 
         while (!self.destroyed) {
             cctv_mpv_event *ev = syms->wait_event(ctx, 0.25);
@@ -806,6 +874,9 @@ enum {
             }
         }
     }
+    // Every exit path signals the destroy handshake, so the teardown
+    // wait can never observe a live consumer that already left.
+    host_mpv_lifecycle_note_event_thread_exited(_lifecycle);
 }
 
 - (void)handleFileLoadedOnMain {

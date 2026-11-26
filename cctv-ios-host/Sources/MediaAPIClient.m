@@ -325,6 +325,10 @@ static id MediaTVBoxNormalize(NSString *operation,NSDictionary *arguments,NSDict
     if([root[@"list"] isKindOfClass:NSDictionary.class]){NSMutableDictionary *copy=[root mutableCopy];copy[@"list"]=@[root[@"list"]];root=copy;}
     if(![root[@"list"] isKindOfClass:NSArray.class]&&[root[@"data"] isKindOfClass:NSArray.class]){NSMutableDictionary *copy=[root mutableCopy];copy[@"list"]=root[@"data"];root=copy;}
     if([root[@"class"] isKindOfClass:NSDictionary.class]){NSMutableDictionary *copy=[root mutableCopy];copy[@"class"]=@[root[@"class"]];root=copy;}
+    // T05/M05：原生 TVBox 也一样——分类/搜索没有 list、首页既无 list 也无 class
+    // 时，不把缺失归一化为空列表，而是返回可识别的错误，让上层按"格式不完整"处理。
+    if(![source[@"protocol"] isEqual:@"maccms-api"]&&([operation isEqual:@"category"]||[operation isEqual:@"search"])&&![root[@"list"] isKindOfClass:NSArray.class])return @{@"error":@"TVBox 接口已返回，但没有识别到 list 数据"};
+    if(![source[@"protocol"] isEqual:@"maccms-api"]&&[operation isEqual:@"home"]&&![root[@"list"] isKindOfClass:NSArray.class]&&![root[@"class"] isKindOfClass:NSArray.class])return @{@"error":@"TVBox 接口已返回，但没有识别到 list 或 class 数据"};
     BOOL macCMS=[source[@"protocol"] isEqual:@"maccms-api"];
     if(macCMS&&[@[@"home",@"category",@"search",@"detail"] containsObject:operation]&&![root[@"list"] isKindOfClass:NSArray.class]&&![root[@"class"] isKindOfClass:NSArray.class]){NSString *message=MediaTVBoxFirstString(root,@[@"msg",@"message",@"errMsg"]);return @{@"error":message.length?message:@"MacCMS JSON 已返回，但没有识别到 list 或 class 数据"};}
     if([operation isEqual:@"capabilities"])return @{@"engine":macCMS?@"MacCMS JSON/XML API":@"TVBox JSON API",@"protocol":source[@"protocol"]?:@"tvbox-api",@"capabilities":@[@"home",@"category",@"search",@"detail",@"play"]};
