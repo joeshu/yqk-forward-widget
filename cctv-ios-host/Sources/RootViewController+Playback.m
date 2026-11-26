@@ -1125,7 +1125,7 @@
     if(self.nativeTransitionKind.length || self.nativeTimeShiftActive){self.nativeTransitionKind=nil;[self.nativeTimeshift cancel];[self log:@"时移操作失败，请返回直播或重新选台"];[self displayNativePlaybackFailure:@"时移 / 回看失败" error:error];return;}
     if(self.directNativeRouteActive && self.requestedNativeRoute && CCTVRouteRequiresSDK(self.requestedNativeRoute) && error.code == -12909 && self.channelID.length && !self.nativeStartupRecoveryUsed){
         self.nativeStartupRecoveryUsed=YES;
-        [self displayNativePlaybackFailure:@"自选线路失败 · 可重试或手动换线" error:error];
+        [self log:@"自选线路失败 -12909，自动切下一条线路"];[self retryPlaybackWithAlternateSource];
         return;
     }
     if (error.code >= 4000 && error.code < 5000) {

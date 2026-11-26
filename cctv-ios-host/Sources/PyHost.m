@@ -475,8 +475,14 @@ static PyObject *pyHostJSCall(PyObject *self, PyObject *args) {
         NSTimeInterval startedAt=diagnosticsEnabled?CACurrentMediaTime():0;
         if(diagnosticsEnabled)[RuntimeDiagnostics.shared recordEvent:@"plugin_bridge_started" category:@"plugin" fields:@{@"engine":@"javascriptcore", @"operation":operationName?:@"unknown", @"service_id":serviceID, @"request_id":requestID}];
         NSString *reply = nil; NSError *error = nil;
+        // play 桥超时须小于媒体 API 的 15 秒 play 超时：失败从桥侧先返回，会话
+        // 按 JSPluginRuntime 的超时复位路径恢复；否则 HTTP 层先断、桥调用成孤儿
+        // 并把会话标 unresponsive（证据：15 秒见超时，桥又占队列 25 秒）。
+        // 其他操作仍用 40 秒：同类错位（HTTP 默认 20 秒）未动——慢 home/category
+        // 解析需要更长的桥预算，收紧会误杀正常慢请求，须另议。
+        NSTimeInterval bridgeTimeout=[operationName isEqualToString:@"play"]?12:40;
         Py_BEGIN_ALLOW_THREADS
-        reply = [[JSPluginRuntime shared] callOperation:operationName json:requestJSON timeout:40 error:&error];
+        reply = [[JSPluginRuntime shared] callOperation:operationName json:requestJSON timeout:bridgeTimeout error:&error];
         Py_END_ALLOW_THREADS
         if(diagnosticsEnabled)CCTVRecordPluginBridgeResult(@"javascriptcore",operationName,serviceID,requestID,startedAt,reply,error,requestJSON);
         if (!reply) { PyErr_SetString(PyExc_RuntimeError, error.localizedDescription.UTF8String ?: "JS bridge failed"); return NULL; }

@@ -1,6 +1,7 @@
 #import "LocalServiceReadiness.h"
 #import <QuartzCore/QuartzCore.h>
 #import "RuntimeDiagnostics.h"
+#import "PyHost.h"
 @interface LocalServiceReadiness ()
 @property(nonatomic, strong) NSURL *url;
 @property(nonatomic, assign) NSTimeInterval timeout;
@@ -103,6 +104,9 @@
         return;
     }
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:self.url];
+    // 本机服务 / 与 /health 有 X-CCTVHost-Token 门禁（见 media-service.py），
+    // 探针不带 token 永远 403：带上与 MediaAPIClient 相同的控制 token。
+    [request setValue:PyHostControlToken() forHTTPHeaderField:@"X-CCTVHost-Token"];
     request.timeoutInterval = MIN(1, remaining);
     self.attemptCount++;
     __weak typeof(self) weakSelf = self;

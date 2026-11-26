@@ -10,11 +10,13 @@ import unittest
 
 class ReadinessFixture(http.server.BaseHTTPRequestHandler):
     attempts = 0
+    tokens = []
 
     def log_message(self, *_):
         pass
 
     def do_GET(self):
+        type(self).tokens.append(self.headers.get('X-CCTVHost-Token', ''))
         if self.path == "/ready":
             type(self).attempts += 1
             attempt = type(self).attempts
@@ -36,6 +38,7 @@ class NativeStartupTests(unittest.TestCase):
     def test_health_deadline_cancellation_and_true_frame_stages(self):
         root = pathlib.Path(__file__).resolve().parents[1]
         ReadinessFixture.attempts = 0
+        ReadinessFixture.tokens = []
         server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), ReadinessFixture)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
@@ -53,6 +56,13 @@ class NativeStartupTests(unittest.TestCase):
                 subprocess.run([exe, str(server.server_port)], check=True,
                                capture_output=True, text=True, timeout=15)
                 self.assertGreaterEqual(ReadinessFixture.attempts, 3)
+                # logfix F1: every readiness probe must carry the control token,
+                # or the gated /health endpoint answers 403 and the service is
+                # wrongly reported unavailable.
+                self.assertTrue(ReadinessFixture.tokens, "readiness probes reached the server")
+                self.assertTrue(
+                    all(token == "native-startup-harness-token" for token in ReadinessFixture.tokens),
+                    "every probe carries X-CCTVHost-Token: %r" % (ReadinessFixture.tokens,))
         finally:
             server.shutdown()
             server.server_close()

@@ -12,6 +12,10 @@ static NSMutableArray *probeEvents;
 + (instancetype)shared {static RuntimeDiagnostics *sink;static dispatch_once_t once;dispatch_once(&once,^{sink=[self new];probeEvents=[NSMutableArray array];});return sink;}
 - (void)recordEvent:(NSString *)event category:(NSString *)category fields:(NSDictionary *)fields {[probeEvents addObject:@{@"event":event,@"fields":fields?:@{}}];}
 @end
+// The production control token lives in PyHost. This standalone macOS harness
+// supplies the same symbol so the real readiness prober links, and the
+// fixture server can observe the probe header it sends.
+NSString *PyHostControlToken(void) { return @"native-startup-harness-token"; }
 static void check(BOOL ok, NSString *why) {
     if (!ok) {
         NSLog(@"FAILED: %@", why);
