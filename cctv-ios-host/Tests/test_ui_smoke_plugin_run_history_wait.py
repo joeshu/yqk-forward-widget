@@ -22,7 +22,7 @@ class PluginRunHistorySmokeWaitTests(unittest.TestCase):
         loop = body[body.index("while(deadline.timeIntervalSinceNow>0)"):body.index("check(historyRows==2")]
         self.assertIn("[history.tableView numberOfRowsInSection:0]==2", loop)
         self.assertIn("numberOfRowsInSection:0];", loop)
-        self.assertIn("@selector(refreshRuns)", loop, "refreshRuns drops in-flight calls; loop must re-request")
+        self.assertIn("@selector(refreshRuns)", loop, "refreshRuns coalesces in-flight calls; loop must re-request so the latest state is fetched")
         self.assertNotIn("count]<2&&deadline", body)
 
     def test_selection_happens_only_after_row_check(self):

@@ -7,6 +7,7 @@
 @property(nonatomic,strong) UILabel *emptyLabel;
 @property(nonatomic,assign) BOOL refreshScheduled;
 @property(nonatomic) BOOL refreshingRuns;
+@property(nonatomic) BOOL refreshPending;
 - (void)confirmClearAll;
 - (void)  refreshRuns;
 @end
@@ -35,11 +36,16 @@
 - (void)scheduleRefresh {if(!NSThread.isMainThread){__weak typeof(self) weakSelf=self;dispatch_async(dispatch_get_main_queue(),^{[weakSelf scheduleRefresh];});return;}if(!self.isViewLoaded||!self.view.window||self.refreshScheduled)return;self.refreshScheduled=YES;__weak typeof(self) weakSelf=self;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,250*NSEC_PER_MSEC),dispatch_get_main_queue(),^{weakSelf.refreshScheduled=NO;if(weakSelf.isViewLoaded&&weakSelf.view.window)[weakSelf refreshRuns];});}
 - (void)refreshRuns {
     if(!NSThread.isMainThread){dispatch_async(dispatch_get_main_queue(),^{[self refreshRuns];});return;}
-    if(self.refreshingRuns)return;self.refreshingRuns=YES;
+    // 取数在途时不丢请求：记下来，等本次取数落定后再取一次。否则慢机型上
+    // “先取到旧快照、后到的刷新被丢弃”会让表格一直停在旧数据上（2026-11-26
+    // CI 上 SE 变体连续两次 rows=0：驱动每 0.5s 重请求一次，但取数在途时全被
+    // 丢弃；改成合并重取后，最后一次请求的状态一定会被取回来）。
+    if(self.refreshingRuns){self.refreshPending=YES;return;}self.refreshingRuns=YES;
     NSArray *(^provider)(void)=[self.runRecordsProvider copy];__weak typeof(self) weakSelf=self;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{NSArray *runs=provider?provider():@[];dispatch_async(dispatch_get_main_queue(),^{
         PluginRunHistoryViewController *owner=weakSelf;if(!owner)return;owner.refreshingRuns=NO;
         owner.runs=[runs isKindOfClass:NSArray.class]?runs:@[];owner.emptyLabel.hidden=owner.runs.count>0;owner.tableView.backgroundView.hidden=owner.runs.count>0;[owner.refreshControl endRefreshing];[owner.tableView reloadData];
+        if(owner.refreshPending){owner.refreshPending=NO;[owner refreshRuns];}
     });});
 }
 

@@ -840,9 +840,11 @@ static void next(NSArray *steps, NSUInteger index) {
             PluginRunHistoryViewController *history=(id)nav.topViewController;
             check([history isKindOfClass:PluginRunHistoryViewController.class], @"service logs first show independent run records");
             check([PluginLogStore.shared runsForIdentifier:@"ui-smoke-plugin"].count==2, @"plugin store persisted two independent runs");
-            // refreshRuns ignores calls while a fetch is in flight, so a stale 1-run snapshot can land last.
-            // Keep re-requesting and require both the model and the table to report two rows (30s for XXXL devices).
-            NSDate *deadline=[NSDate dateWithTimeIntervalSinceNow:30];NSDate *nextRefresh=[NSDate distantPast];
+            // refreshRuns 在途时把重请求合并为一次取数（见 PluginRunHistoryViewController），
+            // 旧快照不会再是最后落定的数据。继续每 0.5s 重请求并要求模型与表格
+            // 同时报 2 行；SE 是最慢变体（同文件时移检查已有同类放宽，621f917），
+            // 取数在模拟器负载下可能很久，超时放宽到 60s。
+            NSDate *deadline=[NSDate dateWithTimeIntervalSinceNow:60];NSDate *nextRefresh=[NSDate distantPast];
             NSInteger historyRows=0;
             while(deadline.timeIntervalSinceNow>0){
                 historyRows=[history tableView:history.tableView numberOfRowsInSection:0];
