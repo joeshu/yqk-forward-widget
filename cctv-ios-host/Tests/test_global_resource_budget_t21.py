@@ -61,6 +61,7 @@ JS_M = read_source("JSPluginRuntime.m")
 SEARCH_M = read_source("MediaGlobalSearchViewController.m")
 FEED_M = read_source("ShortDramaVerticalFeedController.m")
 NATIVE_API_TESTS = open(os.path.join(TESTS, "native_media_api_tests.m"), encoding="utf-8").read()
+JAR_SMOKE_MAIN = open(os.path.join(TESTS, "JARSmoke", "main.m"), encoding="utf-8").read()
 
 
 # --- PERF-06：压力判定与裁剪门禁的 Python 模型（与 ObjC 语义同构） ---
@@ -489,6 +490,15 @@ class GlobalResourceBudgetTests(unittest.TestCase):
     def test_native_media_api_stub_implements_lease_methods(self):
         self.assertIn("acquireLeaseForKind:", NATIVE_API_TESTS)
         self.assertIn("releaseLease:", NATIVE_API_TESTS)
+
+    def test_jar_smoke_stub_implements_lease_methods(self):
+        # Contract lock (CI 2026-11-26, jar-smoke): T21 只给 native_media_api
+        # 的桩补了租约方法，漏了 JARSmoke/main.m 的桩——MediaJARRuntime 的
+        # 首个 JAR 请求在 acquireLeaseForKind: 上因 unrecognized selector
+        # 崩溃，6 分钟等不到 jar-results.json 且 server.log 全空。两处桩
+        # 都要跟进新方法（只报 warning 不报链接错，靠这条契约拦住）。
+        self.assertIn("acquireLeaseForKind:", JAR_SMOKE_MAIN)
+        self.assertIn("releaseLease:", JAR_SMOKE_MAIN)
 
     # --- PERF-08 核查契约（无代码改动，锁住已验证的事实） ---
     def test_sync_js_runs_on_private_serial_queue_not_main(self):

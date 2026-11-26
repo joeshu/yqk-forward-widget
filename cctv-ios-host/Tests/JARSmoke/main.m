@@ -13,6 +13,12 @@ void RunCicadaAdapterProbe(void (^completion)(BOOL,NSString *));
 + (instancetype)shared {static HostRuntimeLifecycleCoordinator *instance;static dispatch_once_t once;dispatch_once(&once,^{instance=[self new];});return instance;}
 - (void)prepareForMutualExclusionBeforeActivating:(HostRuntimeKind)kind {}
 - (void)noteRuntimeActivity:(HostRuntimeKind)kind {}
+// T21 租约桩：MediaJARRuntime.m 的票据在 requestSource: 取租约、完成/取消/
+// 队列拒收时归还；本桩返回 nil（归还无操作），与 native_media_api_tests.m 同款。
+// 缺了它会在首个 JAR 请求上因 unrecognized selector 崩溃（CI 2026-11-26：
+// jar-smoke 6 分钟等不到 jar-results.json，server.log 全空）。
+- (NSUUID *)acquireLeaseForKind:(HostRuntimeKind)kind owner:(NSString *)owner { return nil; }
+- (void)releaseLease:(NSUUID *)lease {}
 @end
 @interface JARSmokeApp : UIResponder <UIApplicationDelegate>
 @property(nonatomic,strong) UIWindow *window;
