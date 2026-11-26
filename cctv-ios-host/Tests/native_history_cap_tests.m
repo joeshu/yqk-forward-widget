@@ -44,7 +44,7 @@ int main(void) {
         for (NSUInteger i = 0; i < 150; i++) {
             [oversizedHistory addObject:@{ @"key" : [NSString stringWithFormat:@"watch-%lu", (unsigned long)i],
                                            @"updatedAt" : @(2000.0 + (double)i),
-                                           @"position" : @(double)i }];
+                                           @"position" : @((double)i) }];
         }
 
         NSMutableDictionary *oversized = [base mutableCopy];
