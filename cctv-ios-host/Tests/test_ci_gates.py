@@ -23,12 +23,39 @@ spec.loader.exec_module(g)
 APP_ROOT = "Payload/CCTVHost.app/"
 
 
-def _write_app_skeleton(zf, frameworks=(), include_mpv=True, mpv_data=b""):
+def _python_extension_plist(module, bundle_id=None):
+    """Info.plist as ci-build.sh writes it for a repackaged extension module."""
+    if bundle_id is None:
+        bundle_id = "org.python.extension." + module
+    return (
+        b'<?xml version="1.0" encoding="UTF-8"?>\n'
+        b'<plist version="1.0"><dict>'
+        b"<key>CFBundleExecutable</key><string>" + module.encode() + b"</string>"
+        b"<key>CFBundleIdentifier</key><string>" + bundle_id.encode() + b"</string>"
+        b"<key>CFBundlePackageType</key><string>FMWK</string>"
+        b"</dict></plist>\n"
+    )
+
+
+def _write_app_skeleton(zf, frameworks=(), include_mpv=True, mpv_data=b"",
+                        python_extensions=(), framework_plists=None):
     """Write a minimal Payload/<app>.app/ tree into an open zipfile."""
     zf.writestr(APP_ROOT + "Info.plist", b"")
     for name in frameworks:
         zf.writestr(
             APP_ROOT + f"Frameworks/{name}.framework/{name}", b""
+        )
+    for module in python_extensions:
+        zf.writestr(APP_ROOT + f"Frameworks/{module}.framework/{module}", b"")
+        zf.writestr(
+            APP_ROOT + f"Frameworks/{module}.framework/Info.plist",
+            _python_extension_plist(module),
+        )
+    for name, bundle_id in (framework_plists or {}).items():
+        zf.writestr(APP_ROOT + f"Frameworks/{name}.framework/{name}", b"")
+        zf.writestr(
+            APP_ROOT + f"Frameworks/{name}.framework/Info.plist",
+            _python_extension_plist(name, bundle_id),
         )
     if include_mpv:
         member = APP_ROOT + "Frameworks/CCTVMPVCore.framework/CCTVMPVCore"
@@ -36,11 +63,13 @@ def _write_app_skeleton(zf, frameworks=(), include_mpv=True, mpv_data=b""):
 
 
 def _make_ipa(path, *, frameworks=(), include_mpv=True, mpv_data=b"",
-              padding_name=None, padding_bytes=0):
+              padding_name=None, padding_bytes=0, python_extensions=(),
+              framework_plists=None):
     with zipfile.ZipFile(path, "w", zipfile.ZIP_STORED) as zf:
         _write_app_skeleton(
             zf, frameworks=frameworks, include_mpv=include_mpv,
-            mpv_data=mpv_data,
+            mpv_data=mpv_data, python_extensions=python_extensions,
+            framework_plists=framework_plists,
         )
         if padding_name and padding_bytes:
             zf.writestr(padding_name, b"\0" * padding_bytes)
@@ -114,6 +143,36 @@ class TestFrameworkWhitelistGate(unittest.TestCase):
             _make_ipa(ipa, frameworks=("alivcffmpeg", "Python"))
             name, passed, detail = g.check_framework_whitelist(ipa, self.WHITELIST)
             self.assertTrue(passed, detail)
+
+    def test_python_extension_frameworks_pass(self):
+        # ci-build.sh repackages every lib-dynload/*.so as a top-level
+        # <module>.framework with CFBundleIdentifier org.python.extension.*.
+        # Those count as part of Python, not as independent frameworks.
+        with tempfile.TemporaryDirectory() as tmp:
+            ipa = Path(tmp) / "pyext.ipa"
+            _make_ipa(
+                ipa,
+                frameworks=self.WHITELIST,
+                python_extensions=("_ssl", "_hashlib", "_sqlite3"),
+            )
+            name, passed, detail = g.check_framework_whitelist(ipa, self.WHITELIST)
+            self.assertTrue(passed, detail)
+            self.assertIn("CPython extension", detail)
+
+    def test_python_extension_identifier_required(self):
+        # Same module name but the wrong bundle identifier is still a
+        # stranger: the identifier, not the name, is what exempts it.
+        with tempfile.TemporaryDirectory() as tmp:
+            ipa = Path(tmp) / "fakeext.ipa"
+            _make_ipa(
+                ipa,
+                frameworks=self.WHITELIST,
+                framework_plists={"_ssl": "com.example.not-python"},
+            )
+            name, passed, detail = g.check_framework_whitelist(ipa, self.WHITELIST)
+            self.assertFalse(passed)
+            self.assertIn("_ssl", detail)
+            self.assertIn("unknown frameworks", detail)
 
 
 class TestMpvSymbolGate(unittest.TestCase):

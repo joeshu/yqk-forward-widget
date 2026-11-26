@@ -17,7 +17,13 @@ expansion, and guarantee the mpv bridge surface stays stable:
    default allowlist mirrors the frameworks the full build legitimately
    embeds today: ``CNPlayerSDK``, ``CicadaPlayerSDK``, ``alivcffmpeg``,
    ``CCTVMPVCore``, ``Python`` and ``NodeMobile``. Override with
-   ``CCTV_FRAMEWORK_WHITELIST`` (comma-separated).
+   ``CCTV_FRAMEWORK_WHITELIST`` (comma-separated). CPython stdlib extension
+   modules are an exception: ``ci-build.sh`` repackages each
+   ``lib-dynload/*.so`` as a top-level ``<module>.framework`` whose
+   Info.plist carries ``CFBundleIdentifier`` ``org.python.extension.<module>``;
+   those count as part of ``Python``, not as independent frameworks, so the
+   gate recognises them by that identifier instead of listing ~70 module
+   names (which would rot on every Python upgrade).
 
 3. **CCTVMPVCore export-symbol gate** — on the macOS runner ``nm -gU`` must
    report the key ``mpv_`` entry points, proving the dynamic framework still
@@ -36,6 +42,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import plistlib
 import re
 import subprocess
 import sys
@@ -70,6 +77,11 @@ FRAMEWORK_WHITELIST_DEFAULT: Tuple[str, ...] = (
     "Python",
     "NodeMobile",
 )
+
+#: Bundle-identifier prefix ci-build.sh stamps on every repackaged CPython
+#: stdlib extension framework (``org.python.extension.<module>``). Frameworks
+#: carrying it are part of the Python runtime, not independent dependencies.
+PYTHON_EXTENSION_BUNDLE_ID_PREFIX = "org.python.extension."
 
 #: Key ``mpv_`` entry points that must be exported by CCTVMPVCore. This is a
 #: subset of ``Scripts/mpv_exported_symbols.txt``; "at least" these must show
@@ -145,6 +157,33 @@ def _list_frameworks(zf: zipfile.ZipFile, app_root: str) -> List[str]:
     return sorted(names)
 
 
+def _is_python_extension_framework(zf: zipfile.ZipFile, app_root: str, name: str) -> bool:
+    """True if the framework is a CPython stdlib extension module.
+
+    ci-build.sh repackages every ``lib-dynload/*.so`` as a top-level
+    ``<module>.framework`` whose Info.plist carries CFBundleIdentifier
+    ``org.python.extension.<module>``. Those are part of the Python runtime,
+    not independent dependencies. A framework without that identifier
+    (including a missing or unparsable Info.plist) is not an extension
+    module, so a stray framework cannot sneak in by name alone.
+    """
+    member = f"{app_root}Frameworks/{name}.framework/Info.plist"
+    try:
+        raw = zf.read(member)
+    except KeyError:
+        return False
+    try:
+        info = plistlib.loads(raw)
+    except Exception:
+        return False
+    if not isinstance(info, dict):
+        return False
+    bundle_id = info.get("CFBundleIdentifier", "")
+    return isinstance(bundle_id, str) and bundle_id.startswith(
+        PYTHON_EXTENSION_BUNDLE_ID_PREFIX
+    )
+
+
 def _mpv_binary_member(app_root: str) -> str:
     return f"{app_root}Frameworks/{MPV_FRAMEWORK_NAME}.framework/{MPV_FRAMEWORK_NAME}"
 
@@ -181,18 +220,35 @@ def check_framework_whitelist(
     ipa_path: str | os.PathLike,
     whitelist: Iterable[str],
 ) -> GateResult:
-    """Verify every embedded framework is on the whitelist."""
+    """Verify every embedded framework is on the whitelist.
+
+    CPython stdlib extension frameworks (Info.plist CFBundleIdentifier
+    ``org.python.extension.*``) count as part of Python, not as independent
+    frameworks — see :func:`_is_python_extension_framework`.
+    """
     allowed = {name for name in whitelist}
     with zipfile.ZipFile(ipa_path) as zf:
         app_root = _discover_app_root(zf.namelist())
         present = _list_frameworks(zf, app_root)
-    offenders = [name for name in present if name not in allowed]
+        python_extensions = [
+            name
+            for name in present
+            if _is_python_extension_framework(zf, app_root, name)
+        ]
+    offenders = [
+        name for name in present if name not in allowed and name not in python_extensions
+    ]
     passed = not offenders
     if passed:
         detail = (
             f"frameworks {present} all on whitelist "
             f"({len(allowed)} allowed)"
         )
+        if python_extensions:
+            detail += (
+                f"; {len(python_extensions)} CPython extension "
+                f"framework(s) recognised as part of Python"
+            )
     else:
         offenders_str = ", ".join(sorted(offenders))
         detail = (
