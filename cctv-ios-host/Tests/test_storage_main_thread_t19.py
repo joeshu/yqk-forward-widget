@@ -93,6 +93,14 @@ class T19StorageMainThreadContracts(unittest.TestCase):
         loader = method_body(self.meta, "- (void)loadPersistentRecordsAsync {", "- (void)loadPersistentRecords {")
         self.assertIn("dispatch_async(self.persistenceQueue, ^{ [self loadPersistentRecords]; });", loader)
 
+    def test_library_store_imports_quartzcore_for_media_time(self):
+        # Contract lock (CI 2026-11-26): allFavorites 用 CACurrentMediaTime
+        # 计快照重建耗时——本文件必须 import QuartzCore，否则 macOS clang
+        # 报 implicit function declaration；本地 Python 套件编不到 ObjC，
+        # 只有这条契约能拦住。
+        self.assertIn("#import <QuartzCore/QuartzCore.h>", self.lib)
+        self.assertIn("CACurrentMediaTime()", self.lib)
+
     def test_persistent_load_never_overwrites_newer_records(self):
         body = method_body(self.meta, "- (void)loadPersistentRecords {", "- (void)schedulePersistentWrite {")
         self.assertIn("dispatch_sync(self.queue, ^{for(NSString *key in loaded)if(!self.persistentRecords[key])self.persistentRecords[key]=loaded[key];});", body)

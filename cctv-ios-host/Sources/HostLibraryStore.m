@@ -1,5 +1,6 @@
 #import "HostLibraryStore.h"
 #import "RuntimeDiagnostics.h"
+#import <QuartzCore/QuartzCore.h>
 #import <sqlite3.h>
 
 NSString *const HostLibraryLegacyFavoritesKey = @"favorites";
