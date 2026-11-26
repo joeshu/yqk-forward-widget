@@ -30,6 +30,12 @@ FOUNDATION_EXPORT NSUInteger MediaSourceConnectionRevision(NSDictionary * _Nulla
 - (void)removeResultForSource:(NSDictionary *)source
                     operation:(NSString *)operation
                     arguments:(NSDictionary *)arguments;
+/// T15/M10：缓存年龄（秒）。-1 表示无记录，或存入时间在未来（时钟回拨，
+/// 视为未知——与 resultForSource 把 age<0 当无缓存一致）。只读，不触发
+/// 持久化回填；供首页/列表把“旧缓存可见”标出年龄与重试入口。
+- (NSTimeInterval)ageOfResultForSource:(NSDictionary *)source
+                             operation:(NSString *)operation
+                             arguments:(NSDictionary *)arguments;
 - (void)removeResultsForSourceID:(NSString *)sourceID;
 - (NSDictionary<NSString *, NSNumber *> *)summary;
 - (void)evictMemoryCache;

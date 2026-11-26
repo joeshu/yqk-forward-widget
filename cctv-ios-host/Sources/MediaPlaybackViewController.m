@@ -1125,6 +1125,8 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 }
 - (void)persistPlaybackProgress {
     if(!self.context)return;
+    if(!self.videoFrameReady&&!self.confirmedAudioOnly)return; // M11：无首帧/纯音频证据，不建历史
+    if(self.resumePromptPending||self.pendingPlaybackSeekTime)return; // M11：续播确认前/seek 未完成，不覆盖旧进度
     NSTimeInterval position,duration;
     if(self.cicadaAdapter){position=self.cicadaAdapter.currentPosition;duration=self.cicadaAdapter.duration;}
     else{AVPlayerItem *item=self.observedItem;if(!item||item!=self.player.currentItem||item.status!=AVPlayerItemStatusReadyToPlay)return;position=CMTimeGetSeconds(self.player.currentTime);duration=[item.asset statusOfValueForKey:@"duration" error:NULL]==AVKeyValueStatusLoaded?CMTimeGetSeconds(item.duration):0;}

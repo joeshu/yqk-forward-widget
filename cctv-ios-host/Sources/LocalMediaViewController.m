@@ -24,6 +24,8 @@
 @property(nonatomic,strong) UILabel *emptyLabel;
 - (void)tableView:(UITableView *)t commitEditingStyle:(UITableViewCellEditingStyle)s forRowAtIndexPath:(NSIndexPath *)ip;
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)path;
+- (UIMenuElement *)deleteMenuForIndexPath:(NSIndexPath *)path;
+- (void)confirmDeleteFileAtIndexPath:(NSIndexPath *)path;
 - (void)updateFromStore;
 - (void)updateProgressHeaderSize;
 - (void)buildSummaryHeaderView;
@@ -193,7 +195,7 @@
     [self updateFromStore];
     [self.refreshControl endRefreshing];
 }
-- (NSString *)displayNameForURL:(NSURL *)url {NSString *name=url.lastPathComponent?:@"媒体文件";if(name.length>37&&[name characterAtIndex:36]=='-')return [name substringFromIndex:37];return name;}
+- (NSString *)displayNameForURL:(NSURL *)url {return [LocalMediaStore displayNameForFileURL:url];}
 - (void)updateFromStore {
     NSMutableArray<NSURL *> *merged=[NSMutableArray arrayWithArray:[self.store filesSnapshot]?:@[]];
     for(NSURL *bm in [self.store mountedBookmarkURLsSnapshot]?:@[])if(![merged containsObject:bm])[merged addObject:bm];
@@ -212,7 +214,9 @@
     }else{
         self.tableView.tableHeaderView=self.allFiles.count?self.summaryHeaderContainer:nil;
         NSUInteger failed=[state[@"failureCount"] unsignedIntegerValue];
+        NSUInteger duplicates=[state[@"duplicateCount"] unsignedIntegerValue];
         if(failed)self.navigationItem.prompt=[NSString stringWithFormat:@"%lu 个文件未能保存；请重新选择",(unsigned long)failed];
+        else if(duplicates)self.navigationItem.prompt=[NSString stringWithFormat:@"%lu 个重复文件已跳过，未重复导入",(unsigned long)duplicates];
         else if(stopping)self.navigationItem.prompt=[NSString stringWithFormat:@"已停止后续导入 · 已完成 %lu/%lu 个文件",(unsigned long)[state[@"completed"] unsignedIntegerValue],(unsigned long)[state[@"total"] unsignedIntegerValue]];
         else self.navigationItem.prompt=self.allFiles.count?@"点击播放 · 长按分享 · 左滑删除":@"添加视频或音频；支持零拷贝挂载或本机副本";
     }
@@ -244,7 +248,7 @@
         [self.store mountExternalURLs:urls completion:^(NSArray<NSURL *> *mounted,NSArray<NSDictionary<NSString *,NSString *> *> *failures){LocalMediaViewController *owner=weakSelf;if(!owner)return;[owner updateFromStore];if(failures.count)owner.navigationItem.prompt=[NSString stringWithFormat:@"%lu 个文件挂载失败",(unsigned long)failures.count];else if(mounted.count)owner.navigationItem.prompt=[NSString stringWithFormat:@"已零拷贝挂载 %lu 个外部媒体",(unsigned long)mounted.count];}];
         return;
     }
-    [self.store importURLs:urls completion:^(NSArray<NSURL *> *imported,NSArray<NSDictionary<NSString *,NSString *> *> *failures){LocalMediaViewController *owner=weakSelf;if(!owner)return;[owner updateFromStore];if(failures.count)owner.navigationItem.prompt=[NSString stringWithFormat:@"%lu 个文件未能保存，请检查访问权限或可用空间",(unsigned long)failures.count];else if(imported.count)owner.navigationItem.prompt=[NSString stringWithFormat:@"已保存 %lu 个本机副本",(unsigned long)imported.count];}];[self updateFromStore];
+    [self.store importURLs:urls completion:^(NSArray<NSURL *> *imported,NSArray<NSDictionary<NSString *,NSString *> *> *failures){LocalMediaViewController *owner=weakSelf;if(!owner)return;[owner updateFromStore];NSUInteger duplicates=[[owner.store stateSnapshot][@"duplicateCount"] unsignedIntegerValue];if(failures.count)owner.navigationItem.prompt=[NSString stringWithFormat:@"%lu 个文件未能保存，请检查访问权限或可用空间",(unsigned long)failures.count];else if(duplicates)owner.navigationItem.prompt=[NSString stringWithFormat:@"已跳过 %lu 个重复文件 · 已保存 %lu 个本机副本",(unsigned long)duplicates,(unsigned long)imported.count];else if(imported.count)owner.navigationItem.prompt=[NSString stringWithFormat:@"已保存 %lu 个本机副本",(unsigned long)imported.count];}];[self updateFromStore];
 }
 - (void)stopImport {[self.store stopAfterCurrentFile];}
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {return self.files.count;}
@@ -287,15 +291,38 @@
             [owner presentViewController:av animated:YES completion:nil];
         }];
         UIAction *copyName=[UIAction actionWithTitle:@"复制文件名称" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){UIPasteboard.generalPasteboard.string=name;}];
-        UIAction *delAct=[UIAction actionWithTitle:@"删除本机副本" image:[UIImage systemImageNamed:@"trash"] identifier:nil handler:^(__unused UIAction *a){[weakSelf tableView:tableView commitEditingStyle:UITableViewCellEditingStyleDelete forRowAtIndexPath:path];}];
-        delAct.attributes=UIMenuElementAttributesDestructive;
         UIMenu *primary=[UIMenu menuWithTitle:@"" image:nil identifier:@"local.media.ctx.primary" options:UIMenuOptionsDisplayInline children:@[playAct,shareAct,copyName]];
-        UIMenu *danger=[UIMenu menuWithTitle:@"" image:nil identifier:@"local.media.ctx.destructive" options:UIMenuOptionsDisplayInline children:@[delAct]];
+        UIMenuElement *delElement=[weakSelf deleteMenuForIndexPath:path];
+        UIMenu *danger=[UIMenu menuWithTitle:@"" image:nil identifier:@"local.media.ctx.destructive" options:UIMenuOptionsDisplayInline children:delElement?@[delElement]:@[]];
         return [UIMenu menuWithTitle:name children:@[primary,danger]];
     }];
 }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)path {
-    [tableView deselectRowAtIndexPath:path animated:YES];if(path.row<0||path.row>=self.files.count)return;NSURL *url=self.files[path.row];NSString *name=[self displayNameForURL:url];MediaPlaybackViewController *page=[MediaPlaybackViewController new];page.title=name;page.context=@{@"localMedia":@YES,@"source":@{@"id":@"local-media",@"name":@"本地媒体"},@"item":@{@"name":name,@"id":url.absoluteString},@"detail":@{@"name":name,@"id":url.absoluteString}};page.result=@{@"url":url.absoluteString,@"directMedia":@YES};[self.navigationController pushViewController:page animated:YES];
+    [tableView deselectRowAtIndexPath:path animated:YES];if(path.row<0||path.row>=self.files.count)return;NSURL *url=self.files[path.row];
+    // T17：挂载文件被移动/删除后不进播放器，提示后由用户左滑移除挂载。
+    NSNumber *regular=nil;[url.URLByStandardizingPath getResourceValue:&regular forKey:NSURLIsRegularFileKey error:nil];
+    if(!regular.boolValue){self.navigationItem.prompt=[self.store isCopiedFileURL:url]?@"该文件已不存在":@"该文件已移动或删除，可左滑移除挂载";return;}
+    NSString *name=[self displayNameForURL:url];MediaPlaybackViewController *page=[MediaPlaybackViewController new];page.title=name;page.context=@{@"localMedia":@YES,@"source":@{@"id":@"local-media",@"name":@"本地媒体"},@"item":@{@"name":name,@"id":url.absoluteString},@"detail":@{@"name":name,@"id":url.absoluteString}};page.result=@{@"url":url.absoluteString,@"directMedia":@YES};[self.navigationController pushViewController:page animated:YES];
 }
-- (void)tableView:(UITableView *)tableView commitEditingStyle:(UITableViewCellEditingStyle)style forRowAtIndexPath:(NSIndexPath *)path {if(style!=UITableViewCellEditingStyleDelete||path.row<0||path.row>=self.files.count)return;NSURL *url=self.files[path.row];__weak typeof(self) weakSelf=self;[self.store deleteFileAtURL:url completion:^(BOOL removed,NSError *error){LocalMediaViewController *owner=weakSelf;if(!owner)return;[owner updateFromStore];if(!removed)owner.navigationItem.prompt=error.localizedDescription?:@"无法删除本机副本";}];}
+- (UIMenuElement *)deleteMenuForIndexPath:(NSIndexPath *)path {
+    NSURL *url=(path.row>=0&&path.row<self.files.count)?self.files[(NSUInteger)path.row]:nil;
+    BOOL copied=url?[self.store isCopiedFileURL:url]:YES;
+    __weak typeof(self) weakSelf=self;
+    UIAction *delAct=[UIAction actionWithTitle:copied?@"删除本机副本":@"移除挂载" image:[UIImage systemImageNamed:@"trash"] identifier:nil handler:^(__unused UIAction *a){[weakSelf confirmDeleteFileAtIndexPath:path];}];
+    delAct.attributes=UIMenuElementAttributesDestructive;
+    return delAct;
+}
+- (void)tableView:(UITableView *)tableView commitEditingStyle:(UITableViewCellEditingStyle)style forRowAtIndexPath:(NSIndexPath *)path {if(style!=UITableViewCellEditingStyleDelete||path.row<0||path.row>=self.files.count)return;[self confirmDeleteFileAtIndexPath:path];}
+/// T17：删除前确认并说明范围——副本只删沙盒内文件（Files 原文件不受影响），挂载只删书签。
+- (void)confirmDeleteFileAtIndexPath:(NSIndexPath *)path {
+    if(path.row<0||path.row>=self.files.count)return;NSURL *url=self.files[(NSUInteger)path.row];BOOL copied=[self.store isCopiedFileURL:url];__weak typeof(self) weakSelf=self;
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:copied?@"删除本机副本？":@"移除挂载？" message:copied?@"仅删除 App 沙盒内的副本，Files 中的原文件不受影响。":@"仅移除本页的挂载记录，原文件不受影响。" preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:copied?@"删除副本":@"移除挂载" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *action){
+        LocalMediaViewController *owner=weakSelf;if(!owner)return;
+        if(copied){[owner.store deleteFileAtURL:url completion:^(BOOL removed,NSError *error){LocalMediaViewController *o2=weakSelf;if(!o2)return;[o2 updateFromStore];if(!removed)o2.navigationItem.prompt=error.localizedDescription?:@"无法删除本机副本";}];}
+        else{[owner.store removeBookmarkForURL:url completion:^(BOOL removed){LocalMediaViewController *o2=weakSelf;if(!o2)return;[o2 updateFromStore];if(!removed)o2.navigationItem.prompt=@"移除挂载失败";}];}
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
 @end

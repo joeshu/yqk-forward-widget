@@ -260,6 +260,19 @@ NSUInteger MediaSourceConnectionRevision(NSDictionary *source) {
     });
     if(persistenceChanged)[self schedulePersistentWrite];
 }
+- (NSTimeInterval)ageOfResultForSource:(NSDictionary *)source operation:(NSString *)operation arguments:(NSDictionary *)arguments {
+    if(![@[@"home",@"category",@"search",@"detail"] containsObject:operation])return -1;
+    NSString *key=[self keyForSource:source operation:operation arguments:arguments];if(!key.length)return -1;
+    __block NSTimeInterval storedAt=-1;
+    dispatch_sync(self.queue, ^{
+        MediaMetadataCacheEntry *entry=[self.entries objectForKey:key];
+        if(entry)storedAt=entry.storedAt;
+        else if([@[@"home",@"category"] containsObject:operation]){NSDictionary *record=self.persistentRecords[key];if(record)storedAt=[record[@"stored_at"] doubleValue];}
+    });
+    if(storedAt<=0)return -1;
+    NSTimeInterval age=NSDate.date.timeIntervalSince1970-storedAt;
+    return age<0?-1:age;
+}
 - (void)removeResultForSource:(NSDictionary *)source operation:(NSString *)operation arguments:(NSDictionary *)arguments {
     NSString *key=[self keyForSource:source operation:operation arguments:arguments];
     if(!key.length)return;

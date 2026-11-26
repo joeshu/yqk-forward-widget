@@ -118,8 +118,14 @@ class HostLibraryStoreSourceTests(unittest.TestCase):
         self.assertIn("[self.defaults setBool:YES forKey:HostLibraryMigrationMarkerKey];", self.m)
         migrate = self.section("- (BOOL)migrateFromDefaultsLocked {", "- (BOOL)transactionLocked:(BOOL (^)(void))work {")
         self.assertIn("transactionLocked", migrate)
-        # 原键保留不删，便于回滚
-        self.assertNotIn("removeObjectForKey", self.m)
+        # 原键保留不删，便于回滚（M12 行级删除只删单条收藏的 key，
+        # 不删 legacy/迁移键本身；全文件唯一的 removeObjectForKey 即该处）
+        self.assertNotIn("removeObjectForKey:HostLibraryLegacyFavoritesKey", self.m)
+        self.assertNotIn("removeObjectForKey:HostLibraryLegacyRecentsKey", self.m)
+        self.assertNotIn("removeObjectForKey:HostMediaFavoritesKey", self.m)
+        self.assertNotIn("removeObjectForKey:HostMediaHistoryKey", self.m)
+        self.assertEqual(self.m.count("removeObjectForKey"), 1)
+        self.assertIn("[favorites removeObjectForKey:favoriteKey];", self.m)
         # 迁移成功后才写标记
         prepare = self.section("- (BOOL)prepareLocked {", "- (BOOL)migrateFromDefaultsLocked {")
         self.assertLess(prepare.index("migrateFromDefaultsLocked"), prepare.index("setBool:YES forKey:HostLibraryMigrationMarkerKey"))

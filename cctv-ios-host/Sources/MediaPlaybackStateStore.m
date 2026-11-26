@@ -179,30 +179,23 @@ static NSDictionary *MediaPlaybackComponents(NSDictionary *context, NSInteger li
     if (!isfinite(position) || position < 0) return;
     if (!isfinite(duration) || duration < 0) duration = 0;
     BOOL finished = completed || (duration > 0 && position >= duration - 2.0);
+    if(!finished&&position<=0)return; // M11：未完成且位置为 0，不新建记录、不覆盖旧进度
     NSMutableDictionary *entry = [parts mutableCopy];
     entry[@"position"] = @(finished ? duration : position);
     entry[@"duration"] = @(duration);
     entry[@"completed"] = @(finished);
     entry[@"updatedAt"] = NSDate.date;
     NSDictionary *previous=[self historyEntryForContext:context lineIndex:lineIndex episodeIndex:episodeIndex];
-    NSMutableArray *rows = [self.watchHistory mutableCopy];
-    NSIndexSet *matches = [rows indexesOfObjectsPassingTest:^BOOL(NSDictionary *candidate, NSUInteger index, BOOL *stop) {
-        return [candidate[@"key"] isEqual:entry[@"key"]]||(previous&&[candidate[@"key"] isEqual:previous[@"key"]]);
-    }];
-    [rows removeObjectsAtIndexes:matches];
-    [rows insertObject:entry atIndex:0];
-    if (rows.count > HostMediaWatchHistoryLimit) [rows removeObjectsInRange:NSMakeRange(HostMediaWatchHistoryLimit, rows.count - HostMediaWatchHistoryLimit)];
-    [HostLibraryStore.shared replaceMediaWatchHistory:rows];
+    NSString *previousKey=[previous[@"key"] isKindOfClass:NSString.class]?previous[@"key"]:nil;
+    if([previousKey isEqualToString:entry[@"key"]])previousKey=nil; // M12：同 key 只写一行；身份变化导致旧 key 不同时才一并删旧行
+    [HostLibraryStore.shared upsertMediaWatchHistoryEntry:entry replacingKey:previousKey]; // M12：行级写入，100 条上限由 Store 在 SQL 内裁剪
 
     }
 }
 + (void)removeHistoryEntryWithKey:(NSString *)key {
     @synchronized(self){
     if (!key.length) return;
-    NSMutableArray *rows = [self.watchHistory mutableCopy];
-    NSIndexSet *matches = [rows indexesOfObjectsPassingTest:^BOOL(NSDictionary *entry, NSUInteger index, BOOL *stop) { return [entry[@"key"] isEqual:key]; }];
-    [rows removeObjectsAtIndexes:matches];
-    [HostLibraryStore.shared replaceMediaWatchHistory:rows];
+    [HostLibraryStore.shared removeMediaWatchHistoryEntryWithKey:key]; // M12：行级删除，不整表重写
 
     }
 }

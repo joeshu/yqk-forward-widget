@@ -107,6 +107,7 @@ class Slot:
         self.played = False
         self.spinner = False
         self.buffer_seconds = None
+        self.failure_reason = None
 
 
 class FeedModel:
@@ -180,8 +181,8 @@ class FeedModel:
         slot.cancel = None
         self.issue_order.append(index)
 
-        def apply_url(url, headers):
-            # 复刻 dispatch 到主队列后的 applyURL 回调。
+        def apply_url(url, headers, failure_reason=None):
+            # 复刻 dispatch 到主队列后的 applyURL 回调（T17：三参，失败带原因）。
             if not self.feed_active:
                 return
             if self.pool.get(index) is not slot:
@@ -191,8 +192,10 @@ class FeedModel:
             slot.cancel = None
             if not url:
                 slot.state = FAILED
+                slot.failure_reason = failure_reason or '无法播放此集'
                 slot.spinner = False
                 return
+            slot.failure_reason = None
             slot.item_url = url
             slot.buffer_seconds = 10.0 if index == self.active_index else 4.0
             slot.state = READY
@@ -270,9 +273,9 @@ class ShortDramaSchedulingBehavior(unittest.TestCase):
     def setUp(self):
         self.pending = {}
 
-    def deliver(self, index, url):
+    def deliver(self, index, url, failure_reason=None):
         client, entry = self.pending[index]
-        return entry['deliver']((url, {}))
+        return entry['deliver']((url, {}, failure_reason))
 
     def test_three_concurrent_resolves_all_complete(self):
         feed = FeedModel(5, make_independent_resolver(self.pending))
@@ -313,6 +316,23 @@ class ShortDramaSchedulingBehavior(unittest.TestCase):
         self.assertTrue(self.deliver(2, 'https://cdn.example/ep2.m3u8'))
         self.assertEqual(slot.state, READY)
         self.assertTrue(slot.played)
+
+    def test_failed_slot_keeps_failure_reason(self):
+        # T17：解析失败带原因——失败卡片显示该原因，而不是笼统的 spinner 停止。
+        feed = FeedModel(5, make_independent_resolver(self.pending))
+        feed.update_pool(2)
+        self.assertTrue(self.deliver(3, None, '需要网页播放，请用标准播放器打开'))
+        self.assertEqual(feed.pool[3].state, FAILED)
+        self.assertEqual(feed.pool[3].failure_reason, '需要网页播放，请用标准播放器打开')
+        self.assertFalse(feed.pool[3].spinner)
+        # 无原因的失败给默认文案。
+        self.assertTrue(self.deliver(1, None))
+        self.assertEqual(feed.pool[1].failure_reason, '无法播放此集')
+        # 成功清掉旧原因。
+        feed.update_pool(1)
+        self.assertTrue(self.deliver(1, 'https://cdn.example/ep1.m3u8'))
+        self.assertEqual(feed.pool[1].state, READY)
+        self.assertIsNone(feed.pool[1].failure_reason)
 
     def test_failed_slot_retries_only_when_current(self):
         feed = FeedModel(5, make_independent_resolver(self.pending))

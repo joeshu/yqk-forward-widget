@@ -13,6 +13,8 @@ FOUNDATION_EXPORT NSString *const HostLibraryFallbackPendingKey;   // @"cctv.lib
 FOUNDATION_EXPORT NSString *const HostLibraryRestorePendingKey;    // @"cctv.libraryStore.restorePending.v1"
 /// 点播观看历史上限。
 FOUNDATION_EXPORT const NSUInteger HostMediaWatchHistoryLimit;
+/// 历史行级写入的 SQLite 事务失败、已回退写入 NSUserDefaults 时发出的通知名。
+FOUNDATION_EXPORT NSString *const HostLibraryStoreMediaHistoryWriteFailedNotification;
 /// 最近观看条数上限（与原 rememberChannel 的 24 条保持一致）。
 FOUNDATION_EXPORT const NSUInteger HostLibraryRecentsLimit;
 
@@ -54,6 +56,16 @@ FOUNDATION_EXPORT const NSUInteger HostLibraryRecentsLimit;
 - (NSArray<NSDictionary *> *)mediaWatchHistory;
 - (void)replaceMediaWatchHistory:(nullable NSArray *)history;
 - (void)clearMediaWatchHistory;
+/// 行级写入单条历史：同 key 覆盖并置顶；previousKey 非空且与新 key 不同时，
+/// 同一事务内一并删除旧行（线路/分集身份变化导致 key 改变的场景）。
+/// 100 条上限由 SQL 裁剪，不再整表 DELETE + INSERT。
+- (void)upsertMediaWatchHistoryEntry:(NSDictionary *)entry replacingKey:(nullable NSString *)previousKey;
+/// 行级删除单条历史。
+- (void)removeMediaWatchHistoryEntryWithKey:(NSString *)key;
+/// 行级写入单条收藏（按 key 覆盖）。
+- (void)upsertMediaFavoriteWithKey:(NSString *)key payload:(NSDictionary *)payload;
+/// 行级删除单条收藏。
+- (void)removeMediaFavoriteWithKey:(NSString *)key;
 
 /// 等待所有已排队的写入完成。
 - (void)flush;

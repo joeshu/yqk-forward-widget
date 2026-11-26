@@ -1255,7 +1255,10 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('complete collection JSON and single-site JSON preserve original provider fields', native)
 
     def test_unified_media_reuses_history_and_moves_management_to_dedicated_entries(self):
-        self.assertIn('MediaPlaybackStateStore.watchHistory', self.browser)
+        # M14 已删首页继续观看模块：历史复用改走专用历史页（文件内仍有引用），
+        # 不再是 mediaFeedSections 里的 continue 分区直接读 watchHistory。
+        self.assertIn('MediaPlaybackStateStore.watchHistory', self.detail)
+        self.assertNotIn('MediaPlaybackStateStore.watchHistory', self.browser)
         self.assertIn('@"__historyEntry"', self.browser)
         self.assertIn('[owner openHistoryEntry:history]', self.browser)
         self.assertIn('- (void)openFavorites', self.browser)

@@ -120,7 +120,10 @@ class MediaDetailContracts(unittest.TestCase):
     def test_media_home_disables_inline_continue_watching_while_retaining_menu_history(self):
         defs = self.source.split('static NSArray<NSDictionary *> *MediaHomeModuleDefinitions(void)', 1)[1].split('}', 1)[0]
         self.assertNotIn('@"id":@"continue"', defs)
-        self.assertIn('if(NO&&[enabled containsObject:@"continue"])', self.source)
+        # T15/M14：死代码已清理——首页不再有 NO&& 守卫的继续观看块，模块
+        # 白名单只剩精选与分类；继续观看只走菜单历史入口，不再恢复首页模块。
+        self.assertNotIn('if(NO&&[enabled containsObject:@"continue"])', self.source)
+        self.assertNotIn('@"id":@"continue"', self.source)
         self.assertIn('[UIAction actionWithTitle:@"观看历史"', self.source)
 
 

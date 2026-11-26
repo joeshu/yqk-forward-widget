@@ -143,7 +143,9 @@ class UI2026DeepRefinementsTests(unittest.TestCase):
         self.assertIn("@\"精选热播 · 点按查看详情\"", feed)
 
         mb = (SOURCES / "MediaBrowserViewController.m").read_text(encoding="utf-8")
-        self.assertIn("item[@\"feedSubtitle\"]=srcName.length?[NSString stringWithFormat:@\"继续观看 · %@\",srcName]:@\"继续观看\";", mb)
+        # M14 已删首页继续观看模块（含该 feedSubtitle 死代码块）；继续观看只走菜单历史入口。
+        self.assertNotIn("item[@\"feedSubtitle\"]=srcName.length?[NSString stringWithFormat:@\"继续观看 · %@\",srcName]:@\"继续观看\";", mb)
+        self.assertNotIn('@"id":@"continue"', mb)
         self.assertIn("self.categoryScroll.contentInset=UIEdgeInsetsMake(0,0,0,14);", mb)
 
         st = (SOURCES / "SettingsViewController.m").read_text(encoding="utf-8")
