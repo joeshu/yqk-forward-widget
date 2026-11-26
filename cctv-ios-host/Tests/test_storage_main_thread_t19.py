@@ -114,13 +114,16 @@ class T19StorageMainThreadContracts(unittest.TestCase):
         loader = method_body(self.meta, "- (void)loadPersistentRecordsAsync {", "- (void)loadPersistentRecords {")
         self.assertIn("dispatch_async(self.persistenceQueue, ^{ [self loadPersistentRecords]; });", loader)
 
-    def test_library_store_imports_quartzcore_for_media_time(self):
-        # Contract lock (CI 2026-11-26): allFavorites 用 CACurrentMediaTime
-        # 计快照重建耗时——本文件必须 import QuartzCore，否则 macOS clang
-        # 报 implicit function declaration；本地 Python 套件编不到 ObjC，
-        # 只有这条契约能拦住。
-        self.assertIn("#import <QuartzCore/QuartzCore.h>", self.lib)
-        self.assertIn("CACurrentMediaTime()", self.lib)
+    def test_library_store_uses_corefoundation_clock_not_quartzcore(self):
+        # Contract lock (CI 2026-11-26): allFavorites 用 CFAbsoluteTimeGetCurrent
+        # 计快照重建耗时——原生测试二进制只链 Foundation/Security，CACurrentMediaTime
+        # 既缺 QuartzCore import（编译错）又缺链接（链接错）；CoreFoundation 的时钟
+        # 经 Foundation.h 即可用。本机 Python 套件编不到 ObjC，只有这条契约能拦住。
+        self.assertIn("CFAbsoluteTimeGetCurrent()", self.lib)
+        self.assertNotIn("CACurrentMediaTime", self.lib)
+        self.assertNotIn("QuartzCore", self.lib)
+        self.assertIn("CFAbsoluteTimeGetCurrent()", self.meta)
+        self.assertNotIn("CACurrentMediaTime", self.meta)
 
     def test_persistent_load_never_overwrites_newer_records(self):
         body = method_body(self.meta, "- (void)loadPersistentRecords {", "- (void)schedulePersistentWrite {")

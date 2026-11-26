@@ -1,6 +1,5 @@
 #import "HostLibraryStore.h"
 #import "RuntimeDiagnostics.h"
-#import <QuartzCore/QuartzCore.h>
 #import <sqlite3.h>
 
 NSString *const HostLibraryLegacyFavoritesKey = @"favorites";
@@ -612,13 +611,13 @@ static NSArray *HostLibraryHistoryRowsByUpserting(NSArray *rows, NSDictionary *e
     NSArray<NSString *> *snapshot = self.snapshotFavorites;
     if (snapshot && self.loadedSnapshotEpoch == self.snapshotEpoch && ![self hasPendingWrites]) return [snapshot mutableCopy];
     __block NSArray<NSString *> *result = @[];
-    CFTimeInterval rebuildStartedAt = CACurrentMediaTime();
+    CFTimeInterval rebuildStartedAt = CFAbsoluteTimeGetCurrent();
     [self performSync:^{
         [self refreshSnapshotsLocked];
         result = self.snapshotFavorites ?: @[];
     }];
     if (RuntimeDiagnostics.shared.enabled) {
-        [RuntimeDiagnostics.shared recordEvent:@"library_store_snapshot_rebuild" category:@"media_api" fields:@{@"collection":@"favorites",@"elapsed_ms":@((NSInteger)(MAX(0, CACurrentMediaTime() - rebuildStartedAt) * 1000))}];
+        [RuntimeDiagnostics.shared recordEvent:@"library_store_snapshot_rebuild" category:@"media_api" fields:@{@"collection":@"favorites",@"elapsed_ms":@((NSInteger)(MAX(0, CFAbsoluteTimeGetCurrent() - rebuildStartedAt) * 1000))}];
     }
     return [result mutableCopy];
 }

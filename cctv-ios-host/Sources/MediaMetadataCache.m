@@ -235,7 +235,7 @@ NSUInteger MediaSourceConnectionRevision(NSDictionary *source) {
     NSString *key=[self keyForSource:source operation:operation arguments:arguments];if(!key.length)return nil;
     __block MediaMetadataCacheEntry *entry=nil;
     // T19/PERF-09：先测——记录同步等待耗时与命中/未命中（诊断开启时才记，平时只有一次时钟读取）。
-    CFTimeInterval readStartedAt=CACurrentMediaTime();
+    CFTimeInterval readStartedAt=CFAbsoluteTimeGetCurrent();
     dispatch_sync(self.queue, ^{
         entry=[self.entries objectForKey:key];
         if(!entry&&[@[@"home",@"category"] containsObject:operation]){NSDictionary *record=self.persistentRecords[key];if(record){entry=[MediaMetadataCacheEntry new];entry.result=record[@"result"];entry.sourceID=record[@"source_id"];entry.storedAt=[record[@"stored_at"] doubleValue];NSUInteger cachedCost=[record[@"cost"] unsignedIntegerValue];if(cachedCost){entry.cost=cachedCost;[self.entries setObject:entry forKey:key cost:entry.cost];}}}
@@ -244,7 +244,7 @@ NSUInteger MediaSourceConnectionRevision(NSDictionary *source) {
         // 未知只出现在损坏记录上。order 只记已提升的条目。
         if(entry){NSTimeInterval accessed=NSDate.date.timeIntervalSince1970;if([self.entries objectForKey:key])self.order[key]=@(accessed);NSMutableDictionary *record=[self.persistentRecords[key] mutableCopy];if(record){record[@"last_access"]=@(accessed);self.persistentRecords[key]=record;[self schedulePersistentWrite];}}
     });
-    if(RuntimeDiagnostics.shared.enabled){[RuntimeDiagnostics.shared recordEvent:@"media_metadata_cache_read" category:@"media_api" fields:@{@"operation":operation?:@"",@"hit":@(entry!=nil),@"elapsed_ms":@((NSInteger)(MAX(0,CACurrentMediaTime()-readStartedAt)*1000))}];}
+    if(RuntimeDiagnostics.shared.enabled){[RuntimeDiagnostics.shared recordEvent:@"media_metadata_cache_read" category:@"media_api" fields:@{@"operation":operation?:@"",@"hit":@(entry!=nil),@"elapsed_ms":@((NSInteger)(MAX(0,CFAbsoluteTimeGetCurrent()-readStartedAt)*1000))}];}
     if(!entry)return nil;
     NSTimeInterval age=NSDate.date.timeIntervalSince1970-entry.storedAt;
     if(age<0||age>MAX(0,maximumAge))return nil;
@@ -259,7 +259,7 @@ NSUInteger MediaSourceConnectionRevision(NSDictionary *source) {
         return;
     }
     // T19/PERF-09：先测——序列化 + 同步等待耗时（诊断开启时才记）。
-    CFTimeInterval storeStartedAt=CACurrentMediaTime();
+    CFTimeInterval storeStartedAt=CFAbsoluteTimeGetCurrent();
     NSData *data=[NSJSONSerialization isValidJSONObject:result]?[NSJSONSerialization dataWithJSONObject:result options:0 error:NULL]:nil;
     if(!data.length||data.length>MediaMetadataCacheSingleEntryLimit){
         if([operation isEqual:@"detail"])dispatch_sync(self.queue,^{[self.entries removeObjectForKey:key];[self.order removeObjectForKey:key];});
@@ -279,7 +279,7 @@ NSUInteger MediaSourceConnectionRevision(NSDictionary *source) {
     });
     if(persistenceChanged)[self schedulePersistentWrite];
     // T19/PERF-09：先测——序列化 + 同步等待耗时（诊断开启时才记）。
-    if(RuntimeDiagnostics.shared.enabled){[RuntimeDiagnostics.shared recordEvent:@"media_metadata_cache_store" category:@"media_api" fields:@{@"operation":operation?:@"",@"bytes":@(data.length),@"elapsed_ms":@((NSInteger)(MAX(0,CACurrentMediaTime()-storeStartedAt)*1000))}];}
+    if(RuntimeDiagnostics.shared.enabled){[RuntimeDiagnostics.shared recordEvent:@"media_metadata_cache_store" category:@"media_api" fields:@{@"operation":operation?:@"",@"bytes":@(data.length),@"elapsed_ms":@((NSInteger)(MAX(0,CFAbsoluteTimeGetCurrent()-storeStartedAt)*1000))}];}
 }
 - (NSTimeInterval)ageOfResultForSource:(NSDictionary *)source operation:(NSString *)operation arguments:(NSDictionary *)arguments {
     if(![@[@"home",@"category",@"search",@"detail"] containsObject:operation])return -1;
