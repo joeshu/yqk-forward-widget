@@ -6,3 +6,5 @@ static inline NSArray<NSString *> *MediaCapabilityCicadaFormats(void) {return @[
 static inline NSArray<NSString *> *MediaCapabilityAvFormats(void) {return @[@"hls",@"m3u8",@"m3u",@"mpegurl",@"mp4",@"m4v",@"mov",@"mp3",@"m4a",@"aac",@"mpeg-ts",@"mpegts",@"ts",@"fmp4",@"cmaf",@"m4s",@"f4v",@"wav",@"flac",@"alac",@"ac3",@"eac3",@"application/vnd.apple.mpegurl",@"application/x-mpegurl",@"audio/mpegurl"];}
 static inline NSArray<NSString *> *MediaCapabilityUnsupportedContainers(void) {return @[@"avi",@"wmv",@"asf",@"rm",@"rmvb"];}
 static inline NSArray<NSString *> *MediaCapabilityUnsupportedVideoCodecs(void) {return @[@"vp8",@"vp9",@"av1",@"h263",@"wmv",@"rv"];}
+static inline NSArray<NSString *> *MediaCapabilityMPVOnlyVideoCodecs(void) {return @[@"vp8",@"vp9",@"av1",@"h263",@"wmv",@"rv"];}
+static inline NSArray<NSString *> *MediaCapabilityMPVOnlyContainers(void) {return @[@"avi",@"wmv",@"asf",@"rm",@"rmvb"];}

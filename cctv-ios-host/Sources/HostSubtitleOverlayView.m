@@ -38,8 +38,14 @@ static NSString *HostSubtitleStripTags(NSString *text) {
 @property (nonatomic, copy) NSArray<HostSubtitleCue *> *cues;
 @property (nonatomic, strong, nullable) NSURLSessionDataTask *fetchTask;
 @property (nonatomic, assign) NSTimeInterval lastPlaybackTime;
+/// T09：加载代际——每次 load/clear 递增；异步完成到达时 generation 已变
+/// 则直接丢弃，晚返回的旧字幕不得覆盖新集（A06）。
+@property (nonatomic, assign) NSUInteger loadGeneration;
 - (void)applyCaptionFont;
 @end
+
+/// T09：外挂字幕文件尺寸上限（2 MiB）——超过一律按加载失败处理，不解析。
+static const NSUInteger HostSubtitleMaxBytes = 2 * 1024 * 1024;
 
 @implementation HostSubtitleOverlayView
 
@@ -174,6 +180,7 @@ static NSString *HostSubtitleStripTags(NSString *text) {
 }
 
 - (void)loadSubtitleText:(NSString *)rawText {
+    self.loadGeneration += 1;
     self.cues = [HostSubtitleOverlayView parseSubtitleText:rawText];
     [self updateForPlaybackTime:self.lastPlaybackTime];
 }
@@ -181,6 +188,10 @@ static NSString *HostSubtitleStripTags(NSString *text) {
 - (void)loadSubtitleURL:(NSURL *)url
                 headers:(NSDictionary<NSString *, NSString *> *)headers
              completion:(void (^)(BOOL loaded, NSUInteger cueCount))completion {
+    // T09：每次加载递增 generation；旧请求的异步完成到达时若 generation
+    // 已变，直接丢弃——晚返回的旧字幕不得覆盖新集（A06）。
+    self.loadGeneration += 1;
+    NSUInteger generation = self.loadGeneration;
     [self.fetchTask cancel];
     self.fetchTask = nil;
     if (!url) {
@@ -190,11 +201,16 @@ static NSString *HostSubtitleStripTags(NSString *text) {
     if (url.isFileURL) {
         __weak typeof(self) weakSelf = self;
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-            NSString *raw = [NSString stringWithContentsOfURL:url encoding:NSUTF8StringEncoding error:NULL];
-            NSArray<HostSubtitleCue *> *parsed = [HostSubtitleOverlayView parseSubtitleText:raw ?: @""];
+            NSArray<HostSubtitleCue *> *parsed = @[];
+            NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:url.path error:NULL];
+            NSNumber *size = attrs[NSFileSize];
+            if (!size || size.unsignedIntegerValue <= HostSubtitleMaxBytes) {
+                NSString *raw = [NSString stringWithContentsOfURL:url encoding:NSUTF8StringEncoding error:NULL];
+                parsed = [HostSubtitleOverlayView parseSubtitleText:raw ?: @""];
+            }
             dispatch_async(dispatch_get_main_queue(), ^{
                 HostSubtitleOverlayView *owner = weakSelf;
-                if (!owner) return;
+                if (!owner || owner.loadGeneration != generation) return;
                 owner.cues = parsed;
                 [owner updateForPlaybackTime:owner.lastPlaybackTime];
                 if (completion) completion(parsed.count > 0, parsed.count);
@@ -209,12 +225,18 @@ static NSString *HostSubtitleStripTags(NSString *text) {
         }
     }
     __weak typeof(self) weakSelf = self;
-    self.fetchTask = [NSURLSession.sharedSession dataTaskWithRequest:req completionHandler:^(NSData *data, __unused NSURLResponse *resp, __unused NSError *err) {
-        NSString *raw = data.length ? ([[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: [[NSString alloc] initWithData:data encoding:NSISOLatin1StringEncoding]) : nil;
-        NSArray<HostSubtitleCue *> *parsed = raw.length ? [HostSubtitleOverlayView parseSubtitleText:raw] : @[];
+    self.fetchTask = [NSURLSession.sharedSession dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *err) {
+        // T09：状态与错误必须判定——非 2xx、网络错误、超 2 MiB 一律按加载
+        // 失败处理，不解析错误页/超大体。
+        NSArray<HostSubtitleCue *> *parsed = @[];
+        NSHTTPURLResponse *http = [resp isKindOfClass:NSHTTPURLResponse.class] ? (NSHTTPURLResponse *)resp : nil;
+        if (!err && http.statusCode >= 200 && http.statusCode < 300 && data.length && data.length <= HostSubtitleMaxBytes) {
+            NSString *raw = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: [[NSString alloc] initWithData:data encoding:NSISOLatin1StringEncoding];
+            parsed = raw.length ? [HostSubtitleOverlayView parseSubtitleText:raw] : @[];
+        }
         dispatch_async(dispatch_get_main_queue(), ^{
             HostSubtitleOverlayView *owner = weakSelf;
-            if (!owner) return;
+            if (!owner || owner.loadGeneration != generation) return;
             owner.cues = parsed;
             [owner updateForPlaybackTime:owner.lastPlaybackTime];
             if (completion) completion(parsed.count > 0, parsed.count);
@@ -224,6 +246,7 @@ static NSString *HostSubtitleStripTags(NSString *text) {
 }
 
 - (void)clearSubtitles {
+    self.loadGeneration += 1;
     [self.fetchTask cancel];
     self.fetchTask = nil;
     self.cues = @[];
@@ -248,8 +271,11 @@ static NSString *HostSubtitleStripTags(NSString *text) {
             hi = mid - 1;
         }
     }
+    // T09：重叠长 cue 修复——从 candidate 一路扫回第 0 条，收集全部覆盖
+    // target 的 cue（旧代码只查最近 5 条，早开始的长 cue 会被遗漏）。
+    // cue 数通常 < 数千，逐帧全扫的开销可忽略；显示顺序保持 startTime 升序。
     NSMutableArray<NSString *> *active = [NSMutableArray array];
-    for (NSInteger i = candidate; i >= 0 && i >= candidate - 4; i--) {
+    for (NSInteger i = candidate; i >= 0; i--) {
         HostSubtitleCue *cue = self.cues[(NSUInteger)i];
         if (cue.startTime <= target && target <= cue.endTime) {
             [active insertObject:cue.text atIndex:0];

@@ -10,6 +10,14 @@ def render():
     for key in ('networkTransports','cicadaFormats','avFormats','unsupportedContainers','unsupportedVideoCodecs'):
         values=','.join('@'+json.dumps(x) for x in data[key])
         lines.append('static inline NSArray<NSString *> *MediaCapability%s(void) {return @[%s];}' % (key[0].upper()+key[1:],values))
+    # Per-engine view of the same registry (T11): the "unsupported" lists mean
+    # "unsupported by AVPlayer and CicadaPlayer". MPV (ffmpeg) can decode them,
+    # so the gate must consult the MPV-only accessors, not the flat lists.
+    # Values are aliases of unsupportedVideoCodecs / unsupportedContainers, so
+    # they cannot drift from the JSON single source.
+    for alias, key in (('MPVOnlyVideoCodecs','unsupportedVideoCodecs'), ('MPVOnlyContainers','unsupportedContainers')):
+        values=','.join('@'+json.dumps(x) for x in data[key])
+        lines.append('static inline NSArray<NSString *> *MediaCapability%s(void) {return @[%s];}' % (alias,values))
     return '\n'.join(lines)+'\n'
 
 if __name__=='__main__':

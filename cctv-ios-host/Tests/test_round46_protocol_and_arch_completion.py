@@ -161,7 +161,11 @@ class Round46ProtocolAndArchCompletionTests(unittest.TestCase):
         self.assertIn("<CCTVPlaybackEngine>", mpv_h)
         self.assertIn("AVPictureInPictureSampleBufferPlaybackDelegate", mpv_m)
         self.assertIn("AVSampleBufferDisplayLayer", mpv_m)
-        self.assertIn("AVPictureInPictureControllerContentSource", mpv_m)
+        # T10/F1：MPV PiP 只有控制骨架、无视频供帧，故标记为未实现——
+        # startPictureInPicture 是 no-op，不创建 AVPictureInPictureControllerContentSource
+        #（旧断言按"桥已建成"锁定，已按新行为更新；供帧由 T24 实现后才开放）。
+        self.assertNotIn("AVPictureInPictureControllerContentSource", mpv_m)
+        self.assertIn("return NO;", mpv_m[mpv_m.index("- (BOOL)isPictureInPictureSupported {"):][:400])
 
         coord_h = (SOURCES_DIR / "HostPlaybackAndResourceCoordinators.h").read_text(encoding="utf-8")
         coord_m = (SOURCES_DIR / "HostPlaybackAndResourceCoordinators.m").read_text(encoding="utf-8")

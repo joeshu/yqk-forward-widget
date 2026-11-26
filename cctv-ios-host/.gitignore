@@ -4,3 +4,6 @@
 source-audit.json
 native-audit/
 python-native-audit/
+
+# Build-specific capability snapshot (T11, generated per build, never committed).
+capability-snapshot.json

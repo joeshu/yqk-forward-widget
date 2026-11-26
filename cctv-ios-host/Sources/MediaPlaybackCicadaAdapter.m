@@ -229,6 +229,7 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
 @property (nonatomic) NSUInteger generation;
 @property (nonatomic) BOOL preparedReported;
 @property (atomic) BOOL firstFrameReported;
+@property (nonatomic) BOOL audioOnlyNotified;
 @property (nonatomic) BOOL completedReported;
 @property (nonatomic) BOOL startRequested;
 @property (nonatomic, readwrite) BOOL loading;
@@ -248,6 +249,7 @@ static NSInteger MediaPlaybackCicadaCodeFromModel(id model) {
 @property(nonatomic) NSTimeInterval firstFrameRemaining;
 @property(nonatomic) CFTimeInterval firstFrameBudgetStarted;
 - (void)handleCompletion;
+- (void)handleAudioOnly;
 - (void)reportErrorWithCode:(NSInteger)code message:(NSString *)message;
 - (void)finishPendingSeekWithFinished:(BOOL)finished;
 -  (void)updateBufferConfiguration;
@@ -539,11 +541,14 @@ static dispatch_queue_t MediaPlaybackCicadaQuarantineQueue(void) {
         id info=[self.player valueForKey:@"mediaInfo"];id tracks=[info valueForKey:@"tracks"];if(![tracks isKindOfClass:NSArray.class])return @[];
         NSMutableArray *result=[NSMutableArray array];
         for(id track in tracks){if(result.count>=128)break;NSNumber *index=[track valueForKey:@"trackIndex"],*type=[track valueForKey:@"trackType"];if(![index respondsToSelector:@selector(integerValue)]||![type respondsToSelector:@selector(integerValue)]||index.integerValue<0||index.integerValue>INT_MAX)continue;
-            NSString *kind=type.integerValue==1?@"audio":(type.integerValue==2?@"subtitle":@"video");NSString *name=MediaPlaybackCicadaStringFromModel(track,@[@"title",@"audioLang",@"subtitleLang",@"language"]);if(!name.length)name=[NSString stringWithFormat:@"%@ %ld",kind,(long)index.integerValue];[result addObject:@{@"index":index,@"type":kind,@"name":name}];
+            NSString *kind=type.integerValue==1?@"audio":(type.integerValue==2?@"subtitle":@"video");NSString *name=MediaPlaybackCicadaStringFromModel(track,@[@"title",@"audioLang",@"subtitleLang",@"language"]);if(!name.length)name=[NSString stringWithFormat:@"%@ %ld",kind,(long)index.integerValue];[result addObject:@{@"index":index,@"type":kind,@"name":name,@"selected":@"unknown"}];
         }return result.copy;
     }@catch(NSException *error){NSLog(@"[CCTVHost] Cicada track list raised %@",error.name);return @[];}
 }
 - (BOOL)selectTrackWithIndex:(NSInteger)index {
+    // T09：返回值只表示 SDK 调用已发出——本 adapter 可用的 mediaInfo
+    // 表面不暴露选中状态，无法重查验证实际切换；调用方须把验证结果
+    // 另外记录，不得只凭 YES 宣称已切换（见协议 selectTrackWithIndex: 注释）。
     if(![self canSelectTracks])return NO;
     for(NSDictionary *track in [self availableTracks])if([track[@"index"] integerValue]==index){CicadaCallVoidInt(self.player,NSSelectorFromString(@"selectTrack:"),(int)index);return YES;}
     return NO;
@@ -594,6 +599,9 @@ static dispatch_queue_t MediaPlaybackCicadaQuarantineQueue(void) {
         NSTimeInterval duration = owner.duration;
         owner.lastPolledPosition = position;
         [owner reportPosition:position duration:duration];
+        // S2：位置前进而始终无视频轨道 = 纯音频（视频帧只能由渲染回调
+        // 证明）；视频随后渲染仍可再报首帧。
+        if (!owner.firstFrameReported && !owner.audioOnlyNotified && owner.playbackRequested && owner.state==MediaPlaybackCicadaAdapterStatePlaying && !owner.hasVideoTrack && position > 1.0) [owner handleAudioOnly];
         // Position advancement can be audio-only. Only render callbacks prove a video frame.
         // 完成兜底：位置到达时长末尾即视为播完（onCompletion 未到时也生效）。
         if (!owner.completedReported && owner.playbackRequested && owner.state==MediaPlaybackCicadaAdapterStatePlaying && duration > 0 && position >= duration - 0.1) [owner handleCompletion];
@@ -621,6 +629,17 @@ static dispatch_queue_t MediaPlaybackCicadaQuarantineQueue(void) {
     [self.firstFrameWatchdog invalidate]; self.firstFrameWatchdog = nil;
     if ([self.delegate respondsToSelector:@selector(cicadaAdapterDidShowFirstFrame:)]) {
         [self.delegate cicadaAdapterDidShowFirstFrame:self];
+    }
+}
+
+- (void)handleAudioOnly {
+    // S2：纯音频开始——位置在前进但始终无视频轨道。不是视频首帧；
+    // 视频随后渲染仍可再报首帧（firstFrameReported 不变）。
+    if (self.audioOnlyNotified || self.firstFrameReported || self.destroyed) return;
+    self.audioOnlyNotified = YES;
+    [self.firstFrameWatchdog invalidate]; self.firstFrameWatchdog = nil;
+    if ([self.delegate respondsToSelector:@selector(cicadaAdapterDidStartAudioOnly:)]) {
+        [self.delegate cicadaAdapterDidStartAudioOnly:self];
     }
 }
 
@@ -655,7 +674,24 @@ static dispatch_queue_t MediaPlaybackCicadaQuarantineQueue(void) {
 - (NSInteger)lastErrorCode { return _lastErrorCode; }
 
 - (NSDictionary<NSString *, id> *)playbackStatistics {
-    return @{};
+    // S5：只填本 adapter 实际跟踪的值；Cicada SDK 未向本 adapter 暴露
+    // 的项是 @"unknown"，绝不伪造。键契约见 CCTVPlaybackEngineProtocol.h。
+    // bufferedPosition 是缓存末尾包的绝对媒体时间戳；bufferedAheadSeconds
+    // 是它与当前位置之差，下限钳到 0。
+    NSTimeInterval ahead = MAX(0, self.bufferedPosition - self.currentPosition);
+    return @{@"engine": @"cicada",
+             @"hwdec": @"unknown",
+             @"videoBitrate": @"unknown",
+             @"audioBitrate": @"unknown",
+             @"fps": @"unknown",
+             @"droppedFrames": @"unknown",
+             @"cacheSeconds": @"unknown",
+             @"bufferedPosition": @(self.bufferedPosition),
+             @"bufferedAheadSeconds": @(ahead),
+             @"currentPosition": @(self.currentPosition),
+             @"duration": @(self.duration),
+             @"state": @(self.state),
+             @"stallCount": @(self.stallCount)};
 }
 
 - (void)reportErrorWithCode:(NSInteger)code message:(NSString *)message {

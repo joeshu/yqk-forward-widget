@@ -62,7 +62,9 @@ class Round44MPVUniversalDecoderTests(unittest.TestCase):
         router_m = (SOURCES_DIR / "MediaPlaybackDecodeRouter.m").read_text(encoding="utf-8")
         self.assertIn('NSClassFromString(@"MediaPlaybackMPVAdapter")', router_m)
         # T07/R4：webOnly 门禁按 MPV 启用状态（开关 + 可用性），不是裸可用性。
-        self.assertIn('if (MediaPlaybackMPVRouteEnabled()) return NO;', router_m)
+        # T11：旁路抽成 helper（直播关闭旁路），导出函数仍按同一启用状态返回 NO。
+        self.assertIn('if (mpvBypassAllowed && MediaPlaybackMPVRouteEnabled()) return NO;', router_m)
+        self.assertIn('return MediaPlaybackResultRequiresWebViewOnlyWithMPVBypass(result, YES);', router_m)
         self.assertIn('rtsp://', router_m)
         self.assertIn('srt://', router_m)
 

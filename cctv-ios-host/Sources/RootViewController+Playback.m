@@ -1458,22 +1458,20 @@
 - (void)handleAudioRouteChange:(NSNotification *)notification {
     (void)notification;
     dispatch_async(dispatch_get_main_queue(), ^{
-        NSString *airPlayDevice = [self activeAirPlayDeviceName];
-        self.activeAirPlayRouteName = airPlayDevice;
+        NSString *airPlayDevice = [self activeAirPlayDeviceName]; self.activeAirPlayRouteName = airPlayDevice;
         BOOL isAirPlay = (airPlayDevice.length > 0);
+        // T10：视频投屏只认 AVPlayer 的 externalPlaybackActive；仅音频路由不得显示"投屏中"/"正在投屏至"。
+        BOOL isAirPlayVideo = self.avPlayer && self.avPlayer.isExternalPlaybackActive;
         self.catalogFloatingAirPlayPicker.tintColor = isAirPlay ? HostAccent() : HostText();
-        if (self.castBtn) {
-            [self.castBtn setTitle:isAirPlay ? @"投屏中" : @"投屏" forState:UIControlStateNormal];
-            self.castBtn.layer.borderColor = isAirPlay ? HostAccent().CGColor : [UIColor colorWithWhite:1 alpha:0.22].CGColor;
-        }
+        if (self.castBtn) { [self.castBtn setTitle:isAirPlayVideo ? @"投屏中" : @"投屏" forState:UIControlStateNormal]; self.castBtn.layer.borderColor = isAirPlayVideo ? HostAccent().CGColor : [UIColor colorWithWhite:1 alpha:0.22].CGColor; }
         if (isAirPlay && self.currentPlayer && !self.avPlayer && self.channelID.length) {
             if (![self switchToAirPlayCompatibleRouteIfPossible]) {
-                self.infoLabel.hidden = NO;
-                self.infoLabel.text = [NSString stringWithFormat:@"📺 已连接 %@ · 加密频道建议使用系统「屏幕镜像」", airPlayDevice];
+                self.infoLabel.hidden = NO; self.infoLabel.text = [NSString stringWithFormat:@"📺 已连接 %@ · 加密频道建议使用系统「屏幕镜像」", airPlayDevice];
             }
-        } else if (isAirPlay && self.avPlayer) {
-            self.infoLabel.hidden = NO;
-            self.infoLabel.text = [NSString stringWithFormat:@"📺 正在投屏至 %@", airPlayDevice];
+        } else if (isAirPlayVideo) {
+            self.infoLabel.hidden = NO; self.infoLabel.text = [NSString stringWithFormat:@"📺 正在投屏至 %@", airPlayDevice];
+        } else if (isAirPlay) {
+            self.infoLabel.hidden = NO; self.infoLabel.text = [NSString stringWithFormat:@"🔊 音频已连接至 %@，视频仍在本机播放", airPlayDevice];
         }
     });
 }

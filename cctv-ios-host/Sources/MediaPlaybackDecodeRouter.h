@@ -34,7 +34,9 @@ FOUNDATION_EXPORT BOOL MediaPlaybackMPVRouteEnabled(void);
 // 失败后由运行时回退链继续走到 WebView。
 FOUNDATION_EXPORT BOOL MediaPlaybackResultSupportsCicadaPlayer(NSDictionary * _Nullable result);
 
-// 该结果是否两路原生引擎都明确不支持（AVI、WMV/ASF、RM/RMVB）：只能走 WebView。
+// 该结果是否 AVPlayer 与 CicadaPlayer 两路原生引擎都明确不支持
+//（AVI、WMV/ASF、RM/RMVB）。MPV 已启用时返回 NO（MPV 可解这些容器）；
+// 函数名是历史遗留，不承诺 WebView 能播放。直播不走 MPV，门禁见下。
 FOUNDATION_EXPORT BOOL MediaPlaybackResultRequiresWebViewOnly(NSDictionary * _Nullable result);
 
 // 按优先级返回下一个未尝试的路由；全部试过返回 MediaPlaybackDecodeRouteNone。
@@ -57,7 +59,12 @@ FOUNDATION_EXPORT NSArray<NSDictionary *> *MediaPlaybackDecodeRouteCandidatesFor
 // MediaDescriptor 一致（webOnly 容器 → 不支持编码 → 不支持传输）；
 // 传输检查只看 result[@"url"]（不看 originalURL：红果 cenc 本地代理的
 // originalURL 是 cenc://，可播地址在 url 字段里）。
+// T11：容器与编码门禁按引擎区分——vp8/vp9/av1/h263/wmv/rv 与 avi/wmv/asf/
+// rm/rmvb 只是 AV/Cicada 不支持，MPV（ffmpeg）可解；MPV 已启用时不拒绝。
+// 直播（forLive=YES）不走 MPV，所以同一结果在直播下仍拒绝（无可用引擎）。
+// 无 forLive 参数的重载是点播语义（forLive=NO），供 MediaDescriptor 调用。
 FOUNDATION_EXPORT NSString * _Nullable MediaPlaybackDecodeRouteRejectionReasonForResult(NSDictionary * _Nullable result);
+FOUNDATION_EXPORT NSString * _Nullable MediaPlaybackDecodeRouteRejectionReasonForResult(NSDictionary * _Nullable result, BOOL forLive);
 
 // 供日志/诊断用：路由名（@"avplayer" / @"cicada" / @"webview" / @"none"）。
 FOUNDATION_EXPORT NSString *MediaPlaybackDecodeRouteName(MediaPlaybackDecodeRoute route);

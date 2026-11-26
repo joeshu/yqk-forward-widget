@@ -143,9 +143,11 @@ BOOL MediaPlaybackResultSupportsCicadaPlayer(NSDictionary *result) {
     return NO;
 }
 
-BOOL MediaPlaybackResultRequiresWebViewOnly(NSDictionary *result) {
+static BOOL MediaPlaybackResultRequiresWebViewOnlyWithMPVBypass(NSDictionary *result, BOOL mpvBypassAllowed) {
     if (![result isKindOfClass:NSDictionary.class]) return NO;
-    if (MediaPlaybackMPVRouteEnabled()) return NO;
+    // MPV 已启用时这些容器可解，不拒绝；直播（mpvBypassAllowed=NO）不走
+    // MPV，旁路关闭。
+    if (mpvBypassAllowed && MediaPlaybackMPVRouteEnabled()) return NO;
     NSString *format = MediaPlaybackDecodeResultFormat(result);
     NSString *mime = MediaPlaybackDecodeResultMIME(result);
     // AVI：无 avi demuxer；WMV/ASF：无 asf demuxer、无 wmv 解码器；
@@ -156,6 +158,10 @@ BOOL MediaPlaybackResultRequiresWebViewOnly(NSDictionary *result) {
     if ([formats containsObject:format] || [mimes containsObject:mime]) return YES;
     NSString *extension = MediaPlaybackDecodeResultExtension(result);
     return [@[@"avi", @"wmv", @"asf", @"rm", @"rmvb"] containsObject:extension];
+}
+
+BOOL MediaPlaybackResultRequiresWebViewOnly(NSDictionary *result) {
+    return MediaPlaybackResultRequiresWebViewOnlyWithMPVBypass(result, YES);
 }
 
 NSString *MediaPlaybackDecodeRouteName(MediaPlaybackDecodeRoute route) {
@@ -169,10 +175,18 @@ NSString *MediaPlaybackDecodeRouteName(MediaPlaybackDecodeRoute route) {
 }
 
 NSString *MediaPlaybackDecodeRouteRejectionReasonForResult(NSDictionary *result) {
+    return MediaPlaybackDecodeRouteRejectionReasonForResult(result, NO);
+}
+
+NSString *MediaPlaybackDecodeRouteRejectionReasonForResult(NSDictionary *result, BOOL forLive) {
     if (![result isKindOfClass:NSDictionary.class]) return @"unsupported_transport";
     // 与 MediaDescriptor 同一顺序：webOnly 容器 → 不支持编码 → 不支持传输。
-    if (MediaPlaybackResultRequiresWebViewOnly(result)) return @"unsupported_container";
-    if ([result[@"videoCodec"] isKindOfClass:NSString.class] && [MediaCapabilityUnsupportedVideoCodecs() containsObject:[result[@"videoCodec"] lowercaseString]]) return @"unsupported_video_codec";
+    // 直播不走 MPV，容器旁路只在点播开。
+    if (MediaPlaybackResultRequiresWebViewOnlyWithMPVBypass(result, !forLive)) return @"unsupported_container";
+    // T11：vp8/vp9/av1/h263/wmv/rv 只是 AV/Cicada 不支持，MPV（ffmpeg）可解；
+    // 点播且 MPV 已启用时不拒绝。直播不走 MPV，仍拒绝（无可用引擎）。
+    // 旧代码无条件拒绝，与 MPV 候选链矛盾（MPV 开启时本应可播）。
+    if ([result[@"videoCodec"] isKindOfClass:NSString.class] && [MediaCapabilityMPVOnlyVideoCodecs() containsObject:[result[@"videoCodec"] lowercaseString]] && (forLive || !MediaPlaybackMPVRouteEnabled())) return @"unsupported_video_codec";
     // 传输只看 result[@"url"]：红果 cenc 本地代理的 originalURL 是 cenc://，
     // 可播地址在 url 字段里，查 originalURL 会误杀它。
     NSURL *url = [NSURL URLWithString:[result[@"url"] isKindOfClass:NSString.class] ? result[@"url"] : @""];
@@ -183,8 +197,9 @@ NSString *MediaPlaybackDecodeRouteRejectionReasonForResult(NSDictionary *result)
 
 NSArray<NSDictionary *> *MediaPlaybackDecodeRouteCandidatesForResult(NSDictionary *result, NSUInteger attemptedRoutes, BOOL forLive) {
     if (![result isKindOfClass:NSDictionary.class]) return @[];
-    // 入口门禁命中则无候选（与 MediaDescriptor 同一判定）。
-    if (MediaPlaybackDecodeRouteRejectionReasonForResult(result)) return @[];
+    // 入口门禁命中则无候选（与 MediaDescriptor 同一判定；直播用 forLive 门禁，
+    // 直播不走 MPV，MPV 可解的容器/编码在直播下仍拒绝）。
+    if (MediaPlaybackDecodeRouteRejectionReasonForResult(result, forLive)) return @[];
     BOOL directMedia = MediaPlaybackResultIsDirectMedia(result);
     BOOL avSupported = MediaPlaybackResultSupportsAVPlayer(result);
     BOOL requiresWebPlayback = ([result[@"requiresWebPlayback"] boolValue] || [result[@"parse"] integerValue] > 0 || [result[@"jx"] integerValue] > 0) && !directMedia;

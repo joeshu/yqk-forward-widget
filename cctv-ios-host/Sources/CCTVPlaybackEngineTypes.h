@@ -16,6 +16,10 @@ typedef NS_ENUM(NSInteger, MediaPlaybackCicadaAdapterState) {
 @optional
 - (void)cicadaAdapterDidPrepare:(id)adapter;
 - (void)cicadaAdapterDidShowFirstFrame:(id)adapter;
+/// 纯音频开始（S2）：时间在前进、没有视频轨道/视频画面时报告；与
+/// 首帧不同——调用方不得把音频开始当作视频首帧（videoFrameReady 保持
+/// NO）。视频画面随后出现时仍可再报 cicadaAdapterDidShowFirstFrame:。
+- (void)cicadaAdapterDidStartAudioOnly:(id)adapter;
 - (void)cicadaAdapter:(id)adapter didFailWithError:(NSError *)error;
 - (void)cicadaAdapterDidComplete:(id)adapter;
 - (void)cicadaAdapter:(id)adapter didUpdatePosition:(NSTimeInterval)position duration:(NSTimeInterval)duration;

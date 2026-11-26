@@ -9,7 +9,19 @@
 
 NSString * const MediaPlaybackMPVAdapterErrorDomain = @"CCTVHost.MediaPlaybackMPVAdapter";
 
+/// S2/S3：MPV 首帧与 seek 的真实证据口径。
+/// - 视频首帧只在观测到视频轨道（video-params 宽/高 > 0）且播放重启或
+///   time-pos 前进时报告；time-pos 前进而无视频轨道不算视频首帧。
+/// - 纯音频：time-pos 超过 1.0 秒仍无视频轨道时报 audio-only（见
+///   MediaPlaybackCicadaAdapterDelegate 的 cicadaAdapterDidStartAudioOnly:），
+///   视频随后出现仍可再报视频首帧。
+/// - seek：每个请求有独立 id + 目标 + 3 秒 deadline；重启或 time-pos 落在
+///   目标 ±1.0 秒内才完成一次，超时/取消/停止/失败完成 NO。
+/// - 首帧预算暂停时冻结（与 Cicada adapter 的 firstFrameRemaining 同款）。
 static NSTimeInterval const MediaPlaybackMPVFirstFrameTimeout = 20.0;
+static NSTimeInterval const MediaPlaybackMPVSeekTimeout = 3.0;
+static NSTimeInterval const MediaPlaybackMPVAudioOnlyPositionThreshold = 1.0;
+static NSTimeInterval const MediaPlaybackMPVSeekPositionTolerance = 1.0;
 // Bounded wait for the event thread to leave mpv_wait_event before the
 // handle is released in destroy (T02/S1). The wait never blocks the
 // caller: on timeout teardown proceeds anyway and the state still closes.
@@ -230,12 +242,18 @@ enum {
 @property (nonatomic) BOOL destroyed;
 @property (nonatomic) BOOL preparedNotified;
 @property (nonatomic) BOOL firstFrameNotified;
+@property (nonatomic) BOOL audioOnlyNotified;
+@property (nonatomic) NSTimeInterval firstFrameRemaining;
+@property (nonatomic) CFTimeInterval firstFrameBudgetStarted;
 @property (nonatomic) BOOL completionNotified;
 @property (nonatomic) BOOL wantStartAfterPrepare;
 @property (nonatomic) CGSize lastVideoSize;
 @property (nonatomic) NSInteger lastVideoRotation;
 @property (nonatomic, strong, nullable) NSTimer *firstFrameWatchdog;
 @property (nonatomic, copy, nullable) void (^pendingSeekCompletion)(BOOL finished);
+@property (nonatomic) NSUInteger pendingSeekID;
+@property (nonatomic) NSTimeInterval pendingSeekTarget;
+@property (nonatomic, strong, nullable) NSTimer *seekTimeoutTimer;
 @property (nonatomic, strong, nullable) NSThread *eventThread;
 @property (nonatomic, strong) NSLock *mpvLock;
 @property (nonatomic, assign) mpv_handle *mpvHandle;
@@ -245,6 +263,9 @@ enum {
 - (void)armFirstFrameWatchdog;
 - (void)cancelFirstFrameWatchdog;
 - (void)handleFirstFrameTimeout;
+- (void)handleAudioOnlyOnMain;
+- (void)maybeCompletePendingSeek;
+- (void)handleSeekTimeoutForID:(NSUInteger)seekID;
 - (void)configureHTTPHeadersOnHandle:(mpv_handle *)ctx;
 - (void)applyBufferOptionsOnHandle:(mpv_handle *)ctx;
 - (void)applyGravity:(NSString *)gravity onHandle:(mpv_handle *)ctx;
@@ -332,6 +353,14 @@ enum {
     self.loading = YES;
     self.preparedNotified = NO;
     self.firstFrameNotified = NO;
+    self.audioOnlyNotified = NO;
+    self.firstFrameRemaining = MediaPlaybackMPVFirstFrameTimeout;
+    [self cancelFirstFrameWatchdog];
+    [self.seekTimeoutTimer invalidate];
+    self.seekTimeoutTimer = nil;
+    self.pendingSeekCompletion = nil;
+    self.pendingSeekID = 0;
+    self.pendingSeekTarget = 0;
     self.completionNotified = NO;
     self.hasVideoTrack = NO;
 
@@ -455,6 +484,9 @@ enum {
 - (void)start {
     if (self.destroyed) return;
     self.wantStartAfterPrepare = YES;
+    // S2：暂停后恢复重新按剩余预算计时（watchdog 已存在时 arm 是 no-op；
+    // prepare 尚未完成时不 arm，预算从 prepare 末尾开始计）。
+    if (self.preparedNotified) [self armFirstFrameWatchdog];
     // Media commands may only touch the handle while the lifecycle is
     // PREPARED (T02/S1): after destroy the handle is gone.
     if (!host_mpv_lifecycle_command_allowed(_lifecycle)) return;
@@ -474,6 +506,12 @@ enum {
 - (void)pause {
     if (self.destroyed) return;
     self.wantStartAfterPrepare = NO;
+    // S2：暂停/后台/等待用户确认时冻结首帧预算，不计启动超时（与 Cicada
+    // adapter 的 firstFrameRemaining 同款；start 时按剩余预算重 arm）。
+    if (self.firstFrameWatchdog) {
+        self.firstFrameRemaining = MAX(0, self.firstFrameRemaining - (CACurrentMediaTime() - self.firstFrameBudgetStarted));
+        [self cancelFirstFrameWatchdog];
+    }
     if (!host_mpv_lifecycle_command_allowed(_lifecycle)) return;
     [self.mpvLock lock];
     mpv_handle *ctx = self.mpvHandle;
@@ -554,8 +592,20 @@ enum {
         if (completion) completion(NO);
         return;
     }
+    // S3：新请求取消旧请求（完成 NO，一次且仅一次）；每个请求独立 id +
+    // 目标 + 3 秒 deadline，过期未落点也完成 NO，不无限等待。
     [self finishPendingSeek:NO];
     self.pendingSeekCompletion = completion;
+    self.pendingSeekID += 1;
+    self.pendingSeekTarget = MAX(0.0, time);
+    NSUInteger seekID = self.pendingSeekID;
+    __weak typeof(self) weakSelf = self;
+    [self.seekTimeoutTimer invalidate];
+    self.seekTimeoutTimer = [NSTimer scheduledTimerWithTimeInterval:MediaPlaybackMPVSeekTimeout
+                                                            repeats:NO
+                                                              block:^(__unused NSTimer *timer) {
+        [weakSelf handleSeekTimeoutForID:seekID];
+    }];
     NSTimeInterval clamped = MAX(0.0, time);
     NSString *target = [NSString stringWithFormat:@"%.3f", clamped];
     [self.mpvLock lock];
@@ -644,19 +694,37 @@ enum {
         if (lang.length) [parts addObject:lang.uppercaseString];
         if (codec.length) [parts addObject:codec.uppercaseString];
         NSString *display = parts.count ? [parts componentsJoinedByString:@" · "] : [NSString stringWithFormat:@"%@ #%lld", kind, trackId];
+        // T09：真实选中状态（track-list/N/selected，引擎同步值），供菜单
+        // 标当前选中与验证切换结果；未知时不填 BOOL、不伪造。
+        int selectedFlag = 0;
+        syms->get_property(ctx, [prefix stringByAppendingString:@"/selected"].UTF8String, MPV_FORMAT_FLAG, &selectedFlag);
         // Encode type in upper bits so selectTrackWithIndex: knows aid vs sid vs vid.
         NSInteger encodedIndex = (NSInteger)trackId;
         if ([kind isEqualToString:@"subtitle"]) encodedIndex += 10000;
         else if ([kind isEqualToString:@"video"]) encodedIndex += 20000;
-        [tracks addObject:@{@"type": kind, @"index": @(encodedIndex), @"name": display}];
+        [tracks addObject:@{@"type": kind, @"index": @(encodedIndex), @"name": display, @"selected": @(selectedFlag != 0)}];
     }
     [self.mpvLock unlock];
     return tracks.copy;
 }
 
 - (BOOL)selectTrackWithIndex:(NSInteger)index {
-    if (index <= 0) return NO;
     if (!host_mpv_lifecycle_command_allowed(_lifecycle)) return NO;
+    // T09：关闭哨兵——0 = 关闭音频轨道，10000 = 关闭字幕轨道（mpv 的
+    // aid/sid 设为 "no"；set_property_string 同步返回即实际切换结果）。
+    if (index == 0 || index == 10000) {
+        const char *prop = (index == 0) ? "aid" : "sid";
+        [self.mpvLock lock];
+        mpv_handle *ctx = self.mpvHandle;
+        const CCTVMPVSymbolTable *syms = self.syms;
+        int err = -1;
+        if (ctx && syms) {
+            err = syms->set_property_string(ctx, prop, "no");
+        }
+        [self.mpvLock unlock];
+        return err >= 0;
+    }
+    if (index < 0) return NO;
     const char *prop = "aid";
     int64_t trackId = index;
     if (index >= 20000) {
@@ -720,9 +788,12 @@ enum {
 }
 
 - (void)armFirstFrameWatchdog {
-    [self cancelFirstFrameWatchdog];
+    // S2：只按剩余预算 arm 一次；暂停冻结后 start 按剩余重 arm，已有
+    // 计时器/已报首帧/已报纯音频/已销毁时是 no-op。
+    if (self.firstFrameWatchdog || self.firstFrameNotified || self.audioOnlyNotified || self.destroyed) return;
     __weak typeof(self) weakSelf = self;
-    self.firstFrameWatchdog = [NSTimer scheduledTimerWithTimeInterval:MediaPlaybackMPVFirstFrameTimeout
+    self.firstFrameBudgetStarted = CACurrentMediaTime();
+    self.firstFrameWatchdog = [NSTimer scheduledTimerWithTimeInterval:MAX(0.01, self.firstFrameRemaining)
                                                               repeats:NO
                                                                 block:^(__unused NSTimer *timer) {
         [weakSelf handleFirstFrameTimeout];
@@ -735,8 +806,34 @@ enum {
 }
 
 - (void)handleFirstFrameTimeout {
-    if (self.destroyed || self.firstFrameNotified) return;
+    if (self.destroyed || self.firstFrameNotified || self.audioOnlyNotified) return;
     [self handleFailureWithCode:-1008 message:@"MPV 全能内核首帧渲染超时"];
+}
+
+- (void)handleAudioOnlyOnMain {
+    // S2：纯音频开始——时间在前进但始终无视频轨道。不是视频首帧：
+    // videoFrameReady 保持 NO；视频随后出现仍可再报首帧。
+    if (self.destroyed || self.firstFrameNotified || self.audioOnlyNotified) return;
+    self.audioOnlyNotified = YES;
+    self.loading = NO;
+    [self cancelFirstFrameWatchdog];
+    id<MediaPlaybackCicadaAdapterDelegate> d = self.delegate;
+    if ([d respondsToSelector:@selector(cicadaAdapterDidStartAudioOnly:)]) {
+        [d cicadaAdapterDidStartAudioOnly:self];
+    }
+}
+
+- (void)maybeCompletePendingSeek {
+    // S3：只有落点在目标 ±1.0 秒内才算完成；无关重启不完成本次请求。
+    if (!self.pendingSeekCompletion) return;
+    if (fabs(self.currentPosition - self.pendingSeekTarget) <= MediaPlaybackMPVSeekPositionTolerance) {
+        [self finishPendingSeek:YES];
+    }
+}
+
+- (void)handleSeekTimeoutForID:(NSUInteger)seekID {
+    if (self.destroyed || self.pendingSeekID != seekID) return;
+    [self finishPendingSeek:NO];
 }
 
 - (void)eventLoopMain:(NSValue *)handleValue {
@@ -769,12 +866,11 @@ enum {
                 }
                 case MPV_EVENT_PLAYBACK_RESTART: {
                     [self runOnMain:^{
-                        [self handleFirstFrameOnMain];
-                        [self finishPendingSeek:YES];
-                        id<MediaPlaybackCicadaAdapterDelegate> d = self.delegate;
-                        if ([d respondsToSelector:@selector(cicadaAdapterDidSeek:)]) {
-                            [d cicadaAdapterDidSeek:self];
-                        }
+                        // S2：重启只证明解码器恢复输出，不证明视频画面——只有
+                        // 观测到视频轨道时才算视频首帧（纯音频流的重启不报）。
+                        if (self.hasVideoTrack) [self handleFirstFrameOnMain];
+                        // S3：重启只在落点接近本次 seek 目标时完成请求。
+                        [self maybeCompletePendingSeek];
                     }];
                     break;
                 }
@@ -803,7 +899,16 @@ enum {
                         [self runOnMain:^{
                             if (self.destroyed || !isfinite(pos) || pos < 0) return;
                             self.currentPosition = pos;
-                            if (!self.firstFrameNotified && pos > 0.05) [self handleFirstFrameOnMain];
+                            // S2：time-pos 前进 ≠ 视频首帧——只有观测到视频
+                            // 轨道时才报首帧；无视频轨道且位置超过 1.0 秒
+                            // 时报纯音频。
+                            if (!self.firstFrameNotified && self.hasVideoTrack && pos > 0.05) {
+                                [self handleFirstFrameOnMain];
+                            } else if (!self.firstFrameNotified && !self.audioOnlyNotified && !self.hasVideoTrack && pos > MediaPlaybackMPVAudioOnlyPositionThreshold) {
+                                [self handleAudioOnlyOnMain];
+                            }
+                            // S3：time-pos 落在目标附近也算 seek 完成。
+                            [self maybeCompletePendingSeek];
                             id<MediaPlaybackCicadaAdapterDelegate> d = self.delegate;
                             if ([d respondsToSelector:@selector(cicadaAdapter:didUpdatePosition:duration:)]) {
                                 [d cicadaAdapter:self didUpdatePosition:self.currentPosition duration:self.duration];
@@ -819,6 +924,9 @@ enum {
                         double buf = *(double *)prop->data;
                         [self runOnMain:^{
                             if (self.destroyed || !isfinite(buf) || buf < 0) return;
+                            // S5：demuxer-cache-time 是缓存末尾包的绝对媒体
+                            // 时间戳（缓存结束点），不是"已缓冲时长"；上层
+                            // 用 bufferedPosition - currentPosition 算 ahead。
                             self.bufferedPosition = buf;
                         }];
                     } else if (tag == CCTVMPVReplyPausedForCache && prop->format == MPV_FORMAT_FLAG) {
@@ -921,7 +1029,49 @@ enum {
 - (NSInteger)lastErrorCode { return _lastErrorCode; }
 
 - (NSDictionary<NSString *, id> *)playbackStatistics {
-    return @{};
+    // S5：只填引擎真实上报的值；引擎不暴露的键是字符串 @"unknown"，
+    // 绝不伪造数字。键契约见 CCTVPlaybackEngineProtocol.h 的
+    // playbackStatistics 注释。
+    // bufferedPosition 是 demuxer-cache-time 的原值：缓存末尾包的绝对
+    // 媒体时间戳（不是"已缓冲时长"）；bufferedAheadSeconds 是它与当前
+    // 位置之差，下限钳到 0。
+    id hwdec = @"unknown", videoBitrate = @"unknown", audioBitrate = @"unknown";
+    id fps = @"unknown", droppedFrames = @"unknown", cacheSeconds = @"unknown";
+    [self.mpvLock lock];
+    mpv_handle *ctx = self.mpvHandle;
+    const CCTVMPVSymbolTable *syms = self.syms;
+    if (ctx && syms) {
+        char *hw = syms->get_property_string(ctx, "hwdec-current");
+        if (hw) {
+            hwdec = [NSString stringWithUTF8String:hw] ?: @"unknown";
+            syms->free_mem(hw);
+        }
+        int64_t vbr = -1;
+        if (syms->get_property(ctx, "video-bitrate", MPV_FORMAT_INT64, &vbr) >= 0 && vbr >= 0) videoBitrate = @(vbr);
+        int64_t abr = -1;
+        if (syms->get_property(ctx, "audio-bitrate", MPV_FORMAT_INT64, &abr) >= 0 && abr >= 0) audioBitrate = @(abr);
+        double f = 0;
+        if (syms->get_property(ctx, "estimated-vf-fps", MPV_FORMAT_DOUBLE, &f) >= 0 && f > 0) fps = @(f);
+        int64_t drop = -1;
+        if (syms->get_property(ctx, "decoder-frame-drop-count", MPV_FORMAT_INT64, &drop) >= 0 && drop >= 0) droppedFrames = @(drop);
+        double cache = 0;
+        if (syms->get_property(ctx, "demuxer-cache-duration", MPV_FORMAT_DOUBLE, &cache) >= 0 && cache >= 0) cacheSeconds = @(cache);
+    }
+    [self.mpvLock unlock];
+    NSTimeInterval ahead = MAX(0, self.bufferedPosition - self.currentPosition);
+    return @{@"engine": @"mpv",
+             @"hwdec": hwdec,
+             @"videoBitrate": videoBitrate,
+             @"audioBitrate": audioBitrate,
+             @"fps": fps,
+             @"droppedFrames": droppedFrames,
+             @"cacheSeconds": cacheSeconds,
+             @"bufferedPosition": @(self.bufferedPosition),
+             @"bufferedAheadSeconds": @(ahead),
+             @"currentPosition": @(self.currentPosition),
+             @"duration": @(self.duration),
+             @"state": @(self.state),
+             @"stallCount": @"unknown"};
 }
 
 - (void)handleFailureWithCode:(NSInteger)code message:(NSString *)message {
@@ -951,15 +1101,30 @@ enum {
 }
 
 - (void)finishPendingSeek:(BOOL)finished {
+    // S3：完成一次且只通知一次；成功才发 didSeek（与 Cicada adapter 的
+    // finishPendingSeekWithFinished: 同款）。
+    [self.seekTimeoutTimer invalidate];
+    self.seekTimeoutTimer = nil;
     void (^cb)(BOOL) = self.pendingSeekCompletion;
     self.pendingSeekCompletion = nil;
     if (cb) cb(finished);
+    if (finished) {
+        id<MediaPlaybackCicadaAdapterDelegate> d = self.delegate;
+        if ([d respondsToSelector:@selector(cicadaAdapterDidSeek:)]) {
+            [d cicadaAdapterDidSeek:self];
+        }
+    }
 }
 
 #pragma mark - AVSampleBufferDisplayLayer Picture-in-Picture Bridge
 
+// T10/F1：MPV 的 PiP 目前只有控制骨架，没有视频供帧——全文件无任何
+// sample enqueue（真实输出是 Metal）。isPictureInPictureSupported 只
+// 返回设备支持会谎称支持 PiP（打开是黑窗），故先标记为未实现：
+// supported 返回 NO，start 是 no-op，不建空 PiP 窗。供帧由 T24 实现后
+// 再开放（pipDisplayLayer/pipController 属性与 delegate 方法保留给 T24）。
 - (BOOL)isPictureInPictureSupported {
-    return [AVPictureInPictureController isPictureInPictureSupported];
+    return NO;
 }
 
 - (BOOL)isPictureInPictureActive {
@@ -967,25 +1132,9 @@ enum {
 }
 
 - (void)startPictureInPicture {
-    if (self.destroyed || ![AVPictureInPictureController isPictureInPictureSupported]) return;
-    if (!self.pipDisplayLayer) {
-        AVSampleBufferDisplayLayer *layer = [AVSampleBufferDisplayLayer new];
-        layer.videoGravity = AVLayerVideoGravityResizeAspect;
-        layer.frame = self.metalView.bounds;
-        [self.metalView.layer addSublayer:layer];
-        self.pipDisplayLayer = layer;
-    }
-    if (!self.pipController && self.pipDisplayLayer) {
-        AVPictureInPictureControllerContentSource *source =
-            [[AVPictureInPictureControllerContentSource alloc] initWithSampleBufferDisplayLayer:self.pipDisplayLayer
-                                                                               playbackDelegate:self];
-        self.pipController = [[AVPictureInPictureController alloc] initWithContentSource:source];
-        self.pipController.canStartPictureInPictureAutomaticallyFromInline = YES;
-    }
-    [self.pipController invalidatePlaybackState];
-    if (!self.pipController.isPictureInPictureActive) {
-        [self.pipController startPictureInPicture];
-    }
+    // T10：未实现——没有视频 sample 可供帧，建 AVSampleBufferDisplayLayer
+    // 也只会得到黑窗；不启动、不创建 controller。
+    return;
 }
 
 - (void)stopPictureInPicture {

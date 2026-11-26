@@ -66,7 +66,17 @@ class PlaybackEngineInterfaceContractTests(unittest.TestCase):
         for header, implementation in ((self.cicada_h, self.cicada_m), (self.mpv_h, self.mpv_m)):
             self.assertRegex(header, r'@property\s*\([^)]*readonly[^)]*\)\s*NSInteger\s+lastErrorCode\s*;')
             self.assertRegex(implementation, r'-\s*\(NSInteger\)lastErrorCode\s*\{')
-            self.assertRegex(implementation, r'-\s*\(NSDictionary<NSString\s*\*,\s*id>\s*\*\)playbackStatistics\s*\{\s*return\s*@\{\};\s*\}')
+            # T08/S5：统计不再是空字典——填真实值，未暴露的键用 @"unknown"
+            # 绝不伪造；两 adapter 共享同一键契约。
+            stats = implementation[implementation.index('playbackStatistics'):]
+            self.assertNotIn('return @{};', stats[:2000])
+            for key in ('@"engine"', '@"hwdec"', '@"videoBitrate"', '@"audioBitrate"',
+                        '@"fps"', '@"droppedFrames"', '@"cacheSeconds"',
+                        '@"bufferedPosition"', '@"bufferedAheadSeconds"',
+                        '@"currentPosition"', '@"duration"', '@"state"',
+                        '@"stallCount"'):
+                self.assertIn(key, stats[:6000], key)
+            self.assertIn('@"unknown"', stats[:6000])
         self.assertIn('self.lastErrorCode = code;', self.cicada_m)
         self.assertIn('self.lastErrorCode = code;', self.mpv_m)
 

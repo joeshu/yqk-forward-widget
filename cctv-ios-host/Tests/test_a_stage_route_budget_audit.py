@@ -133,7 +133,10 @@ class BoundedTotalBudgetContracts(unittest.TestCase):
             method_body(MPV, "- (NSTimeInterval)firstFrameTimeout"),
         )
         # 非重复定时器：到期即报错推进路由。
-        self.assertIn("scheduledTimerWithTimeInterval:MediaPlaybackMPVFirstFrameTimeout", MPV)
+        # T08/S2：预算改为可暂停冻结的剩余量——prepare 把剩余初始化为
+        # 上述固定 20 秒常量，arm 时按剩余（≤20 秒）计时，仍有界。
+        self.assertIn("self.firstFrameRemaining = MediaPlaybackMPVFirstFrameTimeout", MPV)
+        self.assertIn("scheduledTimerWithTimeInterval:MAX(0.01, self.firstFrameRemaining)", MPV)
 
     def test_cicada_first_frame_timeout_is_bounded_formula(self):
         self.assertIn("MediaPlaybackCicadaFirstFrameTimeout = 20.0", CICADA)

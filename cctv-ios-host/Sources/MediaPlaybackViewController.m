@@ -2181,7 +2181,7 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
 }
 - (void)markCicadaFirstFrameReady {
     if(self.videoFrameReady)return;
-    self.videoFrameReady=YES;self.hasVideoTrack=self.cicadaAdapter.hasVideoTrack;self.throughputLabel.hidden=YES;self.throughputLabel.alpha=0.0;self.inlineNowPlayingPill.alpha=0.0;if(!self.gestureLockActive)self.screenLockButton.alpha=0.0;
+    self.videoFrameReady=YES;self.confirmedAudioOnly=NO;self.hasVideoTrack=self.cicadaAdapter.hasVideoTrack;self.throughputLabel.hidden=YES;self.throughputLabel.alpha=0.0;self.inlineNowPlayingPill.alpha=0.0;if(!self.gestureLockActive)self.screenLockButton.alpha=0.0;
     [self.spinner stopAnimating];
     self.status.text=[NSString stringWithFormat:@"视频首帧已就绪 · %@ 正在播放",[self.cicadaAdapter isKindOfClass:[MediaPlaybackMPVAdapter class]]?@"MPV":@"CicadaPlayer"];self.status.accessibilityLabel=self.status.text;
     NSMutableDictionary *fields=[@{@"player":([self.cicadaAdapter isKindOfClass:[MediaPlaybackMPVAdapter class]]?@"mpv":@"cicada"), @"playback_attempt_id":self.playbackAttemptID?:@"", @"elapsed_ms":@(MAX(0,(NSInteger)((CACurrentMediaTime()-self.playbackStartedAt)*1000))), @"line_index":@(self.lineIndex), @"episode_index":@(self.episodeIndex), @"correlation_id":self.diagnosticTraceID?:@""} mutableCopy];
@@ -2362,6 +2362,7 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
     self.playbackOptionsItem.menu=[self.settingsCoordinator playbackOptionsMenu];
     [self markCicadaFirstFrameReady];[self.controlsOverlay show];
 }
+- (void)cicadaAdapterDidStartAudioOnly:(id)adapter {if(adapter!=self.cicadaAdapter)return;self.confirmedAudioOnly=YES;[self.spinner stopAnimating];self.status.text=@"正在播放音频";self.status.accessibilityLabel=self.status.text;[RuntimeDiagnostics.shared recordEvent:@"media_audio_only_started" category:@"playback" fields:@{@"playback_attempt_id":self.playbackAttemptID?:@"",@"correlation_id":self.diagnosticTraceID?:@""}];} // S2：纯音频开始，不是视频首帧（videoFrameReady 保持 NO）；视频随后出现时 didShowFirstFrame 清 confirmedAudioOnly。
 - (void)cicadaAdapter:(id)adapter didFailWithError:(NSError *)error {
     if(adapter!=self.cicadaAdapter)return;
     [self advanceFromCicadaFailureWithError:error];

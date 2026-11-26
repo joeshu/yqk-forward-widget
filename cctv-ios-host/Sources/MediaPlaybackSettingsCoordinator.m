@@ -68,6 +68,45 @@
 
 #pragma mark - 轨道选择（音轨 / 字幕）
 
+// T09：菜单会话守卫——菜单构建时抓取会话快照，点选时校验；会话已变
+// （换集/换线/换引擎/换 item）则拒绝过期动作并刷新菜单。
+- (BOOL)menuSessionChangedSinceAdapter:(nullable id)builtAdapter item:(nullable AVPlayerItem *)builtItem episode:(NSInteger)builtEpisode line:(NSInteger)builtLine {
+    id<MediaPlaybackSettingsCoordinatorOwner> host=self.owner;
+    if(!host)return YES;
+    if(host.episodeIndex!=builtEpisode||host.lineIndex!=builtLine)return YES;
+    if(builtAdapter&&host.cicadaAdapter!=(id)builtAdapter)return YES;
+    if(builtItem&&host.player.currentItem!=builtItem)return YES;
+    return NO;
+}
+
+- (void)refuseStaleMenuAction {
+    id<MediaPlaybackSettingsCoordinatorOwner> host=self.owner;
+    if(!host)return;
+    host.status.text=@"已切换剧集或线路，菜单已过期";
+    [self refreshMenus];
+}
+
+// T09：切换验证——重查轨道列表确认目标轨道当前已选中（MPV 的 selected
+// 是引擎同步值）；Cicada 不暴露选中状态时一律返回 NO（未确认）。
+- (BOOL)verifyTrackSelectionForAdapter:(id<CCTVPlaybackEngine>)adapter index:(NSInteger)index kind:(NSString *)kind {
+    if(![adapter respondsToSelector:@selector(availableTracks)])return NO;
+    for(NSDictionary *track in [adapter availableTracks]){
+        if(![track[@"type"] isEqual:kind])continue;
+        if([track[@"index"] integerValue]!=index)continue;
+        return [track[@"selected"] isEqual:@(YES)];
+    }
+    return NO;
+}
+
+- (BOOL)verifyTrackOffForAdapter:(id<CCTVPlaybackEngine>)adapter kind:(NSString *)kind {
+    if(![adapter respondsToSelector:@selector(availableTracks)])return NO;
+    for(NSDictionary *track in [adapter availableTracks]){
+        if(![track[@"type"] isEqual:kind])continue;
+        if([track[@"selected"] isEqual:@(YES)])return NO;
+    }
+    return YES;
+}
+
 // 字幕/音轨子菜单：优先用宿主提供的版本（1.67 契约，宿主经通用轨道构建器生成），
 // 宿主未提供（无轨道返回 nil）时直接用通用轨道构建器再建一次。
 - (nullable UIMenu *)subtitleSelectionMenu {UIMenu *menu=[self.owner subtitleSelectionMenu];return menu?:[self mediaSelectionMenuForCharacteristic:AVMediaCharacteristicLegible title:@"字幕"];}
@@ -86,25 +125,52 @@
         if(![adapter respondsToSelector:@selector(availableTracks)])return nil;
         BOOL canSelect=[adapter respondsToSelector:@selector(canSelectTracks)]&&[adapter canSelectTracks];
         if(!canSelect)return nil;
+        // T09：抓取菜单构建时的会话快照；点选时校验，换集/换线/换引擎后
+        // 拒绝过期动作（旧 index 不得作用于新 adapter），并刷新菜单。
+        id<CCTVPlaybackEngine> builtAdapter=adapter;
+        NSInteger builtEpisode=owner.episodeIndex;
+        NSInteger builtLine=owner.lineIndex;
+        NSArray<NSDictionary *> *tracks=[adapter availableTracks];
+        // T09：当前选中只认引擎真实上报的 selected=YES（MPV）；全部是
+        // @"unknown"（Cicada）时选中状态未知，不标当前、不提供关闭项。
+        BOOL selectionKnown=NO;NSString *currentName=nil;NSUInteger kindTrackCount=0;
+        for(NSDictionary *t in tracks){
+            if(![t[@"type"] isEqual:kind])continue;
+            kindTrackCount++;
+            if([t[@"selected"] isKindOfClass:NSNumber.class]){selectionKnown=YES;if([t[@"selected"] boolValue])currentName=[t[@"name"] isKindOfClass:NSString.class]?t[@"name"]:[NSString stringWithFormat:@"%@ %ld",kind,(long)[t[@"index"] integerValue]];}
+        }
         NSMutableArray *actions=[NSMutableArray array];
-        for(NSDictionary *track in [adapter availableTracks]){
+        if(selectionKnown){
+            // 关闭项：MPV 关闭哨兵（音频 0、字幕 10000）；选中状态已知时才提供。
+            NSInteger offIndex=[kind isEqualToString:@"audio"]?0:10000;
+            BOOL currentIsOff=!currentName;
+            UIAction *off=[UIAction actionWithTitle:@"关闭" image:nil identifier:nil handler:^(UIAction *action){MediaPlaybackSettingsCoordinator *coordinator=weakSelf;if(!coordinator)return;id<MediaPlaybackSettingsCoordinatorOwner> host=coordinator.owner;if(!host)return;if([coordinator menuSessionChangedSinceAdapter:builtAdapter item:nil episode:builtEpisode line:builtLine]){[coordinator refuseStaleMenuAction];return;}id<CCTVPlaybackEngine> current=(id<CCTVPlaybackEngine>)host.cicadaAdapter;BOOL ok=current&&[current respondsToSelector:@selector(selectTrackWithIndex:)]&&[current selectTrackWithIndex:offIndex];BOOL verified=ok&&[coordinator verifyTrackOffForAdapter:current kind:kind];[RuntimeDiagnostics.shared recordEvent:@"playback_track_selected" category:@"playback" fields:@{@"track_kind":kind,@"track_index":@(-1),@"track_name":@"off",@"engine_selectable":@(canSelect),@"selection_succeeded":@(ok),@"selection_verified":@(verified),@"correlation_id":host.diagnosticTraceID?:@"",@"line_index":@(host.lineIndex),@"episode_index":@(host.episodeIndex)}];if(!ok)host.status.text=@"当前引擎未能切换轨道";else if(!verified)host.status.text=@"已发送切换请求，尚未确认是否切换";}];
+            off.state=currentIsOff?UIMenuElementStateOn:UIMenuElementStateOff;
+            [actions addObject:off];
+        }
+        for(NSDictionary *track in tracks){
             if(![track[@"type"] isEqual:kind])continue;
             NSInteger index=[track[@"index"] integerValue];
             NSString *trackName=[track[@"name"] isKindOfClass:NSString.class]?track[@"name"]:[NSString stringWithFormat:@"%@ %ld",kind,(long)index];
-            UIAction *trackAct=[UIAction actionWithTitle:trackName image:nil identifier:nil handler:^(UIAction *action){MediaPlaybackSettingsCoordinator *coordinator=weakSelf;if(!coordinator)return;id<MediaPlaybackSettingsCoordinatorOwner> host=coordinator.owner;if(!host)return;id<CCTVPlaybackEngine> current=(id<CCTVPlaybackEngine>)host.cicadaAdapter;BOOL ok=current&&[current respondsToSelector:@selector(selectTrackWithIndex:)]&&[current selectTrackWithIndex:index];[RuntimeDiagnostics.shared recordEvent:@"playback_track_selected" category:@"playback" fields:@{@"track_kind":kind,@"track_index":@(index),@"track_name":trackName?:@"",@"engine_selectable":@(canSelect),@"selection_succeeded":@(ok),@"correlation_id":host.diagnosticTraceID?:@"",@"line_index":@(host.lineIndex),@"episode_index":@(host.episodeIndex)}];if(!ok)host.status.text=@"当前引擎未能切换轨道";}];
+            BOOL isCurrent=[track[@"selected"] isEqual:@(YES)];
+            UIAction *trackAct=[UIAction actionWithTitle:trackName image:nil identifier:nil handler:^(UIAction *action){MediaPlaybackSettingsCoordinator *coordinator=weakSelf;if(!coordinator)return;id<MediaPlaybackSettingsCoordinatorOwner> host=coordinator.owner;if(!host)return;if([coordinator menuSessionChangedSinceAdapter:builtAdapter item:nil episode:builtEpisode line:builtLine]){[coordinator refuseStaleMenuAction];return;}id<CCTVPlaybackEngine> current=(id<CCTVPlaybackEngine>)host.cicadaAdapter;BOOL ok=current&&[current respondsToSelector:@selector(selectTrackWithIndex:)]&&[current selectTrackWithIndex:index];BOOL verified=ok&&[coordinator verifyTrackSelectionForAdapter:current index:index kind:kind];[RuntimeDiagnostics.shared recordEvent:@"playback_track_selected" category:@"playback" fields:@{@"track_kind":kind,@"track_index":@(index),@"track_name":trackName?:@"",@"engine_selectable":@(canSelect),@"selection_succeeded":@(ok),@"selection_verified":@(verified),@"correlation_id":host.diagnosticTraceID?:@"",@"line_index":@(host.lineIndex),@"episode_index":@(host.episodeIndex)}];if(!ok)host.status.text=@"当前引擎未能切换轨道";else if(!verified)host.status.text=@"已发送切换请求，尚未确认是否切换";}];
+            trackAct.state=isCurrent?UIMenuElementStateOn:UIMenuElementStateOff;
             [actions addObject:trackAct];
         }
         if(!actions.count)return nil;
         UIMenu *menu=[UIMenu menuWithTitle:title image:icon identifier:nil options:0 children:actions];
-        if(@available(iOS 16.0,*))menu.subtitle=[NSString stringWithFormat:@"%lu 个可选轨道",(unsigned long)actions.count];
+        if(@available(iOS 16.0,*))menu.subtitle=selectionKnown?(currentName?:@"关闭"):[NSString stringWithFormat:@"%lu 个可选轨道 · 选中状态未确认",(unsigned long)kindTrackCount];
         return menu;
     }
 
     AVPlayerItem *item=owner.player.currentItem;BOOL ready=item&&item.status==AVPlayerItemStatusReadyToPlay&&[item.asset statusOfValueForKey:@"availableMediaCharacteristicsWithMediaSelectionOptions" error:NULL]==AVKeyValueStatusLoaded;AVMediaSelectionGroup *group=ready?[item.asset mediaSelectionGroupForMediaCharacteristic:characteristic]:nil;
     if(!group.options.count)return nil;
     NSMutableArray *actions=[NSMutableArray array];AVMediaSelection *selection=item.currentMediaSelection;AVMediaSelectionOption *selected=[selection selectedMediaOptionInMediaSelectionGroup:group];
-    if(group.allowsEmptySelection){UIAction *off=[UIAction actionWithTitle:@"关闭" image:nil identifier:nil handler:^(UIAction *action){MediaPlaybackSettingsCoordinator *coordinator=weakSelf;if(!coordinator)return;id<MediaPlaybackSettingsCoordinatorOwner> host=coordinator.owner;if(!host)return;AVPlayerItem *current=host.player.currentItem;AVMediaSelectionGroup *currentGroup=current?[current.asset mediaSelectionGroupForMediaCharacteristic:characteristic]:nil;if(current&&currentGroup)[current selectMediaOption:nil inMediaSelectionGroup:currentGroup];[RuntimeDiagnostics.shared recordEvent:@"playback_track_selected" category:@"playback" fields:@{@"track_kind":kind,@"track_index":@(-1),@"track_name":@"off",@"engine_selectable":@(YES),@"selection_succeeded":@(YES),@"correlation_id":host.diagnosticTraceID?:@"",@"line_index":@(host.lineIndex),@"episode_index":@(host.episodeIndex)}];}];off.state=selected?UIMenuElementStateOff:UIMenuElementStateOn;[actions addObject:off];}
-    for(AVMediaSelectionOption *option in group.options){NSString *name=option.displayName.length?option.displayName:@"默认";UIAction *optAct=[UIAction actionWithTitle:name image:nil identifier:nil handler:^(UIAction *action){MediaPlaybackSettingsCoordinator *coordinator=weakSelf;if(!coordinator)return;id<MediaPlaybackSettingsCoordinatorOwner> host=coordinator.owner;if(!host)return;AVPlayerItem *current=host.player.currentItem;AVMediaSelectionGroup *currentGroup=current?[current.asset mediaSelectionGroupForMediaCharacteristic:characteristic]:nil;BOOL ok=NO;if(current&&currentGroup){[current selectMediaOption:option inMediaSelectionGroup:currentGroup];ok=YES;}[RuntimeDiagnostics.shared recordEvent:@"playback_track_selected" category:@"playback" fields:@{@"track_kind":kind,@"track_name":name,@"engine_selectable":@(YES),@"selection_succeeded":@(ok),@"correlation_id":host.diagnosticTraceID?:@"",@"line_index":@(host.lineIndex),@"episode_index":@(host.episodeIndex)}];}];optAct.state=[selected isEqual:option]?UIMenuElementStateOn:UIMenuElementStateOff;[actions addObject:optAct];}
+    // T09：AV 分支同样抓取会话快照（item 对象 + 集/线路），点选时校验，
+    // 换集后旧 option 不得作用于新 item 的 group。
+    AVPlayerItem *builtItem=item;NSInteger builtEpisode=owner.episodeIndex;NSInteger builtLine=owner.lineIndex;
+    if(group.allowsEmptySelection){UIAction *off=[UIAction actionWithTitle:@"关闭" image:nil identifier:nil handler:^(UIAction *action){MediaPlaybackSettingsCoordinator *coordinator=weakSelf;if(!coordinator)return;id<MediaPlaybackSettingsCoordinatorOwner> host=coordinator.owner;if(!host)return;if([coordinator menuSessionChangedSinceAdapter:nil item:builtItem episode:builtEpisode line:builtLine]){[coordinator refuseStaleMenuAction];return;}AVPlayerItem *current=host.player.currentItem;AVMediaSelectionGroup *currentGroup=current?[current.asset mediaSelectionGroupForMediaCharacteristic:characteristic]:nil;if(current&&currentGroup)[current selectMediaOption:nil inMediaSelectionGroup:currentGroup];[RuntimeDiagnostics.shared recordEvent:@"playback_track_selected" category:@"playback" fields:@{@"track_kind":kind,@"track_index":@(-1),@"track_name":@"off",@"engine_selectable":@(YES),@"selection_succeeded":@(YES),@"correlation_id":host.diagnosticTraceID?:@"",@"line_index":@(host.lineIndex),@"episode_index":@(host.episodeIndex)}];}];off.state=selected?UIMenuElementStateOff:UIMenuElementStateOn;[actions addObject:off];}
+    for(AVMediaSelectionOption *option in group.options){NSString *name=option.displayName.length?option.displayName:@"默认";UIAction *optAct=[UIAction actionWithTitle:name image:nil identifier:nil handler:^(UIAction *action){MediaPlaybackSettingsCoordinator *coordinator=weakSelf;if(!coordinator)return;id<MediaPlaybackSettingsCoordinatorOwner> host=coordinator.owner;if(!host)return;if([coordinator menuSessionChangedSinceAdapter:nil item:builtItem episode:builtEpisode line:builtLine]){[coordinator refuseStaleMenuAction];return;}AVPlayerItem *current=host.player.currentItem;AVMediaSelectionGroup *currentGroup=current?[current.asset mediaSelectionGroupForMediaCharacteristic:characteristic]:nil;BOOL ok=NO;if(current&&currentGroup){[current selectMediaOption:option inMediaSelectionGroup:currentGroup];ok=YES;}[RuntimeDiagnostics.shared recordEvent:@"playback_track_selected" category:@"playback" fields:@{@"track_kind":kind,@"track_name":name,@"engine_selectable":@(YES),@"selection_succeeded":@(ok),@"correlation_id":host.diagnosticTraceID?:@"",@"line_index":@(host.lineIndex),@"episode_index":@(host.episodeIndex)}];}];optAct.state=[selected isEqual:option]?UIMenuElementStateOn:UIMenuElementStateOff;[actions addObject:optAct];}
     UIMenu *menu=[UIMenu menuWithTitle:title image:icon identifier:nil options:0 children:actions];
     if(@available(iOS 16.0,*))menu.subtitle=selected?(selected.displayName.length?selected.displayName:@"默认"):(group.allowsEmptySelection?@"关闭":@"默认");
     return menu;
@@ -130,6 +196,18 @@
 - (UIMenu *)externalSubtitleMenu {
     __weak typeof(self) weakSelf=self;
     id<MediaPlaybackSettingsCoordinatorOwner> owner=self.owner;
+    // T09：外挂字幕 overlay 只在 AV 路径被喂数据与驱动（VC 只在 AV setup
+    // 里调 loadExternalSubtitlesForResult、只在 AV 进度回调里调
+    // updateForPlaybackTime）；adapter 路径下 overlay 无数据，字号/偏移/
+    // 隐藏控件是无效控件，不提供，改给一句说明（标识符保持不变）。
+    id<CCTVPlaybackEngine> adapter=(id<CCTVPlaybackEngine>)owner.cicadaAdapter;
+    if(adapter){
+        BOOL isMPV=[adapter isKindOfClass:[MediaPlaybackMPVAdapter class]];
+        NSString *note=isMPV?@"MPV 字幕由内核渲染，请用字幕菜单切换":@"Cicada 暂不支持外挂字幕";
+        UIAction *noteAct=[UIAction actionWithTitle:note image:[UIImage systemImageNamed:@"captions.bubble"] identifier:nil handler:^(__unused UIAction *a){}];
+        noteAct.attributes=UIMenuElementAttributesDisabled;
+        return [UIMenu menuWithTitle:@"外挂字幕调节" image:[UIImage systemImageNamed:@"captions.bubble"] identifier:@"media.playback.menu.extsub" options:0 children:@[noteAct]];
+    }
     BOOL enabled=owner.subtitleOverlay?owner.subtitleOverlay.subtitlesEnabled:YES;
     UIAction *toggle=[UIAction actionWithTitle:(enabled?@"隐藏外挂字幕":@"显示外挂字幕") image:[UIImage systemImageNamed:@"captions.bubble"] identifier:nil handler:^(__unused UIAction *a){
         [weakSelf.owner ensureSubtitleOverlayInstalled];
@@ -142,7 +220,10 @@
     UIAction *offMinus=[UIAction actionWithTitle:@"时间轴 · 提前 0.5 秒" image:nil identifier:nil handler:^(__unused UIAction *a){[weakSelf.owner ensureSubtitleOverlayInstalled];weakSelf.owner.subtitleOverlay.timeOffset-=0.5;}];
     UIAction *offZero=[UIAction actionWithTitle:@"时间轴 · 重置 0 秒" image:nil identifier:nil handler:^(__unused UIAction *a){[weakSelf.owner ensureSubtitleOverlayInstalled];weakSelf.owner.subtitleOverlay.timeOffset=0.0;}];
     UIAction *offPlus=[UIAction actionWithTitle:@"时间轴 · 延后 0.5 秒" image:nil identifier:nil handler:^(__unused UIAction *a){[weakSelf.owner ensureSubtitleOverlayInstalled];weakSelf.owner.subtitleOverlay.timeOffset+=0.5;}];
-    return [UIMenu menuWithTitle:@"外挂字幕调节" image:[UIImage systemImageNamed:@"captions.bubble"] identifier:@"media.playback.menu.extsub" options:0 children:@[toggle,scaleStd,scaleLg,scaleXl,offMinus,offZero,offPlus]];
+    UIMenu *menu=[UIMenu menuWithTitle:@"外挂字幕调节" image:[UIImage systemImageNamed:@"captions.bubble"] identifier:@"media.playback.menu.extsub" options:0 children:@[toggle,scaleStd,scaleLg,scaleXl,offMinus,offZero,offPlus]];
+    // T09：overlay 只做纯文本渲染（ASS/VTT 的复杂样式已去除），菜单上明确标注。
+    if(@available(iOS 16.0,*))menu.subtitle=@"仅显示纯文本（复杂样式已去除）";
+    return menu;
 }
 
 #pragma mark - 顶层菜单
