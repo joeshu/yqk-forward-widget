@@ -92,15 +92,22 @@ static NSArray *HostLibraryHistoryRowsByUpserting(NSArray *rows, NSDictionary *e
 // T19/PERF-10：读用不可变快照。快照只在串行队列上构建（与写同一队列），读到
 // loadedSnapshotEpoch==snapshotEpoch 的线程直接取快照，不用 dispatch_sync 等
 // SQLite 查询 + 全量 JSON 解析；写块开始先自增 epoch（脏标记），结束时刷新快照。
+// T19 修正（CI 2026-11-26，ui-smoke 失败）：epoch 只在写块开始执行时才自增，
+// 排队期间的读会命中旧快照——点收藏后立刻重读会看到旧状态，UI 冒烟断言
+// "film favorite is visibly updated and persisted" 失败。pendingWriteCount
+// 在入队时（调用线程，同步）+1、写块结束刷新快照后 −1；有未完成写时读一律
+// 走 performSync（等写块完成再读），快照只在无写进行时才命中。
 @property (atomic, strong) NSArray<NSString *> *snapshotFavorites;
 @property (atomic, strong) NSArray<NSDictionary *> *snapshotRecents;
 @property (atomic, strong) NSDictionary<NSString *, NSDictionary *> *snapshotMediaFavorites;
 @property (atomic, strong) NSArray<NSDictionary *> *snapshotMediaHistory;
 @property (atomic) NSUInteger snapshotEpoch;
 @property (atomic) NSUInteger loadedSnapshotEpoch;
+@property (nonatomic) NSUInteger pendingWriteCount;
 - (void)performSync:(dispatch_block_t)block;
 - (void)performAsync:(dispatch_block_t)block;
 - (void)performWrite:(dispatch_block_t)block;
+- (BOOL)hasPendingWrites;
 - (void)refreshSnapshotsLocked;
 - (NSArray<NSString *> *)favoritesLockedWithPrepared:(BOOL)prepared;
 - (NSArray<NSDictionary *> *)recentsLockedWithPrepared:(BOOL)prepared;
@@ -182,11 +189,19 @@ static NSArray *HostLibraryHistoryRowsByUpserting(NSArray *rows, NSDictionary *e
 - (void)performWrite:(dispatch_block_t)block {
     // T19/PERF-10：写块开始先自增 epoch（脏标记——块执行期间的读会走 performSync
     // 等本块完成，不会拿到写了一半的快照），结束时刷新快照再发布。
+    // 入队时同步 +1（见扩展注释）：排队期间的读也必须等写完成，不能命中旧快照。
+    @synchronized(self) { self.pendingWriteCount++; }
     [self performAsync:^{
         self.snapshotEpoch++;
         block();
         [self refreshSnapshotsLocked];
+        @synchronized(self) { self.pendingWriteCount--; }
     }];
+}
+
+// 有未完成写时读必须走 performSync 等写块完成；只在无写进行时才命中快照。
+- (BOOL)hasPendingWrites {
+    @synchronized(self) { return self.pendingWriteCount > 0; }
 }
 
 /// 只在串行队列上调用。按当前有效源（SQLite 优先，回退时 NSUserDefaults）
@@ -595,7 +610,7 @@ static NSArray *HostLibraryHistoryRowsByUpserting(NSArray *rows, NSDictionary *e
     // T19/PERF-10：快照命中直接返回（可变副本，保持旧返回类型），不进队列等 SQLite
     // 查询 + 全量 JSON 解析。
     NSArray<NSString *> *snapshot = self.snapshotFavorites;
-    if (snapshot && self.loadedSnapshotEpoch == self.snapshotEpoch) return [snapshot mutableCopy];
+    if (snapshot && self.loadedSnapshotEpoch == self.snapshotEpoch && ![self hasPendingWrites]) return [snapshot mutableCopy];
     __block NSArray<NSString *> *result = @[];
     CFTimeInterval rebuildStartedAt = CACurrentMediaTime();
     [self performSync:^{
@@ -611,7 +626,7 @@ static NSArray *HostLibraryHistoryRowsByUpserting(NSArray *rows, NSDictionary *e
 - (BOOL)isFavorite:(NSString *)key {
     if (![key isKindOfClass:NSString.class] || !key.length) return NO;
     NSArray<NSString *> *snapshot = self.snapshotFavorites;
-    if (snapshot && self.loadedSnapshotEpoch == self.snapshotEpoch) return [snapshot containsObject:key];
+    if (snapshot && self.loadedSnapshotEpoch == self.snapshotEpoch && ![self hasPendingWrites]) return [snapshot containsObject:key];
     __block BOOL found = NO;
     [self performSync:^{
         [self refreshSnapshotsLocked];
@@ -674,7 +689,7 @@ static NSArray *HostLibraryHistoryRowsByUpserting(NSArray *rows, NSDictionary *e
 
 - (NSArray<NSDictionary *> *)recents {
     NSArray<NSDictionary *> *snapshot = self.snapshotRecents;
-    if (snapshot && self.loadedSnapshotEpoch == self.snapshotEpoch) return [snapshot mutableCopy];
+    if (snapshot && self.loadedSnapshotEpoch == self.snapshotEpoch && ![self hasPendingWrites]) return [snapshot mutableCopy];
     __block NSArray<NSDictionary *> *result = @[];
     [self performSync:^{
         [self refreshSnapshotsLocked];
@@ -739,7 +754,7 @@ static NSArray *HostLibraryHistoryRowsByUpserting(NSArray *rows, NSDictionary *e
 
 - (NSDictionary<NSString *,NSDictionary *> *)mediaFavorites {
     NSDictionary *snapshot = self.snapshotMediaFavorites;
-    if (snapshot && self.loadedSnapshotEpoch == self.snapshotEpoch) return [snapshot mutableCopy];
+    if (snapshot && self.loadedSnapshotEpoch == self.snapshotEpoch && ![self hasPendingWrites]) return [snapshot mutableCopy];
     __block NSDictionary *out = @{};
     [self performSync:^{
         [self refreshSnapshotsLocked];
@@ -750,7 +765,7 @@ static NSArray *HostLibraryHistoryRowsByUpserting(NSArray *rows, NSDictionary *e
 - (void)replaceMediaFavorites:(NSDictionary *)favorites { NSDictionary *copy=[favorites isKindOfClass:NSDictionary.class]?[favorites copy]:@{}; [self performWrite:^{ if([self prepareLocked]) { if(![self transactionLocked:^BOOL{return [self writeMediaFavoritesLocked:copy];}]){[self closeLocked];[self.defaults setBool:YES forKey:HostLibraryFallbackPendingKey];[self.defaults setObject:copy forKey:HostMediaFavoritesKey];} } else [self.defaults setObject:copy forKey:HostMediaFavoritesKey]; }]; }
 - (NSArray<NSDictionary *> *)mediaWatchHistory {
     NSArray *snapshot = self.snapshotMediaHistory;
-    if (snapshot && self.loadedSnapshotEpoch == self.snapshotEpoch) return [snapshot mutableCopy];
+    if (snapshot && self.loadedSnapshotEpoch == self.snapshotEpoch && ![self hasPendingWrites]) return [snapshot mutableCopy];
     __block NSArray *out = @[];
     [self performSync:^{
         [self refreshSnapshotsLocked];

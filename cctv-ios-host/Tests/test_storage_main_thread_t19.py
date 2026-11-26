@@ -11,7 +11,10 @@ T19 改动：
    诊断开启时才记）；同步块里不再为未知 cost 序列化（读：不提升进内存缓存；
    写裁剪：未知 cost 直接淘汰）。
 2. HostLibraryStore（PERF-10）：读用不可变快照（epoch 脏标记 + 写块结束刷新；
-   写块经 performWrite 包一层）；备份恢复直接写 defaults 后调 invalidateSnapshots。
+   写块经 performWrite 包一层）；父代理 CI 修正：入队时同步记 pendingWriteCount，
+   有未完成写时读一律走 performSync 等写完成（否则排队期间读命中旧快照，
+   ui-smoke "film favorite is visibly updated and persisted" 失败）。备份恢复
+   直接写 defaults 后调 invalidateSnapshots。
 3. ProfileStore（PERF-10）：metadata: 加有界只读快照（大条目不缓存），
    storeProfile/remove/replaceBackupMetadata 失效。
 4. TVBoxCatalogStore（PERF-10）：saveCatalog 的 sidecar 写盘与 removeCatalog 的
@@ -40,10 +43,14 @@ def method_body(text, start, end):
 
 # --- HostLibraryStore 快照可见性的 Python 模型（与 performWrite/refresh 语义同构） ---
 class LibraryStoreSnapshotModel:
-    """db: 底层数据；epoch: 脏标记；snapshot: 已发布快照。
+    """db: 底层数据；epoch: 脏标记；snapshot: 已发布快照；pending: 未完成写块数。
 
-    写块：开始自增 epoch → 改 db → 刷新快照（loaded=epoch）。
-    读：epoch 一致直接取快照；不一致则“等队列排空”（模型里即立即重建）。
+    写块：入队时 pending+1（调用线程同步）→ 块执行时自增 epoch → 改 db →
+    刷新快照（loaded=epoch）→ pending−1。
+    读：epoch 一致且 pending==0 直接取快照；否则“等队列排空”（模型里即
+    立即执行待处理写块再重建）——排队期间的读绝不能命中旧快照（CI
+    2026-11-26：ui-smoke "film favorite is visibly updated and persisted"
+    失败的根因，点收藏后立刻重读看到了旧快照）。
     """
 
     def __init__(self):
@@ -51,17 +58,31 @@ class LibraryStoreSnapshotModel:
         self.snapshot = None
         self.epoch = 0
         self.loaded_epoch = None
+        self.pending = 0
+        self.queue = []
 
     def write(self, value):
-        self.epoch += 1  # 脏标记先于改动
-        self.db.append(value)
-        self.snapshot = list(self.db)  # 刷新快照
-        self.loaded_epoch = self.epoch
+        self.enqueue_write(value)
+        self.run_pending()
+
+    def enqueue_write(self, value):
+        self.pending += 1  # 入队时同步 +1（调用线程）
+        self.queue.append(value)
+
+    def run_pending(self):
+        for value in self.queue:
+            self.epoch += 1  # 脏标记先于改动
+            self.db.append(value)
+            self.snapshot = list(self.db)  # 刷新快照
+            self.loaded_epoch = self.epoch
+            self.pending -= 1
+        self.queue = []
 
     def read(self):
-        if self.snapshot is not None and self.loaded_epoch == self.epoch:
+        if self.snapshot is not None and self.loaded_epoch == self.epoch and self.pending == 0:
             return list(self.snapshot)
-        # 快照失效：等队列排空后重建（模型里同步重建）。
+        # 快照失效或有写在排队：等队列排空后重建（模型里同步执行待处理写块）。
+        self.run_pending()
         self.snapshot = list(self.db)
         self.loaded_epoch = self.epoch
         return list(self.snapshot)
@@ -148,7 +169,9 @@ class T19StorageMainThreadContracts(unittest.TestCase):
 
     def test_is_favorite_served_from_snapshot(self):
         body = method_body(self.lib, "- (BOOL)isFavorite:(NSString *)key {", "- (void)addFavorite:")
-        self.assertIn("if (snapshot && self.loadedSnapshotEpoch == self.snapshotEpoch) return [snapshot containsObject:key];", body)
+        # 有未完成写时不命中快照（父代理 CI 修正：排队期间读旧快照会让 UI
+        # 冒烟的收藏断言失败，见 test_pending_write_gate_in_source）。
+        self.assertIn("if (snapshot && self.loadedSnapshotEpoch == self.snapshotEpoch && ![self hasPendingWrites]) return [snapshot containsObject:key];", body)
 
     def test_all_write_methods_go_through_perform_write(self):
         self.assertEqual(self.lib.count("[self performWrite:^{"), 11)
@@ -256,6 +279,41 @@ class T19StorageMainThreadContracts(unittest.TestCase):
         self.assertEqual(store.read(), ["a", "b"])
         # 连续读不再进队列。
         self.assertEqual(store.read(), ["a", "b"])
+
+    def test_snapshot_model_queued_write_is_visible_to_immediate_read(self):
+        # 冒烟回归（CI 2026-11-26）：点收藏后立刻重读，必须看到新值，
+        # 不能命中排队期间的旧快照。
+        store = LibraryStoreSnapshotModel()
+        store.write("a")
+        self.assertEqual(store.read(), ["a"])
+        store.enqueue_write("b")  # 写已入队、块未执行
+        self.assertEqual(store.read(), ["a", "b"])
+        self.assertEqual(store.pending, 0)
+
+    def test_snapshot_model_two_queued_writes_both_visible(self):
+        store = LibraryStoreSnapshotModel()
+        store.write("a")
+        store.enqueue_write("b")
+        store.enqueue_write("c")
+        self.assertEqual(store.read(), ["a", "b", "c"])
+        self.assertEqual(store.pending, 0)
+
+    def test_pending_write_gate_in_source(self):
+        # 契约：performWrite 入队时同步 +1、块结束刷新后 −1；5 处读都以
+        # hasPendingWrites 为门；计数器读写在 @synchronized 下（atomic
+        # 属性的 ++ 不是原子 RMW，不能直接用）。
+        perform = method_body(self.lib, "- (void)performWrite:(dispatch_block_t)block {",
+                              "- (BOOL)hasPendingWrites {")
+        self.assertIn("@synchronized(self) { self.pendingWriteCount++; }", perform)
+        self.assertIn("[self refreshSnapshotsLocked];", perform)
+        self.assertIn("@synchronized(self) { self.pendingWriteCount--; }", perform)
+        self.assertLess(perform.index("self.pendingWriteCount++;"),
+                        perform.index("[self performAsync:^{"))
+        self.assertLess(perform.index("[self refreshSnapshotsLocked];"),
+                        perform.index("self.pendingWriteCount--;"))
+        gate = method_body(self.lib, "- (BOOL)hasPendingWrites {", "- (void)refreshSnapshotsLocked {")
+        self.assertIn("@synchronized(self) { return self.pendingWriteCount > 0; }", gate)
+        self.assertEqual(self.lib.count("&& ![self hasPendingWrites]"), 5)
 
     def test_snapshot_model_external_defaults_write_needs_invalidate(self):
         store = LibraryStoreSnapshotModel()
