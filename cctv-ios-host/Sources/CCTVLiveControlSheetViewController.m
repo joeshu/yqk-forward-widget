@@ -96,9 +96,23 @@
     closeBtn.layer.borderWidth = 0.55;
     HostSetLayerBorderColor(closeBtn, HostBorder());
     closeBtn.accessibilityLabel = @"关闭播放控制";
+    closeBtn.isAccessibilityElement = NO; // 容器承载无障碍标签，避免重复朗读。
+    closeBtn.userInteractionEnabled = NO; // 命中由外层 44×44 容器承接，视觉仍是 30pt 圆。
     HostInstallPressFeedback(closeBtn);
-    [closeBtn addTarget:self action:@selector(dismissSheet) forControlEvents:UIControlEventTouchUpInside];
-    [headerRow addSubview:closeBtn];
+    // U02：关闭按钮视觉 30pt、有效命中 44×44——44pt 透明容器承接点按，
+    // 圆钮在容器内居中，标题行的 trailing 锚点改到容器。
+    UIControl *closeHit = [UIControl new];
+    closeHit.translatesAutoresizingMaskIntoConstraints = NO;
+    closeHit.accessibilityLabel = @"关闭播放控制";
+    [closeHit addTarget:self action:@selector(dismissSheet) forControlEvents:UIControlEventTouchUpInside];
+    [closeHit addSubview:closeBtn];
+    [headerRow addSubview:closeHit];
+    [NSLayoutConstraint activateConstraints:@[
+        [closeBtn.centerXAnchor constraintEqualToAnchor:closeHit.centerXAnchor],
+        [closeBtn.centerYAnchor constraintEqualToAnchor:closeHit.centerYAnchor],
+        [closeBtn.widthAnchor constraintEqualToConstant:30],
+        [closeBtn.heightAnchor constraintEqualToConstant:30]
+    ]];
 
     UIStackView *pillRow = [UIStackView new];
     pillRow.translatesAutoresizingMaskIntoConstraints = NO;
@@ -116,13 +130,13 @@
     [pillRow addArrangedSubview:pillSpacer];
 
     [NSLayoutConstraint activateConstraints:@[
-        [closeBtn.topAnchor constraintEqualToAnchor:headerRow.topAnchor constant:2],
-        [closeBtn.trailingAnchor constraintEqualToAnchor:headerRow.trailingAnchor],
-        [closeBtn.widthAnchor constraintEqualToConstant:30],
-        [closeBtn.heightAnchor constraintEqualToConstant:30],
+        [closeHit.topAnchor constraintEqualToAnchor:headerRow.topAnchor constant:2],
+        [closeHit.trailingAnchor constraintEqualToAnchor:headerRow.trailingAnchor],
+        [closeHit.widthAnchor constraintEqualToConstant:44],
+        [closeHit.heightAnchor constraintEqualToConstant:44],
         [titleLabel.topAnchor constraintEqualToAnchor:headerRow.topAnchor],
         [titleLabel.leadingAnchor constraintEqualToAnchor:headerRow.leadingAnchor],
-        [titleLabel.trailingAnchor constraintLessThanOrEqualToAnchor:closeBtn.leadingAnchor constant:-10],
+        [titleLabel.trailingAnchor constraintLessThanOrEqualToAnchor:closeHit.leadingAnchor constant:-10],
         [pillRow.topAnchor constraintEqualToAnchor:titleLabel.bottomAnchor constant:7],
         [pillRow.leadingAnchor constraintEqualToAnchor:headerRow.leadingAnchor],
         [pillRow.trailingAnchor constraintEqualToAnchor:headerRow.trailingAnchor],
@@ -513,7 +527,7 @@
         b.layer.cornerRadius = 10;
         b.layer.cornerCurve = kCACornerCurveContinuous;
         b.layer.borderWidth = 0.6;
-        [b.heightAnchor constraintGreaterThanOrEqualToConstant:32].active = YES;
+        [b.heightAnchor constraintGreaterThanOrEqualToConstant:44].active = YES;
         HostInstallPressFeedback(b);
         [b addTarget:self action:@selector(sleepChipTapped:) forControlEvents:UIControlEventTouchUpInside];
         [chips addArrangedSubview:b];
@@ -543,6 +557,9 @@
 }
 
 - (void)sleepChipTapped:(UIButton *)sender {
+    // U02：已选中的 chip 再点按不重复回调（单次触发）；选中态只由
+    // updateSleepChipSelection 统一写，同一时刻只有一个 selected。
+    if (sender.tag == self.sleepMinutes) return;
     self.sleepMinutes = sender.tag;
     [self updateSleepChipSelection];
     if (self.onSelectSleepMinutes) self.onSelectSleepMinutes(sender.tag);
@@ -556,6 +573,9 @@
         b.backgroundColor = active ? HostAccent() : HostRaisedSurface();
         [b setTitleColor:(active ? HostOnAccent() : HostText()) forState:UIControlStateNormal];
         HostSetLayerBorderColor(b, active ? HostAccent() : HostBorder());
+        // U02：选中不再只靠颜色——selected trait + value 让 VoiceOver 读出当前项。
+        b.accessibilityTraits = UIAccessibilityTraitButton | (active ? UIAccessibilityTraitSelected : 0);
+        b.accessibilityValue = active ? @"已选择" : nil;
     }
 }
 

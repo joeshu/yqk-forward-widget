@@ -79,7 +79,8 @@ class Round40PagePolishAndThemeNavFixesTests(unittest.TestCase):
         self.assertIn("self.address.frameLayoutGuide.trailingAnchor constant:-10", import_m)
 
         self.assertIn("CGRectGetHeight(cell.contentView.bounds) - 6", epg_m)
-        self.assertIn("CGFloat pageBottomInset=tabContentInset+(showMiniBar?50:0);", root_m)
+        # T12/U02：mini bar 42→48pt（两按钮 44×44），底部 inset 50→56（48+8）。
+        self.assertIn("CGFloat pageBottomInset=tabContentInset+(showMiniBar?56:0);", root_m)
 
     def test_05_ios15_default_rate_guards_and_compiler_warning_fixes(self):
         playback = read_source("MediaPlaybackViewController.m")

@@ -47,10 +47,18 @@ class PlaybackOwnershipAndMediaUIContracts(unittest.TestCase):
         self.assertLess(suspend, change)
         self.assertIn("self.activeTab<2&&sender.tag>=2", body)
 
-    def test_pushing_a_secondary_navigation_page_also_suspends_live(self):
-        body = method_body(ROOT_SOURCE, "- (void)navigationController:(UINavigationController *)navigationController willShowViewController:")
-        self.assertIn("viewController==self", body)
-        self.assertIn("if(self.activeTab<2)[self suspendLivePlaybackForReason:@\"left_live_navigation_page\"]", body)
+    def test_pushing_a_secondary_navigation_page_suspends_live_only_after_the_push_completes(self):
+        # T13/U03: willShow 里绝不能释放直播会话——交互式侧滑取消时
+        # UIKit 会在 didShow 里再次报告 detail 页，willShow 时的挂起
+        # 会变成不可逆停播。willShow 只置位 in-flight 标志；didShow
+        # 在 push 完成时才挂起，且只读 EPG 页不挂起（会话保留）。
+        will_show = method_body(ROOT_SOURCE, "- (void)navigationController:(UINavigationController *)navigationController willShowViewController:")
+        self.assertNotIn("suspendLivePlaybackForReason", will_show)
+        self.assertIn("self.liveNavigationPushInFlight=YES", will_show)
+        self.assertIn("self.liveNavigationPushInFlight=NO", will_show)
+        did_show = method_body(ROOT_SOURCE, "- (void)navigationController:(UINavigationController *)navigationController didShowViewController:")
+        self.assertIn("self.liveNavigationPushInFlight", did_show)
+        self.assertIn('if(self.activeTab<2&&![viewController isKindOfClass:EPGViewController.class])[self suspendLivePlaybackForReason:@"left_live_navigation_page"]', did_show)
 
     def test_resource_navigation_snapshots_scroll_before_push(self):
         for signature in (

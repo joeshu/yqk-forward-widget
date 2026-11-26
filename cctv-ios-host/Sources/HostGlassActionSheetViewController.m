@@ -45,6 +45,8 @@
 @property(nonatomic, strong) UIView *tintOverlay;
 @property(nonatomic, strong) UIScrollView *scrollView;
 @property(nonatomic, strong) NSMutableArray<dispatch_block_t> *actionHandlers;
+/// U02：动作已分发守卫——快速双击/重复点按只执行一次 handler。
+@property(nonatomic, assign) BOOL actionDispatched;
 - (void)dismissSheet;
 - (void)runActionControl:(UIControl *)sender;
 - (UILabel *)makeSectionHeaderLabel:(NSString *)title;
@@ -183,9 +185,23 @@
     closeBtn.layer.borderWidth = 0.55;
     HostSetLayerBorderColor(closeBtn, HostBorder());
     closeBtn.accessibilityLabel = @"关闭";
+    closeBtn.isAccessibilityElement = NO; // 容器承载无障碍标签，避免重复朗读。
+    closeBtn.userInteractionEnabled = NO; // 命中由外层 44×44 容器承接，视觉仍是 30pt 圆。
     HostInstallPressFeedback(closeBtn);
-    [closeBtn addTarget:self action:@selector(dismissSheet) forControlEvents:UIControlEventTouchUpInside];
-    [headerRow addSubview:closeBtn];
+    // U02：关闭按钮视觉 30pt、有效命中 44×44——44pt 透明容器承接点按，
+    // 圆钮在容器内居中，标题行的 trailing 锚点改到容器。
+    UIControl *closeHit = [UIControl new];
+    closeHit.translatesAutoresizingMaskIntoConstraints = NO;
+    closeHit.accessibilityLabel = @"关闭";
+    [closeHit addTarget:self action:@selector(dismissSheet) forControlEvents:UIControlEventTouchUpInside];
+    [closeHit addSubview:closeBtn];
+    [headerRow addSubview:closeHit];
+    [NSLayoutConstraint activateConstraints:@[
+        [closeBtn.centerXAnchor constraintEqualToAnchor:closeHit.centerXAnchor],
+        [closeBtn.centerYAnchor constraintEqualToAnchor:closeHit.centerYAnchor],
+        [closeBtn.widthAnchor constraintEqualToConstant:30],
+        [closeBtn.heightAnchor constraintEqualToConstant:30]
+    ]];
 
     UIStackView *metaStack = [UIStackView new];
     metaStack.translatesAutoresizingMaskIntoConstraints = NO;
@@ -230,13 +246,13 @@
     }
 
     [NSLayoutConstraint activateConstraints:@[
-        [closeBtn.topAnchor constraintEqualToAnchor:headerRow.topAnchor constant:2],
-        [closeBtn.trailingAnchor constraintEqualToAnchor:headerRow.trailingAnchor],
-        [closeBtn.widthAnchor constraintEqualToConstant:30],
-        [closeBtn.heightAnchor constraintEqualToConstant:30],
+        [closeHit.topAnchor constraintEqualToAnchor:headerRow.topAnchor constant:2],
+        [closeHit.trailingAnchor constraintEqualToAnchor:headerRow.trailingAnchor],
+        [closeHit.widthAnchor constraintEqualToConstant:44],
+        [closeHit.heightAnchor constraintEqualToConstant:44],
         [titleLabel.topAnchor constraintEqualToAnchor:headerRow.topAnchor],
         [titleLabel.leadingAnchor constraintEqualToAnchor:headerRow.leadingAnchor],
-        [titleLabel.trailingAnchor constraintLessThanOrEqualToAnchor:closeBtn.leadingAnchor constant:-10],
+        [titleLabel.trailingAnchor constraintLessThanOrEqualToAnchor:closeHit.leadingAnchor constant:-10],
         [metaStack.topAnchor constraintEqualToAnchor:titleLabel.bottomAnchor constant:(metaStack.arrangedSubviews.count ? 6 : 0)],
         [metaStack.leadingAnchor constraintEqualToAnchor:headerRow.leadingAnchor],
         [metaStack.trailingAnchor constraintEqualToAnchor:headerRow.trailingAnchor],
@@ -277,6 +293,9 @@
 }
 
 - (void)runActionControl:(UIControl *)sender {
+    // U02：只触发一次——dismiss 动画期间控件仍在屏上，快速双击不得重复执行 handler。
+    if (self.actionDispatched) return;
+    self.actionDispatched = YES;
     NSInteger idx = sender.tag;
     if (idx < 0 || (NSUInteger)idx >= self.actionHandlers.count) return;
     dispatch_block_t block = self.actionHandlers[(NSUInteger)idx];
@@ -295,34 +314,49 @@
 }
 
 - (UIView *)makeChipRowCard:(NSArray<HostGlassSheetAction *> *)actions {
-    UIStackView *row = [UIStackView new];
-    row.translatesAutoresizingMaskIntoConstraints = NO;
-    row.axis = UILayoutConstraintAxisHorizontal;
-    row.distribution = UIStackViewDistributionFillEqually;
-    row.spacing = 8;
-
-    for (HostGlassSheetAction *action in actions) {
-        UIColor *tint = action.destructive ? UIColor.systemRedColor : (action.tintColor ?: HostAccent());
-        UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
-        [btn setTitle:action.title forState:UIControlStateNormal];
-        btn.titleLabel.font = HostMonospacedDigitFont(12.5, UIFontWeightSemibold, UIFontTextStyleCaption1);
-        btn.titleLabel.adjustsFontForContentSizeCategory = YES;
-        btn.titleLabel.adjustsFontSizeToFitWidth = YES;
-        btn.titleLabel.minimumScaleFactor = 0.8;
-        btn.backgroundColor = action.selected ? tint : HostCard();
-        [btn setTitleColor:(action.selected ? HostOnAccent() : (action.destructive ? UIColor.systemRedColor : HostText())) forState:UIControlStateNormal];
-        btn.layer.cornerRadius = 12;
-        btn.layer.cornerCurve = kCACornerCurveContinuous;
-        btn.layer.borderWidth = 0.65;
-        HostSetLayerBorderColor(btn, action.selected ? tint : HostBorder());
-        [btn.heightAnchor constraintGreaterThanOrEqualToConstant:40].active = YES;
-        btn.tag = (NSInteger)self.actionHandlers.count;
-        [self.actionHandlers addObject:action.handler ? [action.handler copy] : (id)^{}];
-        HostInstallPressFeedback(btn);
-        [btn addTarget:self action:@selector(runActionControl:) forControlEvents:UIControlEventTouchUpInside];
-        [row addArrangedSubview:btn];
+    // U02：每行最多 4 个 chip（320pt 下单行 5 个也会被均分到 ~51pt，大字号下
+    // 仍挤；超 4 个自动换行），保证 44×44pt 有效命中；选中不再只靠颜色，
+    // 而是 selected trait + value/hint（与行式操作同款语义）。
+    UIStackView *column = [UIStackView new];
+    column.translatesAutoresizingMaskIntoConstraints = NO;
+    column.axis = UILayoutConstraintAxisVertical;
+    column.spacing = 8;
+    NSUInteger chunk = 4;
+    for (NSUInteger start = 0; start < actions.count; start += chunk) {
+        NSUInteger end = MIN(actions.count, start + chunk);
+        UIStackView *row = [UIStackView new];
+        row.translatesAutoresizingMaskIntoConstraints = NO;
+        row.axis = UILayoutConstraintAxisHorizontal;
+        row.distribution = UIStackViewDistributionFillEqually;
+        row.spacing = 8;
+        for (NSUInteger i = start; i < end; i++) {
+            HostGlassSheetAction *action = actions[i];
+            UIColor *tint = action.destructive ? UIColor.systemRedColor : (action.tintColor ?: HostAccent());
+            UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
+            [btn setTitle:action.title forState:UIControlStateNormal];
+            btn.titleLabel.font = HostMonospacedDigitFont(12.5, UIFontWeightSemibold, UIFontTextStyleCaption1);
+            btn.titleLabel.adjustsFontForContentSizeCategory = YES;
+            btn.titleLabel.adjustsFontSizeToFitWidth = YES;
+            btn.titleLabel.minimumScaleFactor = 0.8;
+            btn.backgroundColor = action.selected ? tint : HostCard();
+            [btn setTitleColor:(action.selected ? HostOnAccent() : (action.destructive ? UIColor.systemRedColor : HostText())) forState:UIControlStateNormal];
+            btn.layer.cornerRadius = 12;
+            btn.layer.cornerCurve = kCACornerCurveContinuous;
+            btn.layer.borderWidth = 0.65;
+            HostSetLayerBorderColor(btn, action.selected ? tint : HostBorder());
+            [btn.heightAnchor constraintGreaterThanOrEqualToConstant:44].active = YES;
+            btn.accessibilityTraits = UIAccessibilityTraitButton | (action.selected ? UIAccessibilityTraitSelected : 0);
+            btn.accessibilityValue = action.value;
+            btn.accessibilityHint = action.subtitle;
+            btn.tag = (NSInteger)self.actionHandlers.count;
+            [self.actionHandlers addObject:action.handler ? [action.handler copy] : (id)^{}];
+            HostInstallPressFeedback(btn);
+            [btn addTarget:self action:@selector(runActionControl:) forControlEvents:UIControlEventTouchUpInside];
+            [row addArrangedSubview:btn];
+        }
+        [column addArrangedSubview:row];
     }
-    return row;
+    return column;
 }
 
 - (UIView *)makeGroupedRowsCard:(NSArray<HostGlassSheetAction *> *)actions {

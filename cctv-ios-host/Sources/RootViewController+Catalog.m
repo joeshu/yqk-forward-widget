@@ -471,9 +471,12 @@ static BOOL CCTVCatchupIdentityCompatible(NSDictionary *channel, NSDictionary *c
     UICollectionViewFlowLayout *flow=[layout isKindOfClass:UICollectionViewFlowLayout.class]?(id)layout:nil;
     NSInteger preferred=self.gridColumns==3?3:4;
     CGFloat minimumWidth=MAX(96,[self catalogCardSubtitleFont].pointSize*8);
-    NSInteger columns=MAX(1,MIN(preferred,(NSInteger)(collectionView.bounds.size.width/minimumWidth)));
     UIEdgeInsets inset=flow?flow.sectionInset:UIEdgeInsetsZero;
     CGFloat spacing=flow?flow.minimumInteritemSpacing:6;
+    // T14/U07: 先扣左右 inset，再按可用宽算列数；否则算出的 itemWidth
+    // 会小于 minimumWidth（窄屏上 320pt 宽、96pt 最小宽时 3 列得 94pt）。
+    CGFloat available=collectionView.bounds.size.width-inset.left-inset.right;
+    NSInteger columns=MAX(1,MIN(preferred,(NSInteger)((available+spacing)/(minimumWidth+spacing))));
     CGFloat itemWidth=floor(MAX(1,(collectionView.bounds.size.width-inset.left-inset.right-(columns-1)*spacing)/columns));
     UIFont *titleFont=[self catalogCardTitleFont];
     UIFont *subtitleFont=[self catalogCardSubtitleFont];

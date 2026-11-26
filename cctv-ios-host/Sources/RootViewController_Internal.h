@@ -486,6 +486,12 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 @property (nonatomic, copy) NSString *routeName;
 @property (nonatomic, assign) BOOL firstRender;
 @property (nonatomic, assign) BOOL fullscreen;
+// T13/U03: set in willShow when a push starts, consumed in didShow. A
+// cancelled interactive pop reports the detail controller in didShow, so the
+// flag (cleared by willShow(self) at the start of the pop) is what tells a
+// completed push apart from a cancelled pop. Read-only EPG pages never
+// suspend the live session, so they are exempt in didShow, not here.
+@property (nonatomic, assign) BOOL liveNavigationPushInFlight;
 @property (nonatomic, assign) BOOL stallReported;
 @property (nonatomic, assign) CGSize liveVideoSize;
 @property (nonatomic, assign) double liveBitrateBps;

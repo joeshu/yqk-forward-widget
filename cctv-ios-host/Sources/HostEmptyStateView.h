@@ -21,10 +21,12 @@ NS_ASSUME_NONNULL_BEGIN
 ///      通过 `traitCollectionDidChange` 自动重刷。
 ///   2. 提供 SF Symbol 图标与可选 副标题、可选动作按钮，覆盖审计中常见的
 ///      “空态 + 单一动作入口”（如“返回导入”“重试”）形态。
-///   3. 整体作为单个 VoiceOver 元素：`isAccessibilityElement=YES`，`accessibilityLabel`
-///      由 title+subtitle 组合，`accessibilityTraits` 为静态文本；有动作按钮时改为
-///      `UIAccessibilityTraitButton` 并附带 `accessibilityHint`，避免逐子元素朗读
-///      造成冗余。
+///   3. 标题/描述合并为一个静态可访问文本（titleLabel 承载合并文案，
+///      `UIAccessibilityTraitStaticText`），行动按钮独立暴露为真实按钮
+///      元素；容器本身不是可访问元素。旧实现曾把容器标成按钮却无
+///      `accessibilityActivate`，VoiceOver 双击无法触发真实按钮——
+///      现已按此拆分修正（U01）。按钮隐藏/禁用或无回调时不触发，
+///      每次点按只触发一次。
 ///   4. 提供工厂 `+placeholderLabelWithText:color:` 用于 直接替换既有
 ///      `UILabel` 背景 模式（保持最小迁移面）。
 ///

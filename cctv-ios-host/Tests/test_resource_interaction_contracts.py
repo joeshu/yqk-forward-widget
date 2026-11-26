@@ -815,7 +815,8 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('panelViewport.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor', player)
         self.assertIn('self.controlsViewport.contentLayoutGuide', player)
         self.assertIn('videoView.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor', player)
-        self.assertIn('if(viewController==self)HostStyleNavigation(navigationController)', self.root)
+        # T13/U03: 同行还清 in-flight 标志（取消的侧滑不挂起）。
+        self.assertIn('if(viewController==self){HostStyleNavigation(navigationController);self.liveNavigationPushInFlight=NO;}', self.root)
 
     def test_embedded_player_overlays_stay_inside_the_video_view_hierarchy(self):
         player = self.playback[self.playback.index('@implementation MediaPlaybackViewController'):]
@@ -1501,14 +1502,17 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('BOOL persist=[@[@"home",@"category"] containsObject:operation]', cache)
         self.assertIn('影片详情仅短时缓存在内存中，播放地址不持久化', settings)
 
-    def test_rotation_is_limited_to_the_player_and_supported_by_the_app(self):
+    def test_rotation_is_supported_by_the_app_and_gated_by_fullscreen_for_live(self):
         with (ROOT / 'Resources/Info.plist').open('rb') as f:
             plist = plistlib.load(f)
         self.assertIn('UIInterfaceOrientationLandscapeLeft', plist['UISupportedInterfaceOrientations'])
         self.assertIn('UIInterfaceOrientationLandscapeRight', plist['UISupportedInterfaceOrientations'])
         app_delegate = (ROOT / 'Sources/AppDelegate.m').read_text()
         self.assertIn('self.topViewController.supportedInterfaceOrientations', app_delegate)
-        self.assertIn('supportedInterfaceOrientations { return UIInterfaceOrientationMaskPortrait;', self.root)
+        # T13/U04: 直播全屏时允许横屏（退出全屏恢复竖屏）；点播页与
+        # 详情页的竖屏限制不变。
+        self.assertIn('supportedInterfaceOrientations { return self.fullscreen?UIInterfaceOrientationMaskAllButUpsideDown:UIInterfaceOrientationMaskPortrait;', self.root)
+        self.assertIn('[UIViewController attemptRotationToDeviceOrientation]', self.root)
         self.assertIn('supportedInterfaceOrientations {return UIInterfaceOrientationMaskPortrait;}', self.detail)
         self.assertIn('UIInterfaceOrientationMaskAllButUpsideDown', self.playback)
 

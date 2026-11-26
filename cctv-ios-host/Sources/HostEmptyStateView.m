@@ -196,7 +196,10 @@ static const CGFloat kHostEmptySymbolTopInset = 6.0;
 #pragma mark - Actions / theme
 
 - (void)_actionTapped {
-    if (self.onAction) self.onAction();
+    // 单次触发守卫：按钮隐藏/禁用或无回调时不响应（UIButton 本身每点按
+    // 只发一次 TouchUpInside；这里再挡住隐藏/禁用态下的误触发）。
+    if (_actionButton.hidden || !_actionButton.enabled || !self.onAction) return;
+    self.onAction();
 }
 
 - (void)reloadThemeAppearance {
@@ -225,20 +228,25 @@ static const CGFloat kHostEmptySymbolTopInset = 6.0;
 #pragma mark - Accessibility consolidation
 
 - (void)_updateAccessibility {
-    // 合并 朗读：title 与 subtitle 用逗 号连接；仅有 subtitle 时单独朗读。
+    // 语义拆分（U01）：标题/描述合并为一个静态可访问文本，行动按钮独立
+    // 呈现为可触达的按钮元素。容器本身不再是可访问元素——旧实现把容器标
+    // 成按钮却无 accessibilityActivate/点击识别，VoiceOver 双击无法触
+    // 发真实按钮；现在读屏用户先读一次静态文案，再定位到真实按钮点按。
     NSMutableArray<NSString *> *parts = [NSMutableArray array];
     if (_titleLabel.text.length) [parts addObject:_titleLabel.text];
     if (_subtitleLabel.text.length) [parts addObject:_subtitleLabel.text];
     NSString *combined = [parts componentsJoinedByString:@"，"];
-    self.isAccessibilityElement = YES;
-    self.accessibilityLabel = combined.length ? combined : @"空状态";
-    self.accessibilityTraits = _actionButton.hidden ? UIAccessibilityTraitStaticText : UIAccessibilityTraitButton;
-    self.accessibilityHint = _actionButton.hidden ? nil : (_actionButton.currentTitle ?: @"执行操作");
-    // 图标与文字 不再单独 朗读：容器合并后隐藏子元素的 a11y。
+    self.isAccessibilityElement = NO;
+    self.accessibilityTraits = UIAccessibilityTraitNone;
+    self.accessibilityLabel = nil;
+    self.accessibilityHint = nil;
     _symbolView.isAccessibilityElement = NO;
-    _titleLabel.isAccessibilityElement = NO;
+    _titleLabel.isAccessibilityElement = YES;
+    _titleLabel.accessibilityLabel = combined.length ? combined : @"空状态";
+    _titleLabel.accessibilityTraits = UIAccessibilityTraitStaticText;
     _subtitleLabel.isAccessibilityElement = NO;
-    _actionButton.isAccessibilityElement = NO; // 容器作为按钮整体响应。
+    // 真实按钮独立暴露：隐藏时 VoiceOver 自动跳过；显示时按自身标题朗读。
+    _actionButton.isAccessibilityElement = YES;
 }
 
 @end

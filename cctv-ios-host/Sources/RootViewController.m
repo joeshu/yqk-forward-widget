@@ -236,7 +236,7 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
 
 
 - (BOOL)shouldAutorotate { return YES; }
-- (UIInterfaceOrientationMask)supportedInterfaceOrientations { return UIInterfaceOrientationMaskPortrait; }
+- (UIInterfaceOrientationMask)supportedInterfaceOrientations { return self.fullscreen?UIInterfaceOrientationMaskAllButUpsideDown:UIInterfaceOrientationMaskPortrait; }
 
 #pragma mark - 生命周期
 
@@ -478,9 +478,9 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
     // never snaps by 44 pt after didShowViewController.
     BOOL shouldHide=[self shouldHideNavigationBarForVisibleController:viewController];
     if(navigationController.navigationBarHidden!=shouldHide)[navigationController setNavigationBarHidden:shouldHide animated:animated];
-    if(viewController==self)return;
+    if(viewController==self){self.liveNavigationPushInFlight=NO;return;}
     [navigationController setOverrideTraitCollection:[self fontSizeOverrideTraitCollection] forChildViewController:viewController];
-    if(self.activeTab<2)[self suspendLivePlaybackForReason:@"left_live_navigation_page"];
+    self.liveNavigationPushInFlight=YES;
 }
 
 - (void)navigationController:(UINavigationController *)navigationController didShowViewController:(UIViewController *)viewController animated:(BOOL)animated {
@@ -490,7 +490,7 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
     // the home page cannot leave the navigation bar hidden underneath it.
     BOOL shouldHide=[self shouldHideNavigationBarForVisibleController:viewController];
     if(navigationController.navigationBarHidden!=shouldHide)[navigationController setNavigationBarHidden:shouldHide animated:NO];
-    if(viewController==self)HostStyleNavigation(navigationController);
+    if(viewController==self){HostStyleNavigation(navigationController);self.liveNavigationPushInFlight=NO;}else if(self.liveNavigationPushInFlight){self.liveNavigationPushInFlight=NO;if(self.activeTab<2&&![viewController isKindOfClass:EPGViewController.class])[self suspendLivePlaybackForReason:@"left_live_navigation_page"];}
     if(viewController==self&&shouldHide)navigationController.navigationBar.prefersLargeTitles=NO;
     if(viewController==self&&self.activeTab==2){
         MediaBrowserViewController *mediaPage=[self.tabPages[@2] isKindOfClass:MediaBrowserViewController.class]?self.tabPages[@2]:nil;
@@ -1177,7 +1177,7 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
     else {self.favoritesOnly=NO;self.recentsOnly=NO;if(sender.tag<2)self.subscriptionCatalog=sender.tag==1;[self syncGroupControlSegments];NSString *savedSource=self.catalogStates[@(sender.tag)][@"source"];self.activeSource=([self.subscriptionURLs containsObject:savedSource?:@""]||([savedSource hasPrefix:@"catalog:"]&&[TVBoxCatalogStore catalogForID:[savedSource substringFromIndex:8]]))?savedSource:nil;[self syncGroupControlSegments];self.playerTabs.selectedSegmentIndex=1;[self selectPlayerPanel];NSDictionary *state=self.catalogStates[@(sender.tag)];self.query=state[@"query"]?:@"";self.searchController.searchBar.text=self.query;NSInteger savedGroup=[state[@"group"] integerValue];
         self.catchupOnlyFilter=[state[@"catchup"] boolValue];
         NSArray *groupTitles=[self currentCatalogGroupTitles];
-        if([state[@"groupTitle"] length]){NSUInteger match=[groupTitles indexOfObject:state[@"groupTitle"]];savedGroup=match==NSNotFound?0:(NSInteger)match;}self.groupControl.selectedSegmentIndex=(savedGroup>=0&&savedGroup<self.groupControl.numberOfSegments)?savedGroup:0;NSArray<NSString *> *titles=[self currentCatalogGroupTitles];NSString *segTitle=(self.groupControl.selectedSegmentIndex>=0&&self.groupControl.selectedSegmentIndex<(NSInteger)titles.count)?titles[self.groupControl.selectedSegmentIndex]:@"全部";self.favoritesOnly=[segTitle isEqualToString:@"收藏"];self.recentsOnly=[segTitle isEqualToString:@"最近"];[self configureCatalogNavigation];[self applyFilter];[self.view layoutIfNeeded];BOOL oldTopGeometry=[state[@"immersiveTopVersion"] integerValue]<1;CGFloat topInset=self.channelGrid.contentInset.top;CGFloat gridY=[state[@"gridY"] doubleValue],listY=[state[@"listY"] doubleValue];if(!state){gridY=-topInset;listY=-self.table.contentInset.top;}else if(oldTopGeometry){gridY-=topInset;listY-=self.table.contentInset.top;}self.channelGrid.contentOffset=CGPointMake(0,MAX(-topInset,gridY));self.table.contentOffset=CGPointMake(0,MAX(-self.table.contentInset.top,listY));
+        if([state[@"groupTitle"] length]){NSUInteger match=[groupTitles indexOfObject:state[@"groupTitle"]];savedGroup=match==NSNotFound?0:(NSInteger)match;}self.groupControl.selectedSegmentIndex=(savedGroup>=0&&savedGroup<self.groupControl.numberOfSegments)?savedGroup:0;NSArray<NSString *> *titles=[self currentCatalogGroupTitles];NSString *segTitle=(self.groupControl.selectedSegmentIndex>=0&&self.groupControl.selectedSegmentIndex<(NSInteger)titles.count)?titles[self.groupControl.selectedSegmentIndex]:@"全部";self.favoritesOnly=[segTitle isEqualToString:@"收藏"];self.recentsOnly=[segTitle isEqualToString:@"最近"];[self configureCatalogNavigation];[self applyFilter];[self.view layoutIfNeeded];BOOL oldTopGeometry=[state[@"immersiveTopVersion"] integerValue]<1;CGFloat topInset=self.channelGrid.contentInset.top;CGFloat gridY=[state[@"gridY"] doubleValue],listY=[state[@"listY"] doubleValue];if(!state){gridY=-topInset;listY=-self.table.contentInset.top;}else if(oldTopGeometry){gridY-=topInset;listY-=self.table.contentInset.top;}self.channelGrid.contentOffset=CGPointMake(0,MIN(MAX(-topInset,gridY),MAX(-topInset,self.channelGrid.contentSize.height-self.channelGrid.bounds.size.height+self.channelGrid.contentInset.bottom)));self.table.contentOffset=CGPointMake(0,MIN(MAX(-self.table.contentInset.top,listY),MAX(-self.table.contentInset.top,self.table.contentSize.height-self.table.bounds.size.height+self.table.contentInset.bottom)));
         if(sender.tag==1&&!self.channelID.length&&self.userInitiatedTabSelection&&!self.restoringLastTab)[self refreshSubscriptionsWhenIdle];}
     [self.view setNeedsLayout];
 }
@@ -1309,7 +1309,7 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
         self.groupControl.frame=CGRectMake(12,y+6,w-24,segmentHeight);self.groupControl.hidden=!catalog||expandedLive;self.playerTabs.frame=CGRectMake(12,y+6,w-24,segmentHeight);self.playerTabs.hidden=!catalog||!expandedLive;
         self.versionLabel.hidden=YES;
         UIFont *tabLabelFont=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:11 weight:UIFontWeightSemibold] compatibleWithTraitCollection:self.traitCollection];CGFloat tabHeight=MAX(58,ceil(20+3+tabLabelFont.lineHeight+16)),dockWidth=MIN(MAX(0,w-20),540),dockX=MAX(10,(w-dockWidth)/2),tabY=MAX(0,height-safe.bottom-tabHeight),tabContentInset=MAX(8,height-tabY+8);self.bottomBarBackdrop.frame=CGRectMake(0,tabY,w,MAX(tabHeight,height-tabY));self.bottomDockFadeGradient.frame=self.bottomBarBackdrop.bounds;self.bottomDockGlass.frame=CGRectMake(dockX,2,dockWidth,tabHeight-4);self.bottomDockGlass.layer.cornerRadius=(tabHeight-4)/2;self.bottomBar.frame=CGRectMake(dockX+4,tabY+2,MAX(0,dockWidth-8),tabHeight-4);self.bottomBar.layer.cornerRadius=(tabHeight-4)/2;self.bottomBar.hidden=NO;self.bottomBarBackdrop.hidden=NO;
-        BOOL showMiniBar=self.livePlaybackSuspendedForNavigation&&self.channelID.length&&self.activeTab>=2;self.liveMiniPlayerBar.hidden=!showMiniBar;if(showMiniBar){CGFloat miniW=MIN(w-28,520),miniH=42;self.liveMiniPlayerBar.frame=CGRectMake((w-miniW)/2,MAX(top+8,tabY-miniH-8),miniW,miniH);self.liveMiniPlayerCloseButton.frame=CGRectMake(miniW-38,5,32,32);self.liveMiniPlayerResumeButton.frame=CGRectMake(miniW-130,5,88,32);self.liveMiniPlayerLabel.frame=CGRectMake(14,0,MAX(0,miniW-150),miniH);}
+        BOOL showMiniBar=self.livePlaybackSuspendedForNavigation&&self.channelID.length&&self.activeTab>=2;self.liveMiniPlayerBar.hidden=!showMiniBar;if(showMiniBar){CGFloat miniW=MIN(w-28,520),miniH=48;BOOL axLarge=UIContentSizeCategoryIsAccessibilityCategory(self.traitCollection.preferredContentSizeCategory);self.liveMiniPlayerLabel.numberOfLines=axLarge?2:1;self.liveMiniPlayerBar.frame=CGRectMake((w-miniW)/2,MAX(top+8,tabY-miniH-8),miniW,miniH);self.liveMiniPlayerCloseButton.frame=CGRectMake(miniW-46,2,44,44);self.liveMiniPlayerResumeButton.frame=CGRectMake(miniW-142,2,88,44);self.liveMiniPlayerLabel.frame=CGRectMake(14,0,MAX(0,miniW-158),miniH);}
         CGFloat contentY=y+6+segmentHeight+4;CGFloat contentBottom=height;CGFloat catalogBottomInset=tabContentInset+62;
         CGFloat floatingPillExtra=catalog?18:0;
         CGRect frame=CGRectMake(0,0,w,MAX(0,contentBottom));UIEdgeInsets catalogInsets=UIEdgeInsetsMake(contentY,0,catalogBottomInset+floatingPillExtra,0);CCTVApplyImmersiveScrollGeometry(self.table,frame,catalogInsets);CCTVApplyImmersiveScrollGeometry(self.channelGrid,frame,catalogInsets);
@@ -1317,7 +1317,7 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
         // Every tab page owns the full root bounds. Child controls use their
         // safe-area guides, while their backgrounds and scroll views can pass
         // behind the status and navigation bars.
-        BOOL resourcePage=[self.tabPage isKindOfClass:ConfigCenterViewController.class];CGFloat pageTop=0;CGFloat pageBottomInset=tabContentInset+(showMiniBar?50:0);self.tabPage.view.frame=CGRectMake(0,pageTop,w,MAX(0,contentBottom-pageTop));if(resourcePage){[(ConfigCenterViewController *)self.tabPage setTopSafeAreaInset:top];[(ConfigCenterViewController *)self.tabPage setBottomOverlayInset:pageBottomInset];}else if([self.tabPage isKindOfClass:MediaBrowserViewController.class]){[(MediaBrowserViewController *)self.tabPage setTopSafeAreaInset:top];[(MediaBrowserViewController *)self.tabPage setBottomOverlayInset:pageBottomInset];}else if([self.tabPage isKindOfClass:SettingsViewController.class])[(SettingsViewController *)self.tabPage setBottomOverlayInset:pageBottomInset];
+        BOOL resourcePage=[self.tabPage isKindOfClass:ConfigCenterViewController.class];CGFloat pageTop=0;CGFloat pageBottomInset=tabContentInset+(showMiniBar?56:0);self.tabPage.view.frame=CGRectMake(0,pageTop,w,MAX(0,contentBottom-pageTop));if(resourcePage){[(ConfigCenterViewController *)self.tabPage setTopSafeAreaInset:top];[(ConfigCenterViewController *)self.tabPage setBottomOverlayInset:pageBottomInset];}else if([self.tabPage isKindOfClass:MediaBrowserViewController.class]){[(MediaBrowserViewController *)self.tabPage setTopSafeAreaInset:top];[(MediaBrowserViewController *)self.tabPage setBottomOverlayInset:pageBottomInset];}else if([self.tabPage isKindOfClass:SettingsViewController.class])[(SettingsViewController *)self.tabPage setBottomOverlayInset:pageBottomInset];
         self.catalogTopImmersiveScrim.hidden=!catalog||expandedLive;
         self.catalogGroupGlassCard.hidden=!catalog||expandedLive;
         if(!self.catalogTopImmersiveScrim.hidden){
@@ -1379,7 +1379,7 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
     [self configureCatalogNavigation];
     [self updatePlaybackControlAccessibility];
     [self setNeedsStatusBarAppearanceUpdate];
-    [self.view setNeedsLayout];
+    [self.view setNeedsLayout];[UIViewController attemptRotationToDeviceOrientation];
     [self relayoutPlayer];
     [self attachVideoView];
     self.avLayer.frame = self.playerBox.bounds;

@@ -236,7 +236,7 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
 }
 
 // Metadata probing is bounded independently of package downloads.
-@interface ResourceImportWorkflowViewController () <UIDocumentPickerDelegate,UITextViewDelegate>
+@interface ResourceImportWorkflowViewController () <UIDocumentPickerDelegate,UITextViewDelegate,UIAdaptivePresentationControllerDelegate>
 @property(nonatomic) BOOL restoringSnapshot;
 @property(nonatomic) NSUInteger snapshotRevision;
 @property(nonatomic) NSUInteger editRevision;
@@ -295,6 +295,8 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
 -  (NSString *)runtimeHint;
 -  (void)cancelWork;
 -  (void)reset;
+- (BOOL)hasUnsavedImportWork;
+- (void)presentExitDecisionSheet;
 -  (void)pickFiles:(BOOL)folder;
 -  (void)chooseExistingResourceForCandidate:(NSMutableDictionary *)row;
 -  (void)saveSelected;
@@ -578,14 +580,15 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
     // 防误关闭（Phase-C UI 审计 §6/§9）：导入进行中时禁止手势/外部 dismiss，
     // 对齐 MediaWebViewController。full-screen 演示下为兜底保险；一旦以 sheet
     // 呈现即阻止下拉关闭，进度不被误中断。显式取消仍走 cancelWork，语义不变。
-    BOOL modal=self.busy&&!self.finished;
+    BOOL modal=(self.busy&&!self.finished)||[self hasUnsavedImportWork];
     self.modalInPresentation=modal;
-    if(self.navigationController)self.navigationController.modalInPresentation=modal;
+    if(self.navigationController){self.navigationController.modalInPresentation=modal;self.navigationController.presentationController.delegate=self;}
 }
 - (void)updateView {
     for(NSMutableDictionary *row in self.candidates)if([row[@"needsDecoration"] boolValue])[self decorateCandidate:row file:nil origin:row[@"origin"]];
     NSUInteger readyCount=[self selectedUnsavedCandidateCount];
     self.navigationItem.rightBarButtonItem.enabled=!self.busy&&!self.finished&&readyCount>0;
+    self.navigationItem.leftBarButtonItem.enabled=!self.busy;
     self.navigationItem.rightBarButtonItem.title=readyCount>1?[NSString stringWithFormat:@"保存(%lu)",(unsigned long)readyCount]:@"保存";
     [self applyModalDismissProtection];
     self.address.editable=!self.busy;self.pasteAddressButton.enabled=!self.busy;self.pasteAndRecognizeButton.enabled=!self.busy;self.clearAddressButton.enabled=!self.busy;self.clearAddressButton.hidden=self.address.text.length==0&&self.candidates.count==0;self.runtime.enabled=!self.busy;self.duplicatePolicy.enabled=!self.busy;[self refreshSmartClipboardAndPresets];[self.tableView reloadData];
@@ -622,7 +625,33 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
 }
 - (void)runtimeChanged:(UISegmentedControl *)sender {self.editRevision++;self.restoredRuntimeSelection=sender.selectedSegmentIndex;[self persistSnapshot];}
 - (void)duplicatePolicyChanged:(UISegmentedControl *)sender {self.editRevision++;self.finished=NO;[self updateView];}
-- (void)minimize {[self.view endEditing:YES];[self.navigationController dismissViewControllerAnimated:YES completion:nil];}
+- (BOOL)hasUnsavedImportWork {
+    if(self.finished)return NO;
+    if(self.candidates.count>0)return YES;
+    return self.address.text.length>0;
+}
+- (void)presentExitDecisionSheet {
+    NSUInteger unsaved=[self selectedUnsavedCandidateCount];
+    NSUInteger failed=[self failedCandidateCount];
+    NSMutableArray<NSString *> *parts=[NSMutableArray array];
+    if(unsaved>0)[parts addObject:[NSString stringWithFormat:@"已选 %lu 项未保存",(unsigned long)unsaved]];
+    if(failed>0)[parts addObject:[NSString stringWithFormat:@"%lu 项失败",(unsigned long)failed]];
+    if(!parts.count&&self.candidates.count>0)[parts addObject:[NSString stringWithFormat:@"%lu 个候选尚未保存",(unsigned long)self.candidates.count]];
+    if(!parts.count&&self.address.text.length>0)[parts addObject:@"地址栏有未识别的内容"];
+    NSString *subtitle=[[parts componentsJoinedByString:@"，"] stringByAppendingString:@"。保留任务可在资源主页摘要中继续；放弃将删除未保存的候选，不影响已保存的项目。"];
+    __weak typeof(self) weakSelf=self;
+    HostGlassSheetAction *keep=[HostGlassSheetAction actionWithTitle:@"保留任务，稍后继续" subtitle:@"候选、选择与失败原因已存快照，重新进入可恢复" value:nil icon:@"clock.arrow.circlepath" tint:HostAccent() destructive:NO selected:NO handler:^{ResourceImportWorkflowViewController *owner=weakSelf;if(owner)[owner.navigationController dismissViewControllerAnimated:YES completion:nil];}];
+    HostGlassSheetAction *abandon=[HostGlassSheetAction actionWithTitle:@"放弃未保存并关闭" subtitle:@"删除未保存的候选与本次新建的未保存服务" value:nil icon:@"trash" tint:UIColor.systemRedColor destructive:YES selected:NO handler:^{ResourceImportWorkflowViewController *owner=weakSelf;if(!owner)return;[owner reset];[owner.navigationController dismissViewControllerAnimated:YES completion:nil];}];
+    HostGlassSheetAction *stay=[HostGlassSheetAction actionWithTitle:@"取消" subtitle:nil value:nil icon:nil tint:nil destructive:NO selected:NO handler:nil];
+    [HostGlassActionSheetViewController presentOn:self title:@"退出导入？" subtitle:subtitle badgeText:nil badgeColor:nil sections:@[[HostGlassSheetSection sectionWithTitle:nil actions:@[keep,abandon,stay]]] sourceView:self.view];
+}
+- (void)presentationControllerDidAttemptToDismiss:(UIPresentationController *)presentationController {if(self.busy)return;[self presentExitDecisionSheet];}
+- (void)minimize {
+    [self.view endEditing:YES];
+    if(self.busy)return;
+    if(![self hasUnsavedImportWork]){[self.navigationController dismissViewControllerAnimated:YES completion:nil];return;}
+    [self presentExitDecisionSheet];
+}
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {return 3;}
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if(section==0)return self.advancedOptionsExpanded?7:5;

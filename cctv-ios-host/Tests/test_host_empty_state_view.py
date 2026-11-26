@@ -101,15 +101,24 @@ class HostEmptyStateViewAccessibilityContracts(unittest.TestCase):
     """VoiceOver 合并朗读与可操作性约定，对应审计中各空态标签 a11y 不一致问题。"""
 
     def test_view_is_single_accessibility_element_with_merged_label(self):
-        self.assertIn("self.isAccessibilityElement = YES", M_TEXT)
+        # T12/U01：容器本身不再是可访问元素；标题/描述合并为一句，由 titleLabel
+        # 以静态文本承载，行动按钮独立暴露为真实按钮元素。旧实现把容器标成
+        # 按钮却无 accessibilityActivate，VoiceOver 双击无法触发真实按钮。
+        body = self._method_body("- (void)_updateAccessibility")
+        self.assertIn("self.isAccessibilityElement = NO", body)
+        self.assertIn("_titleLabel.isAccessibilityElement = YES", body)
+        self.assertIn("_titleLabel.accessibilityTraits = UIAccessibilityTraitStaticText", body)
+        self.assertIn("_actionButton.isAccessibilityElement = YES", body)
         # 标题与副标题应合并为一句 accessibilityLabel。
         self.assertIn("componentsJoinedByString:", M_TEXT)
 
     def test_traits_switch_between_static_text_and_button(self):
-        # 无动作按钮时为静态文本；有动作按钮时为按钮，避免 VoiceOver 误读为纯文字。
-        self.assertIn("UIAccessibilityTraitStaticText", M_TEXT)
-        self.assertIn("UIAccessibilityTraitButton", M_TEXT)
-        self.assertIn("_actionButton.hidden", M_TEXT)
+        # T12/U01：语义不再在容器上切换——标题行恒为静态文本，真实按钮恒为
+        # 按钮元素；容器不再冒充按钮。
+        body = self._method_body("- (void)_updateAccessibility")
+        self.assertIn("UIAccessibilityTraitStaticText", body)
+        self.assertNotIn("UIAccessibilityTraitButton", body)
+        self.assertIn("self.accessibilityTraits = UIAccessibilityTraitNone", body)
 
     def test_placeholder_label_is_accessible_static_text(self):
         body = self._method_body("+ (UILabel *)placeholderLabelWithText:")
@@ -119,11 +128,12 @@ class HostEmptyStateViewAccessibilityContracts(unittest.TestCase):
 
     def test_child_elements_excluded_from_individual_announcement(self):
         body = self._method_body("- (void)_updateAccessibility")
-        # 图标、标题、副标题、按钮都不单独朗读，由容器合并。
+        # T12/U01：图标与副标题不单独朗读；标题行承载合并文案单独朗读，
+        # 行动按钮独立暴露为真实按钮元素。
         self.assertIn("_symbolView.isAccessibilityElement = NO", body)
-        self.assertIn("_titleLabel.isAccessibilityElement = NO", body)
+        self.assertIn("_titleLabel.isAccessibilityElement = YES", body)
         self.assertIn("_subtitleLabel.isAccessibilityElement = NO", body)
-        self.assertIn("_actionButton.isAccessibilityElement = NO", body)
+        self.assertIn("_actionButton.isAccessibilityElement = YES", body)
 
     def _method_body(self, signature):
         # 跳过类扩展里的前向声明（"- (void)foo;"），找到以 "{" 开头的实现。
