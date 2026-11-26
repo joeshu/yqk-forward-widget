@@ -24,6 +24,7 @@
 #import "MediaProtocolCapabilities.h"
 #import "HostSubtitleOverlayView.h"
 #import "MediaPlaybackBufferPolicy.h"
+#import "HostMemoryBudgetCoordinator.h"
 #import "HostTheme.h"
 #import "RuntimeDiagnostics.h"
 #import "MediaPlaybackStateStore.h"
@@ -2827,7 +2828,7 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
     [self.prefetchedAsset loadValuesAsynchronouslyForKeys:@[@"playable"] completionHandler:^{}];
 }
 - (void)prefetchNextEpisodeIfNeeded {
-    if(self.resolving||self.prefetchInFlight||!self.videoFrameReady||self.pendingPlaybackSeekTime||self.resumePromptPending)return;
+    if(self.resolving||self.prefetchInFlight||!self.videoFrameReady||self.pendingPlaybackSeekTime||self.resumePromptPending||![HostMemoryBudgetCoordinator shouldAllowBackgroundWarmup])return;
     double buffered=self.cicadaAdapter?MAX(0,self.cicadaAdapter.bufferedPosition-self.cicadaAdapter.currentPosition):[self bufferedAheadForItem:self.observedItem];
     BOOL waiting=self.cicadaAdapter?(self.cicadaAdapter.loading||self.cicadaAdapter.state!=MediaPlaybackCicadaAdapterStatePlaying):self.player.timeControlStatus!=AVPlayerTimeControlStatusPlaying;
     if(!MediaPlaybackShouldPrefetch([self activeEngineCurrentPosition],[self activeEngineDuration],buffered,waiting,[self playbackBufferConstrained]))return;

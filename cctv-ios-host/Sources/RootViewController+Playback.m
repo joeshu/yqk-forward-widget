@@ -1,6 +1,7 @@
 #import "CCTVLiveControlSheetViewController.h"
 #import "HostGlassActionSheetViewController.h"
 #import "RootViewController_Internal.h"
+#import "HostMemoryBudgetCoordinator.h"
 
 
 @implementation RootViewController (Playback)
@@ -1084,7 +1085,7 @@
 }
 
 - (void)prepareNextNativeChannelForGeneration:(NSUInteger)generation {
-    if(generation!=self.playbackGeneration || !self.firstRender || self.nativeTimeShiftActive || !self.currentPlayer || self.avPlayer || self.directNativeRouteActive || !CCTVBoolPreference(@"preloadNativeChannel",YES) || UIApplication.sharedApplication.applicationState!=UIApplicationStateActive)return;
+    if(generation!=self.playbackGeneration || !self.firstRender || self.nativeTimeShiftActive || !self.currentPlayer || self.avPlayer || self.directNativeRouteActive || !CCTVBoolPreference(@"preloadNativeChannel",YES) || ![HostMemoryBudgetCoordinator shouldAllowBackgroundWarmup] || UIApplication.sharedApplication.applicationState!=UIApplicationStateActive)return;
     NSArray *sourceList=self.shownChannels.count>=2?self.shownChannels:self.allChannels;
     NSMutableArray *native=[NSMutableArray array];
     for(NSDictionary *channel in sourceList)if(![channel[@"remoteURL"] length] && ![ProfileStore isHTTP:channel[@"id"]])[native addObject:channel];

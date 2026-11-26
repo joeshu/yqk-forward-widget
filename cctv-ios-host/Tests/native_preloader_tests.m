@@ -27,8 +27,10 @@ int main(void){@autoreleasepool{
     id taken=[p takeChannel:@"cctv2"];
     check(taken==first && first.resets==0 && first.delegate==nil,@"handoff keeps prepared item and detaches temporary delegate");
     check([p takeChannel:@"cctv2"]==nil,@"handoff can occur only once");
+    check(p.preparedCount==2&&p.hitCount==1&&p.wasteCount==1,@"ledger counts prepared hit and cancelled miss");
     [p prepareChannel:@"cctv3" title:@"CCTV-3"];first=latest;first.completion(YES,nil);drain();now+=91;
     check([p takeChannel:@"cctv3"]==nil && first.resets==1,@"expired metadata reset instead of played");
+    check(p.preparedCount==3&&p.hitCount==1&&p.wasteCount==2,@"expired slot counts as waste");
     [p prepareChannel:@"cctv2" title:@"CCTV-2"];first=latest;void (^stale)(BOOL,NSError *)=first.completion;
     [p prepareChannel:@"cctv3" title:@"CCTV-3"];MetadataPlayer *second=latest;stale(YES,nil);drain();
     check([p takeChannel:@"cctv3"]==nil && second.resets==1,@"stale completion cannot make replacement ready");
@@ -40,5 +42,6 @@ int main(void){@autoreleasepool{
     check([p takeChannel:@"cctv2"]==nil,@"cancelled work cannot be revived");
     NativeChannelPreloader *unsupported=[[NativeChannelPreloader alloc] initWithFactory:^id{return [NSObject new];} clock:^NSTimeInterval{return now;}];
     [unsupported prepareChannel:@"cctv2" title:@"CCTV-2"];check([unsupported takeChannel:@"cctv2"]==nil,@"unknown SDK safely ignored");
+    check(p.preparedCount==8&&p.hitCount==1&&p.wasteCount==7,@"ledger totals prepared hit waste");
     puts("metadata preloader lifecycle checks passed");
 }return 0;}

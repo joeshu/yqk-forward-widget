@@ -26,6 +26,11 @@ typedef NS_ENUM(NSInteger, HostMemoryBudgetPressure) {
 /// 严重/危急温升至少 Warning）。只读快照，调用方不得据此假设已裁剪。
 - (HostMemoryBudgetPressure)currentPressure;
 
+/// 非必要后台预热（原生频道预解析、下一集预取）是否允许新开任务。
+/// Normal/Unknown 允许；Warning/Critical 拒绝（只管新准入，不取消在途任务）；
+/// 低电量模式也拒绝（省电优先于预热）。热状态已折进 currentPressure。
++ (BOOL)shouldAllowBackgroundWarmup;
+
 /// 在拉起大型运行时（Python / Node / JAR / MPV）前按需触发缓存裁剪，返回是否执行了裁剪。
 - (BOOL)trimIfNeededForOperation:(NSString *)operation;
 

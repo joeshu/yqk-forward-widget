@@ -73,6 +73,17 @@ static NSTimeInterval const HostMemoryTrimMinimumInterval = 10.0;
     return [self pressureForAvailableBytes:[self availableMemoryBytes]];
 }
 
++ (BOOL)shouldAllowBackgroundWarmup {
+    // T22/S6：预热是可丢弃的投机工作，优先级低于前台播放、搜索与邻集解析。
+    // 低电量拒绝（与 MediaPlaybackViewController.playbackBufferConstrained
+    // 的省电规则一致）；Warning/Critical 拒绝新开（在途任务不管，由各自
+    // 的有界机制收尾：预热单槽 90s TTL、下一集预取单次 15s 客户端超时、
+    // 中继预热 4 线程 + 10s 流过期）；Unknown 按 Normal 放行（T21 同款口径）。
+    if (NSProcessInfo.processInfo.lowPowerModeEnabled) return NO;
+    HostMemoryBudgetPressure pressure = [[self shared] currentPressure];
+    return pressure == HostMemoryBudgetPressureNormal || pressure == HostMemoryBudgetPressureUnknown;
+}
+
 - (void)startMonitoring {
     if (!NSThread.isMainThread) {
         dispatch_async(dispatch_get_main_queue(), ^{ [self startMonitoring]; });

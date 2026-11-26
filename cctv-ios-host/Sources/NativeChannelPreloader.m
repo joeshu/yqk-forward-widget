@@ -16,6 +16,9 @@
 @property(nonatomic) NSUInteger generation;
 @property(nonatomic) BOOL ready;
 @property(nonatomic) NSTimeInterval deadline;
+@property(nonatomic) NSUInteger preparedCount;
+@property(nonatomic) NSUInteger hitCount;
+@property(nonatomic) NSUInteger wasteCount;
 @end
 @implementation NativeChannelPreloader
 - (instancetype)initWithFactory:(id (^)(void))factory clock:(NSTimeInterval (^)(void))clock {
@@ -37,6 +40,7 @@ static const NSTimeInterval NativeChannelPreloaderTTLSeconds = 90.0;
     @try {
         player.autoPlay=NO;
         if(![player playLIVEWithChannelID:channel delegate:self configOptions:@{@"CNPlayerConfigOptionKey_Title":title?:channel}]){[self cancel];return;}
+        self.preparedCount++;
         player.autoPlay=NO;
         __weak typeof(self) weakSelf=self;
         [player prepareRateItemToPlay_completionBlock:^(BOOL isPublic,NSError *error){
@@ -58,13 +62,14 @@ static const NSTimeInterval NativeChannelPreloaderTTLSeconds = 90.0;
     if(!self.ready || ![self.channel isEqualToString:channel] || self.clock()>=self.deadline){[self cancel];return nil;}
     id<CCTVMetadataPlayer> player=self.player;
     // Transfer ownership WITHOUT reset/stop/reconfiguration, preserving CNPlayerItem.
-    self.generation++;self.player=nil;self.channel=nil;self.ready=NO;
+    self.hitCount++;self.generation++;self.player=nil;self.channel=nil;self.ready=NO;
     player.delegate=nil;
     return player;
 }
 - (void)cancel {
     self.generation++;self.ready=NO;self.channel=nil;
     id<CCTVMetadataPlayer> player=self.player;self.player=nil;
+    if(player)self.wasteCount++;
     @try{player.delegate=nil;[player reset];}@catch(NSException *exception){NSLog(@"[CCTVHost] CNPlayer preload reset raised %@",exception.name);}
 }
 - (void)dealloc { [self cancel]; }
