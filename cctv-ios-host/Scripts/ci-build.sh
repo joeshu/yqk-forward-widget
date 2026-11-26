@@ -46,7 +46,7 @@ if [ -n "${CCTV_BASELINE:-}" ]; then
 fi
 ICON_PARTIAL="$OUT/assetcatalog-info.plist"
 xcrun --sdk iphoneos actool --output-format human-readable-text --notices --warnings \
-  --platform iphoneos --minimum-deployment-target 15.0 --target-device iphone --target-device ipad \
+  --platform iphoneos --minimum-deployment-target 17.0 --target-device iphone --target-device ipad \
   --app-icon AppIcon --compress-pngs --compile "$APP" \
   --output-partial-info-plist "$ICON_PARTIAL" Resources/Assets.xcassets
 python3 - "$APP/Info.plist" "$ICON_PARTIAL" <<'PY'

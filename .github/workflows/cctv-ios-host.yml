@@ -236,7 +236,7 @@ jobs:
             case "$f" in *PyHost.m) echo "skip $f (needs python headers, checked in build step)"; continue;; esac
             echo "== $f" >> syntax.log
             xcrun --sdk iphoneos clang -fsyntax-only -arch arm64 -isysroot "$SDK" \
-              -miphoneos-version-min=15.0 -fobjc-arc -I Sources/Include \
+              -miphoneos-version-min=17.0 -fobjc-arc -I Sources/Include \
               -F Frameworks "$f" >> syntax.log 2>&1 || true
           done
           cat syntax.log

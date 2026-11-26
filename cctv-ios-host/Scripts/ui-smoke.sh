@@ -19,7 +19,7 @@ FIXTURE_PORT=$(cat "$OUT/fixture-port.txt")
 SMOKE_LAUNCH_EPOCH=$(date +%s)
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
 ARCH=$(uname -m)
-xcrun --sdk iphonesimulator clang -fobjc-arc -target "$ARCH-apple-ios15.0-simulator" -isysroot "$SDK" \
+xcrun --sdk iphonesimulator clang -fobjc-arc -target "$ARCH-apple-ios17.0-simulator" -isysroot "$SDK" \
   -I Sources/Include -I Sources Sources/*.m Sources/*.c Tests/UISmoke/*.m \
   -framework WebKit -framework JavaScriptCore -framework Security -framework Foundation -framework UIKit -framework ImageIO -framework CoreGraphics -framework CoreMedia -framework AVFoundation -framework AVKit \
   -framework MediaPlayer -framework QuartzCore -framework UniformTypeIdentifiers -framework MetricKit -framework UserNotifications -lz -lsqlite3 \
@@ -46,7 +46,7 @@ codesign --force --sign - "$APP/Frameworks/NodeMobile.framework"
 python3 - "$APP/Info.plist" <<'PY'
 import plistlib,sys
 with open('Resources/Info.plist','rb') as f:p=plistlib.load(f)
-p.update(CFBundleIdentifier='com.example.cctvhost.uismoke',CFBundleSupportedPlatforms=['iPhoneSimulator'],MinimumOSVersion='15.0')
+p.update(CFBundleIdentifier='com.example.cctvhost.uismoke',CFBundleSupportedPlatforms=['iPhoneSimulator'],MinimumOSVersion='17.0')
 p.pop('UIRequiredDeviceCapabilities',None)
 with open(sys.argv[1],'wb') as f:plistlib.dump(p,f)
 PY
