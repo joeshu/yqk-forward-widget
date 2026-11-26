@@ -79,7 +79,7 @@ class CCTVHostQualityFollowupContracts(unittest.TestCase):
         workflow = (ROOT.parent / '.github/workflows/cctv-ios-host.yml').read_text()
         smoke = (ROOT / 'Scripts/ui-smoke.sh').read_text()
         driver = (ROOT / 'Tests/UISmoke/SmokeDriver.m').read_text()
-        self.assertIn('iPhone SE (3rd generation)', workflow)
+        self.assertIn('iPhone 16', workflow)
         self.assertIn('accessibility-xxxl', workflow)
         self.assertIn('Check that this build is still the latest main commit', workflow)
         self.assertIn('cancel-in-progress: true', workflow)

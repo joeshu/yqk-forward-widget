@@ -404,10 +404,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - id: se-default-light
-            device: iPhone SE (3rd generation)
-            content_size: large
-            appearance: light
           - id: iphone-16-accessibility-dark
             device: iPhone 16
             content_size: accessibility-xxxl
