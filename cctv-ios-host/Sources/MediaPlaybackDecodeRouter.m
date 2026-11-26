@@ -175,10 +175,10 @@ NSString *MediaPlaybackDecodeRouteName(MediaPlaybackDecodeRoute route) {
 }
 
 NSString *MediaPlaybackDecodeRouteRejectionReasonForResult(NSDictionary *result) {
-    return MediaPlaybackDecodeRouteRejectionReasonForResult(result, NO);
+    return MediaPlaybackDecodeRouteRejectionReasonForResultForLive(result, NO);
 }
 
-NSString *MediaPlaybackDecodeRouteRejectionReasonForResult(NSDictionary *result, BOOL forLive) {
+NSString *MediaPlaybackDecodeRouteRejectionReasonForResultForLive(NSDictionary *result, BOOL forLive) {
     if (![result isKindOfClass:NSDictionary.class]) return @"unsupported_transport";
     // 与 MediaDescriptor 同一顺序：webOnly 容器 → 不支持编码 → 不支持传输。
     // 直播不走 MPV，容器旁路只在点播开。
@@ -199,7 +199,7 @@ NSArray<NSDictionary *> *MediaPlaybackDecodeRouteCandidatesForResult(NSDictionar
     if (![result isKindOfClass:NSDictionary.class]) return @[];
     // 入口门禁命中则无候选（与 MediaDescriptor 同一判定；直播用 forLive 门禁，
     // 直播不走 MPV，MPV 可解的容器/编码在直播下仍拒绝）。
-    if (MediaPlaybackDecodeRouteRejectionReasonForResult(result, forLive)) return @[];
+    if (MediaPlaybackDecodeRouteRejectionReasonForResultForLive(result, forLive)) return @[];
     BOOL directMedia = MediaPlaybackResultIsDirectMedia(result);
     BOOL avSupported = MediaPlaybackResultSupportsAVPlayer(result);
     BOOL requiresWebPlayback = ([result[@"requiresWebPlayback"] boolValue] || [result[@"parse"] integerValue] > 0 || [result[@"jx"] integerValue] > 0) && !directMedia;

@@ -30,7 +30,7 @@ def read(path):
 
 
 def gate_model(result, for_live, mpv_enabled):
-    """Mirror of MediaPlaybackDecodeRouteRejectionReasonForResult:forLive:."""
+    """Mirror of MediaPlaybackDecodeRouteRejectionReasonForResultForLive."""
     fmt = (result.get("format") or "").lower()
     ext = (result.get("extension") or "").lower()
     if not (not for_live and mpv_enabled):
@@ -123,13 +123,17 @@ class GateWiringContractTests(unittest.TestCase):
         cls.registry_h = read(SOURCES / "MediaCapabilityRegistry.h")
 
     def test_for_live_variant_declared_and_implemented(self):
-        self.assertIn("MediaPlaybackDecodeRouteRejectionReasonForResult(NSDictionary * _Nullable result, BOOL forLive)",
+        self.assertIn("MediaPlaybackDecodeRouteRejectionReasonForResultForLive(NSDictionary * _Nullable result, BOOL forLive)",
                       self.router_h)
         self.assertRegex(self.router_m,
-                         r"MediaPlaybackDecodeRouteRejectionReasonForResult\(NSDictionary \*result, BOOL forLive\)")
+                         r"MediaPlaybackDecodeRouteRejectionReasonForResultForLive\(NSDictionary \*result, BOOL forLive\)")
+        # C 函数不能重载：同名双参声明会在 clang 报 conflicting types
+        #（2026-11-26 CI ui-preview 红）；双参变体必须用 ForLive 后缀的独立名。
+        self.assertNotIn("MediaPlaybackDecodeRouteRejectionReasonForResult(NSDictionary * _Nullable result, BOOL forLive)",
+                         self.router_h)
 
     def test_vod_wrapper_delegates_to_for_live_variant(self):
-        self.assertIn("return MediaPlaybackDecodeRouteRejectionReasonForResult(result, NO);",
+        self.assertIn("return MediaPlaybackDecodeRouteRejectionReasonForResultForLive(result, NO);",
                       self.router_m)
 
     def test_codec_gate_uses_mpv_only_list_not_flat_list(self):
@@ -147,7 +151,7 @@ class GateWiringContractTests(unittest.TestCase):
                       self.router_m)
 
     def test_candidate_function_uses_for_live_gate(self):
-        self.assertIn("MediaPlaybackDecodeRouteRejectionReasonForResult(result, forLive)",
+        self.assertIn("MediaPlaybackDecodeRouteRejectionReasonForResultForLive(result, forLive)",
                       self.router_m)
 
     def test_descriptor_still_uses_vod_wrapper(self):

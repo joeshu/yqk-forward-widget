@@ -64,7 +64,7 @@ FOUNDATION_EXPORT NSArray<NSDictionary *> *MediaPlaybackDecodeRouteCandidatesFor
 // 直播（forLive=YES）不走 MPV，所以同一结果在直播下仍拒绝（无可用引擎）。
 // 无 forLive 参数的重载是点播语义（forLive=NO），供 MediaDescriptor 调用。
 FOUNDATION_EXPORT NSString * _Nullable MediaPlaybackDecodeRouteRejectionReasonForResult(NSDictionary * _Nullable result);
-FOUNDATION_EXPORT NSString * _Nullable MediaPlaybackDecodeRouteRejectionReasonForResult(NSDictionary * _Nullable result, BOOL forLive);
+FOUNDATION_EXPORT NSString * _Nullable MediaPlaybackDecodeRouteRejectionReasonForResultForLive(NSDictionary * _Nullable result, BOOL forLive);
 
 // 供日志/诊断用：路由名（@"avplayer" / @"cicada" / @"webview" / @"none"）。
 FOUNDATION_EXPORT NSString *MediaPlaybackDecodeRouteName(MediaPlaybackDecodeRoute route);
