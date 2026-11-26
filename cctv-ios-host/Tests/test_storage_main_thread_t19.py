@@ -111,8 +111,29 @@ class T19StorageMainThreadContracts(unittest.TestCase):
         init = method_body(self.meta, "- (instancetype)init {", "- (void)loadPersistentRecordsAsync {")
         self.assertIn("[self loadPersistentRecordsAsync];", init)
         self.assertNotIn("[self loadPersistentRecords];", init)
-        loader = method_body(self.meta, "- (void)loadPersistentRecordsAsync {", "- (void)loadPersistentRecords {")
-        self.assertIn("dispatch_async(self.persistenceQueue, ^{ [self loadPersistentRecords]; });", loader)
+        loader = method_body(self.meta, "- (void)loadPersistentRecordsAsync {", "- (void)waitForInitialLoad {")
+        self.assertIn("[self loadPersistentRecords];", loader)
+        self.assertIn("dispatch_group_leave(self.initialLoadGroup);", loader)
+
+    def test_first_read_waits_for_initial_load(self):
+        # Contract lock (CI 2026-11-26, build (full)): T19 把冷启动加载改成
+        # 异步后，新实例立即可读返回了 miss——原生契约要求新实例立即可读
+        # 持久化 home（test_native_state 跨实例恢复检查失败的根因；加载
+        # 完成前 miss 不是“缓存语义安全”，是行为回归）。读/删路径先等
+        # 加载完成（5 秒上限兜底），init 本身仍不阻塞。
+        waiter = method_body(self.meta, "- (void)waitForInitialLoad {", "- (void)loadPersistentRecords {")
+        self.assertIn("dispatch_group_wait(self.initialLoadGroup,", waiter)
+        self.assertIn("5 * NSEC_PER_SEC", waiter)
+        for start, end in [
+            ("- (id)resultForSource:", "- (void)storeResult:"),
+            ("- (NSTimeInterval)ageOfResultForSource:", "- (void)removeResultForSource:"),
+            ("- (void)removeResultForSource:", "- (void)removeResultsForSourceID:"),
+            ("- (void)removeResultsForSourceID:", "- (NSDictionary<NSString *,NSNumber *> *)summary {"),
+            ("- (NSDictionary<NSString *,NSNumber *> *)summary {", "- (void)evictMemoryCache {"),
+            ("- (void)clear {", "@end"),
+        ]:
+            body = method_body(self.meta, start, end)
+            self.assertIn("[self waitForInitialLoad];", body, start)
 
     def test_library_store_uses_corefoundation_clock_not_quartzcore(self):
         # Contract lock (CI 2026-11-26): allFavorites 用 CFAbsoluteTimeGetCurrent

@@ -123,6 +123,8 @@ static id MediaMetadataPersistentSafeValue(id value, NSString *key, NSUInteger d
 @property(nonatomic, strong) NSMutableDictionary<NSString *, NSDictionary *> *persistentRecords;
 @property(nonatomic, copy) NSString *persistentPath;
 @property(nonatomic) BOOL persistenceWriteScheduled;
+@property(nonatomic, strong) dispatch_group_t initialLoadGroup;
+-  (void)waitForInitialLoad;
 -  (void)loadPersistentRecordsAsync;
 -  (void)loadPersistentRecords;
 -  (void)schedulePersistentWrite;
@@ -144,6 +146,8 @@ static id MediaMetadataPersistentSafeValue(id value, NSString *key, NSUInteger d
         NSURL *support=[NSFileManager.defaultManager URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask].firstObject;
         NSURL *directory=[support URLByAppendingPathComponent:@"CCTVHost" isDirectory:YES];
         if(directory){[NSFileManager.defaultManager createDirectoryAtURL:directory withIntermediateDirectories:YES attributes:nil error:NULL];[NSFileManager.defaultManager removeItemAtURL:[directory URLByAppendingPathComponent:@"MediaMetadataCache-v1.json"] error:NULL];[NSFileManager.defaultManager removeItemAtURL:[directory URLByAppendingPathComponent:@"MediaMetadataCache-v2.json"] error:NULL];_persistentPath=[[directory URLByAppendingPathComponent:@"MediaMetadataCache-v3.json"] path];}
+        _initialLoadGroup=dispatch_group_create();
+        dispatch_group_enter(_initialLoadGroup);
         [self loadPersistentRecordsAsync];
 #if TARGET_OS_IOS
         [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(evictMemoryCache) name:UIApplicationDidReceiveMemoryWarningNotification object:nil];
@@ -153,8 +157,18 @@ static id MediaMetadataPersistentSafeValue(id value, NSString *key, NSUInteger d
 }
 - (void)loadPersistentRecordsAsync {
     // T19/PERF-09：冷启动持久化加载（读文件 + JSON 解析 + 逐条校验/序列化 + 排序）
-    // 不再阻塞首次访问的调用线程；加载完成前读缓存只会 miss（缓存语义安全）。
-    dispatch_async(self.persistenceQueue, ^{ [self loadPersistentRecords]; });
+    // 不再阻塞 init 的调用线程；首次读改为等加载完成（见 waitForInitialLoad）——
+    // 加载完成前读到 miss 是错误的：原生契约要求新实例立即可读持久化 home
+    // （CI 2026-11-26：test_native_state 的 home 跨实例恢复检查因此失败）。
+    dispatch_async(self.persistenceQueue, ^{
+        [self loadPersistentRecords];
+        dispatch_group_leave(self.initialLoadGroup);
+    });
+}
+- (void)waitForInitialLoad {
+    // 首次读/删等加载完成：加载只是小文件读解析，正常几毫秒；5 秒上限兜底，
+    // 超时退回旧的 miss 语义，绝不在此永久挂住。
+    if(self.initialLoadGroup)dispatch_group_wait(self.initialLoadGroup, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
 }
 - (void)loadPersistentRecords {
     if(!self.persistentPath.length)return;
@@ -247,6 +261,7 @@ NSUInteger MediaSourceConnectionRevision(NSDictionary *source) {
     return MediaSourceSHA256Hex(data);
 }
 - (id)resultForSource:(NSDictionary *)source operation:(NSString *)operation arguments:(NSDictionary *)arguments maximumAge:(NSTimeInterval)maximumAge isStale:(BOOL *)isStale {
+    [self waitForInitialLoad];
     if(isStale)*isStale=NO;
     if(![@[@"home",@"category",@"search",@"detail"] containsObject:operation])return nil;
     NSString *key=[self keyForSource:source operation:operation arguments:arguments];if(!key.length)return nil;
@@ -299,6 +314,7 @@ NSUInteger MediaSourceConnectionRevision(NSDictionary *source) {
     MediaMetadataRecordDiagnosticsEvent(@"media_metadata_cache_store", @{@"operation":operation?:@"",@"bytes":@(data.length),@"elapsed_ms":@((NSInteger)(MAX(0,CFAbsoluteTimeGetCurrent()-storeStartedAt)*1000))});
 }
 - (NSTimeInterval)ageOfResultForSource:(NSDictionary *)source operation:(NSString *)operation arguments:(NSDictionary *)arguments {
+    [self waitForInitialLoad];
     if(![@[@"home",@"category",@"search",@"detail"] containsObject:operation])return -1;
     NSString *key=[self keyForSource:source operation:operation arguments:arguments];if(!key.length)return -1;
     __block NSTimeInterval storedAt=-1;
@@ -312,6 +328,7 @@ NSUInteger MediaSourceConnectionRevision(NSDictionary *source) {
     return age<0?-1:age;
 }
 - (void)removeResultForSource:(NSDictionary *)source operation:(NSString *)operation arguments:(NSDictionary *)arguments {
+    [self waitForInitialLoad];
     NSString *key=[self keyForSource:source operation:operation arguments:arguments];
     if(!key.length)return;
     __block BOOL removedPersistent=NO;
@@ -326,11 +343,13 @@ NSUInteger MediaSourceConnectionRevision(NSDictionary *source) {
     if(removedPersistent)[self schedulePersistentWrite];
 }
 - (void)removeResultsForSourceID:(NSString *)sourceID {
+    [self waitForInitialLoad];
     if(!sourceID.length)return;
     dispatch_sync(self.queue, ^{for(NSString *key in self.order.allKeys.copy){MediaMetadataCacheEntry *entry=[self.entries objectForKey:key];if(!entry||[entry.sourceID isEqual:sourceID]){[self.entries removeObjectForKey:key];[self.order removeObjectForKey:key];}}for(NSString *key in self.persistentRecords.allKeys.copy)if([self.persistentRecords[key][@"source_id"] isEqual:sourceID])[self.persistentRecords removeObjectForKey:key];});
     [self schedulePersistentWrite];
 }
 - (NSDictionary<NSString *,NSNumber *> *)summary {
+    [self waitForInitialLoad];
     __block NSUInteger bytes=0,count=0;
     dispatch_sync(self.queue, ^{
         for(NSString *key in self.persistentRecords){NSDictionary *record=self.persistentRecords[key];NSUInteger cost=[record[@"cost"] unsignedIntegerValue];if(!cost){NSData *data=[NSJSONSerialization dataWithJSONObject:record[@"result"] options:0 error:NULL];cost=data.length;}if(cost){count++;bytes+=cost;}}
@@ -339,5 +358,5 @@ NSUInteger MediaSourceConnectionRevision(NSDictionary *source) {
     return @{@"entries":@(count),@"bytes":@(bytes)};
 }
 - (void)evictMemoryCache { dispatch_async(self.queue, ^{[self.entries removeAllObjects];[self.order removeAllObjects];}); }
-- (void)clear { dispatch_sync(self.queue, ^{[self.entries removeAllObjects];[self.order removeAllObjects];[self.persistentRecords removeAllObjects];});[self schedulePersistentWrite]; }
+- (void)clear { [self waitForInitialLoad]; dispatch_sync(self.queue, ^{[self.entries removeAllObjects];[self.order removeAllObjects];[self.persistentRecords removeAllObjects];});[self schedulePersistentWrite]; }
 @end

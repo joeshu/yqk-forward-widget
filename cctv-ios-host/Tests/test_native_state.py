@@ -11,7 +11,11 @@ class NativeStateTests(unittest.TestCase):
         root = pathlib.Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmp:
             executable = str(pathlib.Path(tmp) / "cctvhost-native-state-tests")
-            subprocess.run([
+            # 注意：不要用 check=True——CalledProcessError 的 traceback 不打印
+            # 二进制的输出，运行时哪条 check 失败会被吞掉（test_native_history_cap.py
+            # 已改同款；本文件 2026-11-26 CI 45813507443 就这样丢过一次失败原因）；
+            # 改走 assertEqual，把 stdout+stderr 写进断言消息。
+            build = subprocess.run([
                 "xcrun", "clang", "-fobjc-arc", "-framework", "Foundation", "-framework", "Security",
                 "-I", str(root / "Sources"),
                 str(root / "Tests" / "native_state_tests.m"),
@@ -23,5 +27,7 @@ class NativeStateTests(unittest.TestCase):
                 str(root / "Sources" / "MediaMetadataCache.m"),
                 str(root / "Sources" / "MediaPlaybackStateStore.m"),
                 str(root / "Sources" / "MediaSourceHealthStore.m"),
-            ], check=True, capture_output=True, text=True)
-            subprocess.run([executable], check=True, capture_output=True, text=True, timeout=30)
+            ], capture_output=True, text=True)
+            self.assertEqual(build.returncode, 0, build.stdout + build.stderr)
+            result = subprocess.run([executable], capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
