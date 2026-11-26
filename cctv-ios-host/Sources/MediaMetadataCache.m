@@ -1,10 +1,27 @@
 #import "MediaMetadataCache.h"
-#import "RuntimeDiagnostics.h"
 #import <TargetConditionals.h>
 #if TARGET_OS_IOS
 #import <UIKit/UIKit.h>
 #endif
 #import <CommonCrypto/CommonDigest.h>
+#import <objc/message.h>
+
+// T19/PERF-09：RuntimeDiagnostics 是 App 侧类（UIKit/MetricKit），原生测试
+// 二进制不编译它——经 NSClassFromString 运行时查找（MediaAPIClient.m 的
+// MediaAPIRecordAdaptationMonitor 同款做法），缺席时静默跳过，链接不依赖该符号。
+static void MediaMetadataRecordDiagnosticsEvent(NSString *name, NSDictionary *fields) {
+    Class cls = NSClassFromString(@"RuntimeDiagnostics");
+    if (!cls || ![cls respondsToSelector:NSSelectorFromString(@"shared")]) return;
+    id diagnostics = ((id (*)(id, SEL))objc_msgSend)(cls, NSSelectorFromString(@"shared"));
+    if (!diagnostics) return;
+    SEL enabledSel = NSSelectorFromString(@"isEnabled");
+    if (![diagnostics respondsToSelector:enabledSel]) return;
+    if (!((BOOL (*)(id, SEL))objc_msgSend)(diagnostics, enabledSel)) return;
+    SEL recordSel = NSSelectorFromString(@"recordEvent:category:fields:");
+    if ([diagnostics respondsToSelector:recordSel]) {
+        ((void (*)(id, SEL, NSString *, NSString *, NSDictionary *))objc_msgSend)(diagnostics, recordSel, name, @"media_api", fields);
+    }
+}
 
 static const NSUInteger MediaMetadataCacheEntryLimit = 64;
 static const NSUInteger MediaMetadataCacheByteLimit = 8 * 1024 * 1024;
@@ -244,7 +261,7 @@ NSUInteger MediaSourceConnectionRevision(NSDictionary *source) {
         // 未知只出现在损坏记录上。order 只记已提升的条目。
         if(entry){NSTimeInterval accessed=NSDate.date.timeIntervalSince1970;if([self.entries objectForKey:key])self.order[key]=@(accessed);NSMutableDictionary *record=[self.persistentRecords[key] mutableCopy];if(record){record[@"last_access"]=@(accessed);self.persistentRecords[key]=record;[self schedulePersistentWrite];}}
     });
-    if(RuntimeDiagnostics.shared.enabled){[RuntimeDiagnostics.shared recordEvent:@"media_metadata_cache_read" category:@"media_api" fields:@{@"operation":operation?:@"",@"hit":@(entry!=nil),@"elapsed_ms":@((NSInteger)(MAX(0,CFAbsoluteTimeGetCurrent()-readStartedAt)*1000))}];}
+    MediaMetadataRecordDiagnosticsEvent(@"media_metadata_cache_read", @{@"operation":operation?:@"",@"hit":@(entry!=nil),@"elapsed_ms":@((NSInteger)(MAX(0,CFAbsoluteTimeGetCurrent()-readStartedAt)*1000))});
     if(!entry)return nil;
     NSTimeInterval age=NSDate.date.timeIntervalSince1970-entry.storedAt;
     if(age<0||age>MAX(0,maximumAge))return nil;
@@ -279,7 +296,7 @@ NSUInteger MediaSourceConnectionRevision(NSDictionary *source) {
     });
     if(persistenceChanged)[self schedulePersistentWrite];
     // T19/PERF-09：先测——序列化 + 同步等待耗时（诊断开启时才记）。
-    if(RuntimeDiagnostics.shared.enabled){[RuntimeDiagnostics.shared recordEvent:@"media_metadata_cache_store" category:@"media_api" fields:@{@"operation":operation?:@"",@"bytes":@(data.length),@"elapsed_ms":@((NSInteger)(MAX(0,CFAbsoluteTimeGetCurrent()-storeStartedAt)*1000))}];}
+    MediaMetadataRecordDiagnosticsEvent(@"media_metadata_cache_store", @{@"operation":operation?:@"",@"bytes":@(data.length),@"elapsed_ms":@((NSInteger)(MAX(0,CFAbsoluteTimeGetCurrent()-storeStartedAt)*1000))});
 }
 - (NSTimeInterval)ageOfResultForSource:(NSDictionary *)source operation:(NSString *)operation arguments:(NSDictionary *)arguments {
     if(![@[@"home",@"category",@"search",@"detail"] containsObject:operation])return -1;

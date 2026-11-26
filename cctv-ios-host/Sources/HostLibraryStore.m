@@ -1,6 +1,23 @@
 #import "HostLibraryStore.h"
-#import "RuntimeDiagnostics.h"
+#import <objc/message.h>
 #import <sqlite3.h>
+
+// T19/PERF-10：RuntimeDiagnostics 是 App 侧类（UIKit/MetricKit），原生测试
+// 二进制不编译它——经 NSClassFromString 运行时查找（MediaAPIClient.m 的
+// MediaAPIRecordAdaptationMonitor 同款做法），缺席时静默跳过，链接不依赖该符号。
+static void HostLibraryRecordDiagnosticsEvent(NSString *name, NSDictionary *fields) {
+    Class cls = NSClassFromString(@"RuntimeDiagnostics");
+    if (!cls || ![cls respondsToSelector:NSSelectorFromString(@"shared")]) return;
+    id diagnostics = ((id (*)(id, SEL))objc_msgSend)(cls, NSSelectorFromString(@"shared"));
+    if (!diagnostics) return;
+    SEL enabledSel = NSSelectorFromString(@"isEnabled");
+    if (![diagnostics respondsToSelector:enabledSel]) return;
+    if (!((BOOL (*)(id, SEL))objc_msgSend)(diagnostics, enabledSel)) return;
+    SEL recordSel = NSSelectorFromString(@"recordEvent:category:fields:");
+    if ([diagnostics respondsToSelector:recordSel]) {
+        ((void (*)(id, SEL, NSString *, NSString *, NSDictionary *))objc_msgSend)(diagnostics, recordSel, name, @"media_api", fields);
+    }
+}
 
 NSString *const HostLibraryLegacyFavoritesKey = @"favorites";
 NSString *const HostLibraryLegacyRecentsKey = @"recents";
@@ -616,9 +633,7 @@ static NSArray *HostLibraryHistoryRowsByUpserting(NSArray *rows, NSDictionary *e
         [self refreshSnapshotsLocked];
         result = self.snapshotFavorites ?: @[];
     }];
-    if (RuntimeDiagnostics.shared.enabled) {
-        [RuntimeDiagnostics.shared recordEvent:@"library_store_snapshot_rebuild" category:@"media_api" fields:@{@"collection":@"favorites",@"elapsed_ms":@((NSInteger)(MAX(0, CFAbsoluteTimeGetCurrent() - rebuildStartedAt) * 1000))}];
-    }
+    HostLibraryRecordDiagnosticsEvent(@"library_store_snapshot_rebuild", @{@"collection":@"favorites",@"elapsed_ms":@((NSInteger)(MAX(0, CFAbsoluteTimeGetCurrent() - rebuildStartedAt) * 1000))});
     return [result mutableCopy];
 }
 

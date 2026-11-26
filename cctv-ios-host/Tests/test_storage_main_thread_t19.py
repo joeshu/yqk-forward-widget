@@ -125,6 +125,24 @@ class T19StorageMainThreadContracts(unittest.TestCase):
         self.assertIn("CFAbsoluteTimeGetCurrent()", self.meta)
         self.assertNotIn("CACurrentMediaTime", self.meta)
 
+    def test_diagnostics_resolved_at_runtime_not_linked(self):
+        # Contract lock (CI 2026-11-26, build (full) 链接失败): T19 的三处诊断
+        # 事件曾直接引用 RuntimeDiagnostics.shared——原生测试二进制不编译
+        # RuntimeDiagnostics.m（UIKit/MetricKit），链接丢 _OBJC_CLASS_$_RuntimeDiagnostics，
+        # 四个原生测试全挂。修法：两文件都经 NSClassFromString 运行时查找
+        # （MediaAPIClient.m 同款），缺席静默跳过；不得再直接 import/引用该类。
+        for src, helper in ((self.lib, "HostLibraryRecordDiagnosticsEvent"),
+                            (self.meta, "MediaMetadataRecordDiagnosticsEvent")):
+            self.assertIn('NSClassFromString(@"RuntimeDiagnostics")', src)
+            self.assertIn(f"static void {helper}(NSString *name, NSDictionary *fields) {{", src)
+            self.assertIn('NSSelectorFromString(@"isEnabled")', src)
+            self.assertIn('NSSelectorFromString(@"recordEvent:category:fields:")', src)
+            self.assertNotIn('#import "RuntimeDiagnostics.h"', src)
+            self.assertNotIn("RuntimeDiagnostics.shared", src)
+        self.assertIn('HostLibraryRecordDiagnosticsEvent(@"library_store_snapshot_rebuild"', self.lib)
+        self.assertIn('MediaMetadataRecordDiagnosticsEvent(@"media_metadata_cache_read"', self.meta)
+        self.assertIn('MediaMetadataRecordDiagnosticsEvent(@"media_metadata_cache_store"', self.meta)
+
     def test_persistent_load_never_overwrites_newer_records(self):
         body = method_body(self.meta, "- (void)loadPersistentRecords {", "- (void)schedulePersistentWrite {")
         self.assertIn("dispatch_sync(self.queue, ^{for(NSString *key in loaded)if(!self.persistentRecords[key])self.persistentRecords[key]=loaded[key];});", body)
@@ -142,7 +160,10 @@ class T19StorageMainThreadContracts(unittest.TestCase):
     def test_read_and_store_timings_recorded_when_diagnostics_enabled(self):
         self.assertIn('"media_metadata_cache_read"', self.meta)
         self.assertIn('"media_metadata_cache_store"', self.meta)
-        self.assertIn("if(RuntimeDiagnostics.shared.enabled)", self.meta)
+        # 诊断经运行时查找 helper 记（父代理 CI 修正：直接引用 RuntimeDiagnostics
+        # 会让原生测试二进制链接失败，见 test_diagnostics_resolved_at_runtime_not_linked）。
+        self.assertIn('MediaMetadataRecordDiagnosticsEvent(@"media_metadata_cache_read"', self.meta)
+        self.assertIn('MediaMetadataRecordDiagnosticsEvent(@"media_metadata_cache_store"', self.meta)
         # Round 18 的去重序列化不变量保留。
         self.assertIn("[persistentResult isEqual:result]?data:", self.meta)
 
