@@ -11,7 +11,10 @@ typedef void (^ShortDramaResolveCancel)(void);
 /// 不得取消其它下标正在进行的解析；返回取消令牌（不支持取消时返回 nil）。
 /// 若结果需要网页解析/非原生播放（requiresWebPlayback），应直接回调 completion(nil, nil)，
 /// 由详情页的标准播放器承接（feed 只走 AVPlayer 直播）。
-typedef nullable ShortDramaResolveCancel (^ShortDramaEpisodeResolver)(NSInteger index, void (^completion)(NSURL * _Nullable url, NSDictionary<NSString *, NSString *> * _Nullable headers));
+/// 注意：typedef 本身不带 nullable（clang 不接受 block 返回类型前的
+/// nullable 限定）；resolver 可为空由各使用处显式标注（init 参数与
+/// feed 的 episodeResolver 属性均为 nullable）。
+typedef ShortDramaResolveCancel (^ShortDramaEpisodeResolver)(NSInteger index, void (^completion)(NSURL * _Nullable url, NSDictionary<NSString *, NSString *> * _Nullable headers));
 
 /// 短剧全屏竖屏上下滑沉浸播放引擎（3 实例滑窗预热池：当前集播放 + 下一集预热 + 上一集保活）。
 @interface ShortDramaVerticalFeedController : UIViewController

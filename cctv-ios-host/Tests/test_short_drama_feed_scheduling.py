@@ -424,6 +424,11 @@ class ShortDramaSchedulingContracts(unittest.TestCase):
         self.assertIn('ShortDramaEpisodeResolver', self.feed_h)
         self.assertIn('episodeResolver:(nullable ShortDramaEpisodeResolver)resolver', self.feed_h)
         self.assertIn('每次调用必须使用独立的解析任务', self.feed_h)
+        # clang 不接受 block 返回类型前的 nullable 限定（CI ui-preview
+        # 曾因此报 unknown type name 'nullable'）：typedef 本身不带
+        # nullable，空值由 init 参数与属性上的显式 nullable 标注。
+        self.assertNotIn('typedef nullable', self.feed_h)
+        self.assertIn('typedef ShortDramaResolveCancel (^ShortDramaEpisodeResolver)', self.feed_h)
 
     def test_slot_state_machine_replaces_resolving_bool(self):
         for state in ('ShortDramaSlotStateIdle', 'ShortDramaSlotStateResolving',

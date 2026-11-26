@@ -24,7 +24,11 @@ host_mpv_lifecycle_t *host_mpv_lifecycle_create(void) {
     if (!lc) return NULL;
     (void)pthread_mutex_init(&lc->mutex, NULL);
     /* Prefer a monotonic clock for the exit wait so a wall-clock jump
-     * can neither stretch nor cut the bounded wait short. */
+     * can neither stretch nor cut the bounded wait short. macOS has no
+     * pthread_condattr_setclock: there the cond uses the default clock
+     * and the wait deadline is computed in the same clock (see
+     * host_mpv_lifecycle_wait_event_thread_exit). */
+#if !defined(__APPLE__)
     {
         pthread_condattr_t attr;
         if (pthread_condattr_init(&attr) == 0) {
@@ -35,6 +39,9 @@ host_mpv_lifecycle_t *host_mpv_lifecycle_create(void) {
             (void)pthread_cond_init(&lc->exited_cond, NULL);
         }
     }
+#else
+    (void)pthread_cond_init(&lc->exited_cond, NULL);
+#endif
     lc->state = HOST_MPV_LC_IDLE;
     lc->event_thread_started = 0;
     lc->event_thread_exited = 0;
@@ -150,7 +157,15 @@ int host_mpv_lifecycle_wait_event_thread_exit(host_mpv_lifecycle_t *lc, int time
     struct timespec deadline;
     if (!lc) return 0;
     if (timeout_ms < 0) timeout_ms = 0;
+    /* Deadline in the cond's own clock: CLOCK_MONOTONIC where the cond
+     * was created with setclock (Linux), CLOCK_REALTIME on Apple where
+     * the cond uses the default clock. A mismatched clock would make
+     * the bounded wait return immediately or far too late. */
+#ifdef __APPLE__
+    (void)clock_gettime(CLOCK_REALTIME, &deadline);
+#else
     (void)clock_gettime(CLOCK_MONOTONIC, &deadline);
+#endif
     deadline.tv_sec += timeout_ms / 1000;
     deadline.tv_nsec += (long)(timeout_ms % 1000) * 1000000L;
     if (deadline.tv_nsec >= 1000000000L) {

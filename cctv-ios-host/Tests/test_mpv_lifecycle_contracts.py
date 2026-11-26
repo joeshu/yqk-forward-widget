@@ -66,6 +66,17 @@ class MPVLifecycleContractTests(unittest.TestCase):
         self.assertGreaterEqual(
             ADAPTER_M.count("host_mpv_lifecycle_note_event_thread_exited(_lifecycle)"), 3)
 
+    def test_cond_clock_is_portable_to_darwin(self):
+        # pthread_condattr_setclock does not exist on macOS (CI ui-preview
+        # failed on it): the monotonic cond setup must be guarded out on
+        # Apple platforms, and the wait deadline must then be computed in
+        # the cond's own (realtime) clock, or the bounded wait misfires.
+        self.assertIn("#if !defined(__APPLE__)", LIFECYCLE_C)
+        self.assertIn("pthread_condattr_setclock", LIFECYCLE_C)
+        self.assertIn("#ifdef __APPLE__", LIFECYCLE_C)
+        self.assertIn("clock_gettime(CLOCK_REALTIME, &deadline)", LIFECYCLE_C)
+        self.assertIn("clock_gettime(CLOCK_MONOTONIC, &deadline)", LIFECYCLE_C)
+
     def test_lifecycle_core_is_pure_c(self):
         # No Foundation, no I/O, no allocation besides the object itself.
         for forbidden in ("#import <Foundation", "NSLog", "fopen", "NSLock",
