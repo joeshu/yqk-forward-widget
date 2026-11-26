@@ -1,7 +1,7 @@
 """T16 个人库/历史/收藏（M11–M13）测试。
 
 M11：无首帧证据不建历史；续播确认前 / seek 未完成不覆盖旧进度；
-     未完成且位置为 0 的记录在 Store 层直接丢弃。
+     未完成且位置为 0 时不覆盖已有记录，无旧记录时仍建新条目。
 M12：历史与收藏行级写入（单行 upsert/delete + SQL 内裁剪），不再整表
      DELETE + INSERT；事务失败回退 defaults 并发通知。
 M13：历史与收藏统一来源解析——打开时查实时来源列表，显示时按 sourceID
@@ -65,23 +65,27 @@ def vc_gate_passes(video_frame_ready, audio_only, resume_prompt_pending, pending
     return True
 
 
-def store_guard_passes(position, duration, completed):
-    """recordContext 的 Store 层守卫。"""
+def store_guard_passes(position, duration, completed, has_previous=False):
+    """recordContext 的 Store 层守卫。未完成且位置为 0 时，只拦“覆盖已有
+    记录”；无旧记录时仍建新条目（native_state_tests 契约：同批不同集
+    position 0 须入历史）。"""
     if position is None or position != position or position < 0:
         return False
     if duration is None or duration != duration or duration < 0:
         duration = 0
     finished = completed or (duration > 0 and position >= duration - 2.0)
-    if not finished and position <= 0:
+    if not finished and position <= 0 and has_previous:
         return False
     return True
 
 
 def should_persist(video_frame_ready, audio_only, resume_prompt_pending,
-                   pending_seek, position, duration, completed):
+                   pending_seek, position, duration, completed,
+                   has_previous=False):
     return (vc_gate_passes(video_frame_ready, audio_only,
                            resume_prompt_pending, pending_seek)
-            and store_guard_passes(position, duration, completed))
+            and store_guard_passes(position, duration, completed,
+                                   has_previous=has_previous))
 
 
 # ---- M13 显示名模型：与 MediaLibraryDisplaySourceName 逐行对照 ----
@@ -122,7 +126,11 @@ class M11GateTests(unittest.TestCase):
     def test_store_zero_position_guard(self):
         body = method_body(self.store, "+ (void)recordContext:",
                            "+ (void)removeHistoryEntryWithKey:")
-        self.assertIn("if(!finished&&position<=0)return;", body)
+        self.assertIn("if(!finished&&position<=0&&previous)return;", body)
+        # 守卫用到的 previous 必须在守卫前查出（同 key 判定），且只查一次。
+        self.assertLess(body.index("historyEntryForContext:"),
+                        body.index("if(!finished&&position<=0&&previous)return;"))
+        self.assertEqual(body.count("historyEntryForContext:"), 1)
 
     def test_fresh_item_without_evidence_never_persists(self):
         self.assertFalse(should_persist(False, False, False, None, 0, 100, False))
@@ -137,9 +145,16 @@ class M11GateTests(unittest.TestCase):
         self.assertFalse(should_persist(True, False, False, 1800, 30, 100, False))
         self.assertFalse(should_persist(True, False, True, 1800, 0, 100, False))
 
-    def test_zero_position_never_creates_or_overwrites(self):
-        self.assertFalse(should_persist(True, False, False, None, 0, 100, False))
-        self.assertFalse(should_persist(False, True, False, None, 0, 100, False))
+    def test_zero_position_never_overwrites_but_creates_fresh_entry(self):
+        # 有旧记录：0 位置不覆盖旧进度。
+        self.assertFalse(should_persist(True, False, False, None, 0, 100, False,
+                                        has_previous=True))
+        self.assertFalse(should_persist(False, True, False, None, 0, 100, False,
+                                        has_previous=True))
+        # 无旧记录：0 位置仍建新条目（native_state_tests：同批不同集 position 0
+        # 须入历史，否则 watchHistory 只有 1 条）。
+        self.assertTrue(should_persist(True, False, False, None, 0, 100, False,
+                                       has_previous=False))
         # 完成态（距片尾 2 秒内或显式 completed）不受 0 位置守卫拦
         self.assertTrue(should_persist(True, False, False, None, 99, 100, False))
         self.assertTrue(should_persist(True, False, False, None, 0, 0, True))

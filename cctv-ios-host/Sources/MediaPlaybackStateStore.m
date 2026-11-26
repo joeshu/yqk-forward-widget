@@ -179,13 +179,13 @@ static NSDictionary *MediaPlaybackComponents(NSDictionary *context, NSInteger li
     if (!isfinite(position) || position < 0) return;
     if (!isfinite(duration) || duration < 0) duration = 0;
     BOOL finished = completed || (duration > 0 && position >= duration - 2.0);
-    if(!finished&&position<=0)return; // M11：未完成且位置为 0，不新建记录、不覆盖旧进度
+    NSDictionary *previous=[self historyEntryForContext:context lineIndex:lineIndex episodeIndex:episodeIndex];
+    if(!finished&&position<=0&&previous)return; // M11：未完成且位置为 0，不覆盖已有进度；无旧记录时仍建新条目（native_state_tests 契约：同批不同集 position 0 须入历史）
     NSMutableDictionary *entry = [parts mutableCopy];
     entry[@"position"] = @(finished ? duration : position);
     entry[@"duration"] = @(duration);
     entry[@"completed"] = @(finished);
     entry[@"updatedAt"] = NSDate.date;
-    NSDictionary *previous=[self historyEntryForContext:context lineIndex:lineIndex episodeIndex:episodeIndex];
     NSString *previousKey=[previous[@"key"] isKindOfClass:NSString.class]?previous[@"key"]:nil;
     if([previousKey isEqualToString:entry[@"key"]])previousKey=nil; // M12：同 key 只写一行；身份变化导致旧 key 不同时才一并删旧行
     [HostLibraryStore.shared upsertMediaWatchHistoryEntry:entry replacingKey:previousKey]; // M12：行级写入，100 条上限由 Store 在 SQL 内裁剪
