@@ -3,6 +3,7 @@
 #import "HostTheme.h"
 #import "MediaPlaybackStateStore.h"
 #import "PlaybackCoordinator.h"
+#import "HostMemoryBudgetCoordinator.h"
 #import <AVFoundation/AVFoundation.h>
 
 /// 短剧槽位解析状态（M01）：resolving/ready/failed/cancelled 四态显式收敛，
@@ -490,9 +491,13 @@ typedef NS_ENUM(NSInteger, ShortDramaSlotState) {
         }
     }
     // Centre-first：先发当前集解析，再发邻集；邻集只预热、不抢当前集的解析。
+    // T21/S6：邻集预解析按剩余资源决定——正常/未知前后各一集；Warning 只预取
+    // 下一集；Critical 只解当前集，邻集滑到时再解（不取消已在途的解析）。
+    HostMemoryBudgetPressure pressure = [HostMemoryBudgetCoordinator.shared currentPressure];
+    NSUInteger neighborBudget = pressure == HostMemoryBudgetPressureCritical ? 0 : (pressure == HostMemoryBudgetPressureWarning ? 1 : 2);
     [self prepareSlotForIndex:centerIndex autoPlay:YES];
-    if (centerIndex + 1 < (NSInteger)self.episodes.count) [self prepareSlotForIndex:centerIndex + 1 autoPlay:NO];
-    if (centerIndex - 1 >= 0) [self prepareSlotForIndex:centerIndex - 1 autoPlay:NO];
+    if (neighborBudget >= 1 && centerIndex + 1 < (NSInteger)self.episodes.count) [self prepareSlotForIndex:centerIndex + 1 autoPlay:NO];
+    if (neighborBudget >= 2 && centerIndex - 1 >= 0) [self prepareSlotForIndex:centerIndex - 1 autoPlay:NO];
     // T17：进度观察只跟当前集。
     [self installProgressObserverForSlot:self.playerPool[@(centerIndex)]];
 }

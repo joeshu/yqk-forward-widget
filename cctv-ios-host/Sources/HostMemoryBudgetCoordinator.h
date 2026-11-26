@@ -8,6 +8,8 @@ typedef NS_ENUM(NSInteger, HostMemoryBudgetPressure) {
     HostMemoryBudgetPressureNormal = 0,
     HostMemoryBudgetPressureWarning,
     HostMemoryBudgetPressureCritical,
+    /// 内存值不可用（os_proc_available_memory 返回 0）：不断言“正常”，也不触发裁剪。
+    HostMemoryBudgetPressureUnknown,
 };
 
 @interface HostMemoryBudgetCoordinator : NSObject
@@ -20,7 +22,8 @@ typedef NS_ENUM(NSInteger, HostMemoryBudgetPressure) {
 /// 当前进程剩余可用内存字节数（os_proc_available_memory）。
 - (uint64_t)availableMemoryBytes;
 
-/// 当前内存压力级别（<350MB Warning，<200MB Critical）。
+/// 当前内存压力级别（<350MB Warning，<200MB Critical；读不到按 Unknown；
+/// 严重/危急温升至少 Warning）。只读快照，调用方不得据此假设已裁剪。
 - (HostMemoryBudgetPressure)currentPressure;
 
 /// 在拉起大型运行时（Python / Node / JAR / MPV）前按需触发缓存裁剪，返回是否执行了裁剪。

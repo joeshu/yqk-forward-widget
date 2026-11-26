@@ -8,6 +8,7 @@
 #import "MediaSourceHealthStore.h"
 #import "HostImageLoader.h"
 #import "MediaSearchResults.h"
+#import "HostMemoryBudgetCoordinator.h"
 #import <math.h>
 
 static void MediaSearchLoadPosterWithRetry(NSString *url, UIImageView *view, NSUInteger retriesRemaining);
@@ -518,9 +519,19 @@ static NSDictionary *MediaSearchPageState(NSString *name, NSArray *items, NSDict
     [self updateFilters];[self.tableView reloadData];
 }
 
+- (NSUInteger)effectiveMaximumConcurrentSources {
+    // T21/S6：全局搜索并发上限随内存压力自适应——正常/未知保持 6 路；Warning
+    // 降到 2 路；Critical 只留 1 路。只管新任务准入，不取消已在途的搜索
+    //（活跃工作不受回收影响）；压力回落后下一轮泵送自动恢复到 6 路。
+    HostMemoryBudgetPressure pressure = [HostMemoryBudgetCoordinator.shared currentPressure];
+    if (pressure == HostMemoryBudgetPressureCritical) return 1;
+    if (pressure == HostMemoryBudgetPressureWarning) return 2;
+    return MediaGlobalSearchMaximumConcurrentSources;
+}
+
 - (void)scheduleSources {
     if (!self.searching) return;
-    while (self.jobs.count < MediaGlobalSearchMaximumConcurrentSources && self.pendingSections.count) {
+    while (self.jobs.count < [self effectiveMaximumConcurrentSources] && self.pendingSections.count) {
         NSNumber *number = self.pendingSections.firstObject;
         [self.pendingSections removeObjectAtIndex:0];
         NSUInteger section = number.unsignedIntegerValue;
@@ -863,7 +874,7 @@ static NSDictionary *MediaSearchPageState(NSString *name, NSArray *items, NSDict
     NSUInteger denominator = self.scheduledCount;
     if (!denominator) {
         if(self.currentSiteScope)self.progressLabel.text=@"当前站点尚未运行；点按对应来源可单独启动后搜索。";
-        else self.progressLabel.text = [NSString stringWithFormat:@"%lu 个影视来源 · 搜索中来源上限 %lu；不会自动启动其他插件。", (unsigned long)self.searchSources.count, (unsigned long)MediaGlobalSearchMaximumConcurrentSources];
+        else self.progressLabel.text = [NSString stringWithFormat:@"%lu 个影视来源 · 搜索中来源上限 %lu；不会自动启动其他插件。", (unsigned long)self.searchSources.count, (unsigned long)[self effectiveMaximumConcurrentSources]];
         return;
     }
     NSUInteger active = self.jobs.count;

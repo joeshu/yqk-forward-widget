@@ -61,19 +61,31 @@ static void JARThread(void (^work)(void)) {
 @property(nonatomic,strong) NSError *downloadError;
 @property(nonatomic,strong) dispatch_semaphore_t downloaded;
 @property(nonatomic,copy) NSString *requestID;
+@property(nonatomic,strong,nullable) NSUUID *runtimeLease;
+- (void)releaseRuntimeLease;
 @end
 @implementation MediaJARRequest
 - (BOOL)claimCompletion {
     @synchronized(self){
         if(self.completed||self.cancelled)return NO;
         self.completed=YES;
+        [self releaseRuntimeLease];
         return YES;
+    }
+}
+- (void)releaseRuntimeLease {
+    // @synchronized 是可重入的：claimCompletion 已持同一把锁时直接复用。
+    // 归还幂等——token 取出即置 nil，重复调用无操作。
+    @synchronized(self){
+        NSUUID *lease=self.runtimeLease;self.runtimeLease=nil;
+        if(lease)[HostRuntimeLifecycleCoordinator.shared releaseLease:lease];
     }
 }
 - (void)cancel {
     self.cancelled=YES;if(self.watchdog){dispatch_source_cancel(self.watchdog);self.watchdog=nil;}[self.download cancel];
     dispatch_semaphore_t dlSema=self.downloaded;if(dlSema)dispatch_semaphore_signal(dlSema);
     if(self.executing){NSString *requestID=self.requestID;JARThread(^{JARInvoke(@{@"command":@"cancel",@"request":requestID});});}
+    [self releaseRuntimeLease];
 }
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task didReceiveResponse:(NSURLResponse *)response completionHandler:(void (^)(NSURLSessionResponseDisposition))completion {
     NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]?[(NSHTTPURLResponse *)response statusCode]:0;
@@ -113,11 +125,15 @@ static void JARThread(void (^work)(void)) {
     MediaJARRequest *ticket=[MediaJARRequest new];ticket.requestID=NSUUID.UUID.UUIDString;
     // JVM ↔ Node 互斥：拉起 JVM 前若 Node 无活跃会话则先回收其空闲会话（非阻塞，best-effort）。
     [HostRuntimeLifecycleCoordinator.shared prepareForMutualExclusionBeforeActivating:HostRuntimeKindJVM];
+    // 在途 JAR 请求持有 JVM 租约：生命周期协调器此前看不见在途票据
+    //（hasActiveSessionsForKind:JVM 恒为 NO），租约让它在互斥与回收前能确认
+    // JVM 正忙；完成/取消/队列拒收时归还（见 claimCompletion/cancel）。
+    ticket.runtimeLease=[HostRuntimeLifecycleCoordinator.shared acquireLeaseForKind:HostRuntimeKindJVM owner:@"jar-request"];
     [HostRuntimeLifecycleCoordinator.shared noteRuntimeActivity:HostRuntimeKindJVM];
     static NSOperationQueue *queue;static dispatch_once_t once;
     static NSUInteger activeBridgeCalls;
     dispatch_once(&once,^{queue=[NSOperationQueue new];queue.name=@"CCTVHost JAR requests";queue.maxConcurrentOperationCount=2;});
-    if(queue.operationCount>=4){dispatch_async(dispatch_get_main_queue(),^{if(!ticket.cancelled&&completion)completion(nil,JARError(12,@"JAR 准备队列已满，请稍候重试"));});return ticket;}
+    if(queue.operationCount>=4){dispatch_async(dispatch_get_main_queue(),^{if(!ticket.cancelled&&completion)completion(nil,JARError(12,@"JAR 准备队列已满，请稍候重试"));});[ticket releaseRuntimeLease];return ticket;}
     dispatch_source_t watchdog=dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER,0,0,dispatch_get_main_queue());
     ticket.watchdog=watchdog;
     dispatch_source_set_timer(watchdog,dispatch_time(DISPATCH_TIME_NOW,900*NSEC_PER_SEC),DISPATCH_TIME_FOREVER,NSEC_PER_SEC);

@@ -52,6 +52,14 @@ FOUNDATION_EXPORT NSNotificationName const HostRuntimeDidReclaimNotification;
 /// 有活跃会话则不动。非阻塞——实际停止派发到后台队列，不在主线程等待。
 - (void)prepareForMutualExclusionBeforeActivating:(HostRuntimeKind)kind;
 
+/// 为一次活跃工作持有运行时租约（例如在途 JAR 请求）；持有租约的运行时在
+/// 归还前不参与空闲回收。租约须在工作结束时归还（正常完成与取消都要归还）；
+/// 漏归还只会让该运行时暂缓回收，不会停止任何活跃服务。
+- (nullable NSUUID *)acquireLeaseForKind:(HostRuntimeKind)kind owner:(nullable NSString *)owner;
+
+/// 归还租约（重复归还或归还 nil 均无操作）。
+- (void)releaseLease:(nullable NSUUID *)lease;
+
 /// 内存告警路径：按优先级释放空闲运行时会话。critical 为 YES 时阈值放宽。
 /// 复用 HostMemoryBudgetCoordinator 的裁剪通知触发。
 - (void)reclaimIdleRuntimesForMemoryPressure:(BOOL)critical;

@@ -22,6 +22,10 @@ NSString *PyHostControlToken(void) {return @"test-control-token";}
 + (instancetype)shared {static HostRuntimeLifecycleCoordinator *instance;static dispatch_once_t once;dispatch_once(&once,^{instance=[self new];});return instance;}
 - (void)prepareForMutualExclusionBeforeActivating:(HostRuntimeKind)kind {}
 - (void)noteRuntimeActivity:(HostRuntimeKind)kind {}
+// T21 租约桩：MediaJARRuntime.m 的票据持有/归还租约；本 harness 不跑 JAR 请求，
+// 租约恒为空（acquire 返回 nil，release 无操作）。
+- (NSUUID *)acquireLeaseForKind:(HostRuntimeKind)kind owner:(NSString *)owner { return nil; }
+- (void)releaseLease:(NSUUID *)lease {}
 @end
 
 static void check(BOOL condition,NSString *message){if(!condition){NSLog(@"FAILED: %@",message);exit(1);}}

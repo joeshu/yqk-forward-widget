@@ -24,6 +24,7 @@ static NSInteger const HostRuntimeDefaultIdleSeconds = 600;
 @property (nonatomic, strong) dispatch_queue_t queue;
 @property (nonatomic, strong) dispatch_source_t watchdog;
 @property (nonatomic, strong) NSMutableDictionary<NSNumber *, NSDate *> *lastActivity;
+@property (nonatomic, strong) NSMutableDictionary<NSUUID *, NSDictionary *> *leases;
 @property (nonatomic, copy, nullable) BOOL (^playbackProvider)(void);
 @property (nonatomic, assign) BOOL monitoring;
 - (void)registerDefaults;
@@ -32,9 +33,10 @@ static NSInteger const HostRuntimeDefaultIdleSeconds = 600;
 - (void)touchActivityForKind:(HostRuntimeKind)kind;
 - (void)touchActiveRuntimes;
 - (BOOL)hasActiveSessionsForKind:(HostRuntimeKind)kind;
+- (BOOL)hasLiveLeaseForKind:(HostRuntimeKind)kind;
 - (BOOL)anyRuntimeActive;
 - (void)performReclaimWithReason:(NSString *)reason critical:(BOOL)critical;
-- (void)stopIdleSessionsForKind:(HostRuntimeKind)kind;
+- (nullable NSError *)stopIdleSessionsForKind:(HostRuntimeKind)kind;
 - (NSString *)nameForKind:(HostRuntimeKind)kind;
 - (void)handleMemoryWarning:(NSNotification *)note;
 - (void)handleBudgetTrim:(NSNotification *)note;
@@ -53,6 +55,7 @@ static NSInteger const HostRuntimeDefaultIdleSeconds = 600;
     if ((self = [super init])) {
         _queue = dispatch_queue_create("com.cctvhost.runtime-lifecycle", DISPATCH_QUEUE_SERIAL);
         _lastActivity = [NSMutableDictionary dictionary];
+        _leases = [NSMutableDictionary dictionary];
         // 初始活动时间设为启动时刻：开机即开始计时，首个空闲窗口可被看门狗观测。
         NSDate *now = [NSDate date];
         for (NSInteger k = HostRuntimeKindPython; k <= HostRuntimeKindJVM; k++) {
@@ -137,6 +140,32 @@ static NSInteger const HostRuntimeDefaultIdleSeconds = 600;
     }
 }
 
+#pragma mark - Leases
+
+- (NSUUID *)acquireLeaseForKind:(HostRuntimeKind)kind owner:(NSString *)owner {
+    NSUUID *lease = [NSUUID UUID];
+    @synchronized(self) {
+        self.leases[lease] = @{@"kind": @(kind), @"owner": owner ?: @"", @"acquiredAt": @(CFAbsoluteTimeGetCurrent())};
+    }
+    return lease;
+}
+
+- (void)releaseLease:(NSUUID *)lease {
+    if (!lease) return;
+    @synchronized(self) {
+        [self.leases removeObjectForKey:lease];
+    }
+}
+
+- (BOOL)hasLiveLeaseForKind:(HostRuntimeKind)kind {
+    @synchronized(self) {
+        for (NSDictionary *record in self.leases.allValues) {
+            if ([record[@"kind"] integerValue] == kind) return YES;
+        }
+        return NO;
+    }
+}
+
 #pragma mark - Activity tracking
 
 - (NSDate *)lastActivityForKind:(HostRuntimeKind)kind {
@@ -193,10 +222,13 @@ static NSInteger const HostRuntimeDefaultIdleSeconds = 600;
     // 播放中绝不回收——避免在点播/直播占用播放器期间释放任何运行时会话。
     if ([self isPlaybackActive]) return;
     if (!critical && !self.idleReclaimEnabled) return;
+    CFTimeInterval reclaimStartedAt = CFAbsoluteTimeGetCurrent();
     [self touchActiveRuntimes];
     NSTimeInterval threshold = [self thresholdForCritical:critical];
     NSTimeInterval now = [NSDate date].timeIntervalSince1970;
     NSMutableArray<NSString *> *reclaimed = [NSMutableArray array];
+    NSMutableArray<NSString *> *failedKinds = [NSMutableArray array];
+    NSMutableArray<NSString *> *failures = [NSMutableArray array];
 
     // 内存告警按优先级释放：Node（最重常驻）→ JavaScript → Python 残留会话。
     // JVM 不可会话级回收，跳过。
@@ -206,22 +238,34 @@ static NSInteger const HostRuntimeDefaultIdleSeconds = 600;
 
     for (NSNumber *boxed in order) {
         HostRuntimeKind kind = (HostRuntimeKind)boxed.integerValue;
-        if ([self hasActiveSessionsForKind:kind]) continue;
+        // 活跃会话或在途租约任一成立都视为占用，不回收（租约与会话须匹配，
+        // 见 PERF-11；JVM 在途请求由 MediaJARRuntime 的租约标示）。
+        if ([self hasActiveSessionsForKind:kind] || [self hasLiveLeaseForKind:kind]) continue;
         NSDate *last = [self lastActivityForKind:kind];
         BOOL idle = (now - last.timeIntervalSince1970) >= threshold;
         if (!idle) continue;
-        [self stopIdleSessionsForKind:kind];
+        NSError *stopError = [self stopIdleSessionsForKind:kind];
+        if (stopError) {
+            // 停止失败不记入 reclaimed（旧代码无条件记入，诊断会谎称已回收），
+            // 也不刷新计时，下个看门狗周期再试。
+            [failedKinds addObject:[self nameForKind:kind]];
+            [failures addObject:stopError.localizedDescription ?: @"stop failed"];
+            continue;
+        }
         [reclaimed addObject:[self nameForKind:kind]];
         [self touchActivityForKind:kind];
     }
 
-    if (reclaimed.count) {
+    if (reclaimed.count || failedKinds.count) {
+        NSTimeInterval elapsedMs = MAX(0, CFAbsoluteTimeGetCurrent() - reclaimStartedAt) * 1000;
         [NSNotificationCenter.defaultCenter postNotificationName:HostRuntimeDidReclaimNotification
                                                           object:self
                                                         userInfo:@{
                                                             @"reason": reason ?: @"unspecified",
                                                             @"critical": @(critical),
                                                             @"kinds": reclaimed.copy,
+                                                            @"failed_kinds": failedKinds.copy,
+                                                            @"elapsed_ms": @(elapsedMs),
                                                         }];
         [RuntimeDiagnostics.shared recordEvent:@"runtime_idle_reclaim"
                                       category:@"runtime"
@@ -229,24 +273,30 @@ static NSInteger const HostRuntimeDefaultIdleSeconds = 600;
                                             @"reason": reason ?: @"unspecified",
                                             @"critical": @(critical),
                                             @"kinds": reclaimed.copy,
+                                            @"failed_kinds": failedKinds.copy,
+                                            @"error": failures.firstObject ?: @"",
                                             @"threshold_seconds": @(threshold),
+                                            @"elapsed_ms": @(elapsedMs),
                                         }];
     }
 }
 
-- (void)stopIdleSessionsForKind:(HostRuntimeKind)kind {
-    // 仅当该运行时无活跃会话时调用其停止入口，清理 uncertain/managed 残留会话。
-    // 全部在私有后台串行队列执行，不阻塞主线程。
+- (NSError *)stopIdleSessionsForKind:(HostRuntimeKind)kind {
+    // 仅当该运行时无活跃会话且无在途租约时调用其停止入口，清理 uncertain/managed 残留会话。
+    // 全部在私有后台串行队列执行，不阻塞主线程。返回首个停止错误，成功返回 nil。
+    NSError *error = nil;
     switch (kind) {
         case HostRuntimeKindNode:
             if (NodePluginRuntime.shared.managedServiceIdentifiers.count > 0) {
-                [NodePluginRuntime.shared stopWithError:NULL];
+                [NodePluginRuntime.shared stopWithError:&error];
             }
             break;
         case HostRuntimeKindJavaScript: {
             NSArray<NSString *> *managed = JSPluginRuntime.shared.managedServiceIdentifiers;
             for (NSString *identifier in managed) {
-                [JSPluginRuntime.shared stopSessionsForServiceIdentifier:identifier error:NULL];
+                NSError *stopError = nil;
+                [JSPluginRuntime.shared stopSessionsForServiceIdentifier:identifier error:&stopError];
+                if (!error) error = stopError;
             }
             break;
         }
@@ -254,13 +304,14 @@ static NSInteger const HostRuntimeDefaultIdleSeconds = 600;
             // 无活跃 Python 会话时 stopWithError 清理跨运行时的残留 managed 会话；
             // 已通过 hasActiveSessionsForKind 保证此时无活跃会话，不会打断在用服务。
             if (PyHost.runningServiceIdentifiers.count == 0) {
-                [PyHost stopWithError:NULL];
+                [PyHost stopWithError:&error];
             }
             break;
         case HostRuntimeKindJVM:
             // 按请求调用，无可停止的常驻会话；进程级 teardown 为高风险（见报告）。
             break;
     }
+    return error;
 }
 
 - (NSString *)nameForKind:(HostRuntimeKind)kind {
@@ -282,8 +333,9 @@ static NSInteger const HostRuntimeDefaultIdleSeconds = 600;
     else if (kind == HostRuntimeKindJVM) other = HostRuntimeKindNode;
     else return; // 仅 JVM ↔ Node 互斥；Python/JS 不参与。
     dispatch_async(self.queue, ^{
-        // 对方有活跃会话时绝不停止。
-        if ([self hasActiveSessionsForKind:other]) {
+        // 对方有活跃会话或在途租约时绝不停止（租约见 PERF-11；JVM 在途请求
+        // 此前因 hasActiveSessionsForKind:JVM 恒为 NO 而永远看不见，现在由租约标示）。
+        if ([self hasActiveSessionsForKind:other] || [self hasLiveLeaseForKind:other]) {
             [self touchActivityForKind:other];
             return;
         }
