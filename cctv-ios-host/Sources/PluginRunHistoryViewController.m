@@ -41,6 +41,9 @@
     // CI 上 SE 变体连续两次 rows=0：驱动每 0.5s 重请求一次，但取数在途时全被
     // 丢弃；改成合并重取后，最后一次请求的状态一定会被取回来）。
     if(self.refreshingRuns){self.refreshPending=YES;return;}self.refreshingRuns=YES;
+    // 主线程前置工作（只能在主线程做的状态读取/标记）先做完，再把纯取数
+    // 交给后台；provider 里不要再 dispatch_sync 回主线程。
+    if(self.willRefreshRuns)self.willRefreshRuns();
     NSArray *(^provider)(void)=[self.runRecordsProvider copy];__weak typeof(self) weakSelf=self;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{NSArray *runs=provider?provider():@[];dispatch_async(dispatch_get_main_queue(),^{
         PluginRunHistoryViewController *owner=weakSelf;if(!owner)return;owner.refreshingRuns=NO;

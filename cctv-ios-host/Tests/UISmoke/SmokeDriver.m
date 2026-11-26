@@ -843,13 +843,23 @@ static void next(NSArray *steps, NSUInteger index) {
             // refreshRuns 在途时把重请求合并为一次取数（见 PluginRunHistoryViewController），
             // 旧快照不会再是最后落定的数据。继续每 0.5s 重请求并要求模型与表格
             // 同时报 2 行；SE 是最慢变体（同文件时移检查已有同类放宽，621f917），
-            // 取数在模拟器负载下可能很久，超时放宽到 60s。
+            // 取数在模拟器负载下可能很久，超时放宽到 60s。轮询过程每 5s 记一行
+            // 到 history-wait-trace.txt（随产物上传），若再红可直接看到取数
+            // 是卡在途（refreshing=1）还是回了空数据（refreshing=0 runs=0）。
             NSDate *deadline=[NSDate dateWithTimeIntervalSinceNow:60];NSDate *nextRefresh=[NSDate distantPast];
+            NSDate *pollStart=[NSDate date];NSDate *nextTrace=[NSDate distantPast];
+            NSString *tracePath=[outputDir stringByAppendingPathComponent:@"history-wait-trace.txt"];
+            NSMutableString *trace=[NSMutableString string];
             NSInteger historyRows=0;
             while(deadline.timeIntervalSinceNow>0){
                 historyRows=[history tableView:history.tableView numberOfRowsInSection:0];
                 if([[history valueForKey:@"runs"] count]==2&&historyRows==2&&[history.tableView numberOfRowsInSection:0]==2)break;
                 if(nextRefresh.timeIntervalSinceNow<=0){[history performSelector:@selector(refreshRuns)];nextRefresh=[NSDate dateWithTimeIntervalSinceNow:0.5];}
+                if(nextTrace.timeIntervalSinceNow<=0){
+                    [trace appendFormat:@"t=%.1fs refreshing=%d pending=%d runs=%lu store=%lu rows=%ld\n",-[pollStart timeIntervalSinceNow],[[history valueForKey:@"refreshingRuns"] boolValue],[[history valueForKey:@"refreshPending"] boolValue],(unsigned long)[[history valueForKey:@"runs"] count],(unsigned long)[PluginLogStore.shared runsForIdentifier:@"ui-smoke-plugin"].count,(long)historyRows];
+                    [trace writeToFile:tracePath atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+                    nextTrace=[NSDate dateWithTimeIntervalSinceNow:5];
+                }
                 [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.025]];
             }
             historyRows=[history tableView:history.tableView numberOfRowsInSection:0];
