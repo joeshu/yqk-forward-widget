@@ -70,9 +70,13 @@ static void *fake_consumer_main(void *arg) {
         (void)pthread_cond_timedwait(&c->cond, &c->mutex, &deadline);
     }
     (void)pthread_mutex_unlock(&c->mutex);
-    /* Exit handshake: exactly once, before touching the handle again. */
-    host_mpv_lifecycle_note_event_thread_exited(c->lc);
+    /* Exit handshake: record the exit sequence BEFORE signalling the
+     * lifecycle — the waiter takes its release sequence the moment the
+     * wait returns, so assigning exit_seq after the signal lets the
+     * waiter win the race and breaks the exit<release ordering check
+     * (CI 2026-11-26: two consecutive red runs on the loaded runner). */
     c->exit_seq = next_seq();
+    host_mpv_lifecycle_note_event_thread_exited(c->lc);
     return NULL;
 }
 

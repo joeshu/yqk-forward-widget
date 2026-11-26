@@ -106,6 +106,18 @@ class MPVLifecycleBehaviorTests(unittest.TestCase):
         self.assertLess(r["exit_seq"], r["release_seq"])
         self.assertEqual(r["state"], 3)
 
+    def test_exit_sequence_is_recorded_before_signalling_exit(self):
+        # Contract lock (CI 2026-11-26): fake_consumer_main must take its
+        # exit_seq BEFORE note_event_thread_exited — the waiter takes
+        # release_seq the moment the wait returns, so recording after the
+        # signal lets the waiter win the race and flakes the ordering
+        # check above on a loaded runner.
+        harness = HARNESS_C.read_text()
+        main = harness[harness.index("fake_consumer_main"):
+                       harness.index("fake_consumer_start")]
+        self.assertLess(main.index("c->exit_seq = next_seq();"),
+                        main.index("host_mpv_lifecycle_note_event_thread_exited(c->lc);"))
+
     def test_event_exit_timeout_is_bounded(self):
         r = self.results["event_exit_timeout_bounded"]
         self.assertEqual(r["owned"], 1)
