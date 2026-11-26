@@ -47,9 +47,10 @@ class DecodeRouterContracts(unittest.TestCase):
         # AVPlayer 支持的格式判定不动（MediaPlaybackHeaders.m 的既有逻辑）。
         for ext in ('m3u8', 'mp4', 'm4v', 'mov', 'mp3', 'aac', 'ts'):
             self.assertIn(f'@"{ext}"', self.headers_m)
-        # 路由函数先问 AVPlayer，再问 Cicada。
+        # 路由函数先问 AVPlayer；Cicada 恒在链内作通用兜底（T07：不再
+        # 另算 SupportsCicadaPlayer 来决定它进不进链）。
         self.assertIn('MediaPlaybackResultSupportsAVPlayer(result)', self.router_m)
-        self.assertIn('MediaPlaybackResultSupportsCicadaPlayer(result)', self.router_m)
+        self.assertIn('MediaPlaybackDecodeRouteCicadaPlayer ? (preferCicada', self.router_m)
 
     def test_router_has_attempted_mask_and_priority_function(self):
         # 回退链靠 attempted 位掩码防循环；优先级函数是唯一决策入口。
@@ -290,9 +291,18 @@ class MPVRouteWiringContracts(unittest.TestCase):
                       self.vc, 'startCicadaPlaybackWithResult: 未按 useMPV 设置正确的路由位掩码')
 
     def test_cicada_path_avoids_mpv_retry_after_failure(self):
-        # useMPV 必须检查 AttemptedMPV 位，避免 MPV 失败后重复创建 MPV adapter。
-        self.assertIn('!(self.attemptedRoutes&MediaPlaybackDecodeRouteAttemptedMPV)',
-                      self.vc, 'useMPV 未检查 AttemptedMPV 位以防止 MPV 回退后重试')
+        # T07：工厂只建已决定的 route，不再据 attemptedRoutes 重选核——MPV
+        # 失败后不会无声地再建一个 MPV adapter。MPV 的唯一重进是软解重试，
+        # 保持同引擎（failedRoute），只换解码方式。
+        player = read_source('MediaPlaybackViewController.m')
+        self.assertIn('startCicadaPlaybackWithResult:(NSDictionary *)result route:(MediaPlaybackDecodeRoute)route',
+                      player, '工厂未按 route 参数建引擎')
+        self.assertIn('route:failedRoute url:retryURL', player,
+                      '软解重试未保持失败引擎同核')
+        self.assertIn('engineForRoute:route', player,
+                      '工厂未走协调器单一工厂建引擎')
+        self.assertNotIn('!(self.attemptedRoutes&MediaPlaybackDecodeRouteAttemptedMPV)', player,
+                         '工厂仍在据 attempted 位重选核')
 
     def test_cicada_failure_handles_mpv_and_cicada_fallback_routes(self):
         # advanceFromCicadaFailureWithError: 必须处理 nextRoute==MPV 和 nextRoute==CicadaPlayer，

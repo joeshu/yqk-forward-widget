@@ -620,16 +620,14 @@
         NSDictionary *retry=@{@"id":self.channelID?:@"",@"name":self.channelName?:@"直播",
                               @"remoteURL":self.currentRemoteURL?:@"",@"headers":self.currentRemoteHeaders?:@{},
                               @"nativePlainRoute":@(self.nativePlainRouteActive)};
-        [self startRemoteChannel:retry];
-        return;
+        [self startRemoteChannel:retry];return;
     }
     NSDictionary *alternate=[self nextUntriedAlternateChannel];
     if(alternate)[self startRemoteChannel:alternate];
 }
 - (void)cicadaAdapterDidComplete:(id)adapter {if(adapter!=self.remoteAdapter)return;self.remotePlaybackWanted=NO;[self.playPauseBtn setTitle:@"重播" forState:UIControlStateNormal];self.infoLabel.text=@"播放已结束 · 可重新连接";[self setLiveOverlayHidden:NO];[self updateNowPlaying];}
 - (void)startRemoteURL:(NSString *)url generation:(NSUInteger)generation {
-    if(generation!=self.playbackGeneration)return;
-    [[PlaybackCoordinator shared] acquireSession:(id<PlaybackSession>)self];
+    if(generation!=self.playbackGeneration)return;[[PlaybackCoordinator shared] acquireSession:(id<PlaybackSession>)self];
     NSDictionary *headers=self.nativePlainRouteActive?@{@"User-Agent":@"qqlive",@"Referer":@"https://live.cctv.cn/"}:(self.currentRemoteHeaders?:@{});
     NSMutableDictionary *descriptor=[@{@"url":url?:@""} mutableCopy];
     if(headers.count)descriptor[@"headers"]=headers;
@@ -638,7 +636,9 @@
     if(![telemetry[@"probeURL"] isEqual:url]||probeAge<0||probeAge>60)telemetry=nil;
     if([telemetry[@"contentType"] isKindOfClass:NSString.class]&&[telemetry[@"contentType"] length])descriptor[@"probedMIME"]=telemetry[@"contentType"];
     if([telemetry[@"headerBytes"] isKindOfClass:NSData.class])descriptor[@"headerBytes"]=telemetry[@"headerBytes"];
-    if(MediaPlaybackDecodeRouteNextForResult(descriptor,0)==MediaPlaybackDecodeRouteCicadaPlayer&&[self startRemoteCicada:url generation:generation])return;
+    MediaPlaybackDecodeRoute liveFirst=MediaPlaybackDecodeRouteNextForLiveResult(descriptor,0);
+    if(liveFirst==MediaPlaybackDecodeRouteCicadaPlayer&&[self startRemoteCicada:url generation:generation])return;
+    if(liveFirst==MediaPlaybackDecodeRouteNone){[self.spinner stopAnimating];self.remotePlaybackFailed=YES;self.titleLabel.hidden=NO;self.titleLabel.text=@"该直播源没有可用的播放方式";self.infoLabel.hidden=NO;self.infoLabel.text=@"可重试或切换线路";[self.playPauseBtn setTitle:@"重试" forState:UIControlStateNormal];self.playPauseBtn.enabled=YES;return;}
     AVURLAsset *asset=[AVURLAsset URLAssetWithURL:[NSURL URLWithString:url] options:headers.count?@{@"AVURLAssetHTTPHeaderFieldsKey":headers,@"AVURLAssetPreferPreciseDurationAndTimingKey":@NO}:@{@"AVURLAssetPreferPreciseDurationAndTimingKey":@NO}];
     AVPlayerItem *item=[AVPlayerItem playerItemWithAsset:asset];item.preferredForwardBufferDuration=1.0;
     // 直播 AVPlayer 回退路径也按默认清晰度偏好约束 HLS 自适应码率，
@@ -661,8 +661,7 @@
     else [self.avPlayer play];
     __weak typeof(self) w=self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC),dispatch_get_main_queue(),^{
-        if(generation!=w.playbackGeneration||item!=w.avPlayer.currentItem||!w.firstRender)return;
-        item.preferredForwardBufferDuration=4.0;
+        if(generation!=w.playbackGeneration||item!=w.avPlayer.currentItem||!w.firstRender)return;item.preferredForwardBufferDuration=4.0;
     });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,12*NSEC_PER_SEC),dispatch_get_main_queue(), ^{
         // A terminal AVPlayerItem failure has its own recovery path. Do not let
@@ -685,7 +684,8 @@
             [w endPlaybackPriority];
             return;
         }
-        if([w startRemoteCicada:w.currentRemoteURL generation:generation])return;
+        NSDictionary *liveDescriptor=@{@"url":w.currentRemoteURL?:@"",@"headers":w.currentRemoteHeaders?:@{}};
+        if(MediaPlaybackDecodeRouteNextForLiveResult(liveDescriptor,MediaPlaybackDecodeRouteAttemptedAVPlayer)==MediaPlaybackDecodeRouteCicadaPlayer&&[w startRemoteCicada:w.currentRemoteURL generation:generation])return;
         NSMutableDictionary *timeoutFields=[@{@"player":@"AVPlayer", @"timeout_seconds":@12, @"playback_generation":@(generation), @"playback_attempt_id":w.currentRemotePlaybackAttemptID?:@"", @"correlation_id":w.currentPlaybackTraceID?:@""} mutableCopy];[timeoutFields addEntriesFromDictionary:MediaPlaybackDiagnosticHeaderFields(w.currentRemoteHeaders)];[timeoutFields addEntriesFromDictionary:CCTVDiagnosticURLFields([NSURL URLWithString:w.currentRemoteURL])];CCTVAddAVPlayerFailureFields(timeoutFields,item,w.avPlayer,item.error);[RuntimeDiagnostics.shared recordEvent:@"playback_first_frame_timeout" category:@"playback" fields:timeoutFields];
         [w.spinner stopAnimating];w.remotePlaybackFailed=YES;w.titleLabel.hidden=NO;w.titleLabel.text=[NSString stringWithFormat:@"%@ · 等待视频首帧",w.channelName];w.infoLabel.hidden=NO;w.infoLabel.text=@"仍可等待，或点按“重试”重新连接";[w.playPauseBtn setTitle:@"重试" forState:UIControlStateNormal];w.playPauseBtn.enabled=YES;NSDictionary *service=[w localServiceForURL:[NSURL URLWithString:w.currentRemoteURL?:@""]];if(service)[w logPluginLine:@"接口已请求，但 12 秒内未收到视频首帧" identifier:service[@"id"] name:service[@"name"]];[w log:@"订阅 12 秒未渲染首帧（并非播放器就绪时间）"];
     });

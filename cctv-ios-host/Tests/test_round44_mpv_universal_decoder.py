@@ -61,13 +61,15 @@ class Round44MPVUniversalDecoderTests(unittest.TestCase):
     def test_router_player_and_ci_integration(self):
         router_m = (SOURCES_DIR / "MediaPlaybackDecodeRouter.m").read_text(encoding="utf-8")
         self.assertIn('NSClassFromString(@"MediaPlaybackMPVAdapter")', router_m)
-        self.assertIn('if (MediaPlaybackMPVUniversalAvailable()) return NO;', router_m)
+        # T07/R4：webOnly 门禁按 MPV 启用状态（开关 + 可用性），不是裸可用性。
+        self.assertIn('if (MediaPlaybackMPVRouteEnabled()) return NO;', router_m)
         self.assertIn('rtsp://', router_m)
         self.assertIn('srt://', router_m)
 
         player_m = (SOURCES_DIR / "MediaPlaybackViewController.m").read_text(encoding="utf-8")
         self.assertIn('#import "MediaPlaybackMPVAdapter.h"', player_m)
-        self.assertIn('[MediaPlaybackMPVAdapter isAvailable]', player_m)
+        # T07：VC 不再直接问 MPV isAvailable，改走协调器单一工厂建引擎。
+        self.assertIn('engineForRoute:route', player_m)
         self.assertIn('addExternalSubtitleURL:', player_m)
 
         ci_sh = (SCRIPTS_DIR / "ci-build.sh").read_text(encoding="utf-8")

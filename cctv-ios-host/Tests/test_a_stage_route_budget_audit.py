@@ -40,7 +40,12 @@ def method_body(source, signature):
 
 
 def router_body():
+    # T07：路由逻辑已移到单一候选计算函数；NextForResult 只是取首个
+    # 未尝试候选的薄 wrapper。两者拼起来才是完整路由体。
     return method_body(
+        ROUTER,
+        "NSArray<NSDictionary *> *MediaPlaybackDecodeRouteCandidatesForResult",
+    ) + method_body(
         ROUTER,
         "MediaPlaybackDecodeRoute MediaPlaybackDecodeRouteNextForResult",
     )
@@ -51,8 +56,10 @@ class RouteOnceBitmaskContracts(unittest.TestCase):
 
     def test_router_skips_attempted_bits(self):
         body = router_body()
-        self.assertIn("(attemptedRoutes & bit) == 0) return route", body)
-        self.assertIn("return MediaPlaybackDecodeRouteNone", body)
+        # T07：已尝试路由在候选循环里跳过（continue），不再以 return 形式
+        # 逐个返回；耗尽后 wrapper 以三元返回 None。
+        self.assertIn("if (attemptedRoutes & bit) continue;", body)
+        self.assertIn(": MediaPlaybackDecodeRouteNone;", body)
 
     def test_avplayer_start_marks_its_bit(self):
         body = method_body(VC, "- (void)playResult:(NSDictionary *)result")

@@ -163,12 +163,13 @@ class PlaybackSearchRound2Contracts(unittest.TestCase):
         self.assertIn("[self applyPendingPlaybackSeekForCicada]", cicada_body)
 
     def test_web_fallback_does_not_present_over_an_existing_modal(self):
-        for signature in (
-            "- (void)openWebPlaybackFallback {",
-            "- (void)openEpisodePageWebFallback {",
-        ):
-            body = method_body(PLAYBACK_SOURCE, signature)
-            self.assertIn("if(self.presentedViewController)return;", body)
+        # openWebPlaybackFallback 的 presented 守卫走统一终态（T07）：不 present，
+        # 停 spinner + 终态文案 + 可重试 + 关闭 attempt。
+        body = method_body(PLAYBACK_SOURCE, "- (void)openWebPlaybackFallback {")
+        self.assertIn('failureKind:@"webview_presented"', body)
+        self.assertIn('showTerminalPlaybackFailureWithStatus:', body)
+        episode_body = method_body(PLAYBACK_SOURCE, "- (void)openEpisodePageWebFallback {")
+        self.assertIn("if(self.presentedViewController)return;", episode_body)
         play_body = method_body(PLAYBACK_SOURCE, "- (void)playResult:(NSDictionary *)result {")
         self.assertIn("已有页面正在显示", play_body)
 

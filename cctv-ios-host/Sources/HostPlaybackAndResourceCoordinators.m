@@ -12,15 +12,22 @@
     return instance;
 }
 
-- (id<CCTVPlaybackEngine>)createUniversalEngineWithURL:(NSURL *)url
-                                               headers:(NSDictionary<NSString *, NSString *> *)headers
-                                        networkTimeout:(NSTimeInterval)timeout
-                                        liveStreamHint:(BOOL)isLive {
-    NSString *mode = [[NSUserDefaults standardUserDefaults] stringForKey:@"cctv.mediaDecodeMode.v1"] ?: @"auto";
-    BOOL useMPV = [MediaPlaybackMPVAdapter isAvailable] && ![mode isEqualToString:@"cicada_legacy"];
-    id<CCTVPlaybackEngine> engine = useMPV
-        ? (id<CCTVPlaybackEngine>)[[MediaPlaybackMPVAdapter alloc] initWithURL:url headers:headers networkTimeout:timeout]
-        : (id<CCTVPlaybackEngine>)[[MediaPlaybackCicadaAdapter alloc] initWithURL:url headers:headers networkTimeout:timeout];
++ (nullable id<CCTVPlaybackEngine>)engineForRoute:(MediaPlaybackDecodeRoute)route
+                                               url:(NSURL *)url
+                                           headers:(nullable NSDictionary<NSString *, NSString *> *)headers
+                                    networkTimeout:(NSTimeInterval)timeout
+                                    liveStreamHint:(BOOL)isLive {
+    id<CCTVPlaybackEngine> engine = nil;
+    if (route == MediaPlaybackDecodeRouteMPV) {
+        // MPV 被禁用时 fail-closed：绝不实例化，调用方走统一终态。
+        if (!MediaPlaybackMPVRouteEnabled()) return nil;
+        engine = [[MediaPlaybackMPVAdapter alloc] initWithURL:url headers:headers networkTimeout:timeout];
+    } else if (route == MediaPlaybackDecodeRouteCicadaPlayer) {
+        if (![MediaPlaybackCicadaAdapter isAvailable]) return nil;
+        engine = [[MediaPlaybackCicadaAdapter alloc] initWithURL:url headers:headers networkTimeout:timeout];
+    } else {
+        return nil;
+    }
     engine.liveStreamHint = isLive;
     return engine;
 }

@@ -19,7 +19,7 @@ class PlaybackHeaderScopeContracts(unittest.TestCase):
     def test_direct_av_and_cicada_requests_use_scoped_headers(self):
         av = self.playback.split('static NSDictionary *MediaPlaybackAVAssetHeaders', 1)[1].split('static NSURL *MediaPlaybackEpisodePageFallbackURL', 1)[0]
         self.assertIn('MediaPlaybackHeadersScopedToURL(headers,originURL,url)', av)
-        cicada = self.playback.split('- (void)startCicadaPlaybackWithResult:(NSDictionary *)result url:(NSURL *)url sourceURL:(NSURL *)sourceURL playerGeneration:(NSUInteger)playerGeneration {', 1)[1].split('\n- (void)', 1)[0]
+        cicada = self.playback.split('- (void)startCicadaPlaybackWithResult:(NSDictionary *)result route:(MediaPlaybackDecodeRoute)route url:(NSURL *)url sourceURL:(NSURL *)sourceURL playerGeneration:(NSUInteger)playerGeneration {', 1)[1].split('\n- (void)', 1)[0]
         self.assertIn('MediaPlaybackHeadersScopedToURL(requestHeaders,sourceURL?:url,effectiveURL)', cicada)
 
     def test_scope_preserves_same_origin_and_standard_https_upgrade(self):

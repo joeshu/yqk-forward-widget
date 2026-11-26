@@ -33,7 +33,9 @@ class Round42P0FixesTests(unittest.TestCase):
         self.assertIn('CicadaCallVoidInt(self.config,NSSelectorFromString(@"setMaxDelayTime:"),0);', impl)
         self.assertIn('self.preparedReported = YES;\n    [self updateBufferConfiguration];', impl)
         self.assertIn('adapter.liveStreamHint=!self.remoteCatchupActive;', live_caller)
-        self.assertIn('adapter.liveStreamHint=[result[@"isLive"] boolValue];', vod_caller)
+        # T07：点播仍由 result[@"isLive"] 决定引擎的 liveStreamHint，只是
+        # 经协调器单一工厂传入，不再在 VC 里直接赋值。
+        self.assertIn('liveStreamHint:[result[@"isLive"] boolValue]', vod_caller)
 
     # --- P0-2: Cross-origin anti-hotlink Referer/Origin preserved, credentials stripped ---
     def test_p0_2_cross_origin_preserves_referer_origin_and_strips_credentials(self):

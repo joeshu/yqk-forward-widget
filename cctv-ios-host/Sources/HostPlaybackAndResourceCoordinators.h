@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import "CCTVPlaybackEngineProtocol.h"
+#import "MediaPlaybackDecodeRouter.h"
 #import "M3UParser.h"
 
 NS_ASSUME_NONNULL_BEGIN
@@ -7,11 +8,14 @@ NS_ASSUME_NONNULL_BEGIN
 /// 直播播放协调器（P2-2）：统一创建直播全能解码引擎与管理实时睡眠倒计时。
 @interface HostLivePlayerCoordinator : NSObject
 + (instancetype)shared;
-/// 根据运行期可用性与用户偏好构建直播/点播通用引擎（优先 MPV Universal，回退 Cicada）。
-- (id<CCTVPlaybackEngine>)createUniversalEngineWithURL:(NSURL *)url
-                                               headers:(nullable NSDictionary<NSString *, NSString *> *)headers
-                                        networkTimeout:(NSTimeInterval)timeout
-                                        liveStreamHint:(BOOL)isLive;
+/// 按已决定的路由建引擎（单一工厂）：只建 route 指定的引擎，不再内部
+/// 重选核。MPV 被禁用时 fail-closed（返回 nil，不实例化）；Cicada 不可
+/// 用时同样返回 nil。调用方在 nil 时走统一终态。
++ (nullable id<CCTVPlaybackEngine>)engineForRoute:(MediaPlaybackDecodeRoute)route
+                                               url:(NSURL *)url
+                                           headers:(nullable NSDictionary<NSString *, NSString *> *)headers
+                                    networkTimeout:(NSTimeInterval)timeout
+                                    liveStreamHint:(BOOL)isLive;
 /// 睡眠定时截止时间（nil 表示未开启）。
 @property (nonatomic, strong, nullable) NSDate *sleepTimerFireDate;
 /// 剩余睡眠定时秒数（0 表示未开启或已到期）。

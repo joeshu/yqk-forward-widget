@@ -131,10 +131,11 @@ BOOL MediaPlaybackResultSupportsCicadaPlayer(NSDictionary *result) {
     if ([lowerRaw hasPrefix:@"rtmp://"] || [lowerRaw hasPrefix:@"rtmps://"] || [lowerRaw hasPrefix:@"udp://"]) return YES;
     NSString *extension = MediaPlaybackDecodeResultExtension(result);
     if ([@[@"flv", @"mpd", @"mkv", @"webm", @"3gp", @"3gpp"] containsObject:extension]) return YES;
-    if (MediaPlaybackMPVUniversalAvailable()) {
+    if (MediaPlaybackMPVRouteEnabled()) {
+        // MPV 已启用（非仅可用）时才由它覆盖这些 scheme；容器分支已删：
+        // AVI/WMV/ASF/RM/RMVB 的前置拒绝由 RequiresWebViewOnly 按同一
+        // 启用状态判定，这里不再与它矛盾地宣称 Cicada 可播。
         if ([lowerRaw hasPrefix:@"rtsp://"] || [lowerRaw hasPrefix:@"rtsps://"] || [lowerRaw hasPrefix:@"srt://"] || [lowerRaw hasPrefix:@"smb://"]) return YES;
-        if ([@[@"avi", @"wmv", @"asf", @"rm", @"rmvb", @"vob", @"ogm", @"ogv"] containsObject:extension] ||
-            [@[@"avi", @"wmv", @"asf", @"rm", @"rmvb"] containsObject:format]) return YES;
     }
     if (!extension.length && lowerRaw.length) {
         if ([lowerRaw containsString:@".flv?"] || [lowerRaw containsString:@"format=flv"] || [lowerRaw containsString:@"type=flv"] || [lowerRaw containsString:@"format=mpd"] || [lowerRaw containsString:@".mpd?"]) return YES;
@@ -144,7 +145,7 @@ BOOL MediaPlaybackResultSupportsCicadaPlayer(NSDictionary *result) {
 
 BOOL MediaPlaybackResultRequiresWebViewOnly(NSDictionary *result) {
     if (![result isKindOfClass:NSDictionary.class]) return NO;
-    if (MediaPlaybackMPVUniversalAvailable()) return NO;
+    if (MediaPlaybackMPVRouteEnabled()) return NO;
     NSString *format = MediaPlaybackDecodeResultFormat(result);
     NSString *mime = MediaPlaybackDecodeResultMIME(result);
     // AVI：无 avi demuxer；WMV/ASF：无 asf demuxer、无 wmv 解码器；
@@ -167,13 +168,25 @@ NSString *MediaPlaybackDecodeRouteName(MediaPlaybackDecodeRoute route) {
     }
 }
 
-MediaPlaybackDecodeRoute MediaPlaybackDecodeRouteNextForResult(NSDictionary *result, NSUInteger attemptedRoutes) {
-    if (![result isKindOfClass:NSDictionary.class]) return MediaPlaybackDecodeRouteNone;
-    BOOL webOnly = MediaPlaybackResultRequiresWebViewOnly(result);
-    if(webOnly)return MediaPlaybackDecodeRouteNone;
+NSString *MediaPlaybackDecodeRouteRejectionReasonForResult(NSDictionary *result) {
+    if (![result isKindOfClass:NSDictionary.class]) return @"unsupported_transport";
+    // 与 MediaDescriptor 同一顺序：webOnly 容器 → 不支持编码 → 不支持传输。
+    if (MediaPlaybackResultRequiresWebViewOnly(result)) return @"unsupported_container";
+    if ([result[@"videoCodec"] isKindOfClass:NSString.class] && [MediaCapabilityUnsupportedVideoCodecs() containsObject:[result[@"videoCodec"] lowercaseString]]) return @"unsupported_video_codec";
+    // 传输只看 result[@"url"]：红果 cenc 本地代理的 originalURL 是 cenc://，
+    // 可播地址在 url 字段里，查 originalURL 会误杀它。
+    NSURL *url = [NSURL URLWithString:[result[@"url"] isKindOfClass:NSString.class] ? result[@"url"] : @""];
+    NSString *transport = url.scheme.lowercaseString ?: @"";
+    if (![MediaCapabilityNetworkTransports() containsObject:transport] && !url.isFileURL) return @"unsupported_transport";
+    return nil;
+}
+
+NSArray<NSDictionary *> *MediaPlaybackDecodeRouteCandidatesForResult(NSDictionary *result, NSUInteger attemptedRoutes, BOOL forLive) {
+    if (![result isKindOfClass:NSDictionary.class]) return @[];
+    // 入口门禁命中则无候选（与 MediaDescriptor 同一判定）。
+    if (MediaPlaybackDecodeRouteRejectionReasonForResult(result)) return @[];
     BOOL directMedia = MediaPlaybackResultIsDirectMedia(result);
     BOOL avSupported = MediaPlaybackResultSupportsAVPlayer(result);
-    BOOL cicadaSupported = MediaPlaybackResultSupportsCicadaPlayer(result);
     BOOL requiresWebPlayback = ([result[@"requiresWebPlayback"] boolValue] || [result[@"parse"] integerValue] > 0 || [result[@"jx"] integerValue] > 0) && !directMedia;
     NSString *decodeMode = MediaPlaybackDecodeLowerString([[NSUserDefaults standardUserDefaults] stringForKey:@"cctv.mediaDecodeMode.v1"] ?: @"auto");
     NSString *probedContainer = MediaPlaybackDecodeLowerString(result[@"probedContainer"]);
@@ -184,33 +197,66 @@ MediaPlaybackDecodeRoute MediaPlaybackDecodeRouteNextForResult(NSDictionary *res
     NSString *urlExt = MediaPlaybackDecodeResultExtension(result);
     BOOL rawProgressiveTS = ([urlExt isEqualToString:@"ts"] && ![MediaPlaybackDecodeResultFormat(result) isEqualToString:@"hls"] && ![MediaPlaybackDecodeResultFormat(result) isEqualToString:@"m3u8"]);
     BOOL preferCicada = probedCicadaOnly || rawProgressiveTS || [decodeMode isEqualToString:@"cicada"] || [decodeMode isEqualToString:@"cicada_soft"] || [MediaPlaybackDecodeLowerString(result[@"playbackEngine"]) isEqualToString:@"cicada"];
+    BOOL legacyCicada = [decodeMode isEqualToString:@"cicada_legacy"];
+    NSString *cicadaDecodeMode = ([decodeMode isEqualToString:@"cicada_soft"] || [result[@"preferSoftwareDecode"] boolValue]) ? @"cicada_soft" : @"cicada";
 
     // Parser and platform watch pages are documents, not media resources. Send
     // them straight to the in-app browser instead of making both native players
-    // probe an HTML page before the browser fallback can appear.
+    // probe an HTML page before the browser fallback can appear. Live has no
+    // in-app web player, so a live parse page has no candidate at all.
     if (requiresWebPlayback) {
-        return (attemptedRoutes & MediaPlaybackDecodeRouteAttemptedWebView)
-            ? MediaPlaybackDecodeRouteNone : MediaPlaybackDecodeRouteWebView;
+        if (forLive) return @[];
+        if (attemptedRoutes & MediaPlaybackDecodeRouteAttemptedWebView) return @[];
+        return @[@{@"route": @(MediaPlaybackDecodeRouteWebView), @"decodeMode": @"webview", @"reason": @"web_page"}];
     }
 
     // Ordered VOD fallback: AVPlayer → MPV → Cicada → WebView.
     MediaPlaybackDecodeRoute candidates[] = { MediaPlaybackDecodeRouteAVPlayer, MediaPlaybackDecodeRouteMPV, MediaPlaybackDecodeRouteCicadaPlayer, MediaPlaybackDecodeRouteWebView };
+    NSMutableArray<NSDictionary *> *out = [NSMutableArray array];
     for (NSUInteger i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
         MediaPlaybackDecodeRoute route = candidates[i];
         if (route == MediaPlaybackDecodeRouteMPV && !MediaPlaybackMPVRouteEnabled()) continue;
+        // cicada_legacy 是历史遗留值：MPV 不参与，Cicada 恒在链内。
+        if (route == MediaPlaybackDecodeRouteMPV && legacyCicada) continue;
+        // 直播默认不走实验中的 MPV，也没有网页播放器。
+        if (forLive && (route == MediaPlaybackDecodeRouteMPV || route == MediaPlaybackDecodeRouteWebView)) continue;
+        // 直连媒体不进 WebView：耗尽后返回 None，走统一终态。
+        if (route == MediaPlaybackDecodeRouteWebView && directMedia) continue;
         // AVPlayer only leads the chain for formats it can decode. For Cicada-only
         // containers (FLV/DASH/MKV/WebM/RTMP) MediaPlaybackResultSupportsAVPlayer
         // returns NO; attempting AVPlayer first wastes a full startup-watchdog
-        // budget on a deterministically-failing leg and contradicts the header's
-        // documented "Cicada专属格式 → [Cicada,WebView]" priority. Skip it so the
-        // ordered chain starts at MPV/Cicada, matching the contract.
+        // budget on a deterministically-failing leg. Skip it so the ordered
+        // chain starts at MPV/Cicada.
         if (route == MediaPlaybackDecodeRouteAVPlayer && !avSupported) continue;
         NSUInteger bit = route == MediaPlaybackDecodeRouteAVPlayer ? MediaPlaybackDecodeRouteAttemptedAVPlayer :
             route == MediaPlaybackDecodeRouteMPV ? MediaPlaybackDecodeRouteAttemptedMPV :
             route == MediaPlaybackDecodeRouteCicadaPlayer ? MediaPlaybackDecodeRouteAttemptedCicadaPlayer : MediaPlaybackDecodeRouteAttemptedWebView;
-        if ((attemptedRoutes & bit) == 0) return route;
+        if (attemptedRoutes & bit) continue;
+        NSString *decodeModeForRoute = route == MediaPlaybackDecodeRouteAVPlayer ? @"av" :
+            route == MediaPlaybackDecodeRouteMPV ? @"mpv" :
+            route == MediaPlaybackDecodeRouteCicadaPlayer ? cicadaDecodeMode : @"webview";
+        NSString *reason = route == MediaPlaybackDecodeRouteAVPlayer ? @"av_supported" :
+            route == MediaPlaybackDecodeRouteMPV ? @"mpv_preferred" :
+            route == MediaPlaybackDecodeRouteCicadaPlayer ? (preferCicada ? @"cicada_preferred" : @"cicada_fallback") : @"web_page";
+        [out addObject:@{@"route": @(route), @"decodeMode": decodeModeForRoute, @"reason": reason}];
     }
-    return MediaPlaybackDecodeRouteNone;
+    // preferCicada 时 Cicada 排 MPV 之前：交换两者在候选中的位置。
+    if (preferCicada) {
+        NSUInteger mpvIndex = [out indexOfObjectPassingTest:^BOOL(NSDictionary *entry, NSUInteger idx, BOOL *stop) { return [entry[@"route"] integerValue] == MediaPlaybackDecodeRouteMPV; }];
+        NSUInteger cicadaIndex = [out indexOfObjectPassingTest:^BOOL(NSDictionary *entry, NSUInteger idx, BOOL *stop) { return [entry[@"route"] integerValue] == MediaPlaybackDecodeRouteCicadaPlayer; }];
+        if (mpvIndex != NSNotFound && cicadaIndex != NSNotFound && cicadaIndex > mpvIndex) [out exchangeObjectAtIndex:mpvIndex withObjectAtIndex:cicadaIndex];
+    }
+    return out;
+}
+
+MediaPlaybackDecodeRoute MediaPlaybackDecodeRouteNextForResult(NSDictionary *result, NSUInteger attemptedRoutes) {
+    NSArray<NSDictionary *> *candidates = MediaPlaybackDecodeRouteCandidatesForResult(result, attemptedRoutes, NO);
+    return candidates.count ? (MediaPlaybackDecodeRoute)[candidates[0][@"route"] integerValue] : MediaPlaybackDecodeRouteNone;
+}
+
+MediaPlaybackDecodeRoute MediaPlaybackDecodeRouteNextForLiveResult(NSDictionary *result, NSUInteger attemptedRoutes) {
+    NSArray<NSDictionary *> *candidates = MediaPlaybackDecodeRouteCandidatesForResult(result, attemptedRoutes, YES);
+    return candidates.count ? (MediaPlaybackDecodeRoute)[candidates[0][@"route"] integerValue] : MediaPlaybackDecodeRouteNone;
 }
 
 BOOL MediaPlaybackCicadaErrorAllowsSoftwareRetry(NSError *error) {

@@ -38,15 +38,26 @@ FOUNDATION_EXPORT BOOL MediaPlaybackResultSupportsCicadaPlayer(NSDictionary * _N
 FOUNDATION_EXPORT BOOL MediaPlaybackResultRequiresWebViewOnly(NSDictionary * _Nullable result);
 
 // 按优先级返回下一个未尝试的路由；全部试过返回 MediaPlaybackDecodeRouteNone。
-// 优先级（按结果特征）：
-//   WebView-only（AVI/WMV/RMVB）        → [WebView]
-//   需解析且非直连媒体（parse/jx>0）   → [WebView, Cicada（若候选）, AVPlayer（若支持）]
-//   Cicada 专属格式（FLV/DASH/MKV…）   → [CicadaPlayer, WebView]
-//   AVPlayer 支持                      → [AVPlayer, CicadaPlayer, WebView]
-//   直连媒体但格式未知/无扩展名        → [AVPlayer, CicadaPlayer, WebView]
-//   其他                               → [AVPlayer, CicadaPlayer, WebView]
-// attemptedRoutes 为上面三个位掩码的或；传 0 表示从头开始。
+// 单一候选计算见 MediaPlaybackDecodeRouteCandidatesForResult：解析页 →
+// [WebView]；直连媒体 → 原生候选 [AVPlayer, MPV, CicadaPlayer]（preferCicada
+// 时 Cicada 在 MPV 之前），WebView 不进候选；直播（forLive=YES）排除 MPV
+// 与 WebView。attemptedRoutes 为上面四个位掩码的或；传 0 表示从头开始。
 FOUNDATION_EXPORT MediaPlaybackDecodeRoute MediaPlaybackDecodeRouteNextForResult(NSDictionary * _Nullable result, NSUInteger attemptedRoutes);
+// 下一路（直播）：同上，但 MPV 与 WebView 不进候选。
+FOUNDATION_EXPORT MediaPlaybackDecodeRoute MediaPlaybackDecodeRouteNextForLiveResult(NSDictionary * _Nullable result, NSUInteger attemptedRoutes);
+// 单一候选计算：返回有序候选字典数组，每项含 @"route"
+// （NSNumber(MediaPlaybackDecodeRoute)）、@"decodeMode"（@"av" / @"mpv" /
+// @"cicada" / @"cicada_soft" / @"webview"）、@"reason"（诊断用原因：
+// @"av_supported" / @"mpv_preferred" / @"cicada_preferred" /
+// @"cicada_fallback" / @"web_page"）。门禁命中（见下）或已尝试过的路由不
+// 进候选；直连媒体不含 WebView；直播（forLive=YES）不含 MPV 与 WebView。
+FOUNDATION_EXPORT NSArray<NSDictionary *> *MediaPlaybackDecodeRouteCandidatesForResult(NSDictionary * _Nullable result, NSUInteger attemptedRoutes, BOOL forLive);
+// 入口门禁原因：nil 表示可尝试；否则为 @"unsupported_container" /
+// @"unsupported_video_codec" / @"unsupported_transport"。检查顺序与
+// MediaDescriptor 一致（webOnly 容器 → 不支持编码 → 不支持传输）；
+// 传输检查只看 result[@"url"]（不看 originalURL：红果 cenc 本地代理的
+// originalURL 是 cenc://，可播地址在 url 字段里）。
+FOUNDATION_EXPORT NSString * _Nullable MediaPlaybackDecodeRouteRejectionReasonForResult(NSDictionary * _Nullable result);
 
 // 供日志/诊断用：路由名（@"avplayer" / @"cicada" / @"webview" / @"none"）。
 FOUNDATION_EXPORT NSString *MediaPlaybackDecodeRouteName(MediaPlaybackDecodeRoute route);

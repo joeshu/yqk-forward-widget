@@ -16,6 +16,7 @@
 #import "MediaPlaybackQualityPanelView.h"
 #import "MediaPlaybackSniffFetch.h"
 #import "MediaPlaybackDecodeRouter.h"
+#import "HostPlaybackAndResourceCoordinators.h"
 #import "HostPlaybackSession.h"
 #import "MediaPlaybackCicadaAdapter.h"
 #import "MediaPlaybackCicadaControls.h"
@@ -506,7 +507,8 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 - (void)selectAlternate:(UIButton *)sender;
 - (void)setRetryAvailable:(BOOL)available;
 - (void)recordPlaybackFailureForItem:(AVPlayerItem *)item error:(NSError *)error stage:(NSString *)stage;
-- (void)startCicadaPlaybackWithResult:(NSDictionary *)result url:(NSURL *)url sourceURL:(NSURL *)sourceURL playerGeneration:(NSUInteger)playerGeneration;
+- (void)showTerminalPlaybackFailureWithStatus:(NSString *)statusText outcome:(NSString *)outcome failureKind:(NSString *)failureKind;
+- (void)startCicadaPlaybackWithResult:(NSDictionary *)result route:(MediaPlaybackDecodeRoute)route url:(NSURL *)url sourceURL:(NSURL *)sourceURL playerGeneration:(NSUInteger)playerGeneration;
 - (void)watchAVPlayerFirstFrameForItem:(AVPlayerItem *)item generation:(NSUInteger)playerGeneration url:(NSURL *)url sourceURL:(NSURL *)sourceURL;
 - (BOOL)isApplicationActiveForAVFirstFrameWatchdog;
 - (void)teardownCicadaAdapter;
@@ -1954,7 +1956,7 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
     MediaDescriptor *descriptor=[[MediaDescriptor alloc] initWithResult:result];
     if([descriptor.capabilityStatus isEqual:@"unsupported"]){[self.spinner stopAnimating];NSString *codec=[result[@"videoCodec"] isKindOfClass:NSString.class]?[result[@"videoCodec"] uppercaseString]:@"";NSString *specific=[result[@"capabilityReasonMessage"] isKindOfClass:NSString.class]?result[@"capabilityReasonMessage"]:@"";if(specific.length)self.status.text=specific;else if([descriptor.capabilityReason isEqual:@"unsupported_container"])self.status.text=@"当前播放器不支持此容器 · 请切换线路或格式";else if([descriptor.capabilityReason isEqual:@"unsupported_video_codec"])self.status.text=codec.length?[NSString stringWithFormat:@"当前播放器不支持 %@ 视频编码 · 请切换线路",codec]:@"当前播放器不支持此视频编码 · 请切换线路";else if([descriptor.capabilityReason isEqual:@"unsupported_transport"])self.status.text=[NSString stringWithFormat:@"当前播放器不支持 %@ 播放协议",descriptor.transport.uppercaseString];else self.status.text=@"当前播放器不支持此媒体格式";self.status.accessibilityLabel=self.status.text;[self setRetryAvailable:YES];return;}
     MediaPlaybackDecodeRoute initialRoute=[self.playbackSession nextRouteForResult:result];
-    if(initialRoute==MediaPlaybackDecodeRouteNone){if([PlaybackCoordinator shared].currentSession==(id<PlaybackSession>)self)[[PlaybackCoordinator shared] releaseSession:(id<PlaybackSession>)self];[self.spinner stopAnimating];self.status.text=@"该资源没有可用的播放方式 · 可切换线路";self.status.accessibilityLabel=self.status.text;[self setRetryAvailable:YES];[self recordPlaybackAttemptOutcome:@"rejected" failureKind:@"no_playback_route" httpStatus:0 terminal:YES];return;}
+    if(initialRoute==MediaPlaybackDecodeRouteNone){if([PlaybackCoordinator shared].currentSession==(id<PlaybackSession>)self)[[PlaybackCoordinator shared] releaseSession:(id<PlaybackSession>)self];[self showTerminalPlaybackFailureWithStatus:@"该资源没有可用的播放方式 · 可切换线路" outcome:@"rejected" failureKind:@"no_playback_route"];return;}
     if(initialRoute==MediaPlaybackDecodeRouteWebView){
         if(self.onPlaybackWillStart)self.onPlaybackWillStart();
         [[PlaybackCoordinator shared] acquireSession:(id<PlaybackSession>)self];
@@ -1966,7 +1968,7 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
     [[PlaybackCoordinator shared] acquireSession:(id<PlaybackSession>)self];
     [RuntimeDiagnostics.shared recordEvent:@"playback_owner_acquired" category:@"playback" fields:@{@"owner":@"vod",@"engine":MediaPlaybackDecodeRouteName(initialRoute),@"line_index":@(self.lineIndex),@"episode_index":@(self.episodeIndex),@"service_id":serviceID,@"correlation_id":self.diagnosticTraceID?:@""}];
 
-    if(initialRoute==MediaPlaybackDecodeRouteCicadaPlayer||initialRoute==MediaPlaybackDecodeRouteMPV){[self startCicadaPlaybackWithResult:result url:url sourceURL:sourceURL playerGeneration:playerGeneration];return;}
+    if(initialRoute==MediaPlaybackDecodeRouteCicadaPlayer||initialRoute==MediaPlaybackDecodeRouteMPV){[self startCicadaPlaybackWithResult:result route:initialRoute url:url sourceURL:sourceURL playerGeneration:playerGeneration];return;}
     self.attemptedRoutes|=MediaPlaybackDecodeRouteAttemptedAVPlayer;
     NSMutableDictionary *handoffFields=[@{@"player":@"avplayer", @"playback_attempt_id":self.playbackAttemptID?:@"", @"line_index":@(self.lineIndex), @"episode_index":@(self.episodeIndex), @"correlation_id":self.diagnosticTraceID?:@""} mutableCopy];[handoffFields addEntriesFromDictionary:MediaPlaybackDiagnosticHeaderFields(MediaPlaybackHeadersFromResult(result))];[handoffFields addEntriesFromDictionary:MediaPlaybackDiagnosticSourceFields(sourceURL)];[RuntimeDiagnostics.shared recordEvent:@"episode_player_handoff" category:@"playback" fields:handoffFields];
     self.hasDiagnosticTimeControlStatus=NO;self.playbackStartedAt=CACurrentMediaTime();self.status.text=@"正在载入媒体…";self.status.accessibilityLabel=self.status.text;[self.spinner startAnimating];[self setRetryAvailable:NO];
@@ -2022,24 +2024,23 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
         BOOL tier2AudioOnlyVideoStuck=!isCENCStream&&owner.avFirstFrameActiveWait>=7.5&&item.status==AVPlayerItemStatusReadyToPlay&&isfinite(curPos)&&curPos>=0.8&&!owner.videoFrameReady&&!owner.confirmedAudioOnly;
         if(!tier1DeadLink&&!tier2AudioOnlyVideoStuck&&owner.avFirstFrameActiveWait<timeout)return;
         [timer invalidate];owner.avFirstFrameTimer=nil;
-        NSTimeInterval position=CMTimeGetSeconds(owner.player.currentTime);NSMutableDictionary *fields=[@{@"player":@"AVPlayer", @"playback_attempt_id":owner.playbackAttemptID?:@"", @"elapsed_ms":@(MAX(0,(NSInteger)((CACurrentMediaTime()-owner.playbackStartedAt)*1000))), @"line_index":@(owner.lineIndex), @"episode_index":@(owner.episodeIndex), @"correlation_id":owner.diagnosticTraceID?:@"", @"time_control_status":@(owner.player.timeControlStatus), @"playback_position_seconds":@(isfinite(position)&&position>0?position:0), @"video_track_state":owner.hasVideoTrack?@"confirmed_video":@"unknown", @"video_layer_ready_for_display":@(owner.videoLayer.readyForDisplay), @"video_layer_width":@(MAX(0,(NSInteger)llround(owner.videoLayer.bounds.size.width))), @"video_layer_height":@(MAX(0,(NSInteger)llround(owner.videoLayer.bounds.size.height)))} mutableCopy];fields[@"controller_ready_for_display"]=@(owner.playerController.readyForDisplay);fields[@"controller_player_attached"]=@(owner.playerController.player==owner.player);fields[@"controller_view_in_window"]=@(owner.playerController.isViewLoaded&&owner.playerController.view.window!=nil);fields[@"controller_view_width"]=@(CGRectGetWidth(owner.playerController.view.bounds));fields[@"controller_view_height"]=@(CGRectGetHeight(owner.playerController.view.bounds));fields[@"controller_video_width"]=@(CGRectGetWidth(owner.playerController.videoBounds));fields[@"controller_video_height"]=@(CGRectGetHeight(owner.playerController.videoBounds));fields[@"embedded_mode"]=@(owner.embeddedMode);fields[@"wait_reason"]=owner.player.reasonForWaitingToPlay?:@"";[fields addEntriesFromDictionary:MediaPlaybackDiagnosticSourceFields(MediaPlaybackOriginalSourceURL(owner.result))];MediaPlaybackAddAccessLogFields(fields,item);[RuntimeDiagnostics.shared recordEvent:@"playback_video_frame_timeout" category:@"playback" fields:fields];[owner recordPlaybackAttemptOutcome:@"first_frame_timeout" failureKind:@"first_frame_timeout" httpStatus:0 terminal:NO];if([owner.playbackSession peekNextRouteForResult:owner.result]==MediaPlaybackDecodeRouteCicadaPlayer||[owner.playbackSession peekNextRouteForResult:owner.result]==MediaPlaybackDecodeRouteMPV){if(tier2AudioOnlyVideoStuck&&isfinite(curPos)&&curPos>1.0&&!owner.pendingPlaybackSeekTime)owner.pendingPlaybackSeekTime=@(curPos);[owner clearCurrentPlayerItem];owner.playbackFailureRecorded=NO;owner.terminalPlaybackOutcomeRecorded=NO;[owner startCicadaPlaybackWithResult:owner.result url:url sourceURL:sourceURL playerGeneration:owner.playerGeneration];return;}if([owner tryNextLineForAutomaticFallback:@"first_frame_timeout"])return;[owner.spinner stopAnimating];owner.status.text=[owner.playbackProtocolCapability isEqualToString:@"experimental"]?@"播放器尚未显示画面 · 该协议为实验支持，可能无法播放 · 可重试或手动切换线路":@"播放器尚未显示画面 · 可重试或手动切换线路";owner.status.accessibilityLabel=owner.status.text;[owner setRetryAvailable:YES];
+        NSTimeInterval position=CMTimeGetSeconds(owner.player.currentTime);NSMutableDictionary *fields=[@{@"player":@"AVPlayer", @"playback_attempt_id":owner.playbackAttemptID?:@"", @"elapsed_ms":@(MAX(0,(NSInteger)((CACurrentMediaTime()-owner.playbackStartedAt)*1000))), @"line_index":@(owner.lineIndex), @"episode_index":@(owner.episodeIndex), @"correlation_id":owner.diagnosticTraceID?:@"", @"time_control_status":@(owner.player.timeControlStatus), @"playback_position_seconds":@(isfinite(position)&&position>0?position:0), @"video_track_state":owner.hasVideoTrack?@"confirmed_video":@"unknown", @"video_layer_ready_for_display":@(owner.videoLayer.readyForDisplay), @"video_layer_width":@(MAX(0,(NSInteger)llround(owner.videoLayer.bounds.size.width))), @"video_layer_height":@(MAX(0,(NSInteger)llround(owner.videoLayer.bounds.size.height)))} mutableCopy];fields[@"controller_ready_for_display"]=@(owner.playerController.readyForDisplay);fields[@"controller_player_attached"]=@(owner.playerController.player==owner.player);fields[@"controller_view_in_window"]=@(owner.playerController.isViewLoaded&&owner.playerController.view.window!=nil);fields[@"controller_view_width"]=@(CGRectGetWidth(owner.playerController.view.bounds));fields[@"controller_view_height"]=@(CGRectGetHeight(owner.playerController.view.bounds));fields[@"controller_video_width"]=@(CGRectGetWidth(owner.playerController.videoBounds));fields[@"controller_video_height"]=@(CGRectGetHeight(owner.playerController.videoBounds));fields[@"embedded_mode"]=@(owner.embeddedMode);fields[@"wait_reason"]=owner.player.reasonForWaitingToPlay?:@"";[fields addEntriesFromDictionary:MediaPlaybackDiagnosticSourceFields(MediaPlaybackOriginalSourceURL(owner.result))];MediaPlaybackAddAccessLogFields(fields,item);[RuntimeDiagnostics.shared recordEvent:@"playback_video_frame_timeout" category:@"playback" fields:fields];[owner recordPlaybackAttemptOutcome:@"first_frame_timeout" failureKind:@"first_frame_timeout" httpStatus:0 terminal:NO];if([owner.playbackSession peekNextRouteForResult:owner.result]==MediaPlaybackDecodeRouteCicadaPlayer||[owner.playbackSession peekNextRouteForResult:owner.result]==MediaPlaybackDecodeRouteMPV){if(tier2AudioOnlyVideoStuck&&isfinite(curPos)&&curPos>1.0&&!owner.pendingPlaybackSeekTime)owner.pendingPlaybackSeekTime=@(curPos);[owner clearCurrentPlayerItem];owner.playbackFailureRecorded=NO;owner.terminalPlaybackOutcomeRecorded=NO;[owner startCicadaPlaybackWithResult:owner.result route:[owner.playbackSession peekNextRouteForResult:owner.result] url:url sourceURL:sourceURL playerGeneration:owner.playerGeneration];return;}if([owner tryNextLineForAutomaticFallback:@"first_frame_timeout"])return;[owner.spinner stopAnimating];owner.status.text=[owner.playbackProtocolCapability isEqualToString:@"experimental"]?@"播放器尚未显示画面 · 该协议为实验支持，可能无法播放 · 可重试或手动切换线路":@"播放器尚未显示画面 · 可重试或手动切换线路";owner.status.accessibilityLabel=owner.status.text;[owner setRetryAvailable:YES];
     }];
     self.avFirstFrameTimer.tolerance=0.2;
     [NSRunLoop.mainRunLoop addTimer:self.avFirstFrameTimer forMode:NSRunLoopCommonModes];
 }
 - (BOOL)isApplicationActiveForAVFirstFrameWatchdog {return UIApplication.sharedApplication.applicationState==UIApplicationStateActive;}
 
-- (void)startCicadaPlaybackWithResult:(NSDictionary *)result url:(NSURL *)url sourceURL:(NSURL *)sourceURL playerGeneration:(NSUInteger)playerGeneration {
-    if(self.playbackSuspendedForVisibility)return;
-    NSString *decodeModePref=[[NSUserDefaults standardUserDefaults] stringForKey:@"cctv.mediaDecodeMode.v1"]?:@"auto";
-    BOOL useMPV=[MediaPlaybackMPVAdapter isAvailable]&&![decodeModePref isEqualToString:@"cicada_legacy"]&&!(self.attemptedRoutes&MediaPlaybackDecodeRouteAttemptedMPV);
+- (void)startCicadaPlaybackWithResult:(NSDictionary *)result route:(MediaPlaybackDecodeRoute)route url:(NSURL *)url sourceURL:(NSURL *)sourceURL playerGeneration:(NSUInteger)playerGeneration {
+    if(self.playbackSuspendedForVisibility)return;BOOL useMPV=(route==MediaPlaybackDecodeRouteMPV);
+    // 工厂只建已决定的 route：不重读偏好、不重选核；MPV 被禁用时协调器工厂返回 nil（fail-closed）。
     self.attemptedRoutes|=(useMPV?MediaPlaybackDecodeRouteAttemptedMPV:MediaPlaybackDecodeRouteAttemptedCicadaPlayer);
-    NSMutableDictionary *handoffFields=[@{@"player":@"cicada", @"playback_attempt_id":self.playbackAttemptID?:@"", @"line_index":@(self.lineIndex), @"episode_index":@(self.episodeIndex), @"correlation_id":self.diagnosticTraceID?:@""} mutableCopy];
+    NSMutableDictionary *handoffFields=[@{@"player":MediaPlaybackDecodeRouteName(route), @"playback_attempt_id":self.playbackAttemptID?:@"", @"line_index":@(self.lineIndex), @"episode_index":@(self.episodeIndex), @"correlation_id":self.diagnosticTraceID?:@""} mutableCopy];
     [handoffFields addEntriesFromDictionary:MediaPlaybackDiagnosticHeaderFields(MediaPlaybackHeadersFromResult(result))];
     [handoffFields addEntriesFromDictionary:MediaPlaybackDiagnosticSourceFields(sourceURL)];
     [RuntimeDiagnostics.shared recordEvent:@"episode_player_handoff" category:@"playback" fields:handoffFields];
     self.hasDiagnosticTimeControlStatus=NO;self.playbackStartedAt=CACurrentMediaTime();
-    self.status.text=self.cicadaAdapterSoftwareDecodeFallbackAttempted?@"正在使用 CicadaPlayer 软解码 (cc) 载入媒体…":@"正在使用 ffmpeg 内核载入媒体…";self.status.accessibilityLabel=self.status.text;
+    self.status.text=self.cicadaAdapterSoftwareDecodeFallbackAttempted?[NSString stringWithFormat:@"正在使用 %@ 软解码 (cc) 载入媒体…",useMPV?@"MPV":@"CicadaPlayer"]:[NSString stringWithFormat:@"正在使用 %@ 载入媒体…",useMPV?@"MPV":@"CicadaPlayer"];self.status.accessibilityLabel=self.status.text;
     [self.spinner startAnimating];[self setRetryAvailable:NO];
     NSTimeInterval timeout=[[NSUserDefaults standardUserDefaults] objectForKey:@"cctv.networkTimeout.v1"]?[[NSUserDefaults standardUserDefaults] doubleForKey:@"cctv.networkTimeout.v1"]:20;
     NSDictionary *requestHeaders=MediaPlaybackHeadersFromResult(@{
@@ -2053,10 +2054,9 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
     // URLs implement headers, cookies, key handling or disguised segment repair.
     if(isLoopbackRelay&&[result[@"dashRemuxed"] boolValue])effectiveURL=sourceURL;
     requestHeaders=MediaPlaybackHeadersScopedToURL(requestHeaders,sourceURL?:url,effectiveURL);
-    MediaPlaybackCicadaAdapter *adapter=useMPV
-        ?(MediaPlaybackCicadaAdapter *)[[MediaPlaybackMPVAdapter alloc] initWithURL:effectiveURL headers:requestHeaders networkTimeout:timeout]
-        :[[MediaPlaybackCicadaAdapter alloc] initWithURL:effectiveURL headers:requestHeaders networkTimeout:timeout];
-    adapter.liveStreamHint=[result[@"isLive"] boolValue];
+    id<CCTVPlaybackEngine> engine=[HostLivePlayerCoordinator engineForRoute:route url:effectiveURL headers:requestHeaders networkTimeout:timeout liveStreamHint:[result[@"isLive"] boolValue]];
+    if(!engine){[self showTerminalPlaybackFailureWithStatus:@"该线路无法启动播放器 · 可切换线路" outcome:@"rejected" failureKind:@"engine_unavailable"];return;}
+    MediaPlaybackCicadaAdapter *adapter=(MediaPlaybackCicadaAdapter *)engine;
     adapter.delegate=self;self.cicadaAdapter=adapter;self.cicadaPosition=0;self.cicadaDuration=0;
     UIView *playerView=adapter.playerView;playerView.translatesAutoresizingMaskIntoConstraints=NO;
     [self.videoView addSubview:playerView];
@@ -2183,14 +2183,15 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
     if(self.videoFrameReady)return;
     self.videoFrameReady=YES;self.hasVideoTrack=self.cicadaAdapter.hasVideoTrack;self.throughputLabel.hidden=YES;self.throughputLabel.alpha=0.0;self.inlineNowPlayingPill.alpha=0.0;if(!self.gestureLockActive)self.screenLockButton.alpha=0.0;
     [self.spinner stopAnimating];
-    self.status.text=@"视频首帧已就绪 · CicadaPlayer 正在播放";self.status.accessibilityLabel=self.status.text;
-    NSMutableDictionary *fields=[@{@"player":@"cicada", @"playback_attempt_id":self.playbackAttemptID?:@"", @"elapsed_ms":@(MAX(0,(NSInteger)((CACurrentMediaTime()-self.playbackStartedAt)*1000))), @"line_index":@(self.lineIndex), @"episode_index":@(self.episodeIndex), @"correlation_id":self.diagnosticTraceID?:@""} mutableCopy];
+    self.status.text=[NSString stringWithFormat:@"视频首帧已就绪 · %@ 正在播放",[self.cicadaAdapter isKindOfClass:[MediaPlaybackMPVAdapter class]]?@"MPV":@"CicadaPlayer"];self.status.accessibilityLabel=self.status.text;
+    NSMutableDictionary *fields=[@{@"player":([self.cicadaAdapter isKindOfClass:[MediaPlaybackMPVAdapter class]]?@"mpv":@"cicada"), @"playback_attempt_id":self.playbackAttemptID?:@"", @"elapsed_ms":@(MAX(0,(NSInteger)((CACurrentMediaTime()-self.playbackStartedAt)*1000))), @"line_index":@(self.lineIndex), @"episode_index":@(self.episodeIndex), @"correlation_id":self.diagnosticTraceID?:@""} mutableCopy];
     [fields addEntriesFromDictionary:MediaPlaybackDiagnosticSourceFields(MediaPlaybackOriginalSourceURL(self.result))];
     [RuntimeDiagnostics.shared recordEvent:@"media_first_frame_ready" category:@"playback" fields:fields];
 }
 - (void)advanceFromCicadaFailureWithError:(NSError *)error {
     MediaPlaybackCicadaAdapter *adapter=self.cicadaAdapter;
     if(!adapter)return; // 已回退过或已拆解：幂等，不重复推进
+    MediaPlaybackDecodeRoute failedRoute=[adapter isKindOfClass:[MediaPlaybackMPVAdapter class]]?MediaPlaybackDecodeRouteMPV:MediaPlaybackDecodeRouteCicadaPlayer; // 失败引擎由实际 adapter 类型决定，软解重试保持同引擎
     NSTimeInterval failedPosition=adapter.currentPosition;
     if(!self.pendingQualitySeekTime&&!self.pendingPlaybackSeekTime&&isfinite(failedPosition)&&failedPosition>0){
         self.pendingQualitySeekTime=@(failedPosition);
@@ -2198,7 +2199,7 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
         self.pendingQualityRestorePlaybackState=YES;
     }
     [self teardownCicadaAdapter];
-    NSMutableDictionary *fields=[@{@"player":@"cicada", @"playback_attempt_id":self.playbackAttemptID?:@"", @"failure_kind":@"cicada_playback_failed", @"error_domain":error.domain?:@"", @"error_code":@(error.code), @"error_message":error.localizedDescription?:@"", @"line_index":@(self.lineIndex), @"episode_index":@(self.episodeIndex), @"correlation_id":self.diagnosticTraceID?:@""} mutableCopy];
+    NSMutableDictionary *fields=[@{@"player":(failedRoute==MediaPlaybackDecodeRouteMPV?@"mpv":@"cicada"), @"playback_attempt_id":self.playbackAttemptID?:@"", @"failure_kind":@"cicada_playback_failed", @"error_domain":error.domain?:@"", @"error_code":@(error.code), @"error_message":error.localizedDescription?:@"", @"line_index":@(self.lineIndex), @"episode_index":@(self.episodeIndex), @"correlation_id":self.diagnosticTraceID?:@""} mutableCopy];
     [fields addEntriesFromDictionary:MediaPlaybackDiagnosticSourceFields(MediaPlaybackOriginalSourceURL(self.result))];
     [RuntimeDiagnostics.shared recordEvent:@"playback_failed" category:@"playback" fields:fields];
     [self recordPlaybackAttemptOutcome:@"failed" failureKind:@"cicada_playback_failed" httpStatus:0 terminal:NO];
@@ -2210,12 +2211,12 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
         self.cicadaAdapterSoftwareDecodeFallbackAttempted=YES;
         NSTimeInterval position=self.cicadaPosition;
         self.pendingPlaybackSeekTime=@(isfinite(position)&&position>0?position:0);self.pendingQualityWasPlaying=YES;self.pendingQualityRestorePlaybackState=YES;
-        NSMutableDictionary *retryFields=[@{@"player":@"cicada", @"playback_attempt_id":self.playbackAttemptID?:@"", @"software_decode_fallback_available":@YES, @"line_index":@(self.lineIndex), @"episode_index":@(self.episodeIndex), @"correlation_id":self.diagnosticTraceID?:@""} mutableCopy];
+        NSMutableDictionary *retryFields=[@{@"player":(failedRoute==MediaPlaybackDecodeRouteMPV?@"mpv":@"cicada"), @"playback_attempt_id":self.playbackAttemptID?:@"", @"software_decode_fallback_available":@YES, @"line_index":@(self.lineIndex), @"episode_index":@(self.episodeIndex), @"correlation_id":self.diagnosticTraceID?:@""} mutableCopy];
         [retryFields addEntriesFromDictionary:MediaPlaybackDiagnosticSourceFields(MediaPlaybackOriginalSourceURL(self.result))];
         [RuntimeDiagnostics.shared recordEvent:@"cicada_software_decode_fallback" category:@"playback" fields:retryFields];
         [self recordPlaybackAttemptOutcome:@"software_decode_fallback" failureKind:@"hardware_decoder_error" httpStatus:0 terminal:NO];
         NSURL *retryURL=[NSURL URLWithString:[self.result[@"url"] isKindOfClass:NSString.class]?self.result[@"url"]:@""];
-        [self startCicadaPlaybackWithResult:self.result url:retryURL sourceURL:MediaPlaybackOriginalSourceURL(self.result) playerGeneration:self.playerGeneration];
+        [self startCicadaPlaybackWithResult:self.result route:failedRoute url:retryURL sourceURL:MediaPlaybackOriginalSourceURL(self.result) playerGeneration:self.playerGeneration];
         return;
     }
     MediaPlaybackDecodeRoute nextRoute=[self.playbackSession nextRouteForResult:self.result];
@@ -2234,28 +2235,29 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
     if(nextRoute==MediaPlaybackDecodeRouteMPV||nextRoute==MediaPlaybackDecodeRouteCicadaPlayer){
         NSURL *fallbackPlayURL=[NSURL URLWithString:[self.result[@"url"] isKindOfClass:NSString.class]?self.result[@"url"]:@""];
 
-        [self startCicadaPlaybackWithResult:self.result url:fallbackPlayURL sourceURL:MediaPlaybackOriginalSourceURL(self.result) playerGeneration:self.playerGeneration];
+        [self startCicadaPlaybackWithResult:self.result route:nextRoute url:fallbackPlayURL sourceURL:MediaPlaybackOriginalSourceURL(self.result) playerGeneration:self.playerGeneration];
         return;
     }
     if(nextRoute==MediaPlaybackDecodeRouteWebView){[self openWebPlaybackFallback];return;}
     // 无下一路时也自动试下一条线路（与 AVPlayer/直连路径同款回退）。
     if([self tryNextLineForAutomaticFallback:@"cicada_playback_failed"])return;
     // 无下一路：显示失败（与 AVPlayer 最终失败同一文案风格）。
-    [self.spinner stopAnimating];
-    self.status.text=[self.playbackProtocolCapability isEqualToString:@"experimental"]?@"ffmpeg 内核也无法播放此资源 · 协议为实验支持，可能无法播放 · 可重试或切换线路":@"ffmpeg 内核也无法播放此资源 · 可重试或切换线路";self.status.accessibilityLabel=self.status.text;
-    [self setRetryAvailable:YES];
-    [self recordPlaybackAttemptOutcome:@"failed" failureKind:@"cicada_playback_failed" httpStatus:0 terminal:YES];
+    NSString *terminalText=[self.playbackProtocolCapability isEqualToString:@"experimental"]?[NSString stringWithFormat:@"%@ 也无法播放此资源 · 协议为实验支持，可能无法播放 · 可重试或切换线路",(failedRoute==MediaPlaybackDecodeRouteMPV?@"MPV":@"CicadaPlayer")]:[NSString stringWithFormat:@"%@ 也无法播放此资源 · 可重试或切换线路",(failedRoute==MediaPlaybackDecodeRouteMPV?@"MPV":@"CicadaPlayer")];
+    [self showTerminalPlaybackFailureWithStatus:terminalText outcome:@"failed" failureKind:@"cicada_playback_failed"];
 }
 - (void)handleCicadaFirstFrameTimeoutForAdapter:(id)adapter {
     if(adapter!=self.cicadaAdapter)return;
-    NSError *error=[NSError errorWithDomain:MediaPlaybackCicadaAdapterErrorDomain code:-1001 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"CicadaPlayer %.0f 秒内未显示首帧",self.cicadaAdapter.firstFrameTimeout]}];
+    NSError *error=[NSError errorWithDomain:MediaPlaybackCicadaAdapterErrorDomain code:-1001 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"%@ %.0f 秒内未显示首帧",[adapter isKindOfClass:[MediaPlaybackMPVAdapter class]]?@"MPV":@"CicadaPlayer",self.cicadaAdapter.firstFrameTimeout]}];
     [self advanceFromCicadaFailureWithError:error];
 }
+// 统一终态（停 spinner + 文案 + 可重试 + 关闭 attempt），供 WebView 早返回/工厂 fail-closed/None 分支/advance 终态共用；session 释放在调用点。
+- (void)showTerminalPlaybackFailureWithStatus:(NSString *)statusText outcome:(NSString *)outcome failureKind:(NSString *)failureKind {
+[self.spinner stopAnimating];self.status.text=statusText;self.status.accessibilityLabel=self.status.text;[self setRetryAvailable:YES];[self recordPlaybackAttemptOutcome:outcome failureKind:failureKind httpStatus:0 terminal:YES];}
 - (void)openWebPlaybackFallback {
-    if(self.presentedViewController)return;
-    if(![self.result[@"url"] isKindOfClass:NSString.class]||![self.result[@"url"] length])return;
+    if(self.presentedViewController){[self showTerminalPlaybackFailureWithStatus:@"已有页面正在显示 · 请关闭后重试" outcome:@"rejected" failureKind:@"webview_presented"];return;}
+    if(![self.result[@"url"] isKindOfClass:NSString.class]||![self.result[@"url"] length]){[self showTerminalPlaybackFailureWithStatus:@"没有可用的网页播放地址 · 可切换线路" outcome:@"rejected" failureKind:@"webview_no_url"];return;}
     NSURL *pageURL=[NSURL URLWithString:self.result[@"url"]];
-    if(![@[@"http",@"https"] containsObject:pageURL.scheme.lowercaseString]||!pageURL.host.length||MediaPlaybackResultIsDirectMedia(self.result)){self.status.text=@"该媒体不支持直接解析 · 请切换线路";return;}
+    if(![@[@"http",@"https"] containsObject:pageURL.scheme.lowercaseString]||!pageURL.host.length||MediaPlaybackResultIsDirectMedia(self.result)){[self showTerminalPlaybackFailureWithStatus:@"该媒体不支持直接解析 · 请切换线路" outcome:@"rejected" failureKind:@"webview_direct_media"];return;}
     self.attemptedRoutes|=MediaPlaybackDecodeRouteAttemptedWebView;
     [self persistPlaybackProgress];[self pauseActiveEngine];self.awaitingWebPlaybackReturn=NO;
     [RuntimeDiagnostics.shared recordEvent:@"playback_web_fallback_selected" category:@"playback" fields:@{@"line_index":@(self.lineIndex),@"episode_index":@(self.episodeIndex),@"correlation_id":self.diagnosticTraceID?:@""}];
@@ -2283,15 +2285,14 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
     MediaPlaybackDecodeRoute nextRoute=[self.playbackSession nextRouteForResult:self.result];
     if(nextRoute==MediaPlaybackDecodeRouteMPV||nextRoute==MediaPlaybackDecodeRouteCicadaPlayer){
         // 新尝试：清掉本次失败标记，让 Cicada/MPV 路径有自己的失败上报。
-        // startCicadaPlaybackWithResult: 内部据 attemptedRoutes 自动选用 MPV
-        // 或 Cicada 适配器，从而走通路由表声明的 AVPlayer→MPV→Cicada→WebView 链。
+        // startCicadaPlaybackWithResult: 按已决定的 nextRoute 建引擎，走路由表声明的链。
         NSTimeInterval position=CMTimeGetSeconds(item.currentTime);
         if(!self.pendingPlaybackSeekTime&&isfinite(position)&&position>0)self.pendingPlaybackSeekTime=@(position);
         self.playbackFailureRecorded=NO;self.terminalPlaybackOutcomeRecorded=NO;
         self.resumePromptPending=NO;
         [self clearCurrentPlayerItem];
         NSURL *fallbackURL=[NSURL URLWithString:[self.result[@"url"] isKindOfClass:NSString.class]?self.result[@"url"]:@""];
-        [self startCicadaPlaybackWithResult:self.result url:fallbackURL sourceURL:MediaPlaybackOriginalSourceURL(self.result) playerGeneration:self.playerGeneration];
+        [self startCicadaPlaybackWithResult:self.result route:nextRoute url:fallbackURL sourceURL:MediaPlaybackOriginalSourceURL(self.result) playerGeneration:self.playerGeneration];
         return;
     }
     if(nextRoute==MediaPlaybackDecodeRouteWebView){[self openWebPlaybackFallback];return;}
@@ -2408,19 +2409,19 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
         self.diagnosticStallCount++;
         double stalledAt=[self activeEngineCurrentPosition];if(!isfinite(stalledAt)||stalledAt<0)stalledAt=0;
         NSUInteger generation=self.playerGeneration;
-        [RuntimeDiagnostics.shared recordEvent:@"playback_stalled" category:@"playback" fields:@{@"player":@"cicada",@"playback_attempt_id":self.playbackAttemptID?:@"",@"correlation_id":self.diagnosticTraceID?:@"",@"media_stall_count":@(self.diagnosticStallCount),@"media_buffered_ahead_seconds":@(MAX(0,self.cicadaAdapter.bufferedPosition-stalledAt))}];
+        [RuntimeDiagnostics.shared recordEvent:@"playback_stalled" category:@"playback" fields:@{@"player":([self.cicadaAdapter isKindOfClass:[MediaPlaybackMPVAdapter class]]?@"mpv":@"cicada"),@"playback_attempt_id":self.playbackAttemptID?:@"",@"correlation_id":self.diagnosticTraceID?:@"",@"media_stall_count":@(self.diagnosticStallCount),@"media_buffered_ahead_seconds":@(MAX(0,self.cicadaAdapter.bufferedPosition-stalledAt))}];
         __weak typeof(self) weakSelf=self;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW,12*NSEC_PER_SEC),dispatch_get_main_queue(),^{
             MediaPlaybackViewController *owner=weakSelf;
             if(!owner||generation!=owner.playerGeneration||owner.cicadaAdapter!=adapter||!owner.cicadaAdapter.loading||owner.cicadaAdapter.state!=MediaPlaybackCicadaAdapterStatePlaying||owner.resolving||owner.stallRecoveryAttempts>=1)return;
             double position=[owner activeEngineCurrentPosition];if(!isfinite(position)||fabs(position-stalledAt)>0.5)return;
             owner.stallRecoveryAttempts++;owner.pendingQualitySeekTime=@(stalledAt);owner.pendingQualityWasPlaying=YES;owner.pendingQualityRestorePlaybackState=YES;owner.pendingResolutionReason=@"stall_recovery";
-            [RuntimeDiagnostics.shared recordEvent:@"playback_stall_recovery_started" category:@"playback" fields:@{@"player":@"cicada",@"playback_attempt_id":owner.playbackAttemptID?:@"",@"correlation_id":owner.diagnosticTraceID?:@"",@"attempt":@(owner.stallRecoveryAttempts),@"stalled_position_seconds":@(stalledAt)}];
+            [RuntimeDiagnostics.shared recordEvent:@"playback_stall_recovery_started" category:@"playback" fields:@{@"player":([owner.cicadaAdapter isKindOfClass:[MediaPlaybackMPVAdapter class]]?@"mpv":@"cicada"),@"playback_attempt_id":owner.playbackAttemptID?:@"",@"correlation_id":owner.diagnosticTraceID?:@"",@"attempt":@(owner.stallRecoveryAttempts),@"stalled_position_seconds":@(stalledAt)}];
             [owner resolveAndPlay];
         });
     }
     if(loading){self.status.text=@"正在缓冲 · 等待 CicadaPlayer";self.status.accessibilityLabel=self.status.text;[self.spinner startAnimating];}
-    else if(self.videoFrameReady){self.status.text=@"视频首帧已就绪 · CicadaPlayer 正在播放";self.status.accessibilityLabel=self.status.text;[self.spinner stopAnimating];}
+    else if(self.videoFrameReady){self.status.text=[NSString stringWithFormat:@"视频首帧已就绪 · %@ 正在播放",[self.cicadaAdapter isKindOfClass:[MediaPlaybackMPVAdapter class]]?@"MPV":@"CicadaPlayer"];self.status.accessibilityLabel=self.status.text;[self.spinner stopAnimating];}
 }
 - (void)cicadaAdapterDidSeek:(id)adapter {
     if(adapter!=self.cicadaAdapter)return;

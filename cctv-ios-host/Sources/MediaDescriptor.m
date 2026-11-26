@@ -11,10 +11,11 @@
         _headers=MediaPlaybackHeadersFromResult(_result);
         _container=[_result[@"probedContainer"] isKindOfClass:NSString.class]?[_result[@"probedContainer"] lowercaseString]:(_url.pathExtension.lowercaseString?:@"");
         _capabilityStatus=@"unknown";_capabilityReason=@"requires_device_playback_validation";
-        if(MediaPlaybackResultRequiresWebViewOnly(_result)){_capabilityStatus=@"unsupported";_capabilityReason=@"unsupported_container";}
-        else if([_result[@"videoCodec"] isKindOfClass:NSString.class]&&[MediaCapabilityUnsupportedVideoCodecs() containsObject:[_result[@"videoCodec"] lowercaseString]]){_capabilityStatus=@"unsupported";_capabilityReason=@"unsupported_video_codec";}
-        else if(![MediaCapabilityNetworkTransports() containsObject:_transport]&&!_url.isFileURL){_capabilityStatus=@"unsupported";_capabilityReason=@"unsupported_transport";}
-        else if(MediaPlaybackResultSupportsNativePlayback(_result)){_capabilityStatus=@"recognized";}
+        // 门禁与可播判定统一到 MediaPlaybackDecodeRouter（单一决策点）：
+        // 拒绝原因非空 → unsupported + 该原因；有候选 → recognized。
+        NSString *rejection=MediaPlaybackDecodeRouteRejectionReasonForResult(_result);
+        if(rejection){_capabilityStatus=@"unsupported";_capabilityReason=rejection;}
+        else if(MediaPlaybackDecodeRouteCandidatesForResult(_result,0,NO).count){_capabilityStatus=@"recognized";}
     }return self;
 }
 @end
