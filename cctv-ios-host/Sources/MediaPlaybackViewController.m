@@ -2058,6 +2058,10 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
     [self seekActiveEngineToTime:target completion:^(BOOL finished){if(generation!=self.playerGeneration||adapter!=self.cicadaAdapter)return;if(finished){if(wasPlaying)[self playActiveEngine];else[self pauseActiveEngine];}[self refreshCicadaControls];[self.controlsOverlay rearmAutoHide];}];
 }
 - (void)mountCicadaRenderView:(UIView *)renderView inHost:(UIView *)host {
+    if(!renderView||!host){
+        [RuntimeDiagnostics.shared recordEvent:@"playback_render_mount_rejected" category:@"playback" fields:@{@"render_view_present":@(renderView!=nil),@"host_present":@(host!=nil)}];
+        return;
+    }
     [NSLayoutConstraint deactivateConstraints:self.cicadaRenderConstraints?:@[]];
     renderView.translatesAutoresizingMaskIntoConstraints=NO;
     [UIView performWithoutAnimation:^{

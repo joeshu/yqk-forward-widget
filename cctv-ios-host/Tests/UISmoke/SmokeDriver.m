@@ -1550,12 +1550,14 @@ static void next(NSArray *steps, NSUInteger index) {
             // Exercise the app's real MPV view and fullscreen controls without
             // requiring the device-only renderer in the UI smoke target.
             mpvFullscreenProbe=[MediaPlaybackViewController new];
+            [mpvFullscreenProbe loadViewIfNeeded];
             [nav pushViewController:mpvFullscreenProbe animated:NO];
             [mpvFullscreenProbe setValue:@(9.0/16.0) forKey:@"videoAspectRatio"];
             NSURL *fixtureURL=[NSURL URLWithString:@"https://fixture.test/video.mp4"];
             mpvSurfaceAdapter=[[MediaPlaybackMPVAdapter alloc] initWithURL:fixtureURL headers:@{} networkTimeout:1];
             [mpvFullscreenProbe setValue:mpvSurfaceAdapter forKey:@"cicadaAdapter"];
             UIView *inlineHost=[mpvFullscreenProbe valueForKey:@"videoView"];
+            if(!inlineHost||mpvFullscreenProbe.view.window!=self.window){check(NO,@"MPV fullscreen smoke controller is mounted before reparenting its render view");return;}
             [mpvFullscreenProbe mountCicadaRenderView:mpvSurfaceAdapter.playerView inHost:inlineHost];
             MediaPlaybackCicadaControls *controls=[mpvFullscreenProbe valueForKey:@"cicadaControlsBuilder"];
             [mpvFullscreenProbe refreshCicadaControls];

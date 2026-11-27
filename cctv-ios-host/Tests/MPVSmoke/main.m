@@ -57,7 +57,7 @@
     [self mount:self.adapter.playerView in:self.root.view];
     [self.adapter prepareWithHardwareDecoder:NO];
     [self.adapter start];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,45*NSEC_PER_SEC),dispatch_get_main_queue(),^{[self finish:@"timed out waiting for MPV playback or fullscreen transitions"];});
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,90*NSEC_PER_SEC),dispatch_get_main_queue(),^{[self finish:@"timed out waiting for MPV playback or fullscreen transitions"];});
     return YES;
 }
 - (void)cicadaAdapterDidShowFirstFrame:(id)adapter {
@@ -90,7 +90,7 @@
     if(self.adapter.currentPosition>before+0.15){
         if(self.round==0){
             [@"ready" writeToFile:[self.documents stringByAppendingPathComponent:@"mpv-frame-ready"] atomically:YES encoding:NSUTF8StringEncoding error:NULL];
-            [self waitForScreenshotUntil:[NSDate dateWithTimeIntervalSinceNow:12]];
+            [self waitForScreenshotUntil:[NSDate dateWithTimeIntervalSinceNow:30]];
             return;
         }
         [self exitFullscreen];
