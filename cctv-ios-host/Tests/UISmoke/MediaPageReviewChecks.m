@@ -65,7 +65,12 @@ BOOL MediaPageReviewRunSmokeChecks(void) {
     picker.selectedEpisodeIndex=0;
     [picker rebuildSelection];
     NSArray *seasonEpisodes=[picker episodesForLine:0];
-    passed&=MediaPageCheck(picker.lines.count==1&&[[seasonEpisodes.firstObject[@"id"] description] isEqual:@"s2e1"],@"season episodes override shared route episodes without losing playback routes");
+    passed&=MediaPageCheck(picker.lines.count==1&&[[seasonEpisodes.firstObject[@"id"] description] isEqual:@"episode-0"],@"shared playback routes keep their own episode mapping");
+    picker.detail=@{@"lines":@[@{@"id":@"shared-route"}],
+                    @"seasons":@[@{@"id":@"season-two",@"episodes":@[@{@"id":@"s2e1",@"name":@"第二季第一集"}]}]};
+    [picker rebuildSelection];
+    NSArray *seasonFallbackEpisodes=[picker episodesForLine:0];
+    passed&=MediaPageCheck(picker.lines.count==1&&[[seasonFallbackEpisodes.firstObject[@"id"] description] isEqual:@"s2e1"],@"season episodes fill routes that omit their own episode list");
     MediaEpisodeSelectionViewController *emptySeasonPicker=[MediaEpisodeSelectionViewController new];
     emptySeasonPicker.item=@{@"id":@"empty-season-movie",@"name":@"空线路季"};
     emptySeasonPicker.source=@{@"id":@"review",@"port":@18780};

@@ -118,16 +118,15 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
 - (NSArray *)lines {
     NSArray *seasonLines=[self.currentSeason[@"lines"] isKindOfClass:NSArray.class]?self.currentSeason[@"lines"]:@[];
     if([self.currentSeason[@"__mediaHasOwnLines"] boolValue])return seasonLines;
-    // A source may define season-specific episode lists alongside shared
-    // top-level playback routes. Keep those routes available while the
-    // selected season's episodes remain authoritative in episodesForLine:.
+    // Some sources share playback routes across seasons. Keep those routes
+    // available; each route's own episode list remains the best mapping for
+    // that route, with the season list used when a route has no episodes.
     return [self.detail[@"lines"] isKindOfClass:NSArray.class]?self.detail[@"lines"]:@[];
 }
 - (NSArray *)episodesForLine:(NSInteger)index {
-    NSArray *seasonEpisodes=[self.currentSeason[@"episodes"] isKindOfClass:NSArray.class]?self.currentSeason[@"episodes"]:@[];
-    if(seasonEpisodes.count){NSMutableArray *clean=[NSMutableArray arrayWithCapacity:seasonEpisodes.count];for(id episode in seasonEpisodes)[clean addObject:[episode isKindOfClass:NSDictionary.class]?episode:@{}];return clean;}
     NSArray *lines=self.lines;
     if(index>=0&&index<lines.count){NSDictionary *line=[lines[(NSUInteger)index] isKindOfClass:NSDictionary.class]?lines[(NSUInteger)index]:@{};NSArray *lineEpisodes=[line[@"episodes"] isKindOfClass:NSArray.class]?line[@"episodes"]:@[];if(lineEpisodes.count){NSMutableArray *clean=[NSMutableArray arrayWithCapacity:lineEpisodes.count];for(id episode in lineEpisodes)[clean addObject:[episode isKindOfClass:NSDictionary.class]?episode:@{}];return clean;}}
+    NSArray *seasonEpisodes=[self.currentSeason[@"episodes"] isKindOfClass:NSArray.class]?self.currentSeason[@"episodes"]:@[];
     NSMutableArray *clean=[NSMutableArray arrayWithCapacity:seasonEpisodes.count];for(id episode in seasonEpisodes)[clean addObject:[episode isKindOfClass:NSDictionary.class]?episode:@{}];return clean;
 }
 - (NSString *)currentParserID {
