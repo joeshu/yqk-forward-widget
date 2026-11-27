@@ -18,7 +18,7 @@ static NSArray<NSDictionary *> *MediaEpisodeSelectionLines(id value) {
     NSArray *rows=MediaEpisodeSelectionDictionaryRows(value);NSMutableArray *lines=[NSMutableArray arrayWithCapacity:rows.count];for(NSDictionary *rawLine in rows){NSMutableDictionary *line=[rawLine mutableCopy];line[@"episodes"]=MediaEpisodeSelectionDictionaryRows(line[@"episodes"]);[lines addObject:line];}return lines;
 }
 static NSDictionary *MediaEpisodeSelectionSanitizedDetail(id value) {
-    if(![value isKindOfClass:NSDictionary.class])return nil;NSMutableDictionary *detail=[value mutableCopy];detail[@"lines"]=MediaEpisodeSelectionLines(detail[@"lines"]);id rawSeasons=detail[@"seasons"]?:detail[@"seasonList"]?:detail[@"season_list"];if([rawSeasons isKindOfClass:NSArray.class]){NSMutableArray *seasons=[NSMutableArray array];for(NSDictionary *rawSeason in MediaEpisodeSelectionDictionaryRows(rawSeasons)){NSMutableDictionary *season=[rawSeason mutableCopy];season[@"lines"]=MediaEpisodeSelectionLines(season[@"lines"]);season[@"episodes"]=MediaEpisodeSelectionDictionaryRows(season[@"episodes"]);[seasons addObject:season];}detail[@"seasons"]=seasons;}return detail;
+    if(![value isKindOfClass:NSDictionary.class])return nil;NSMutableDictionary *detail=[value mutableCopy];detail[@"lines"]=MediaEpisodeSelectionLines(detail[@"lines"]);id rawSeasons=detail[@"seasons"]?:detail[@"seasonList"]?:detail[@"season_list"];if([rawSeasons isKindOfClass:NSArray.class]){NSMutableArray *seasons=[NSMutableArray array];for(NSDictionary *rawSeason in MediaEpisodeSelectionDictionaryRows(rawSeasons)){NSMutableDictionary *season=[rawSeason mutableCopy];season[@"__mediaHasOwnLines"]=@([rawSeason[@"lines"] isKindOfClass:NSArray.class]);season[@"lines"]=MediaEpisodeSelectionLines(season[@"lines"]);season[@"episodes"]=MediaEpisodeSelectionDictionaryRows(season[@"episodes"]);[seasons addObject:season];}detail[@"seasons"]=seasons;}return detail;
 }
 static void MediaEpisodeSelectionLoadPoster(NSString *url, UIImageView *view, NSUInteger retriesRemaining);
 static void MediaEpisodeSelectionLoadPoster(NSString *url, UIImageView *view, NSUInteger retriesRemaining) {
@@ -117,13 +117,17 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
 }
 - (NSArray *)lines {
     NSArray *seasonLines=[self.currentSeason[@"lines"] isKindOfClass:NSArray.class]?self.currentSeason[@"lines"]:@[];
-    if(self.seasonCollections.count)return seasonLines;
+    if([self.currentSeason[@"__mediaHasOwnLines"] boolValue])return seasonLines;
+    // A source may define season-specific episode lists alongside shared
+    // top-level playback routes. Keep those routes available while the
+    // selected season's episodes remain authoritative in episodesForLine:.
     return [self.detail[@"lines"] isKindOfClass:NSArray.class]?self.detail[@"lines"]:@[];
 }
 - (NSArray *)episodesForLine:(NSInteger)index {
+    NSArray *seasonEpisodes=[self.currentSeason[@"episodes"] isKindOfClass:NSArray.class]?self.currentSeason[@"episodes"]:@[];
+    if(seasonEpisodes.count){NSMutableArray *clean=[NSMutableArray arrayWithCapacity:seasonEpisodes.count];for(id episode in seasonEpisodes)[clean addObject:[episode isKindOfClass:NSDictionary.class]?episode:@{}];return clean;}
     NSArray *lines=self.lines;
     if(index>=0&&index<lines.count){NSDictionary *line=[lines[(NSUInteger)index] isKindOfClass:NSDictionary.class]?lines[(NSUInteger)index]:@{};NSArray *lineEpisodes=[line[@"episodes"] isKindOfClass:NSArray.class]?line[@"episodes"]:@[];if(lineEpisodes.count){NSMutableArray *clean=[NSMutableArray arrayWithCapacity:lineEpisodes.count];for(id episode in lineEpisodes)[clean addObject:[episode isKindOfClass:NSDictionary.class]?episode:@{}];return clean;}}
-    NSArray *seasonEpisodes=[self.currentSeason[@"episodes"] isKindOfClass:NSArray.class]?self.currentSeason[@"episodes"]:@[];
     NSMutableArray *clean=[NSMutableArray arrayWithCapacity:seasonEpisodes.count];for(id episode in seasonEpisodes)[clean addObject:[episode isKindOfClass:NSDictionary.class]?episode:@{}];return clean;
 }
 - (NSString *)currentParserID {

@@ -60,11 +60,20 @@ BOOL MediaPageReviewRunSmokeChecks(void) {
     foundSelected=NO;
     for(UIButton *button in quick.arrangedSubviews)if(!button.hidden&&button.tag==79)foundSelected=YES;
     passed&=MediaPageCheck(foundSelected,@"reverse order keeps the chosen episode in the quick window");
-    picker.detail=@{@"lines":@[@{@"episodes":episodes}],
+    picker.detail=@{@"lines":@[@{@"id":@"shared-route",@"episodes":episodes}],
                     @"seasons":@[@{@"id":@"season-two",@"episodes":@[@{@"id":@"s2e1",@"name":@"第二季第一集"}]}]};
     picker.selectedEpisodeIndex=0;
     [picker rebuildSelection];
-    passed&=MediaPageCheck(!picker.lines.count&&[[picker episodesForLine:0][0][@"id"] isEqual:@"s2e1"],@"a season with direct episodes cannot inherit another season's routes");
+    NSArray *seasonEpisodes=[picker episodesForLine:0];
+    passed&=MediaPageCheck(picker.lines.count==1&&[[seasonEpisodes.firstObject[@"id"] description] isEqual:@"s2e1"],@"season episodes override shared route episodes without losing playback routes");
+    MediaEpisodeSelectionViewController *emptySeasonPicker=[MediaEpisodeSelectionViewController new];
+    emptySeasonPicker.item=@{@"id":@"empty-season-movie",@"name":@"空线路季"};
+    emptySeasonPicker.source=@{@"id":@"review",@"port":@18780};
+    emptySeasonPicker.detail=@{@"lines":@[@{@"id":@"other-season-route",@"episodes":episodes}],
+                               @"seasons":@[@{@"id":@"empty-season",@"lines":@[],@"episodes":@[@{@"id":@"s1e1",@"name":@"第一季第一集"}]}]};
+    [emptySeasonPicker loadViewIfNeeded];
+    NSArray *emptySeasonEpisodes=[emptySeasonPicker episodesForLine:0];
+    passed&=MediaPageCheck(!emptySeasonPicker.lines.count&&[[emptySeasonEpisodes.firstObject[@"id"] description] isEqual:@"s1e1"],@"explicitly empty season routes do not inherit another season's routes");
     [picker setValue:@"pending" forKey:@"inFlightEpisodeSignature"];
     [picker rebuildSelection];
     passed&=MediaPageCheck(!((UIButton *)[picker valueForKey:@"continueButton"]).enabled,@"layout changes preserve the pending playback action");
