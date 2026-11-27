@@ -220,13 +220,15 @@ NSArray<NSDictionary *> *MediaPlaybackDecodeRouteCandidatesForResult(NSDictionar
                          [MediaCapabilityMPVOnlyVideoCodecs() containsObject:videoCodec]);
     BOOL rawProgressiveTS = ([urlExt isEqualToString:@"ts"] && ![resolvedFormat isEqualToString:@"hls"] && ![resolvedFormat isEqualToString:@"m3u8"]);
     NSString *requestedEngine = MediaPlaybackDecodeLowerString(result[@"playbackEngine"]);
+    BOOL explicitPreferAV = [decodeMode isEqualToString:@"av"] || [decodeMode isEqualToString:@"avplayer"];
     BOOL explicitPreferMPV = [decodeMode isEqualToString:@"mpv"] || [requestedEngine isEqualToString:@"mpv"];
     BOOL legacyCicada = [decodeMode isEqualToString:@"cicada_legacy"];
     BOOL userExplicitCicada = [decodeMode isEqualToString:@"cicada"] || [decodeMode isEqualToString:@"cicada_soft"] || legacyCicada;
     BOOL mpvEnabledForVOD = !forLive && !legacyCicada && MediaPlaybackMPVRouteEnabled();
+    BOOL defaultPreferMPV = mpvEnabledForVOD && !userExplicitCicada && !explicitPreferAV;
     BOOL allowCicadaInVOD = !mpvEnabledForVOD || userExplicitCicada;
     BOOL explicitPreferCicada = userExplicitCicada || (!mpvEnabledForVOD && [requestedEngine isEqualToString:@"cicada"]);
-    BOOL preferCicada = !mpvOnlyMedia && !explicitPreferMPV && allowCicadaInVOD && (probedCicadaOnly || rawProgressiveTS || explicitPreferCicada);
+    BOOL preferCicada = !mpvOnlyMedia && !explicitPreferMPV && !defaultPreferMPV && allowCicadaInVOD && (probedCicadaOnly || rawProgressiveTS || explicitPreferCicada);
     NSString *cicadaDecodeMode = ([decodeMode isEqualToString:@"cicada_soft"] || [result[@"preferSoftwareDecode"] boolValue]) ? @"cicada_soft" : @"cicada";
 
     // Parser and platform watch pages are documents, not media resources. Send
@@ -239,7 +241,7 @@ NSArray<NSDictionary *> *MediaPlaybackDecodeRouteCandidatesForResult(NSDictionar
         return @[@{@"route": @(MediaPlaybackDecodeRouteWebView), @"decodeMode": @"webview", @"reason": @"web_page"}];
     }
 
-    // Ordered VOD fallback: AVPlayer → MPV (Cicada only when explicitly requested or MPV unavailable) → WebView.
+    // Ordered VOD fallback: MPV (default preferred) → AVPlayer (Cicada only when explicitly requested or MPV unavailable) → WebView.
     MediaPlaybackDecodeRoute candidates[] = { MediaPlaybackDecodeRouteAVPlayer, MediaPlaybackDecodeRouteMPV, MediaPlaybackDecodeRouteCicadaPlayer, MediaPlaybackDecodeRouteWebView };
     NSMutableArray<NSDictionary *> *out = [NSMutableArray array];
     for (NSUInteger i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
@@ -249,7 +251,7 @@ NSArray<NSDictionary *> *MediaPlaybackDecodeRouteCandidatesForResult(NSDictionar
         if (route == MediaPlaybackDecodeRouteMPV && legacyCicada) continue;
         // 直播默认不走实验中的 MPV，也没有网页播放器。
         if (forLive && (route == MediaPlaybackDecodeRouteMPV || route == MediaPlaybackDecodeRouteWebView)) continue;
-        // 点播默认仅走 AVPlayer → MPV，不再自动回落到 Cicada（除非用户显式选择 Cicada 或 MPV 不可用）。
+        // 点播默认仅走 MPV → AVPlayer，不再自动回落到 Cicada（除非用户显式选择 Cicada 或 MPV 不可用）。
         if (!forLive && route == MediaPlaybackDecodeRouteCicadaPlayer && !allowCicadaInVOD) continue;
         // MPV-only 容器/编码（AVI/WMV/ASF/RM/VP8/VP9/AV1 等）Cicada 必败，直接跳过。
         if (route == MediaPlaybackDecodeRouteCicadaPlayer && mpvOnlyMedia) continue;
@@ -274,8 +276,8 @@ NSArray<NSDictionary *> *MediaPlaybackDecodeRouteCandidatesForResult(NSDictionar
             route == MediaPlaybackDecodeRouteCicadaPlayer ? (preferCicada ? @"cicada_preferred" : @"cicada_fallback") : @"web_page";
         [out addObject:@{@"route": @(route), @"decodeMode": decodeModeForRoute, @"reason": reason}];
     }
-    // 显式指定 MPV 或 Cicada 时优先置顶。
-    if (explicitPreferMPV) {
+    // 点播默认 MPV 优先（或显式指定 MPV）时将 MPV 置顶；显式指定 Cicada 时置顶 Cicada。
+    if (explicitPreferMPV || defaultPreferMPV) {
         NSUInteger mpvIndex = [out indexOfObjectPassingTest:^BOOL(NSDictionary *entry, NSUInteger idx, BOOL *stop) { return [entry[@"route"] integerValue] == MediaPlaybackDecodeRouteMPV; }];
         if (mpvIndex != NSNotFound && mpvIndex > 0) {
             NSDictionary *entry = out[mpvIndex];

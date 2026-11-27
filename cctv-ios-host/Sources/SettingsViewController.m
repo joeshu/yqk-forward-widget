@@ -43,10 +43,11 @@ static NSString *SettingsPreferredQualityText(void) {
 
 static NSString *SettingsDecodeModeText(void) {
     NSString *mode=[[NSUserDefaults standardUserDefaults] stringForKey:@"cctv.mediaDecodeMode.v1"]?:@"auto";
+    if([mode isEqualToString:@"av"]||[mode isEqualToString:@"avplayer"])return @"优先 AVPlayer";
     if([mode isEqualToString:@"mpv"])return @"优先 MPV";
     if([mode isEqualToString:@"cicada"])return @"旧引擎兼容 (硬解)";
     if([mode isEqualToString:@"cicada_soft"])return @"旧引擎兼容 (软解)";
-    return @"自动 · AVPlayer/MPV";
+    return @"自动 · MPV 优先";
 }
 
 static NSString *SettingsEPGCacheFilePath(void) {
@@ -2018,12 +2019,12 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
     if(self.presentedViewController)return;
     NSString *current=[[NSUserDefaults standardUserDefaults] stringForKey:@"cctv.mediaDecodeMode.v1"]?:@"auto";
     NSArray<NSDictionary *> *options=@[
-        @{@"title":@"自动（AVPlayer → MPV）",@"sub":@"按容器与编码智能选路：AVPlayer 优先，非原生容器与失败自动切换 MPV",@"val":@"推荐",@"icon":@"sparkles",@"value":@"auto"},
-        @{@"title":@"优先 MPV 播放",@"sub":@"跳过 AVPlayer，直接由 MPV (FFmpeg + VideoToolbox) 全能内核起播",@"val":@"MPV",@"icon":@"cpu",@"value":@"mpv"},
+        @{@"title":@"自动（MPV 优先 → AVPlayer）",@"sub":@"默认由 MPV (FFmpeg + VideoToolbox) 全能内核起播，失败自动回退 AVPlayer",@"val":@"推荐",@"icon":@"sparkles",@"value":@"auto"},
+        @{@"title":@"优先 AVPlayer 原生",@"sub":@"标准 HLS/MP4 优先使用 Apple 原生 AVPlayer，失败或非原生容器自动切换 MPV",@"val":@"AV",@"icon":@"play.rectangle",@"value":@"av"},
         @{@"title":@"旧引擎兼容（Cicada 软解）",@"sub":@"仅在极少数异常流下手动启用，默认不参与点播路由",@"val":@"兼容",@"icon":@"wrench.and.screwdriver",@"value":@"cicada_soft"}
     ];
     NSMutableArray<HostGlassSheetAction *> *rows=[NSMutableArray array];
-    NSString *activeTitle=@"自动（AVPlayer → MPV）";
+    NSString *activeTitle=@"自动（MPV 优先 → AVPlayer）";
     __weak typeof(self) weakSelf=self;
     for(NSDictionary *option in options){
         NSString *title=option[@"title"],*value=option[@"value"];

@@ -976,6 +976,14 @@ class Catalog:
             number = len(episodes) + 1
             title = _text(_first(item, "title", "name")) if isinstance(item, dict) else ""
             episodes.append({"id": video_id, "title": title or "第%d集" % number, "number": number})
+        if not episodes and invalid > 0:
+            try:
+                v5_eps = _v5_directory_episodes(series_id)
+                if v5_eps:
+                    episodes = v5_eps
+                    invalid = 0
+            except Exception:
+                pass
         if not episodes:
             raise CatalogError("detail contains no valid episode IDs")
         expected = movie["count"]
@@ -2304,6 +2312,57 @@ def _video_tab_v5_model(vid, device=None, base=_VIDEO_TAB_V5_URL_B):
         raise ValueError("v5 video_tab returned an empty response")
     j = _json.loads(raw.decode("utf-8", "replace"))
     return _parse_video_model_response(j, vid)
+
+
+_V5_DIRECTORY_APIS = (
+    "https://reading.snssdk.com/reading/bookapi/directory/all_items/v/",
+    "https://api5-normal-sinfonlineb.fqnovel.com/reading/bookapi/directory/all_items/v/",
+)
+
+
+def _v5_directory_episodes(series_id, device=None):
+    dev = device if _valid_device_identity(device) else _ensure_device(False)
+    for base in _V5_DIRECTORY_APIS:
+        try:
+            values = {
+                "aid": "8662", "app_name": "novelread", "version_code": "74532",
+                "version_name": "7.4.5.32", "channel": "update_64",
+                "device_platform": "android", "device_type": "25053RT47C",
+                "device_brand": "Redmi", "os_version": "16", "os_api": "36",
+                "ac": "wifi", "language": "zh", "host_abi": "arm64-v8a",
+                "manifest_version_code": "74532", "update_version_code": "74532",
+                "os": "android", "ssmix": "a",
+                "iid": str(dev["iid"]), "cdid": str(dev["cdid"]), "device_id": str(dev["device_id"]),
+                "book_id": str(series_id), "need_version": "true", "is_first_enter": "true",
+            }
+            url, headers, ticket = _sign_playback_v5(base, values, None, int(_time.time() * 1000))
+            req_headers = dict(headers)
+            req_headers["x-ss-req-ticket"] = str(ticket)
+            req_headers["User-Agent"] = _VIDEO_UA_TMPL % "73932"
+            req_headers["Accept"] = "application/json"
+            raw = _get_bytes(url, req_headers, 12)
+            if not raw:
+                continue
+            j = _json.loads(raw.decode("utf-8", "replace"))
+            data = j.get("data") if isinstance(j, dict) and isinstance(j.get("data"), dict) else {}
+            rows = data.get("item_data_list") or data.get("item_list") or []
+            if not isinstance(rows, list):
+                continue
+            episodes, seen = [], set()
+            for row in rows:
+                raw_id = _first(row, "item_id", "vid", "video_id", "id") if isinstance(row, dict) else row
+                video_id = _identifier(raw_id)
+                if not video_id or video_id in seen:
+                    continue
+                seen.add(video_id)
+                number = len(episodes) + 1
+                title = _text(_first(row, "title", "name")) if isinstance(row, dict) else ""
+                episodes.append({"id": video_id, "title": title or "第%d集" % number, "number": number})
+            if episodes:
+                return episodes
+        except Exception:
+            continue
+    return []
 
 
 # r9（2026-11-24）：r8 的 74332 画像 + medusa f21=377 已被服务端丢弃

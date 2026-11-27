@@ -828,6 +828,56 @@ async function videoTabV5Model(vid, device, base = VIDEO_TAB_API) {
   return parseVideoModelResponse(j, vid);
 }
 
+const V5_DIRECTORY_APIS = [
+  'https://reading.snssdk.com/reading/bookapi/directory/all_items/v/',
+  'https://api5-normal-sinfonlineb.fqnovel.com/reading/bookapi/directory/all_items/v/',
+];
+
+async function fetchV5DirectoryEpisodes(sid) {
+  const device = await ensureDeviceSession(false);
+  for (const base of V5_DIRECTORY_APIS) {
+    try {
+      const values = {
+        aid: '8662', app_name: 'novelread', version_code: '74532',
+        version_name: '7.4.5.32', channel: 'update_64',
+        device_platform: 'android', device_type: '25053RT47C',
+        device_brand: 'Redmi', os_version: '16', os_api: '36',
+        ac: 'wifi', language: 'zh', host_abi: 'arm64-v8a',
+        manifest_version_code: '74532', update_version_code: '74532',
+        os: 'android', ssmix: 'a',
+        iid: String(device.iid), cdid: String(device.cdid), device_id: String(device.device_id),
+        book_id: String(sid), need_version: 'true', is_first_enter: 'true',
+      };
+      const signed = signPlaybackV5(base, values, null, Date.now());
+      const headers = {
+        ...signed.headers,
+        'x-ss-req-ticket': String(signed.ticket),
+        'User-Agent': VIDEO_UA_TMPL.replace('%s', '73932'),
+        Accept: 'application/json',
+      };
+      const r = await httpText(signed.url, { method: 'GET', headers, body: null, timeout: 12000 });
+      if (r.status < 200 || r.status >= 300 || !r.body.length) continue;
+      const j = JSON.parse(r.body.toString('utf8'));
+      const data = j && j.data && typeof j.data === 'object' ? j.data : {};
+      const rows = Array.isArray(data.item_data_list) && data.item_data_list.length
+        ? data.item_data_list
+        : (Array.isArray(data.item_list) ? data.item_list : []);
+      const episodes = [], seen = new Set();
+      for (const row of rows) {
+        const item = row && typeof row === 'object' ? row : null;
+        const raw = item ? (item.item_id || item.vid || item.video_id || item.id) : row;
+        const eid = raw == null ? '' : String(raw);
+        if (!/^\d{1,24}$/.test(eid) || seen.has(eid)) continue;
+        seen.add(eid);
+        const title = item && (item.title || item.name);
+        episodes.push({ name: String(title || ('第' + (episodes.length + 1) + '集')).replace(/[$#\r\n]/g, ' '), id: eid });
+      }
+      if (episodes.length) return episodes;
+    } catch (_) { /* try next endpoint */ }
+  }
+  return [];
+}
+
 
 // r9（2026-11-24）：r8 的 74332 画像 + medusa f21=377 已被服务端丢弃
 //（video_tab / player/v1 / video_model/v1 全回 HTTP 200 空体；同请求 A/B：
@@ -1481,11 +1531,16 @@ async function parseEpisodes(sid, html) {
   if (hasRows) {
     const episodes = episodesFrom(html, sid);
     if (episodes.length) return episodes;
+    const v5Episodes = await fetchV5DirectoryEpisodes(sid);
+    if (v5Episodes.length) return v5Episodes;
   }
   // Detail pages show only a few navigation links when SSR data is absent.
   // Give the player catalogue a chance to supply the full list first.
   const playerEpisodes = episodesFrom(await siteHtml('/player/' + sid), sid);
-  return playerEpisodes.length ? playerEpisodes : episodesFrom(html || '', sid);
+  if (playerEpisodes.length) return playerEpisodes;
+  const fallbackEpisodes = episodesFrom(html || '', sid);
+  if (fallbackEpisodes.length) return fallbackEpisodes;
+  return await fetchV5DirectoryEpisodes(sid);
 }
 
 // ---------------- 视频模型（签名接口） ----------------

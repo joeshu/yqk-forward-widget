@@ -57,9 +57,18 @@ typedef NS_ENUM(NSInteger, ShortDramaSlotState) {
 - (instancetype)initWithFrame:(CGRect)frame {
     if ((self = [super initWithFrame:frame])) {
         self.backgroundColor = UIColor.blackColor;
-        _videoHost = [[UIView alloc] initWithFrame:self.contentView.bounds];
-        _videoHost.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        self.contentView.clipsToBounds = YES;
+        _videoHost = [UIView new];
+        _videoHost.translatesAutoresizingMaskIntoConstraints = NO;
+        _videoHost.backgroundColor = UIColor.blackColor;
+        _videoHost.clipsToBounds = YES;
         [self.contentView addSubview:_videoHost];
+        [NSLayoutConstraint activateConstraints:@[
+            [_videoHost.topAnchor constraintEqualToAnchor:self.contentView.topAnchor],
+            [_videoHost.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor],
+            [_videoHost.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor],
+            [_videoHost.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor],
+        ]];
 
         _spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge];
         _spinner.translatesAutoresizingMaskIntoConstraints = NO;
@@ -163,19 +172,35 @@ typedef NS_ENUM(NSInteger, ShortDramaSlotState) {
     self.failureView.hidden = YES;
 }
 - (void)attachPlayerLayer:(AVPlayerLayer *)layer {
-    if (self.attachedLayer == layer) return;
+    if (self.attachedLayer == layer) {
+        if (layer) {
+            [CATransaction begin];
+            [CATransaction setDisableActions:YES];
+            layer.frame = self.videoHost.bounds;
+            [CATransaction commit];
+        }
+        return;
+    }
     [self.attachedLayer removeFromSuperlayer];
     self.attachedLayer = layer;
     if (layer) {
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
         layer.frame = self.videoHost.bounds;
-        layer.videoGravity = AVLayerVideoGravityResizeAspectFill;
+        if (!layer.videoGravity.length) {
+            layer.videoGravity = AVLayerVideoGravityResizeAspect;
+        }
+        [CATransaction commit];
         [self.videoHost.layer insertSublayer:layer atIndex:0];
     }
 }
 - (void)layoutSubviews {
     [super layoutSubviews];
     if (self.attachedLayer) {
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
         self.attachedLayer.frame = self.videoHost.bounds;
+        [CATransaction commit];
     }
 }
 - (void)prepareForReuse {
@@ -200,8 +225,12 @@ typedef NS_ENUM(NSInteger, ShortDramaSlotState) {
 /// T17：当前集的 1s 进度观察（只跟当前集，切换/退出时移除）。
 @property (nonatomic, strong, nullable) id progressObserver;
 @property (nonatomic, weak, nullable) AVPlayer *observedPlayer;
+@property (nonatomic, assign) CGSize lastLayoutSize;
+@property (nonatomic, assign) BOOL fillScreenGravity;
+@property (nonatomic, strong) UIButton *gravityButton;
 - (void)teardownFeed;
 - (void)closeFeed;
+- (void)toggleVideoGravity;
 - (void)showEpisodeDrawer;
 - (void)updateSlidingPoolAroundIndex:(NSInteger)centerIndex;
 - (void)prepareSlotForIndex:(NSInteger)index autoPlay:(BOOL)autoPlay;
@@ -269,6 +298,17 @@ typedef NS_ENUM(NSInteger, ShortDramaSlotState) {
     [closeBtn addTarget:self action:@selector(closeFeed) forControlEvents:UIControlEventTouchUpInside];
     [self.view addSubview:closeBtn];
 
+    UIButton *gravityBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    gravityBtn.translatesAutoresizingMaskIntoConstraints = NO;
+    gravityBtn.tintColor = UIColor.whiteColor;
+    gravityBtn.backgroundColor = [UIColor colorWithWhite:0 alpha:0.55];
+    gravityBtn.layer.cornerRadius = 20;
+    [gravityBtn setImage:[UIImage systemImageNamed:@"aspectratio"] forState:UIControlStateNormal];
+    gravityBtn.accessibilityLabel = @"切换画面适应或铺满";
+    [gravityBtn addTarget:self action:@selector(toggleVideoGravity) forControlEvents:UIControlEventTouchUpInside];
+    self.gravityButton = gravityBtn;
+    [self.view addSubview:gravityBtn];
+
     UIButton *drawerBtn = [UIButton buttonWithType:UIButtonTypeSystem];
     drawerBtn.translatesAutoresizingMaskIntoConstraints = NO;
     drawerBtn.tintColor = UIColor.whiteColor;
@@ -284,6 +324,10 @@ typedef NS_ENUM(NSInteger, ShortDramaSlotState) {
         [closeBtn.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:10],
         [closeBtn.widthAnchor constraintEqualToConstant:40],
         [closeBtn.heightAnchor constraintEqualToConstant:40],
+        [gravityBtn.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-16],
+        [gravityBtn.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:10],
+        [gravityBtn.widthAnchor constraintEqualToConstant:40],
+        [gravityBtn.heightAnchor constraintEqualToConstant:40],
         [drawerBtn.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-16],
         [drawerBtn.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-32],
         [drawerBtn.widthAnchor constraintEqualToConstant:40],
@@ -292,6 +336,31 @@ typedef NS_ENUM(NSInteger, ShortDramaSlotState) {
 
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(handlePlaybackEnded:) name:AVPlayerItemDidPlayToEndTimeNotification object:nil];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(handlePlaybackFailed:) name:AVPlayerItemFailedToPlayToEndTimeNotification object:nil];
+}
+
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    CGSize size = self.view.bounds.size;
+    if (size.width <= 0 || size.height <= 0) return;
+    if (!CGSizeEqualToSize(self.lastLayoutSize, size)) {
+        self.lastLayoutSize = size;
+        self.collectionView.frame = self.view.bounds;
+        [self.collectionView.collectionViewLayout invalidateLayout];
+        [self.collectionView layoutIfNeeded];
+        if (self.episodes.count > 0 && self.activeIndex >= 0 && self.activeIndex < (NSInteger)self.episodes.count) {
+            CGPoint targetOffset = CGPointMake(0, self.activeIndex * size.height);
+            [self.collectionView setContentOffset:targetOffset animated:NO];
+        }
+    }
+}
+
+- (void)toggleVideoGravity {
+    self.fillScreenGravity = !self.fillScreenGravity;
+    AVLayerVideoGravity gravity = self.fillScreenGravity ? AVLayerVideoGravityResizeAspectFill : AVLayerVideoGravityResizeAspect;
+    for (ShortDramaPlayerSlot *slot in self.playerPool.allValues) {
+        slot.playerLayer.videoGravity = gravity;
+    }
+    [self.gravityButton setImage:[UIImage systemImageNamed:(self.fillScreenGravity ? @"arrow.down.right.and.arrow.up.left" : @"aspectratio")] forState:UIControlStateNormal];
 }
 
 - (void)viewDidAppear:(BOOL)animated {
@@ -547,6 +616,7 @@ typedef NS_ENUM(NSInteger, ShortDramaSlotState) {
     slot.episodeIndex = index;
     slot.player = [AVPlayer new];
     slot.playerLayer = [AVPlayerLayer playerLayerWithPlayer:slot.player];
+    slot.playerLayer.videoGravity = self.fillScreenGravity ? AVLayerVideoGravityResizeAspectFill : AVLayerVideoGravityResizeAspect;
     slot.state = ShortDramaSlotStateResolving;
     self.playerPool[@(index)] = slot;
     if (cell) [cell.spinner startAnimating];
