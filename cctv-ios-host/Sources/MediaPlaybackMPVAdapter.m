@@ -983,22 +983,31 @@ enum {
 }
 
 - (void)seekToTime:(NSTimeInterval)time completion:(void (^)(BOOL finished))completion {
+    if (!NSThread.isMainThread) {
+        dispatch_async(dispatch_get_main_queue(), ^{ [self seekToTime:time completion:completion]; });
+        return;
+    }
     if (self.destroyed) {
         if (completion) completion(NO);
         return;
     }
-    if (!host_mpv_lifecycle_command_allowed(_lifecycle)) {
+    if (!isfinite(time) || !host_mpv_lifecycle_command_allowed(_lifecycle)) {
         if (completion) completion(NO);
         return;
     }
     // S3：新请求取消旧请求（完成 NO，一次且仅一次）；每个请求独立 id +
     // 目标 + 3 秒 deadline，过期未落点也完成 NO，不无限等待。
+    // Reserve this request before notifying the previous caller. That callback
+    // may synchronously start a newer seek or destroy this adapter.
+    NSUInteger seekID = ++self.pendingSeekID;
     [self finishPendingSeek:NO];
+    if (self.destroyed || self.pendingSeekID != seekID || !host_mpv_lifecycle_command_allowed(_lifecycle)) {
+        if (completion) completion(NO);
+        return;
+    }
     self.pendingSeekCompletion = completion;
-    self.pendingSeekID += 1;
     self.pendingSeekTarget = MAX(0.0, time);
     self.seekEventObserved = NO;
-    NSUInteger seekID = self.pendingSeekID;
     __weak typeof(self) weakSelf = self;
     [self runOnMain:^{
         MediaPlaybackMPVAdapter *strongSelf = weakSelf;

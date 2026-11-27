@@ -54,6 +54,7 @@ extern BOOL PlaybackGestureRunSmokeChecks(void);
 extern void ImportSnapshotRunSmokeChecksAsync(void (^completion)(BOOL passed));
 extern BOOL CicadaBudgetRunSmokeChecks(void);
 extern BOOL MediaPageReviewRunSmokeChecks(void);
+extern BOOL MPVSeekRunSmokeChecks(void);
 @interface MediaPlaybackViewController (MPVFullscreenSmoke)
 - (void)mountCicadaRenderView:(UIView *)renderView inHost:(UIView *)host;
 - (void)refreshCicadaControls;
@@ -460,6 +461,7 @@ static void next(NSArray *steps, NSUInteger index) {
       check(LiveCatalogRunSmokeChecks(),@"live catchup identity, disabled sources and catalog sizing");
       check(PlaybackGestureRunSmokeChecks(),@"live volume displacement is independent of gesture event frequency");
       check(CicadaBudgetRunSmokeChecks(),@"Cicada first-frame budget excludes paused time");
+      check(MPVSeekRunSmokeChecks(),@"MPV seek rejects non-finite input and preserves reentrant requests");
       check(MediaPageReviewRunSmokeChecks(),@"media page continuation, seasonal episodes and selection state");
       check([CNPlayerCrashGuard install], @"CNPlayer thumbnail exception guard installs");
       check([CNPlayer smokeCicadaLicenseOverrideCount]==0,@"SDK setup preserves the Cicada core's built-in license endpoint without a host override");
