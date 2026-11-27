@@ -10,7 +10,7 @@ SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
 xcrun --sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -isysroot "$SDK" -fobjc-arc \
   -I Sources -I Sources/Include \
   Tests/MPVSmoke/main.m Sources/MediaPlaybackMPVAdapter.m Sources/HostMPVLifecycle.c Sources/MediaPlaybackFullscreenHost.m \
-  -framework Foundation -framework UIKit -framework QuartzCore -framework AVFoundation -framework AVKit \
+  -framework Foundation -framework UIKit -framework QuartzCore -framework CoreMedia -framework AVFoundation -framework AVKit \
   -o "$APP/CCTVMPVSmoke" 2>&1 | tee "$OUT/compile.log"
 python3 - "$APP" <<'PY'
 import base64, pathlib, plistlib, sys
