@@ -517,6 +517,7 @@ static void next(NSArray *steps, NSUInteger index) {
       __block MediaPlaybackViewController *mediaPlayback;
       __block MediaPlaybackViewController *mpvFullscreenProbe;
       __block MediaPlaybackMPVAdapter *mpvSurfaceAdapter;
+      __block UIViewController *mpvFullscreenPreviousRoot;
       __block NSDate *stalePlaybackDeadline;
       __block ResourceImportWorkflowViewController *importProbe;
       __block TVBoxCatalogViewController *catalogSmokePage;
@@ -1550,8 +1551,9 @@ static void next(NSArray *steps, NSUInteger index) {
             // Exercise the app's real MPV view and fullscreen controls without
             // requiring the device-only renderer in the UI smoke target.
             mpvFullscreenProbe=[MediaPlaybackViewController new];
+            mpvFullscreenPreviousRoot=self.window.rootViewController;
+            self.window.rootViewController=mpvFullscreenProbe;
             [mpvFullscreenProbe loadViewIfNeeded];
-            [nav pushViewController:mpvFullscreenProbe animated:NO];
             [mpvFullscreenProbe setValue:@(9.0/16.0) forKey:@"videoAspectRatio"];
             NSURL *fixtureURL=[NSURL URLWithString:@"https://fixture.test/video.mp4"];
             mpvSurfaceAdapter=[[MediaPlaybackMPVAdapter alloc] initWithURL:fixtureURL headers:@{} networkTimeout:1];
@@ -1590,8 +1592,10 @@ static void next(NSArray *steps, NSUInteger index) {
             [mpvFullscreenProbe teardownCicadaAdapter];
           },
           ^{
-            check(![mpvFullscreenProbe valueForKey:@"cicadaFullscreenHost"]&&!nav.presentedViewController&&!mpvSurfaceAdapter.playerView.superview,@"MPV teardown dismisses an active fullscreen host and removes its render view");
-            [nav popToRootViewControllerAnimated:NO];
+            check(![mpvFullscreenProbe valueForKey:@"cicadaFullscreenHost"]&&!mpvFullscreenProbe.presentedViewController&&!mpvSurfaceAdapter.playerView.superview,@"MPV teardown dismisses an active fullscreen host and removes its render view");
+            self.window.rootViewController=mpvFullscreenPreviousRoot;
+            mpvFullscreenPreviousRoot=nil;
+            [self.window makeKeyAndVisible];
             mpvFullscreenProbe=nil;
             mpvSurfaceAdapter=nil;
           }
