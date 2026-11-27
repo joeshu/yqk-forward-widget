@@ -62,14 +62,16 @@ static void MediaPlaybackSetDefaultRate(AVPlayer *player, float rate) {
     }
 }
 
-// A view-only fullscreen host keeps the same decoder, URL and playback session.
-@interface MediaPlaybackFullscreenHost : UIViewController
+// The playback controller owns the session. This host only presents its render view.
+@interface MediaPlaybackFullscreenHost : UIViewController <UIGestureRecognizerDelegate>
 @property(nonatomic,copy) dispatch_block_t onClose;
 @property(nonatomic,copy) dispatch_block_t onTogglePlayPause;
 @property(nonatomic,strong) UIButton *closeButton;
 @property(nonatomic,strong) UIButton *playPauseButton;
 @property(nonatomic,assign) BOOL controlsHidden;
-- (void)updatePlayingState:(BOOL)playing;
+@property(nonatomic) BOOL closing;
+- (void)updatePlayingState:(BOOL)playing enabled:(BOOL)enabled;
+- (void)closeFullscreen;
 @end
 @implementation MediaPlaybackFullscreenHost
 - (BOOL)shouldAutorotate {return YES;}
@@ -77,7 +79,7 @@ static void MediaPlaybackSetDefaultRate(AVPlayer *player, float rate) {
 - (void)viewDidLoad {
     [super viewDidLoad];self.view.backgroundColor=UIColor.blackColor;
     UITapGestureRecognizer *tap=[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(toggleControlsVisibility)];
-    tap.cancelsTouchesInView=NO;[self.view addGestureRecognizer:tap];
+    tap.cancelsTouchesInView=NO;tap.delegate=self;[self.view addGestureRecognizer:tap];
     UIButton *close=[UIButton buttonWithType:UIButtonTypeSystem];close.translatesAutoresizingMaskIntoConstraints=NO;close.tintColor=UIColor.whiteColor;close.backgroundColor=[UIColor colorWithWhite:0 alpha:0.6];close.layer.cornerRadius=22;
     [close setImage:[UIImage systemImageNamed:@"xmark"] forState:UIControlStateNormal];close.accessibilityLabel=@"退出全屏";close.accessibilityIdentifier=@"media-cicada-close-fullscreen";[close addTarget:self action:@selector(closeFullscreen) forControlEvents:UIControlEventTouchUpInside];[self.view addSubview:close];
     self.closeButton=close;
@@ -94,27 +96,38 @@ static void MediaPlaybackSetDefaultRate(AVPlayer *player, float rate) {
     ]];
 }
 - (void)toggleControlsVisibility {
+    if(UIAccessibilityIsVoiceOverRunning())return;
     self.controlsHidden=!self.controlsHidden;
     CGFloat alpha=self.controlsHidden?0.0:1.0;
-    [UIView animateWithDuration:0.2 animations:^{self.closeButton.alpha=alpha;self.playPauseButton.alpha=alpha;}];
+    [UIView animateWithDuration:UIAccessibilityIsReduceMotionEnabled()?0:0.2 animations:^{self.closeButton.alpha=alpha;self.playPauseButton.alpha=alpha;}];
+}
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer shouldReceiveTouch:(UITouch *)touch {
+    for(UIView *view=touch.view;view&&view!=self.view;view=view.superview){
+        if([view isKindOfClass:UIControl.class])return NO;
+    }
+    return YES;
 }
 - (void)togglePlayPauseTapped {if(self.onTogglePlayPause)self.onTogglePlayPause();}
-- (void)updatePlayingState:(BOOL)playing {
+- (void)updatePlayingState:(BOOL)playing enabled:(BOOL)enabled {
     [self.playPauseButton setImage:[UIImage systemImageNamed:playing?@"pause.fill":@"play.fill"] forState:UIControlStateNormal];
+    self.playPauseButton.accessibilityLabel=playing?@"暂停":@"播放";
+    self.playPauseButton.enabled=enabled;
 }
-- (void)viewDidAppear:(BOOL)animated {
-    [super viewDidAppear:animated];
-    if (@available(iOS 16.0, *)) {
-        UIWindowScene *scene = self.view.window.windowScene;
-        if (scene) {
-            UIWindowSceneGeometryPreferencesIOS *prefs = [[UIWindowSceneGeometryPreferencesIOS alloc] initWithInterfaceOrientations:UIInterfaceOrientationMaskLandscape];
-            [scene requestGeometryUpdateWithPreferences:prefs errorHandler:nil];
-        }
-    }
+- (void)closeFullscreen {
+    if(self.closing||self.isBeingPresented||self.isBeingDismissed||!self.presentingViewController)return;
+    self.closing=YES;
+    dispatch_block_t close=self.onClose;
+    self.onClose=nil;
+    if(close)close();
 }
-- (void)restorePortraitOrientationIfNeeded { if(@available(iOS 16.0,*)){ UIWindowScene *scene=self.view.window.windowScene; if(scene){ UIWindowSceneGeometryPreferencesIOS *prefs=[[UIWindowSceneGeometryPreferencesIOS alloc] initWithInterfaceOrientations:UIInterfaceOrientationMaskAllButUpsideDown]; [scene requestGeometryUpdateWithPreferences:prefs errorHandler:nil]; } } }
-- (void)closeFullscreen { [self restorePortraitOrientationIfNeeded]; __weak typeof(self) weakSelf=self; [self dismissViewControllerAnimated:YES completion:^{if(weakSelf.onClose)weakSelf.onClose();}]; }
-- (void)viewDidDisappear:(BOOL)animated { [super viewDidDisappear:animated]; if(self.isBeingDismissed){ [self restorePortraitOrientationIfNeeded]; if(self.onClose)self.onClose(); } }
+- (void)viewDidDisappear:(BOOL)animated {
+    [super viewDidDisappear:animated];
+    if(!self.isBeingDismissed||self.closing)return;
+    self.closing=YES;
+    dispatch_block_t close=self.onClose;
+    self.onClose=nil;
+    if(close)close();
+}
 @end
 
 static void *CCTVPlayerItemStatusContext = &CCTVPlayerItemStatusContext;
@@ -326,10 +339,9 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 @property(nonatomic) BOOL cicadaScrubbing;
 @property(nonatomic) BOOL cicadaScrubWasPlaying;
 @property(nonatomic,strong) MediaPlaybackFullscreenHost *cicadaFullscreenHost;
-@property(nonatomic,weak) UIView *cicadaVideoOriginalSuperview;
-@property(nonatomic) NSUInteger cicadaVideoOriginalIndex;
-@property(nonatomic,copy) NSArray<NSLayoutConstraint *> *cicadaFullscreenSavedConstraints;
-@property(nonatomic,copy) NSArray<NSLayoutConstraint *> *cicadaFullscreenConstraints;
+@property(nonatomic,copy) NSArray<NSLayoutConstraint *> *cicadaRenderConstraints;
+@property(nonatomic) UIInterfaceOrientation cicadaFullscreenOriginalOrientation;
+@property(nonatomic) BOOL cicadaFullscreenRequestedLandscape;
 @property(nonatomic,strong) UILabel *throughputLabel;
 @property(nonatomic,strong) UIView *gestureSurface;
 @property(nonatomic,strong) UILabel *gestureFeedbackLabel;
@@ -523,6 +535,8 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 - (void)installCicadaControls;
 - (void)refreshCicadaControls;
 - (void)restoreVideoFromCicadaFullscreen;
+- (void)mountCicadaRenderView:(UIView *)renderView inHost:(UIView *)host;
+- (BOOL)canEnterCicadaFullscreen;
 - (BOOL)isCicadaEngineActive;
 - (NSTimeInterval)activeEngineCurrentPosition;
 - (NSTimeInterval)activeEngineDuration;
@@ -986,7 +1000,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 }
 - (void)teardownAfterScreenExit {
     [[PlaybackCoordinator shared] releaseSession:(id<PlaybackSession>)self];
-    if(self.cicadaFullscreenHost){[self.cicadaFullscreenHost dismissViewControllerAnimated:NO completion:nil];[self restoreVideoFromCicadaFullscreen];}
+    [self restoreVideoFromCicadaFullscreen];
     self.pendingScreenExit=NO;
     [self endBackgroundAutoAdvanceTaskIfNeeded];
     [self teardownHiddenStreamSniffer];
@@ -1031,7 +1045,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 }
 - (void)viewWillTransitionToSize:(CGSize)size withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator {[super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];[coordinator animateAlongsideTransition:^(id<UIViewControllerTransitionCoordinatorContext> context){[self updatePlaybackLayoutForSize:size];} completion:nil];}
 - (void)updatePlaybackLayoutForSize:(CGSize)size {
-    if(self.cicadaFullscreenHost||size.width<=0||size.height<=0)return;
+    if(size.width<=0||size.height<=0)return;
     if(self.floatingInlineSurfaceInstalled)return;
     BOOL tallVideo=self.videoAspectRatio>0.0&&self.videoAspectRatio<0.95;
     if(self.embeddedMode){
@@ -2052,9 +2066,7 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
     }
     MediaPlaybackCicadaAdapter *adapter=(MediaPlaybackCicadaAdapter *)engine;
     adapter.delegate=self;self.cicadaAdapter=adapter;self.cicadaPosition=0;self.cicadaDuration=0;
-    UIView *playerView=adapter.playerView;playerView.translatesAutoresizingMaskIntoConstraints=NO;
-    [self.videoView addSubview:playerView];
-    [NSLayoutConstraint activateConstraints:@[[playerView.leadingAnchor constraintEqualToAnchor:self.videoView.leadingAnchor],[playerView.trailingAnchor constraintEqualToAnchor:self.videoView.trailingAnchor],[playerView.topAnchor constraintEqualToAnchor:self.videoView.topAnchor],[playerView.bottomAnchor constraintEqualToAnchor:self.videoView.bottomAnchor]]];
+    [self mountCicadaRenderView:adapter.playerView inHost:self.videoView];
     [self.playerController.view setHidden:YES];
     [self refreshCicadaControls];
     NSString *gravity=[NSUserDefaults.standardUserDefaults stringForKey:@"cctv.mediaVideoGravity"]?:AVLayerVideoGravityResizeAspect;
@@ -2088,7 +2100,8 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
     BOOL ready=self.cicadaAdapter.state==MediaPlaybackCicadaAdapterStatePlaying||self.cicadaAdapter.state==MediaPlaybackCicadaAdapterStatePaused||self.cicadaAdapter.state==MediaPlaybackCicadaAdapterStateCompleted;
     BOOL playing=self.cicadaAdapter.state==MediaPlaybackCicadaAdapterStatePlaying;
     [self.cicadaControlsBuilder.playPauseButton setImage:[UIImage systemImageNamed:playing?@"pause.fill":@"play.fill"] forState:UIControlStateNormal];self.cicadaControlsBuilder.playPauseButton.accessibilityLabel=playing?@"暂停":@"播放";self.cicadaControlsBuilder.playPauseButton.enabled=ready&&!self.resumePromptPending;
-    if(self.cicadaFullscreenHost)[self.cicadaFullscreenHost updatePlayingState:playing];
+    self.cicadaControlsBuilder.fullscreenButton.enabled=[self canEnterCicadaFullscreen];
+    [self.cicadaFullscreenHost updatePlayingState:playing enabled:ready&&!self.resumePromptPending];
     double duration=self.cicadaAdapter.duration,position=self.cicadaAdapter.currentPosition;if(!isfinite(position)||position<0)position=0;BOOL seekable=ready&&isfinite(duration)&&duration>0;
     self.cicadaControlsBuilder.seekSlider.enabled=seekable;self.cicadaControlsBuilder.rewindButton.enabled=seekable;self.cicadaControlsBuilder.forwardButton.enabled=seekable;
     if(!self.cicadaScrubbing){self.cicadaControlsBuilder.seekSlider.value=seekable?(float)MIN(1,MAX(0,position/duration)):0;self.cicadaControlsBuilder.elapsedLabel.text=[self formatMediaTime:isfinite(position)?MAX(0,position):0];}
@@ -2113,28 +2126,106 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
     if(!self.cicadaScrubbing||!self.cicadaAdapter)return;self.cicadaScrubbing=NO;id adapter=self.cicadaAdapter;NSUInteger generation=self.playerGeneration;BOOL wasPlaying=self.cicadaScrubWasPlaying;double target=self.cicadaControlsBuilder.seekSlider.value*self.cicadaAdapter.duration;
     [self seekActiveEngineToTime:target completion:^(BOOL finished){if(generation!=self.playerGeneration||adapter!=self.cicadaAdapter)return;if(finished){if(wasPlaying)[self playActiveEngine];else[self pauseActiveEngine];}[self refreshCicadaControls];[self.controlsOverlay rearmAutoHide];}];
 }
+- (void)mountCicadaRenderView:(UIView *)renderView inHost:(UIView *)host {
+    [NSLayoutConstraint deactivateConstraints:self.cicadaRenderConstraints?:@[]];
+    renderView.translatesAutoresizingMaskIntoConstraints=NO;
+    [UIView performWithoutAnimation:^{
+        // UIKit reparents the render view directly. Keep the inline container,
+        // its constraints and the AVPlayer child controller in place.
+        [host insertSubview:renderView atIndex:0];
+        self.cicadaRenderConstraints=@[
+            [renderView.leadingAnchor constraintEqualToAnchor:host.leadingAnchor],
+            [renderView.trailingAnchor constraintEqualToAnchor:host.trailingAnchor],
+            [renderView.topAnchor constraintEqualToAnchor:host.topAnchor],
+            [renderView.bottomAnchor constraintEqualToAnchor:host.bottomAnchor]
+        ];
+        [NSLayoutConstraint activateConstraints:self.cicadaRenderConstraints];
+        [host layoutIfNeeded];
+    }];
+}
+- (BOOL)canEnterCicadaFullscreen {
+    if(!self.cicadaAdapter||self.cicadaFullscreenHost||self.pendingScreenExit||self.confirmedAudioOnly||self.resumePromptPending)return NO;
+    // MPV initializes the Vulkan surface asynchronously. Wait for the first
+    // frame before moving it so initialization sees a stable inline size.
+    return ![self.cicadaAdapter isKindOfClass:MediaPlaybackMPVAdapter.class]||self.videoFrameReady;
+}
 - (void)toggleCicadaFullscreen {
-    if(self.cicadaFullscreenHost){[self.cicadaFullscreenHost closeFullscreen];return;}
-    if(!self.cicadaAdapter||self.presentedViewController||!self.videoView.window)return;
-    UIView *original=self.videoView.superview;if(!original)return;
-    self.cicadaVideoOriginalSuperview=original;self.cicadaVideoOriginalIndex=[original.subviews indexOfObject:self.videoView];
-    NSMutableArray *constraints=[NSMutableArray array];
-    for(UIView *ancestor=original;ancestor;ancestor=ancestor.superview)for(NSLayoutConstraint *constraint in ancestor.constraints)if(constraint.active&&(constraint.firstItem==self.videoView||constraint.secondItem==self.videoView))[constraints addObject:constraint];
-    for(NSLayoutConstraint *constraint in self.videoView.constraints)if(constraint.active&&constraint.firstItem==self.videoView&&(constraint.secondItem==self.videoView||!constraint.secondItem))[constraints addObject:constraint];
-    self.cicadaFullscreenSavedConstraints=constraints.copy;[NSLayoutConstraint deactivateConstraints:constraints];
-    MediaPlaybackFullscreenHost *host=[MediaPlaybackFullscreenHost new];host.modalPresentationStyle=UIModalPresentationOverFullScreen;self.cicadaFullscreenHost=host;__weak typeof(self) weakSelf=self;host.onClose=^{[weakSelf restoreVideoFromCicadaFullscreen];};
-    host.onTogglePlayPause=^{MediaPlaybackViewController *owner=weakSelf;if(!owner||!owner.cicadaAdapter)return;[owner toggleCicadaPlayback];[owner.cicadaFullscreenHost updatePlayingState:owner.cicadaAdapter.state==MediaPlaybackCicadaAdapterStatePlaying];};
-    [host loadViewIfNeeded];[host updatePlayingState:self.cicadaAdapter.state==MediaPlaybackCicadaAdapterStatePlaying];[self.videoView removeFromSuperview];[host.view insertSubview:self.videoView atIndex:0];
-    self.cicadaFullscreenConstraints=@[[self.videoView.leadingAnchor constraintEqualToAnchor:host.view.leadingAnchor],[self.videoView.trailingAnchor constraintEqualToAnchor:host.view.trailingAnchor],[self.videoView.topAnchor constraintEqualToAnchor:host.view.topAnchor],[self.videoView.bottomAnchor constraintEqualToAnchor:host.view.bottomAnchor]];[NSLayoutConstraint activateConstraints:self.cicadaFullscreenConstraints];
-    [self presentViewController:host animated:YES completion:nil];
+    // Ignore duplicate entry taps while UIKit presents the host. The close
+    // button owns exit so a double tap cannot immediately dismiss it again.
+    if(![self canEnterCicadaFullscreen])return;
+    UIView *renderView=self.cicadaAdapter.playerView;
+    UIWindow *window=self.videoView.window;
+    if(!window||!renderView||renderView.superview!=self.videoView)return;
+    for(UIViewController *owner=self;owner;owner=owner.parentViewController){
+        if(owner.presentedViewController||owner.isBeingDismissed||owner.isMovingFromParentViewController)return;
+    }
+
+    UIWindowScene *scene=window.windowScene;
+    self.cicadaFullscreenOriginalOrientation=scene.interfaceOrientation;
+    MediaPlaybackFullscreenHost *host=[MediaPlaybackFullscreenHost new];
+    host.modalPresentationStyle=UIModalPresentationOverFullScreen;
+    self.cicadaFullscreenHost=host;
+    NSString *engine=[self.cicadaAdapter isKindOfClass:MediaPlaybackMPVAdapter.class]?@"mpv":@"cicada";
+    NSDictionary *diagnosticFields=@{@"player":engine,@"playback_attempt_id":self.playbackAttemptID?:@"",@"embedded":@(self.embeddedMode)};
+    __weak typeof(self) weakSelf=self;
+    host.onClose=^{[weakSelf restoreVideoFromCicadaFullscreen];};
+    host.onTogglePlayPause=^{[weakSelf toggleCicadaPlayback];};
+    [host loadViewIfNeeded];
+    [self refreshCicadaControls];
+    [RuntimeDiagnostics.shared recordEvent:@"playback_fullscreen_enter_requested" category:@"playback" fields:diagnosticFields];
+    [self presentViewController:host animated:NO completion:^{
+        MediaPlaybackViewController *owner=weakSelf;
+        if(owner.cicadaFullscreenHost!=host){
+            if(host.presentingViewController&&!host.isBeingDismissed)[host dismissViewControllerAnimated:NO completion:nil];
+            return;
+        }
+        if(owner.cicadaAdapter.playerView!=renderView||window!=host.view.window||window!=renderView.window){
+            [owner restoreVideoFromCicadaFullscreen];
+            return;
+        }
+        [owner mountCicadaRenderView:renderView inHost:host.view];
+        [RuntimeDiagnostics.shared recordEvent:@"playback_fullscreen_attached" category:@"playback" fields:diagnosticFields];
+        UIAccessibilityPostNotification(UIAccessibilityScreenChangedNotification,host.closeButton);
+        if(scene&&UIInterfaceOrientationIsPortrait(scene.interfaceOrientation)&&owner.videoAspectRatio>=1.0){
+            owner.cicadaFullscreenRequestedLandscape=YES;
+            [host setNeedsUpdateOfSupportedInterfaceOrientations];
+            UIWindowSceneGeometryPreferencesIOS *preferences=[[UIWindowSceneGeometryPreferencesIOS alloc] initWithInterfaceOrientations:UIInterfaceOrientationMaskLandscape];
+            [scene requestGeometryUpdateWithPreferences:preferences errorHandler:^(NSError *error){
+                [RuntimeDiagnostics.shared recordEvent:@"playback_fullscreen_rotation_denied" category:@"playback" fields:@{@"error_code":@(error.code)}];
+            }];
+        }
+    }];
 }
 - (void)restoreVideoFromCicadaFullscreen {
-    if(!self.cicadaFullscreenHost)return;
-    [NSLayoutConstraint deactivateConstraints:self.cicadaFullscreenConstraints?:@[]];
-    UIView *original=self.cicadaVideoOriginalSuperview;[self.videoView removeFromSuperview];if(original)[original insertSubview:self.videoView atIndex:MIN(self.cicadaVideoOriginalIndex,original.subviews.count)];
-    self.cicadaFullscreenHost.onClose=nil;self.cicadaFullscreenHost=nil;self.cicadaFullscreenConstraints=nil;
-    if(original)[NSLayoutConstraint activateConstraints:self.cicadaFullscreenSavedConstraints?:@[]];self.cicadaFullscreenSavedConstraints=nil;self.cicadaVideoOriginalSuperview=nil;self.playbackLayoutInitialized=NO;
-    [self updatePlaybackLayoutForSize:self.view.bounds.size];[self refreshCicadaControls];
+    MediaPlaybackFullscreenHost *host=self.cicadaFullscreenHost;
+    if(!host)return;
+    host.onClose=nil;
+    host.onTogglePlayPause=nil;
+    self.cicadaFullscreenHost=nil;
+
+    UIView *renderView=self.cicadaAdapter.playerView;
+    if(renderView&&renderView.superview==host.view)[self mountCicadaRenderView:renderView inHost:self.videoView];
+    UIWindowScene *scene=self.videoView.window.windowScene;
+    UIInterfaceOrientation previousOrientation=self.cicadaFullscreenOriginalOrientation;
+    BOOL restoreOrientation=self.cicadaFullscreenRequestedLandscape;
+    self.cicadaFullscreenRequestedLandscape=NO;
+    __weak typeof(self) weakSelf=self;
+    dispatch_block_t didClose=^{
+        MediaPlaybackViewController *owner=weakSelf;
+        if(!owner||owner.cicadaFullscreenHost||owner.videoView.window.windowScene!=scene||!scene)return;
+        if(restoreOrientation&&scene.interfaceOrientation!=previousOrientation){
+            [owner setNeedsUpdateOfSupportedInterfaceOrientations];
+            UIWindowSceneGeometryPreferencesIOS *preferences=[[UIWindowSceneGeometryPreferencesIOS alloc] initWithInterfaceOrientations:(1UL<<previousOrientation)];
+            [scene requestGeometryUpdateWithPreferences:preferences errorHandler:nil];
+        }
+        UIAccessibilityPostNotification(UIAccessibilityScreenChangedNotification,owner.cicadaControlsBuilder.fullscreenButton);
+    };
+    if(host.presentingViewController&&!host.isBeingPresented&&!host.isBeingDismissed){
+        [host dismissViewControllerAnimated:NO completion:didClose];
+    }else{
+        dispatch_async(dispatch_get_main_queue(),didClose);
+    }
+    [self refreshCicadaControls];
 }
 - (BOOL)isCicadaEngineActive { return self.cicadaAdapter!=nil; }
 - (NSTimeInterval)activeEngineCurrentPosition {
@@ -2170,9 +2261,11 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
 - (void)teardownCicadaAdapterUpdatingUI:(BOOL)updateUI {
     MediaPlaybackCicadaAdapter *adapter=self.cicadaAdapter;self.cicadaAdapter=nil;
     self.cicadaScrubbing=NO;
-    if(updateUI&&self.cicadaFullscreenHost){MediaPlaybackFullscreenHost *host=self.cicadaFullscreenHost;[self restoreVideoFromCicadaFullscreen];if(host.presentingViewController)[host dismissViewControllerAnimated:NO completion:nil];}
+    if(updateUI)[self restoreVideoFromCicadaFullscreen];
     if(updateUI)[self refreshCicadaControls];
     if(!adapter)return;
+    [NSLayoutConstraint deactivateConstraints:self.cicadaRenderConstraints?:@[]];
+    self.cicadaRenderConstraints=nil;
     [adapter.playerView removeFromSuperview];
     [adapter destroy];
     if(updateUI)[self.playerController.view setHidden:NO];
@@ -2342,7 +2435,7 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
 - (void)cicadaAdapterDidShowFirstFrame:(id)adapter {
     if(adapter!=self.cicadaAdapter)return;
     self.playbackOptionsItem.menu=[self.settingsCoordinator playbackOptionsMenu];
-    [self markCicadaFirstFrameReady];[self.controlsOverlay show];
+    [self markCicadaFirstFrameReady];[self.controlsOverlay show];[self refreshCicadaControls];
 }
 - (void)cicadaAdapterDidStartAudioOnly:(id)adapter {if(adapter!=self.cicadaAdapter)return;self.confirmedAudioOnly=YES;[self.spinner stopAnimating];self.status.text=@"正在播放音频";self.status.accessibilityLabel=self.status.text;[RuntimeDiagnostics.shared recordEvent:@"media_audio_only_started" category:@"playback" fields:@{@"playback_attempt_id":self.playbackAttemptID?:@"",@"correlation_id":self.diagnosticTraceID?:@""}];} // S2：纯音频开始，不是视频首帧（videoFrameReady 保持 NO）；视频随后出现时 didShowFirstFrame 清 confirmedAudioOnly。
 - (void)cicadaAdapter:(id)adapter didFailWithError:(NSError *)error {

@@ -162,7 +162,14 @@ int host_mpv_lifecycle_wait_event_thread_exit(host_mpv_lifecycle_t *lc, int time
     int exited = 0;
     struct timespec deadline;
     if (!lc) return 0;
-    if (timeout_ms < 0) timeout_ms = 0;
+    if (timeout_ms < 0) {
+        host_mpv_lifecycle_lock(lc);
+        while (lc->event_thread_started && !lc->event_thread_exited) {
+            (void)pthread_cond_wait(&lc->exited_cond, &lc->mutex);
+        }
+        host_mpv_lifecycle_unlock(lc);
+        return 1;
+    }
     (void)clock_gettime(CLOCK_MONOTONIC, &deadline);
     deadline.tv_sec += timeout_ms / 1000;
     deadline.tv_nsec += (long)(timeout_ms % 1000) * 1000000L;
@@ -205,7 +212,7 @@ int host_mpv_lifecycle_wait_event_thread_exit(host_mpv_lifecycle_t *lc, int time
 void host_mpv_lifecycle_finish_destroy(host_mpv_lifecycle_t *lc) {
     if (!lc) return;
     host_mpv_lifecycle_lock(lc);
-    if (lc->state == HOST_MPV_LC_DESTROYING) {
+    if (lc->state == HOST_MPV_LC_DESTROYING && (!lc->event_thread_started || lc->event_thread_exited)) {
         lc->state = HOST_MPV_LC_DESTROYED;
     }
     host_mpv_lifecycle_unlock(lc);

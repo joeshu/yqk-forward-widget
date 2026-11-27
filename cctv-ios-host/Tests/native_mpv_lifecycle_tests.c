@@ -219,7 +219,7 @@ static void scenario_event_exit_timeout_bounded(void) {
     long t0 = now_ms();
     int waited = host_mpv_lifecycle_wait_event_thread_exit(lc, 200);
     long elapsed = now_ms() - t0;
-    /* Bounded wait ends anyway: teardown proceeds, never hangs the caller. */
+    /* A bounded wait can return before cleanup is safe. */
     host_mpv_lifecycle_finish_destroy(lc);
     host_mpv_lifecycle_state_t state = host_mpv_lifecycle_state(lc);
     printf("RESULT event_exit_timeout_bounded owned=%d waited=%d elapsed_ms=%ld state=%d\n",
@@ -227,13 +227,16 @@ static void scenario_event_exit_timeout_bounded(void) {
     CHECK(owned == 1, "timeout: destroy must own teardown");
     CHECK(waited == 0, "timeout: wait must report the consumer did NOT exit");
     CHECK(elapsed >= 150 && elapsed < 1000, "timeout: wait must be bounded (~200ms), elapsed=%ld", elapsed);
-    CHECK(state == HOST_MPV_LC_DESTROYED, "timeout: teardown still finishes the state");
-    /* Unstick the consumer for a clean process exit. */
+    CHECK(state == HOST_MPV_LC_DESTROYING, "timeout: teardown cannot finish with a live consumer");
+    /* Release the consumer and let the background wait complete. */
     (void)pthread_mutex_lock(&consumer.mutex);
     consumer.ignore_stop = 0;
     consumer.stop_requested = 1;
     (void)pthread_cond_signal(&consumer.cond);
     (void)pthread_mutex_unlock(&consumer.mutex);
+    CHECK(host_mpv_lifecycle_wait_event_thread_exit(lc, -1) == 1, "timeout: background wait reports exit");
+    host_mpv_lifecycle_finish_destroy(lc);
+    CHECK(host_mpv_lifecycle_state(lc) == HOST_MPV_LC_DESTROYED, "timeout: teardown finishes after the consumer exits");
     fake_consumer_join(&consumer);
     host_mpv_lifecycle_release(lc);
 }
