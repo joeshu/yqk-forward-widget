@@ -93,5 +93,27 @@ BOOL MediaPageReviewRunSmokeChecks(void) {
     [browser setValue:@YES forKey:@"hasMore"];
     footer=browser.mediaFeedSections.lastObject;
     passed&=MediaPageCheck([footer[@"action"] isEqual:@"load-more"],@"continuation is accessible without a scroll gesture");
+
+    UIWindow *window=[[UIWindow alloc] initWithFrame:CGRectMake(0,0,390,844)];
+    window.windowLevel=UIWindowLevelNormal-1;
+    window.rootViewController=[UIViewController new];
+    window.hidden=NO;
+    MediaFeedView *feed=[[MediaFeedView alloc] initWithFrame:window.bounds];
+    [window.rootViewController.view addSubview:feed];
+    NSArray *heroItems=@[@{@"id":@"one",@"name":@"影片一"},@{@"id":@"two",@"name":@"影片二"}];
+    __block NSString *status=@"加载中";
+    feed.sectionsProvider=^NSArray *{
+        return @[@{@"id":@"hero",@"kind":@"hero",@"items":heroItems},
+                 @{@"id":@"status",@"kind":@"status",@"title":status}];
+    };
+    [feed reloadData];[feed layoutIfNeeded];
+    NSIndexPath *heroPath=[NSIndexPath indexPathForItem:0 inSection:0];
+    UICollectionViewCell *hero=[feed cellForItemAtIndexPath:heroPath];
+    [hero setValue:@1 forKey:@"page"];
+    status=@"更新完成";
+    [feed reloadData];[feed layoutIfNeeded];
+    UICollectionViewCell *updatedHero=[feed cellForItemAtIndexPath:heroPath];
+    passed&=MediaPageCheck(hero!=nil&&hero==updatedHero&&[[updatedHero valueForKey:@"page"] integerValue]==1,@"updating a status section preserves the current banner and its page");
+    window.hidden=YES;
     return passed;
 }

@@ -132,7 +132,7 @@ static void MediaFeedLoadPosterWithRetry(NSString *url, UIImageView *imageView, 
         [self addSubview:self.accentBar];
         self.titleLabel=[UILabel new];
         self.titleLabel.textColor=HostText();
-        self.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];
+        self.titleLabel.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleHeadline] scaledFontForFont:[UIFont systemFontOfSize:17 weight:UIFontWeightSemibold]];
         self.titleLabel.adjustsFontForContentSizeCategory=YES;
         self.titleLabel.numberOfLines=0;
         self.titleLabel.accessibilityTraits=UIAccessibilityTraitHeader;
