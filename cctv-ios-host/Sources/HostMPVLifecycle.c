@@ -12,6 +12,11 @@
 #include <stdlib.h>
 #include <time.h>
 
+#ifdef __APPLE__
+/* Hidden by _POSIX_C_SOURCE on Darwin; declare it explicitly. */
+extern int pthread_cond_timedwait_relative_np(pthread_cond_t *, pthread_mutex_t *, const struct timespec *);
+#endif
+
 static void host_mpv_lifecycle_lock(host_mpv_lifecycle_t *lc) {
     (void)pthread_mutex_lock(&lc->mutex);
 }
