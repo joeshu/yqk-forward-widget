@@ -43,9 +43,10 @@ static NSString *SettingsPreferredQualityText(void) {
 
 static NSString *SettingsDecodeModeText(void) {
     NSString *mode=[[NSUserDefaults standardUserDefaults] stringForKey:@"cctv.mediaDecodeMode.v1"]?:@"auto";
-    if([mode isEqualToString:@"cicada"])return @"Cicada 硬解";
-    if([mode isEqualToString:@"cicada_soft"])return @"Cicada 软解";
-    return @"自动回退";
+    if([mode isEqualToString:@"mpv"])return @"优先 MPV";
+    if([mode isEqualToString:@"cicada"])return @"旧引擎兼容 (硬解)";
+    if([mode isEqualToString:@"cicada_soft"])return @"旧引擎兼容 (软解)";
+    return @"自动 · AVPlayer/MPV";
 }
 
 static NSString *SettingsEPGCacheFilePath(void) {
@@ -2017,12 +2018,12 @@ static UIImage *SettingsThemeSwatchPreviewImage(HostThemePalette *palette) {
     if(self.presentedViewController)return;
     NSString *current=[[NSUserDefaults standardUserDefaults] stringForKey:@"cctv.mediaDecodeMode.v1"]?:@"auto";
     NSArray<NSDictionary *> *options=@[
-        @{@"title":@"自动回退",@"sub":@"按容器与编码智能选路：AVPlayer → Cicada 硬解 → 软解",@"val":@"推荐",@"icon":@"sparkles",@"value":@"auto"},
-        @{@"title":@"优先 Cicada 硬解",@"sub":@"跳过 AVPlayer，直接由 CicadaPlayer 硬件解码器起播",@"val":@"硬解",@"icon":@"cpu",@"value":@"cicada"},
-        @{@"title":@"强制 Cicada 软解",@"sub":@"兼容高码率/异常编码流，功耗略高但容错最强",@"val":@"软解",@"icon":@"wrench.and.screwdriver",@"value":@"cicada_soft"}
+        @{@"title":@"自动（AVPlayer → MPV）",@"sub":@"按容器与编码智能选路：AVPlayer 优先，非原生容器与失败自动切换 MPV",@"val":@"推荐",@"icon":@"sparkles",@"value":@"auto"},
+        @{@"title":@"优先 MPV 播放",@"sub":@"跳过 AVPlayer，直接由 MPV (FFmpeg + VideoToolbox) 全能内核起播",@"val":@"MPV",@"icon":@"cpu",@"value":@"mpv"},
+        @{@"title":@"旧引擎兼容（Cicada 软解）",@"sub":@"仅在极少数异常流下手动启用，默认不参与点播路由",@"val":@"兼容",@"icon":@"wrench.and.screwdriver",@"value":@"cicada_soft"}
     ];
     NSMutableArray<HostGlassSheetAction *> *rows=[NSMutableArray array];
-    NSString *activeTitle=@"自动回退";
+    NSString *activeTitle=@"自动（AVPlayer → MPV）";
     __weak typeof(self) weakSelf=self;
     for(NSDictionary *option in options){
         NSString *title=option[@"title"],*value=option[@"value"];

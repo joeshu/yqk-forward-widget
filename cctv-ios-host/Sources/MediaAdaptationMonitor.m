@@ -641,15 +641,15 @@ static const NSUInteger MediaAdaptationProbeByteLimit = 4096;
         [notes addObject:@"JAR-Bridge 原生桥接：无需 JVM 即可在 iOS 原生执行 csp_* 站点（支持 7lj763gg 巧技解密、AppGet/RJApp/Shark AES-128-CBC、JianPian、NongMin 及本地包常量池回退）"];
     }
     if ([url hasPrefix:@"cenc://"] || [resolved containsString:@"/cenc/"] || [fmt containsString:@"cenc"] || [route containsString:@"local-proxy"]) {
-        [notes addObject:@"加密/代理流适配：采用 CENC(AES-CTR) 样本表解密与本机 Range 文件流式代理，重写 encv/enca->hvc1/avc1 并抹除 sinf/senc，供 AVPlayer/CicadaPlayer 直接硬解"];
+        [notes addObject:@"加密/代理流适配：采用 CENC(AES-CTR) 样本表解密与本机 Range 文件流式代理，重写 encv/enca->hvc1/avc1 并抹除 sinf/senc，供 AVPlayer / MPV 直接硬解"];
     }
     if ([codec containsString:@"hev1"] || [codec containsString:@"hvc1"] || [codec containsString:@"hevc"] || [codec containsString:@"bytevc"]) {
-        [notes addObject:@"编码适配：检测到 HEVC/H.265 视频轨，已启用 hev1->hvc1 FourCC 兼容改写与 CicadaPlayer 混合解码兜底"];
+        [notes addObject:@"编码适配：检测到 HEVC/H.265 视频轨，已启用 hev1->hvc1 FourCC 兼容改写与 MPV 全能解码兜底"];
     }
     if ([fmt containsString:@"dash"] || [url containsString:@".mpd"]) {
-        [notes addObject:@"容器适配：MPEG-DASH(.mpd) 采用本机 fMP4-HLS 桥接转封装与 CicadaPlayer 原生 DASH 双通道"];
+        [notes addObject:@"容器适配：MPEG-DASH(.mpd) 采用本机 fMP4-HLS 桥接转封装与 MPV 原生 DASH 双通道"];
     } else if ([fmt containsString:@"flv"] || [url containsString:@".flv"]) {
-        [notes addObject:@"容器适配：HTTP-FLV 流优先路由至 CicadaPlayer / CNPlayerSDK 软硬协同内核"];
+        [notes addObject:@"容器适配：HTTP-FLV 流优先路由至 MPV 全能解码内核"];
     } else if ([fmt containsString:@"hls"] || [url containsString:@".m3u8"]) {
         [notes addObject:@"容器适配：HLS(m3u8) 列表已支持本机 MediaRelay 防盗链头注入与分片预取"];
     }
@@ -1018,8 +1018,8 @@ static const NSUInteger MediaAdaptationProbeByteLimit = 4096;
                 advice = @"检测到 MP4 含有 CENC (encv/sinf/senc) 加密盒，直接交给播放器会黑屏；必须经由本机 CENC 样本解密代理改写为 hvc1/avc1 清流后播放。";
             } else if ([headText containsString:@"hev1"]) {
                 codecHint = @"HEVC (hev1)";
-                recommendedEngine = @"AVPlayer (FourCC 归一化) / CicadaPlayer";
-                advice = [NSString stringWithFormat:@"检测到 HEVC (hev1) 编码，Range 支持：%@。宿主会自动归一化为 hvc1 或交由 CicadaPlayer 解码。", supportsRange ? @"支持 (HTTP 206)" : @"未声明"];
+                recommendedEngine = @"AVPlayer (FourCC 归一化) / MPV";
+                advice = [NSString stringWithFormat:@"检测到 HEVC (hev1) 编码，Range 支持：%@。宿主会自动归一化为 hvc1 或交由 MPV 全能解码。", supportsRange ? @"支持 (HTTP 206)" : @"未声明"];
             } else if ([headText containsString:@"hvc1"]) {
                 codecHint = @"HEVC (hvc1)";
                 recommendedEngine = @"AVPlayer 原生硬解";
@@ -1033,12 +1033,12 @@ static const NSUInteger MediaAdaptationProbeByteLimit = 4096;
             }
         } else if ([headText containsString:@"<MPD"] || [mime containsString:@"dash+xml"]) {
             detectedType = @"MPEG-DASH (MPD 清单)";
-            recommendedEngine = @"MediaRelay DASH->HLS 桥接 / CicadaPlayer";
-            advice = @"检测到 MPEG-DASH 流，宿主会自动将清流 MPD 桥接为 HLS(fMP4) 供 AVPlayer 播放，或路由至 CicadaPlayer 原生 DASH 引擎。";
+            recommendedEngine = @"MediaRelay DASH->HLS 桥接 / MPV";
+            advice = @"检测到 MPEG-DASH 流，宿主会自动将清流 MPD 桥接为 HLS(fMP4) 供 AVPlayer 播放，或路由至 MPV 原生 DASH 引擎。";
         } else if (data.length >= 4 && [headText hasPrefix:@"FLV"]) {
             detectedType = @"HTTP-FLV 视频流";
-            recommendedEngine = @"CicadaPlayer / CNPlayerSDK";
-            advice = @"检测到 FLV 封装流，AVPlayer 不直接支持 FLV，宿主解码路由器会自动切至 CicadaPlayer / CNPlayerSDK 播放。";
+            recommendedEngine = @"MPV 全能解码内核";
+            advice = @"检测到 FLV 封装流，AVPlayer 不直接支持 FLV，宿主解码路由器会自动切至 MPV 全能内核播放。";
         } else if ([headText.lowercaseString containsString:@"<html"] || [headText.lowercaseString containsString:@"<!doctype"]) {
             BOOL hasM3U8 = [headText containsString:@".m3u8"];
             BOOL hasMP4 = [headText containsString:@".mp4"];
@@ -1625,7 +1625,7 @@ static const NSUInteger MediaAdaptationProbeByteLimit = 4096;
                                        MediaAdaptationMonitor.shared.isMonitoringEnabled ? @"运行中" : @"已暂停",
                                        (unsigned long)total, (unsigned long)ok,
                                        self.filterFailedOnly ? @" · [仅看异常]" : @""];
-                cell.detailTextLabel.text = [NSString stringWithFormat:@"AVPlayer %@ 次 · CicadaPlayer %@ 次 · JAR-Bridge %@ 次 · CENC 解密 %@ 次 · MediaRelay %@ 次 · 合集导入 %@ 次",
+                cell.detailTextLabel.text = [NSString stringWithFormat:@"AVPlayer %@ 次 · MPV %@ 次 · JAR-Bridge %@ 次 · CENC 解密 %@ 次 · MediaRelay %@ 次 · 合集导入 %@ 次",
                                              self.adaptationSummary[@"avPlayerCount"] ?: @0,
                                              self.adaptationSummary[@"cicadaPlayerCount"] ?: @0,
                                              self.adaptationSummary[@"jarBridgeCount"] ?: @0,
@@ -1707,7 +1707,7 @@ static const NSUInteger MediaAdaptationProbeByteLimit = 4096;
         if (indexPath.section == 0) {
             NSArray<NSDictionary *> *rows = @[
                 @{@"t": @"Apple AVPlayer 原生硬解引擎", @"d": [NSString stringWithFormat:@"累计承载 %@ 次 · 适用于标准 HLS(m3u8)、MP4(hvc1/avc1) 与本机 CENC 解密后 HTTP 206 流", self.adaptationSummary[@"avPlayerCount"] ?: @0]},
-                @{@"t": @"CicadaPlayer / CNPlayerSDK 多格式内核", @"d": [NSString stringWithFormat:@"累计承载 %@ 次 · 适用于 HTTP-FLV、MKV、非标 TS、hev1/ByteVC1 及 AVPlayer 首帧超时回退", self.adaptationSummary[@"cicadaPlayerCount"] ?: @0]},
+                @{@"t": @"MPV 全能解码内核（FFmpeg + VideoToolbox）", @"d": [NSString stringWithFormat:@"累计承载 %@ 次 · 适用于 HTTP-FLV、MKV、WebM、MPD、AVI/WMV/VP9/AV1、非标 TS 及 AVPlayer 首帧超时回退", self.adaptationSummary[@"cicadaPlayerCount"] ?: @0]},
                 @{@"t": @"JAR-Bridge 原生 TVBox Spider 桥接引擎", @"d": [NSString stringWithFormat:@"累计触发 %@ 次 · 支持 spider.jar 字节码常量池提取、7lj763gg 巧技解密及 AppGet/RJApp/Shark AES-128-CBC 协议", self.adaptationSummary[@"jarBridgeCount"] ?: @0]},
                 @{@"t": @"本机 CENC(AES-CTR) 样本解密与 Range 文件代理", @"d": [NSString stringWithFormat:@"累计触发 %@ 次 · 针对红果短剧 Python/JS 等加密 MP4，自动完成多档画质降级兜底、senc 子样本解密与 moov 改写", self.adaptationSummary[@"cencProxyCount"] ?: @0]},
                 @{@"t": @"本机 MediaRelay 防盗链与 HLS 净化中继", @"d": [NSString stringWithFormat:@"累计触发 %@ 次 · 自动注入站点 Referer/Origin/Cookie/UA，重写相对分片地址并剔除插播广告切片", self.adaptationSummary[@"mediaRelayCount"] ?: @0]},
@@ -1723,9 +1723,9 @@ static const NSUInteger MediaAdaptationProbeByteLimit = 4096;
                 @{@"t": @"规则 1 · TVBox 本地集合包与 spider.jar 常量池穿透适配", @"d": @"自动识别初忆本地包等 ZIP/目录合集，校验 spider.jar MD5，合并 api.original.json 与 .class 常量池中的上游接口和 AES 密钥，将 localhost 占位地址无缝还原为真实站点。"},
                 @{@"t": @"规则 2 · 刺桐影视 (ctys.json) 与 7lj763gg 巧技密文脱壳", @"d": @"自动剥离头部 // 注释，对 7lj763gg... 扩展串执行 qiaoji 水印剔除、g..l 半字节还原与 170 字节 XOR 密钥流解密，直接驱动 AppGet/RJApp/Shark/Getapp 全系接口。"},
                 @{@"t": @"规则 3 · CENC 加密短剧与多音视频轨边界保护", @"d": @"解析 MP4 stbl/saiz/saio/senc 时严格限定在当前加密轨 (encv/enca) 字节区间，支持 senc 子样本 (flags&2) 与多档清晰度 (1080p->720p->540p->480p->360p) 自动降级容错。"},
-                @{@"t": @"规则 4 · HEVC FourCC 归一化 (hev1 -> hvc1)", @"d": @"iOS AVPlayer 对 hev1 封装标签兼容度低，本机代理与解码路由器自动识别并改写为 hvc1 或无缝移交 CicadaPlayer。"},
+                @{@"t": @"规则 4 · HEVC FourCC 归一化 (hev1 -> hvc1)", @"d": @"iOS AVPlayer 对 hev1 封装标签兼容度低，本机代理与解码路由器自动识别并改写为 hvc1 或无缝移交 MPV。"},
                 @{@"t": @"规则 5 · 详情页全链路穿透刷新", @"d": @"点击详情页右上角刷新按钮或菜单「重新加载详情」时，同步穿透客户端 MediaMetadataCache、服务端 MediaRuntime 缓存与 Spider 内部缓存。"},
-                @{@"t": @"规则 6 · 直播与点播首帧看门狗自动回退", @"d": @"AVPlayer 首帧超时或解码报错时，保留当前播放进度自动切换至备用清晰度、备用线路或 CicadaPlayer 内核。"},
+                @{@"t": @"规则 6 · 直播与点播首帧看门狗自动回退", @"d": @"AVPlayer 首帧超时或解码报错时，保留当前播放进度自动切换至备用清晰度、备用线路或 MPV 全能内核。"},
             ];
             NSDictionary *rule = rules[(NSUInteger)indexPath.row];
             cell.textLabel.text = rule[@"t"];

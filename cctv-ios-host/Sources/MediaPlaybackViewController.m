@@ -1417,7 +1417,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
     [self presentViewController:nav animated:YES completion:nil];
 }
 - (void)copyCurrentStreamDiagnostics {
-    NSString *engine=self.cicadaAdapter?(self.cicadaAdapterSoftwareDecodeFallbackAttempted?@"CicadaPlayer (ffmpeg 软解 cc)":@"CicadaPlayer (硬解)"):@"AVPlayer (Apple 原生)";
+    BOOL isMPV=[self.cicadaAdapter isKindOfClass:[MediaPlaybackMPVAdapter class]];NSString *engine=self.cicadaAdapter?(isMPV?(self.cicadaAdapterSoftwareDecodeFallbackAttempted?@"MPV (软解)":@"MPV (VideoToolbox 硬解)"):(self.cicadaAdapterSoftwareDecodeFallbackAttempted?@"CicadaPlayer (ffmpeg 软解 cc)":@"CicadaPlayer (硬解)")):@"AVPlayer (Apple 原生)";
     NSURL *origURL=MediaPlaybackOriginalSourceURL(self.result);
     NSString *host=origURL.host?:@"未知";
     NSTimeInterval pos=[self activeEngineCurrentPosition],dur=[self activeEngineDuration];
@@ -1459,7 +1459,7 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
         [self playResult:self.result];
     }
 }
-- (UIMenu *)decodeModeMenu {__weak typeof(self) weakSelf=self;NSString *currentDecodeMode=[[NSUserDefaults standardUserDefaults] stringForKey:@"cctv.mediaDecodeMode.v1"]?:@"auto";NSArray *decodeModes=@[@{@"title":@"自动（AVPlayer → MPV）",@"short":@"自动 · AVPlayer/MPV",@"value":@"auto"},@{@"title":@"优先 MPV 播放",@"short":@"优先 MPV",@"value":@"mpv"},@{@"title":@"兼容兜底（Cicada 硬解）",@"short":@"Cicada 硬解",@"value":@"cicada"},@{@"title":@"兼容兜底 · 强制 CicadaPlayer 软解码 (cc)",@"short":@"Cicada 软解",@"value":@"cicada_soft"}];NSMutableArray *decodeActions=[NSMutableArray array];NSString *decodeShort=@"自动 · AVPlayer/MPV";
+- (UIMenu *)decodeModeMenu {__weak typeof(self) weakSelf=self;NSString *currentDecodeMode=[[NSUserDefaults standardUserDefaults] stringForKey:@"cctv.mediaDecodeMode.v1"]?:@"auto";NSArray *decodeModes=@[@{@"title":@"自动（AVPlayer → MPV）",@"short":@"自动 · AVPlayer/MPV",@"value":@"auto"},@{@"title":@"优先 MPV 播放",@"short":@"优先 MPV",@"value":@"mpv"},@{@"title":@"旧引擎兼容 · 强制 CicadaPlayer 软解码 (cc)",@"short":@"旧引擎软解",@"value":@"cicada_soft"}];NSMutableArray *decodeActions=[NSMutableArray array];NSString *decodeShort=@"自动 · AVPlayer/MPV";
     for(NSDictionary *modeOpt in decodeModes){NSString *val=modeOpt[@"value"];BOOL active=[currentDecodeMode isEqualToString:val];if(active)decodeShort=modeOpt[@"short"];UIAction *decAct=[UIAction actionWithTitle:modeOpt[@"title"] image:nil identifier:nil handler:^(__unused UIAction *a){MediaPlaybackViewController *owner=weakSelf;if(!owner)return;[[NSUserDefaults standardUserDefaults] setObject:val forKey:@"cctv.mediaDecodeMode.v1"];[owner.settingsCoordinator applyDecodeModeChange:val];}];decAct.state=[currentDecodeMode isEqualToString:val]?UIMenuElementStateOn:UIMenuElementStateOff;[decodeActions addObject:decAct];}
     UIMenu *decodeMenu=[UIMenu menuWithTitle:@"解码模式" image:[UIImage systemImageNamed:@"cpu"] identifier:nil options:0 children:decodeActions];if(@available(iOS 16.0,*))decodeMenu.subtitle=decodeShort;return decodeMenu;
 }
@@ -2403,7 +2403,7 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
             [owner resolveAndPlay];
         });
     }
-    if(loading){self.status.text=@"正在缓冲 · 等待 CicadaPlayer";self.status.accessibilityLabel=self.status.text;[self.spinner startAnimating];}
+    if(loading){self.status.text=[NSString stringWithFormat:@"正在缓冲 · 等待 %@",[self.cicadaAdapter isKindOfClass:[MediaPlaybackMPVAdapter class]]?@"MPV":@"CicadaPlayer"];self.status.accessibilityLabel=self.status.text;[self.spinner startAnimating];}
     else if(self.videoFrameReady){self.status.text=[NSString stringWithFormat:@"视频首帧已就绪 · %@ 正在播放",[self.cicadaAdapter isKindOfClass:[MediaPlaybackMPVAdapter class]]?@"MPV":@"CicadaPlayer"];self.status.accessibilityLabel=self.status.text;[self.spinner stopAnimating];}
 }
 - (void)cicadaAdapterDidSeek:(id)adapter {
