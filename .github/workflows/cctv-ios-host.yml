@@ -18,6 +18,11 @@ on:
         required: false
         default: false
         type: boolean
+      run_mpv_simulator:
+        description: "Run the real MPV fullscreen simulator smoke"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -28,6 +33,29 @@ concurrency:
 
 
 jobs:
+  mpv-simulator:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_mpv_simulator == true
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: /tmp/cctvhost-mpvkit-1.0.0
+          key: mpvkit-simulator-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cctv-ios-host/Scripts/prepare_mpv_runtime.py') }}
+      - name: Play and change fullscreen with embedded MPV
+        working-directory: cctv-ios-host
+        run: bash Scripts/mpv_simulator_smoke.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: CCTVHost-MPV-simulator-${{ github.sha }}
+          path: |
+            cctv-ios-host/mpv-preview/*.json
+            cctv-ios-host/mpv-preview/*.log
+            cctv-ios-host/mpv-preview/*.png
+          if-no-files-found: warn
+
   source-audit:
     runs-on: macos-15
     timeout-minutes: 20
