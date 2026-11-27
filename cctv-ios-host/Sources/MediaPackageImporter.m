@@ -116,7 +116,6 @@ static NSDictionary *PackageIDJMetadata(id raw,NSString *mainSource,NSError **er
     if(![manifest[@"schema"] isKindOfClass:NSNumber.class]||[manifest[@"schema"] integerValue]!=1){PackageError(error,@"iDuanJu 插件 schema 版本不受支持");return nil;}
     NSString *identifier=[manifest[@"id"] isKindOfClass:NSString.class]?manifest[@"id"]:@"",*name=[manifest[@"name"] isKindOfClass:NSString.class]?manifest[@"name"]:@"",*version=[manifest[@"version"] isKindOfClass:NSString.class]?manifest[@"version"]:@"",*type=[manifest[@"type"] isKindOfClass:NSString.class]?manifest[@"type"]:@"",*entry=[manifest[@"entry"] isKindOfClass:NSString.class]?manifest[@"entry"]:@"",*integrity=[manifest[@"integrity"] isKindOfClass:NSString.class]?manifest[@"integrity"]:@"";
     if(!identifier.length||identifier.length>128||[identifier rangeOfString:@"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" options:NSRegularExpressionSearch].location==NSNotFound||!name.length||name.length>256||!version.length||version.length>128||![@[@"video",@"shortdrama"] containsObject:type]||![entry isEqual:@"main.js"]){PackageError(error,@"iDuanJu manifest 的 ID、名称、版本、类型或入口无效");return nil;}
-    NSDictionary *files=[raw[@"files"] isKindOfClass:NSDictionary.class]?raw[@"files"]:nil;if(files.count!=1||![files[@"main.js"] isKindOfClass:NSString.class]){PackageError(error,@"当前只支持单入口 main.js 的 iDuanJu 插件包");return nil;}
     NSString *expected=[integrity hasPrefix:@"sha256-"]?[integrity substringFromIndex:7]:@"";NSData *sourceData=[mainSource dataUsingEncoding:NSUTF8StringEncoding];unsigned char digest[CC_SHA256_DIGEST_LENGTH];CC_SHA256(sourceData.bytes,(CC_LONG)sourceData.length,digest);NSString *actual=[[NSData dataWithBytes:digest length:sizeof(digest)] base64EncodedStringWithOptions:0];
     NSData *expectedBytes=[[NSData alloc] initWithBase64EncodedString:expected options:0];if(expectedBytes.length!=CC_SHA256_DIGEST_LENGTH||![actual isEqual:expected]){PackageError(error,@"iDuanJu 插件 SHA-256 完整性校验失败，未安装");return nil;}
     NSDictionary *permissions=[manifest[@"permissions"] isKindOfClass:NSDictionary.class]?manifest[@"permissions"]:nil;if(!permissions){PackageError(error,@"iDuanJu 插件缺少 permissions 声明");return nil;}
@@ -456,7 +455,7 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     NSData *bytes=ReadBounded(file,PackageInputReadLimit(file),error);if(!bytes)return nil;
     NSString *inputExtension=file.pathExtension.lowercaseString;BOOL idjInput=[inputExtension isEqual:@"idjplugin"],iplayrInput=[inputExtension isEqual:@"json"]&&[runtimeHint isEqual:@"iplayr-rule"];
     if(idjInput&&![runtimeHint isEqual:@"idj-plugin"]){PackageError(error,@".idjplugin 必须通过魔蚁插件清单适配器导入");return nil;}
-    if([inputExtension isEqual:@"json"]&&!iplayrInput){PackageError(error,@"仅支持由 WeBox 影视规则目录选中的 iPlayr JSON；普通 JSON 不是可执行影视源");return nil;}
+    if([inputExtension isEqual:@"json"]&&!iplayrInput){PackageError(error,@"仅支持通过 WeBox iPlayr 规则目录选择的 JSON；普通 JSON 不是可执行影视源");return nil;}
     if([runtimeHint isEqual:@"idj-plugin"]&&!idjInput){PackageError(error,@"魔蚁插件适配器只接受 .idjplugin 包");return nil;}
     if([runtimeHint isEqual:@"iplayr-rule"]&&!iplayrInput){PackageError(error,@"WeBox iPlayr 适配器只接受 JSON 规则文件");return nil;}
     NSString *identifier=NSUUID.UUID.UUIDString,*stage=[[ServiceStore directory] stringByAppendingPathComponent:[@".import-" stringByAppendingString:identifier]];
@@ -471,6 +470,7 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
         if(idjInput){
             if(![connection isKindOfClass:NSDictionary.class]){PackageError(error,@"不是有效的 .idjplugin JSON 包");return nil;}
             NSDictionary *rawIDJ=[connection[@"manifest"] isKindOfClass:NSDictionary.class]?connection[@"manifest"]:nil;NSDictionary *rawFiles=[connection[@"files"] isKindOfClass:NSDictionary.class]?connection[@"files"]:nil;NSString *mainSource=[rawFiles[@"main.js"] isKindOfClass:NSString.class]?rawFiles[@"main.js"]:nil;
+            if(rawFiles.count!=1||!mainSource.length){PackageError(error,@"当前只支持单入口 main.js 的 iDuanJu 插件包");return nil;}
             NSDictionary *idj=PackageIDJMetadata(rawIDJ,mainSource,error);if(!idj)return nil;
             NSData *mainData=[mainSource dataUsingEncoding:NSUTF8StringEncoding];NSDictionary *idjHostManifest=@{@"schemaVersion":@1,@"entry":@"main.js",@"runtime":@"javascript",@"protocol":@"idj1",@"moduleType":@"esm",@"name":idj[@"name"],@"pluginVersion":idj[@"version"],@"pluginID":idj[@"id"],@"pluginType":idj[@"type"],@"adult":idj[@"adult"],@"permissions":idj[@"permissions"],@"capabilities":idj[@"capabilities"],@"idjManifest":idj};
             if(![mainData writeToFile:[package stringByAppendingPathComponent:@"main.js"] options:NSDataWritingAtomic error:error]||![[NSJSONSerialization dataWithJSONObject:idjHostManifest options:0 error:error] writeToFile:[package stringByAppendingPathComponent:@"cctvhost.json"] options:NSDataWritingAtomic error:error])return nil;
