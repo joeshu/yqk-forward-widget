@@ -79,6 +79,14 @@ BOOL MediaPageReviewRunSmokeChecks(void) {
     [emptySeasonPicker loadViewIfNeeded];
     NSArray *emptySeasonEpisodes=[emptySeasonPicker episodesForLine:0];
     passed&=MediaPageCheck(!emptySeasonPicker.lines.count&&[[emptySeasonEpisodes.firstObject[@"id"] description] isEqual:@"s1e1"],@"explicitly empty season routes do not inherit another season's routes");
+    NSDictionary *sharedRouteDetail=@{@"lines":@[@{@"id":@"main-route",@"episodes":@[@{@"id":@"main-episode"}]},@{@"id":@"backup-route",@"episodes":@[@{@"id":@"second"}]}],
+                                      @"seasons":@[@{@"id":@"season-one",@"episodes":@[@{@"id":@"season-episode"}]}]};
+    MediaEpisodeSelectionViewController *firstRoutePicker=[MediaEpisodeSelectionViewController new];
+    firstRoutePicker.source=@{@"id":@"review",@"port":@18780};firstRoutePicker.detail=sharedRouteDetail;[firstRoutePicker loadViewIfNeeded];
+    MediaEpisodeSelectionViewController *reopenedRoutePicker=[MediaEpisodeSelectionViewController new];
+    reopenedRoutePicker.source=firstRoutePicker.source;reopenedRoutePicker.detail=firstRoutePicker.detail;reopenedRoutePicker.selectedLineIndex=1;[reopenedRoutePicker loadViewIfNeeded];
+    NSArray *reopenedBackupEpisodes=[reopenedRoutePicker episodesForLine:1];
+    passed&=MediaPageCheck(reopenedRoutePicker.lines.count==2&&reopenedRoutePicker.selectedLineIndex==1&&[[reopenedBackupEpisodes.firstObject[@"id"] description] isEqual:@"second"],@"reopened selector preserves shared routes and the selected backup line");
     [picker setValue:@"pending" forKey:@"inFlightEpisodeSignature"];
     [picker rebuildSelection];
     passed&=MediaPageCheck(!((UIButton *)[picker valueForKey:@"continueButton"]).enabled,@"layout changes preserve the pending playback action");
