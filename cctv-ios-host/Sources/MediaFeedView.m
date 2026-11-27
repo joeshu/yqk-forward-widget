@@ -288,7 +288,10 @@ static void MediaFeedLoadPosterWithRetry(NSString *url, UIImageView *imageView, 
     self.renderSerial++;
     self.categoryNotificationScheduled=NO;
     self.visibleCategoryIDs=nil;
-    BOOL sameStructure=previous.count==self.sections.count&&self.numberOfSections==previous.count;
+    // Querying UICollectionView.numberOfSections here asks its data source (self)
+    // for the count. On a collection-view subclass that can reenter reloadData
+    // while UIKit is resolving an update, so compare our last rendered snapshot.
+    BOOL sameStructure=previous.count==self.sections.count;
     NSMutableIndexSet *changed=[NSMutableIndexSet indexSet];
     for(NSUInteger index=0;sameStructure&&index<previous.count;index++){
         NSDictionary *before=previous[index],*after=self.sections[index];
