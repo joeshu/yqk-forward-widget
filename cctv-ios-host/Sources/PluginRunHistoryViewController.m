@@ -41,15 +41,19 @@
     // CI 上 SE 变体连续两次 rows=0：驱动每 0.5s 重请求一次，但取数在途时全被
     // 丢弃；改成合并重取后，最后一次请求的状态一定会被取回来）。
     if(self.refreshingRuns){self.refreshPending=YES;return;}self.refreshingRuns=YES;
-    // 主线程前置工作（只能在主线程做的状态读取/标记）先做完，再把纯取数
-    // 交给后台；provider 里不要再 dispatch_sync 回主线程。
+    // 主线程前置工作（只能在主线程做的状态读取/标记）先做完；存储层在
+    // 自己的串行队列读取记录，避免占用全局线程池等待存储队列。
     if(self.willRefreshRuns)self.willRefreshRuns();
-    NSArray *(^provider)(void)=[self.runRecordsProvider copy];__weak typeof(self) weakSelf=self;
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{NSArray *runs=provider?provider():@[];dispatch_async(dispatch_get_main_queue(),^{
-        PluginRunHistoryViewController *owner=weakSelf;if(!owner)return;owner.refreshingRuns=NO;
-        owner.runs=[runs isKindOfClass:NSArray.class]?runs:@[];owner.emptyLabel.hidden=owner.runs.count>0;owner.tableView.backgroundView.hidden=owner.runs.count>0;[owner.refreshControl endRefreshing];[owner.tableView reloadData];
-        if(owner.refreshPending){owner.refreshPending=NO;[owner refreshRuns];}
-    });});
+    void (^loader)(void (^)(NSArray<NSDictionary *> *))=[self.runRecordsLoader copy];__weak typeof(self) weakSelf=self;
+    if(!loader){self.refreshingRuns=NO;self.runs=@[];self.emptyLabel.hidden=NO;self.tableView.backgroundView.hidden=NO;[self.refreshControl endRefreshing];[self.tableView reloadData];return;}
+    loader(^(NSArray<NSDictionary *> *runs){
+        void (^apply)(void)=^{
+            PluginRunHistoryViewController *owner=weakSelf;if(!owner)return;owner.refreshingRuns=NO;
+            owner.runs=[runs isKindOfClass:NSArray.class]?runs:@[];owner.emptyLabel.hidden=owner.runs.count>0;owner.tableView.backgroundView.hidden=owner.runs.count>0;[owner.refreshControl endRefreshing];[owner.tableView reloadData];
+            if(owner.refreshPending){owner.refreshPending=NO;[owner refreshRuns];}
+        };
+        if(NSThread.isMainThread)apply();else dispatch_async(dispatch_get_main_queue(),apply);
+    });
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {return 1;}
