@@ -221,9 +221,12 @@ NSArray<NSDictionary *> *MediaPlaybackDecodeRouteCandidatesForResult(NSDictionar
     BOOL rawProgressiveTS = ([urlExt isEqualToString:@"ts"] && ![resolvedFormat isEqualToString:@"hls"] && ![resolvedFormat isEqualToString:@"m3u8"]);
     NSString *requestedEngine = MediaPlaybackDecodeLowerString(result[@"playbackEngine"]);
     BOOL explicitPreferMPV = [decodeMode isEqualToString:@"mpv"] || [requestedEngine isEqualToString:@"mpv"];
-    BOOL explicitPreferCicada = [decodeMode isEqualToString:@"cicada"] || [decodeMode isEqualToString:@"cicada_soft"] || [requestedEngine isEqualToString:@"cicada"];
-    BOOL preferCicada = !mpvOnlyMedia && !explicitPreferMPV && (probedCicadaOnly || rawProgressiveTS || explicitPreferCicada);
     BOOL legacyCicada = [decodeMode isEqualToString:@"cicada_legacy"];
+    BOOL userExplicitCicada = [decodeMode isEqualToString:@"cicada"] || [decodeMode isEqualToString:@"cicada_soft"] || legacyCicada;
+    BOOL mpvEnabledForVOD = !forLive && !legacyCicada && MediaPlaybackMPVRouteEnabled();
+    BOOL allowCicadaInVOD = !mpvEnabledForVOD || userExplicitCicada;
+    BOOL explicitPreferCicada = userExplicitCicada || (!mpvEnabledForVOD && [requestedEngine isEqualToString:@"cicada"]);
+    BOOL preferCicada = !mpvOnlyMedia && !explicitPreferMPV && allowCicadaInVOD && (probedCicadaOnly || rawProgressiveTS || explicitPreferCicada);
     NSString *cicadaDecodeMode = ([decodeMode isEqualToString:@"cicada_soft"] || [result[@"preferSoftwareDecode"] boolValue]) ? @"cicada_soft" : @"cicada";
 
     // Parser and platform watch pages are documents, not media resources. Send
@@ -236,7 +239,7 @@ NSArray<NSDictionary *> *MediaPlaybackDecodeRouteCandidatesForResult(NSDictionar
         return @[@{@"route": @(MediaPlaybackDecodeRouteWebView), @"decodeMode": @"webview", @"reason": @"web_page"}];
     }
 
-    // Ordered VOD fallback: AVPlayer → MPV → Cicada → WebView.
+    // Ordered VOD fallback: AVPlayer → MPV (Cicada only when explicitly requested or MPV unavailable) → WebView.
     MediaPlaybackDecodeRoute candidates[] = { MediaPlaybackDecodeRouteAVPlayer, MediaPlaybackDecodeRouteMPV, MediaPlaybackDecodeRouteCicadaPlayer, MediaPlaybackDecodeRouteWebView };
     NSMutableArray<NSDictionary *> *out = [NSMutableArray array];
     for (NSUInteger i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
@@ -246,11 +249,13 @@ NSArray<NSDictionary *> *MediaPlaybackDecodeRouteCandidatesForResult(NSDictionar
         if (route == MediaPlaybackDecodeRouteMPV && legacyCicada) continue;
         // 直播默认不走实验中的 MPV，也没有网页播放器。
         if (forLive && (route == MediaPlaybackDecodeRouteMPV || route == MediaPlaybackDecodeRouteWebView)) continue;
+        // 点播默认仅走 AVPlayer → MPV，不再自动回落到 Cicada（除非用户显式选择 Cicada 或 MPV 不可用）。
+        if (!forLive && route == MediaPlaybackDecodeRouteCicadaPlayer && !allowCicadaInVOD) continue;
         // MPV-only 容器/编码（AVI/WMV/ASF/RM/VP8/VP9/AV1 等）Cicada 必败，直接跳过。
         if (route == MediaPlaybackDecodeRouteCicadaPlayer && mpvOnlyMedia) continue;
         // 直连媒体不进 WebView：耗尽后返回 None，走统一终态。
         if (route == MediaPlaybackDecodeRouteWebView && directMedia) continue;
-        // AVPlayer only leads the chain for formats it can decode. For Cicada-only
+        // AVPlayer only leads the chain for formats it can decode. For non-AVPlayer
         // containers (FLV/DASH/MKV/WebM/RTMP) MediaPlaybackResultSupportsAVPlayer
         // returns NO; attempting AVPlayer first wastes a full startup-watchdog
         // budget on a deterministically-failing leg. Skip it so the ordered

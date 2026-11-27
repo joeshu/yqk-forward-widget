@@ -106,10 +106,23 @@ if [ -z "${PY_DISABLE:-}" ]; then
          "$APP/python/lib/python${PY_VER}/tkinter" "$APP/python/lib/python${PY_VER}/ensurepip" \
          "$APP/python/lib/python${PY_VER}/turtledemo" "$APP/python/lib/python${PY_VER}/distutils" \
          "$APP/python/lib/python${PY_VER}/pydoc_data" "$APP/python/lib/python${PY_VER}/lib2to3" \
+         "$APP/python/lib/python${PY_VER}/unittest" "$APP/python/lib/python${PY_VER}/_pyrepl" \
+         "$APP/python/lib/python${PY_VER}/xmlrpc" "$APP/python/lib/python${PY_VER}/wsgiref" \
+         "$APP/python/lib/python${PY_VER}/venv" "$APP/python/lib/python${PY_VER}/curses" \
+         "$APP/python/lib/python${PY_VER}/dbm" "$APP/python/lib/python${PY_VER}/doctest.py" \
+         "$APP/python/lib/python${PY_VER}/pdb.py" "$APP/python/lib/python${PY_VER}/turtle.py" \
+         "$APP/python/lib/python${PY_VER}/antigravity.py" "$APP/python/lib/python${PY_VER}/this.py" \
          "$APP/python/lib/python${PY_VER}"/config-* "$APP/python/lib/python${PY_VER}/site-packages"/*.dist-info
-  rm -rf "$APP/python/lib/python${PY_VER}/__pycache__"
+  find "$APP/python/lib/python${PY_VER}" -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true
   find "$APP/python/lib/python${PY_VER}" -name '*.pyc' -delete
-  PYTHONHASHSEED=0 python3 -m compileall -q -f --invalidation-mode unchecked-hash "$APP/python/lib/python${PY_VER}" || true
+  HOST_PY_VER="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null || true)"
+  if [ "$HOST_PY_VER" = "$PY_VER" ]; then
+    PYTHONHASHSEED=0 python3 -m compileall -q -f --invalidation-mode unchecked-hash "$APP/python/lib/python${PY_VER}" || true
+  fi
+  rm -f "$APP/python/lib/python${PY_VER}/lib-dynload"/_test*.so \
+        "$APP/python/lib/python${PY_VER}/lib-dynload"/xxlimited*.so \
+        "$APP/python/lib/python${PY_VER}/lib-dynload"/xxsubtype*.so \
+        "$APP/python/lib/python${PY_VER}/lib-dynload"/_ctypes_test*.so
   for extension in "$APP/python/lib/python${PY_VER}/lib-dynload"/*.so; do
     [ -f "$extension" ] || continue
     filename=$(basename "$extension"); module=${filename%%.*}; framework="$APP/Frameworks/${module}.framework"
@@ -140,6 +153,18 @@ SOURCES=$(find Sources -maxdepth 1 \( -name '*.m' -o -name '*.c' \) -print | sor
 JAR_ROOT="${CCTV_JAR_CACHE:-$PWD/.jar-runtime}/iphoneos"
 if [ ! -s "$JAR_ROOT/lib/libTVAppleRuntime.a" ]; then bash Scripts/prepare_jar_runtime.sh ios; fi
 cp -R "$JAR_ROOT/Resources/" "$APP/"
+# Store JavaHost JARs uncompressed so outer zip -9 compresses across class files (same strategy as jlink --compress=zip-0).
+python3 - "$APP/JavaHost" <<'PY'
+import pathlib, sys, zipfile
+root = pathlib.Path(sys.argv[1])
+if root.is_dir():
+    for jar in sorted(root.rglob("*.jar")):
+        tmp = jar.with_suffix(".jar.tmp")
+        with zipfile.ZipFile(jar, "r") as zin, zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_STORED) as zout:
+            for info in zin.infolist():
+                zout.writestr(info, zin.read(info.filename), compress_type=zipfile.ZIP_STORED)
+        tmp.replace(jar)
+PY
 JAR_FLAGS=(-DCCTV_JAR_ENABLED=1 -I "$JAR_ROOT/include" "$JAR_ROOT/AppleRuntime.m" -Wl,-force_load,"$JAR_ROOT/lib/libTVAppleRuntime.a" -Wl,-export_dynamic)
 /usr/libexec/PlistBuddy -c 'Set :MinimumOSVersion 17.0' "$APP/Info.plist" 2>/dev/null || \
   /usr/libexec/PlistBuddy -c 'Add :MinimumOSVersion string 17.0' "$APP/Info.plist"
@@ -148,7 +173,7 @@ set -x
 clang -arch arm64 \
   -isysroot "$SDK" \
   -miphoneos-version-min=17.0 \
-  -fobjc-arc -O2 -g \
+  -fobjc-arc -Oz -g \
   -I Sources/Include \
   -F Frameworks \
   -framework WebKit -framework JavaScriptCore -framework Security -framework Foundation -framework UIKit -framework ImageIO -framework CoreGraphics -framework CoreMedia -framework UniformTypeIdentifiers -framework QuartzCore -framework MetricKit \
@@ -163,6 +188,7 @@ clang -arch arm64 \
 set +x
 
 xcrun dsymutil "$APP/CCTVHost" -o "$OUT/CCTVHost.app.dSYM"
+rm -rf "$APP/CCTVHost.dSYM"
 xcrun strip -x "$APP/CCTVHost" 2>/dev/null || true
 for fw_bin in "$APP/Frameworks"/*.framework/*; do
   if [ -f "$fw_bin" ] && [[ "$(basename "$fw_bin")" != *.plist ]] && [[ "$(basename "$fw_bin")" != *.json ]] && [[ "$(basename "$fw_bin")" != *.md ]]; then
