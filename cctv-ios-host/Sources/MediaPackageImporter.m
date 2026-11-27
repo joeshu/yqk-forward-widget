@@ -155,7 +155,7 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
         NSUInteger localName=U16(b,local+26),body=local+30+localName+U16(b,local+28);
         if(body>offset || compressed>offset-body || localName!=nameLength || memcmp(b+local+30,nameData.bytes,nameLength)!=0)return PackageError(error,@"ZIP 数据范围或文件名不一致");
         NSString *target=[directory stringByAppendingPathComponent:name];
-        if(isDirectory){if(expanded || ![fm createDirectoryAtPath:target withIntermediateDirectories:YES attributes:nil error:error])return NO;}
+        if(isDirectory){if(expanded)return PackageError(error,@"ZIP 目录项大小无效");if(![fm createDirectoryAtPath:target withIntermediateDirectories:YES attributes:nil error:error])return NO;}
         else {
             NSMutableData *output=[NSMutableData dataWithLength:expanded];
             if(method==0){if(compressed!=expanded)return PackageError(error,@"ZIP 未压缩文件大小不一致");if(expanded)memcpy(output.mutableBytes,b+body,expanded);}

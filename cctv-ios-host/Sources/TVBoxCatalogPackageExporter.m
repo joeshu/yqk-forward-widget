@@ -37,6 +37,7 @@ static NSString *TVBoxPackageSafeName(NSString *value) {
 @property(nonatomic) NSUInteger totalCount;
 @property(nonatomic) NSUInteger completedCount;
 @property(nonatomic) NSUInteger failedCount;
+@property(nonatomic) BOOL started;
 @property(nonatomic) BOOL cancelled;
 @property(nonatomic) BOOL finished;
 - (void)pump;
@@ -68,7 +69,8 @@ static NSString *TVBoxPackageSafeName(NSString *value) {
     NSString *path=parts.path.lowercaseString?:@"";if([path hasSuffix:@".md5"])path=[path stringByDeletingPathExtension];NSString *extension=path.pathExtension.lowercaseString;return [@[@"py",@"js",@"hjs",@"mjs",@"cjs"] containsObject:extension]?extension:nil;
 }
 - (void)startWithCompletion:(void (^)(NSURL *,NSUInteger,NSError *))completion {
-    if(self.finished)return;self.completion=[completion copy];NSDictionary *catalog=[TVBoxCatalogStore catalogForID:self.catalogID];if(!catalog){[self finish:nil error:TVBoxPackageError(@"找不到此资源合集")];return;}
+    @synchronized(self){if(self.started||self.finished)return;self.started=YES;}
+    self.completion=[completion copy];NSDictionary *catalog=[TVBoxCatalogStore catalogForID:self.catalogID];if(!catalog){[self finish:nil error:TVBoxPackageError(@"找不到此资源合集")];return;}
     NSError *jsonError=nil;NSData *config=[TVBoxCatalogStore exportDataForCatalogID:self.catalogID error:&jsonError];if(!config){[self finish:nil error:jsonError?:TVBoxPackageError(@"无法读取资源合集 JSON")];return;}self.archiveFiles[@"config.json"]=config;
     NSArray *sites=[catalog[@"sites"] isKindOfClass:NSArray.class]?catalog[@"sites"]:@[];NSMutableSet *usedPaths=[NSMutableSet set];NSUInteger index=0;
     for(NSDictionary *site in sites){index++;NSString *raw=[site[@"api"] isKindOfClass:NSString.class]?site[@"api"]:@"";NSString *extension=[self fileExtensionForURL:raw];if(!extension)continue;NSString *resolved=[self resolvedURL:raw];NSString *name=[site[@"name"] isKindOfClass:NSString.class]?site[@"name"]:@"source";NSString *key=[site[@"key"] isKindOfClass:NSString.class]?site[@"key"]:[NSString stringWithFormat:@"%lu",(unsigned long)index];NSString *path=[NSString stringWithFormat:@"scripts/%03lu-%@-%@.%@",(unsigned long)index,TVBoxPackageSafeName(key),TVBoxPackageSafeName(name),extension];NSUInteger suffix=1;NSString *candidate=path;while([usedPaths containsObject:candidate]){candidate=[path stringByDeletingPathExtension];candidate=[candidate stringByAppendingFormat:@"-%lu.%@",(unsigned long)suffix++,extension];}path=candidate;[usedPaths addObject:path];
@@ -76,9 +78,12 @@ static NSString *TVBoxPackageSafeName(NSString *value) {
         NSURLComponents *parts=[NSURLComponents componentsWithString:resolved];
         if(!parts){NSMutableCharacterSet *allowed=[NSCharacterSet.URLQueryAllowedCharacterSet mutableCopy];[allowed addCharactersInString:@"#%/:?@[]!$&'()*+,;="];NSString *encoded=[resolved stringByAddingPercentEncodingWithAllowedCharacters:allowed];if(encoded.length)parts=[NSURLComponents componentsWithString:encoded];}
         if(!parts.URL||![@[@"http",@"https"] containsObject:parts.scheme.lowercaseString]||!parts.host.length||parts.user.length||parts.password.length){record[@"status"]=@"地址无效";self.failedCount++;self.completedCount++;[self.manifestFailures addObject:@{@"name":name,@"url":raw,@"reason":@"地址无效"}];[self.manifestEntries addObject:record];continue;}
-        BOOL checksum=[parts.path.lowercaseString hasSuffix:@".md5"];NSURLComponents *scriptParts=[parts copy];if(checksum)scriptParts.path=[scriptParts.path stringByDeletingPathExtension];NSDictionary *headers=[site[@"header"] isKindOfClass:NSDictionary.class]?site[@"header"]:@{};[self.pending addObject:@{@"url":parts.URL.absoluteString,@"scriptURL":scriptParts.URL.absoluteString?:parts.URL.absoluteString,@"checksumRequest":@(checksum),@"path":path,@"name":name,@"rawURL":raw,@"headers":headers,@"recordIndex":@(self.manifestEntries.count)}];[self.manifestEntries addObject:record];
+        BOOL checksum=[parts.path.lowercaseString hasSuffix:@".md5"];NSURLComponents *scriptParts=[parts copy];if(checksum)scriptParts.path=[scriptParts.path stringByDeletingPathExtension];NSDictionary *headers=[site[@"header"] isKindOfClass:NSString.class]?@{}:([site[@"header"] isKindOfClass:NSDictionary.class]?site[@"header"]:@{});[self.pending addObject:@{@"url":parts.URL.absoluteString,@"scriptURL":scriptParts.URL.absoluteString?:parts.URL.absoluteString,@"checksumRequest":@(checksum),@"path":path,@"name":name,@"rawURL":raw,@"headers":headers,@"recordIndex":@(self.manifestEntries.count)}];[self.manifestEntries addObject:record];
     }
-    self.totalCount=self.manifestEntries.count;if(self.progressHandler)dispatch_async(dispatch_get_main_queue(),^{self.progressHandler(self.completedCount,self.totalCount,@"准备下载");});
+    self.totalCount=self.manifestEntries.count;
+    void (^progress)(NSUInteger,NSUInteger,NSString *)=[self.progressHandler copy];
+    NSUInteger done=self.completedCount,total=self.totalCount;
+    if(progress)dispatch_async(dispatch_get_main_queue(),^{progress(done,total,@"准备下载");});
     NSURLSessionConfiguration *configuration=NSURLSessionConfiguration.ephemeralSessionConfiguration;configuration.URLCache=nil;configuration.HTTPCookieStorage=nil;configuration.timeoutIntervalForRequest=20;configuration.timeoutIntervalForResource=30;self.delegateQueue=[NSOperationQueue new];self.delegateQueue.maxConcurrentOperationCount=1;self.session=[NSURLSession sessionWithConfiguration:configuration delegate:self delegateQueue:self.delegateQueue];__weak typeof(self) weakSelf=self;[self.delegateQueue addOperationWithBlock:^{[weakSelf pump];}];
 }
 - (void)pump {
@@ -113,13 +118,18 @@ static NSString *TVBoxPackageSafeName(NSString *value) {
     BOOL succeeded=!error&&response.statusCode>=200&&response.statusCode<300&&buffer.length>0;
     if(succeeded&&[entry[@"checksumRequest"] boolValue]){
         NSString *text=[[NSString alloc] initWithData:buffer encoding:NSUTF8StringEncoding];NSString *hash=[[[text componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] firstObject] lowercaseString];static NSRegularExpression *validHash=nil;static dispatch_once_t md5RegexOnce;dispatch_once(&md5RegexOnce,^{validHash=[NSRegularExpression regularExpressionWithPattern:@"^[0-9a-f]{32}$" options:0 error:NULL];});BOOL valid=hash.length==32&&[validHash numberOfMatchesInString:hash options:0 range:NSMakeRange(0,hash.length)]==1;
+        if(self.totalBytes>=buffer.length)self.totalBytes-=buffer.length;else self.totalBytes=0;
         if(valid){NSMutableDictionary *next=[entry mutableCopy];NSURL *effective=task.response.URL;NSURLComponents *effectiveParts=[NSURLComponents componentsWithURL:effective resolvingAgainstBaseURL:NO];if([effectiveParts.path.lowercaseString hasSuffix:@".md5"])effectiveParts.path=[effectiveParts.path stringByDeletingPathExtension];next[@"url"]=effectiveParts.URL.absoluteString?:entry[@"scriptURL"];if(!TVBoxPackageSameOrigin([NSURL URLWithString:entry[@"url"]],effective)){NSMutableDictionary *safeHeaders=[entry[@"headers"] mutableCopy]?:[NSMutableDictionary dictionary];for(id key in [safeHeaders.allKeys copy])if([key isKindOfClass:NSString.class]&&([key caseInsensitiveCompare:@"Authorization"]==NSOrderedSame||[key caseInsensitiveCompare:@"Cookie"]==NSOrderedSame||[key caseInsensitiveCompare:@"Proxy-Authorization"]==NSOrderedSame))[safeHeaders removeObjectForKey:key];next[@"headers"]=safeHeaders;}next[@"checksumRequest"]=@NO;next[@"expectedMD5"]=hash;record[@"md5"]=hash;record[@"status"]=@"已读取 MD5 校验值";[self.pending insertObject:next atIndex:0];[self.taskEntries removeObjectForKey:identifier];[self.taskData removeObjectForKey:identifier];[self.redirectCounts removeObjectForKey:identifier];[self pump];return;}
         succeeded=NO;record[@"status"]=@"MD5 校验文件格式无效";
     }
     if(succeeded&&[entry[@"expectedMD5"] isKindOfClass:NSString.class]&&![entry[@"expectedMD5"] isEqual:TVBoxPackageMD5(buffer)]){succeeded=NO;record[@"status"]=@"脚本 MD5 校验失败";}
     if(succeeded){self.archiveFiles[entry[@"path"]]=buffer.copy;record[@"status"]=[entry[@"expectedMD5"] isKindOfClass:NSString.class]?@"已收集 · MD5 校验通过":@"已收集 · 未提供 MD5";record[@"bytes"]=@(buffer.length);}
-    else {self.failedCount++;NSString *reason=record[@"status"]?: (error?[NSString stringWithFormat:@"%@ (%ld)",error.domain,(long)error.code]:[NSString stringWithFormat:@"HTTP %ld",(long)response.statusCode]);record[@"status"]=reason;NSMutableDictionary *failure=[@{@"name":entry[@"name"]?:@"资源",@"url":entry[@"rawURL"]?:@"",@"reason":reason} mutableCopy];[self.manifestFailures addObject:failure];}
-    self.completedCount++;[self.taskEntries removeObjectForKey:identifier];[self.taskData removeObjectForKey:identifier];[self.redirectCounts removeObjectForKey:identifier];if(self.progressHandler)dispatch_async(dispatch_get_main_queue(),^{self.progressHandler(self.completedCount,self.totalCount,entry[@"name"]?:@"资源");});[self pump];
+    else {if(![entry[@"checksumRequest"] boolValue]){if(self.totalBytes>=buffer.length)self.totalBytes-=buffer.length;else self.totalBytes=0;}self.failedCount++;NSString *reason=record[@"status"]?: (error?[NSString stringWithFormat:@"%@ (%ld)",error.domain,(long)error.code]:[NSString stringWithFormat:@"HTTP %ld",(long)response.statusCode]);record[@"status"]=reason;NSMutableDictionary *failure=[@{@"name":entry[@"name"]?:@"资源",@"url":entry[@"rawURL"]?:@"",@"reason":reason} mutableCopy];[self.manifestFailures addObject:failure];}
+    self.completedCount++;[self.taskEntries removeObjectForKey:identifier];[self.taskData removeObjectForKey:identifier];[self.redirectCounts removeObjectForKey:identifier];
+    void (^progress)(NSUInteger,NSUInteger,NSString *)=[self.progressHandler copy];
+    NSUInteger done=self.completedCount,total=self.totalCount;NSString *itemName=entry[@"name"]?:@"资源";
+    if(progress)dispatch_async(dispatch_get_main_queue(),^{progress(done,total,itemName);});
+    [self pump];
 }
 - (void)finishArchive {
     if(self.finished||self.cancelled)return;
@@ -142,9 +152,23 @@ static NSString *TVBoxPackageSafeName(NSString *value) {
     [self finish:url error:error];
 }
 - (void)finish:(NSURL *)url error:(NSError *)error {
-    if(self.finished)return;self.finished=YES;[self.session invalidateAndCancel];self.session=nil;void(^completion)(NSURL *,NSUInteger,NSError *)=self.completion;self.completion=nil;if(completion)dispatch_async(dispatch_get_main_queue(),^{completion(url,self.failedCount,error);});
+    void(^completion)(NSURL *,NSUInteger,NSError *)=nil;
+    NSURLSession *session=nil;
+    NSUInteger failed=0;
+    @synchronized(self){
+        if(self.finished)return;self.finished=YES;
+        session=self.session;self.session=nil;
+        completion=self.completion;self.completion=nil;
+        self.progressHandler=nil;
+        failed=self.failedCount;
+    }
+    [session invalidateAndCancel];
+    if(completion)dispatch_async(dispatch_get_main_queue(),^{completion(url,failed,error);});
 }
 - (void)cancel {
-    if(self.finished)return;__weak typeof(self) weakSelf=self;[self.delegateQueue addOperationWithBlock:^{TVBoxCatalogPackageExporter *owner=weakSelf;if(!owner||owner.finished)return;owner.cancelled=YES;[owner.session invalidateAndCancel];owner.session=nil;owner.finished=YES;void(^completion)(NSURL *,NSUInteger,NSError *)=owner.completion;owner.completion=nil;if(completion)dispatch_async(dispatch_get_main_queue(),^{completion(nil,owner.failedCount,[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil]);});}];
+    @synchronized(self){if(self.finished)return;self.cancelled=YES;}
+    NSOperationQueue *queue=self.delegateQueue;
+    if(!queue){[self finish:nil error:[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil]];return;}
+    __weak typeof(self) weakSelf=self;[queue addOperationWithBlock:^{TVBoxCatalogPackageExporter *owner=weakSelf;if(!owner)return;[owner finish:nil error:[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil]];}];
 }
 @end

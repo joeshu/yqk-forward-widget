@@ -70,7 +70,7 @@ static const NSUInteger ResourceImportZIPLimit = 24 * 1024 * 1024;
     @synchronized(self){
         if(!self.cancelled&&task==self.task){self.response=response;NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]?[(NSHTTPURLResponse *)response statusCode]:0;
             valid=status>=200&&status<300&&response.expectedContentLength<=(long long)ResourceImportZIPLimit;
-            if(!valid){NSString *message=(status<200||status>=300)?[NSString stringWithFormat:@"资源返回 HTTP %ld",(long)status]:[NSString stringWithFormat:@"资源声明大小 %.1f MiB，超过 ZIP 24 MiB 上限",(double)response.expectedContentLength/(1024.0*1024.0)];self.failure=[NSError errorWithDomain:@"ResourceImport" code:1 userInfo:@{NSLocalizedDescriptionKey:message}];}
+            if(!valid&&!self.failure){NSString *message=(status<200||status>=300)?[NSString stringWithFormat:@"资源返回 HTTP %ld",(long)status]:[NSString stringWithFormat:@"资源声明大小 %.1f MiB，超过 ZIP 24 MiB 上限",(double)response.expectedContentLength/(1024.0*1024.0)];self.failure=[NSError errorWithDomain:@"ResourceImport" code:1 userInfo:@{NSLocalizedDescriptionKey:message}];}
         }
     }
     completionHandler(valid?NSURLSessionResponseAllow:NSURLSessionResponseCancel);

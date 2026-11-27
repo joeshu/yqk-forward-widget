@@ -29,7 +29,7 @@
     for(NSDictionary *catalog in [TVBoxCatalogStore catalogs]){
         NSString *identifier=catalog[@"id"]?:@"";NSString *catalogName=[catalog[@"name"] isKindOfClass:NSString.class]?catalog[@"name"]:@"";if(!catalogName.length||[catalogName isEqual:@"TVBox 资源目录"]||[catalogName isEqual:@"TVBox资源目录"])catalogName=@"资源合集";NSArray *sites=[catalog[@"sites"] isKindOfClass:NSArray.class]?catalog[@"sites"]:@[];NSUInteger supported=0;for(NSDictionary *site in sites)if([site[@"supported"] boolValue])supported++;
         NSUInteger liveCount=[catalog[@"lives"] count];NSString *kind=supported&&liveCount?@"both":(supported?@"vod":(liveCount?@"live":@"unknown"));NSString *catalogKind=[catalog[@"catalogKind"] isKindOfClass:NSString.class]?catalog[@"catalogKind"]:@"tvbox";
-        BOOL current=[selectedMediaCatalog isEqual:identifier]||[selectedMedia hasPrefix:[NSString stringWithFormat:@"tvbox-api:%@:",identifier]]||[selectedMedia hasPrefix:[NSString stringWithFormat:@"maccms-api:%@:",identifier]]||[selectedMedia hasPrefix:[NSString stringWithFormat:@"jar-bridge:%@:",identifier]];
+        BOOL current=[selectedMediaCatalog isEqual:identifier]||[selectedMedia hasPrefix:[NSString stringWithFormat:@"tvbox-api:%@:",identifier]]||[selectedMedia hasPrefix:[NSString stringWithFormat:@"maccms-api:%@:",identifier]]||[selectedMedia hasPrefix:[NSString stringWithFormat:@"jar-bridge:%@:",identifier]]||[selectedMedia hasPrefix:[NSString stringWithFormat:@"douban-index:%@:",identifier]];
         BOOL liveEnabled=NO;for(NSString *owner in self.subscriptionURLs){NSDictionary *ownerMetadata=[ProfileStore metadata:owner];if([ownerMetadata[@"tvboxCatalogID"] isEqual:identifier]&&![disabled containsObject:owner]&&[counts[owner] unsignedIntegerValue]){liveEnabled=YES;break;}}
         NSMutableDictionary *profile=[@{@"name":catalogName,@"type":@"tvbox",@"catalogKind":catalogKind,@"resourceKind":kind,@"source":[@"tvbox:" stringByAppendingString:identifier],@"url":catalog[@"url"]?:@"",@"updatedAt":catalog[@"updatedAt"]?:@0,@"siteCount":@(sites.count),@"supportedCount":@(supported),@"liveCount":@(liveCount),@"enabled":@(liveEnabled),@"current":@(current),@"showChannelLogo":@([ProfileStore isChannelLogoEnabledForSource:[@"tvbox:" stringByAppendingString:identifier]]),@"showPlayerCornerLogo":@([ProfileStore isPlayerCornerLogoEnabledForSource:[@"tvbox:" stringByAppendingString:identifier]]),@"showChannelPreview":@([ProfileStore isChannelPreviewEnabledForSource:[@"tvbox:" stringByAppendingString:identifier]]),@"showChannelTelemetry":@([ProfileStore isChannelTelemetryEnabledForSource:[@"tvbox:" stringByAppendingString:identifier]])} mutableCopy];if(catalog[@"importSourceFilename"])profile[@"sourceFilename"]=catalog[@"importSourceFilename"];if(catalog[@"importFingerprint"])profile[@"fingerprint"]=catalog[@"importFingerprint"];[rows addObject:profile];
     }
@@ -150,7 +150,10 @@
     return NO;
 }
 - (void)deleteSubscription:(NSString *)source {
+    if(![source isKindOfClass:NSString.class]||!source.length)return;
     [self.subscriptionTasks[source] cancel];[self.subscriptionTasks removeObjectForKey:source];[self.subscriptionTraceIDs removeObjectForKey:source];[ProfileStore remove:source];
+    if([self.activeSource isEqual:source])self.activeSource=nil;
+    NSMutableArray *disabledSources=[[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[] mutableCopy];if([disabledSources containsObject:source]){[disabledSources removeObject:source];[NSUserDefaults.standardUserDefaults setObject:disabledSources forKey:@"disabledSubscriptions"];}
     [self.subscriptionURLs removeObject:source];self.subscriptionRequestVersions[source]=@([self.subscriptionRequestVersions[source] unsignedIntegerValue]+1);[self removeSubscriptionSource:source];[NSUserDefaults.standardUserDefaults setObject:self.subscriptionURLs.allObjects forKey:@"subscriptions"];
 }
 
@@ -188,12 +191,9 @@
             ];
             NSArray<HostGlassSheetAction *> *dangerOps = @[
                 [HostGlassSheetAction actionWithTitle:@"删除" subtitle:@"从本地移除此直播订阅源" value:nil icon:@"trash" tint:UIColor.systemRedColor destructive:YES selected:NO handler:^{
-                    NSString *sourceKey = [owner stableURLKey:u];
-                    [owner.subscriptionURLs removeObject:sourceKey ?: u];
-                    NSString *deletedKey = sourceKey ?: u;
-                    owner.subscriptionRequestVersions[deletedKey] = @([owner.subscriptionRequestVersions[deletedKey] unsignedIntegerValue] + 1);
-                    [owner removeSubscriptionSource:deletedKey];
-                    [[NSUserDefaults standardUserDefaults] setObject:owner.subscriptionURLs.allObjects forKey:@"subscriptions"];
+                    NSString *deletedKey = [owner stableURLKey:u] ?: u;
+                    [owner deleteSubscription:deletedKey];
+                    [owner refreshConfigurationPage];
                     [owner log:@"已删除订阅 %@", CCTVServiceLogAddress(u)];
                 }]
             ];
@@ -234,12 +234,13 @@
         workflow.onOpenServices=^{[weakSelf openServicesPage];};
         workflow.existingImportTargetsProvider=^NSArray<NSDictionary *> *{RootViewController *owner=weakSelf;if(!owner)return @[];NSMutableArray<NSDictionary *> *targets=[NSMutableArray array];for(NSDictionary *catalog in [TVBoxCatalogStore catalogs])if(!catalog[@"bundledResourceID"]){[targets addObject:@{@"kind":@"catalog",@"kindLabel":@"影视合集",@"id":catalog[@"id"]?:@"",@"name":catalog[@"name"]?:@"资源合集",@"url":catalog[@"url"]?:@"",@"fingerprint":catalog[@"importFingerprint"]?:@"",@"sourceFilename":catalog[@"importSourceFilename"]?:@""}];}for(NSDictionary *service in [ServiceStore services])if(![service[@"builtin"] boolValue]&&![service[@"bundledResourceID"] length]){[targets addObject:@{@"kind":@"service",@"kindLabel":@"脚本资源",@"id":service[@"id"]?:@"",@"name":service[@"name"]?:@"脚本资源",@"url":service[@"url"]?:@"",@"fingerprint":service[@"importFingerprint"]?:@"",@"sourceFilename":service[@"importSourceFilename"]?:@""}];}for(NSString *source in owner.subscriptionURLs)if([source hasPrefix:@"local-playlist:"]){NSDictionary *metadata=[ProfileStore metadata:source];[targets addObject:@{@"kind":@"playlist",@"kindLabel":@"本地直播列表",@"id":source,@"name":metadata[@"name"]?:@"本地播放列表",@"url":source,@"fingerprint":metadata[@"importFingerprint"]?:@"",@"sourceFilename":metadata[@"importSourceFilename"]?:@""}];}return targets.copy;};
         workflow.onSaveCandidate=^(NSDictionary *candidate,BOOL update,void (^completion)(NSError *)){RootViewController *owner=weakSelf;if(owner)[owner saveImportCandidate:candidate update:update completion:completion];else completion([NSError errorWithDomain:@"ResourceImport" code:1 userInfo:@{NSLocalizedDescriptionKey:@"资源页面已关闭"}]);};
-        [workflow refreshExistingResourceMatches];
     }
+    if(self.resourceImportWorkflow.presentingViewController||self.resourceImportWorkflow.navigationController.presentingViewController)return;
+    [self.resourceImportWorkflow refreshExistingResourceMatches];
     UINavigationController *navigation=[[UINavigationController alloc] initWithRootViewController:self.resourceImportWorkflow];
     // iPad regular 尺寸采用 formSheet 弹出（居中卡片 + sheet detents + grabber）；
     // iPhone compact 维持既有 full-screen 演示，样式不变。
-    UIViewController *presenter=self.navigationController.topViewController;
+    UIViewController *presenter=self.navigationController.topViewController?:self;
     BOOL regularWidth=presenter.traitCollection.horizontalSizeClass==UIUserInterfaceSizeClassRegular;
     navigation.modalPresentationStyle=regularWidth?UIModalPresentationFormSheet:UIModalPresentationFullScreen;
     HostStyleNavigation(navigation);[presenter presentViewController:navigation animated:YES completion:nil];
@@ -260,6 +261,7 @@
         else if([TVBoxCatalogStore catalogs].count>=50)failure=[NSError errorWithDomain:@"ResourceImport" code:2 userInfo:@{NSLocalizedDescriptionKey:@"已达到 50 个合集上限"}];else {[TVBoxCatalogStore saveCatalog:incoming];savedCatalogID=incoming[@"id"];}
         if(!failure&&activateAfterSave&&savedCatalogID.length){
             [NSUserDefaults.standardUserDefaults setObject:savedCatalogID forKey:@"selectedMediaCatalogID"];
+            [NSUserDefaults.standardUserDefaults removeObjectForKey:@"selectedMediaSource"];
             MediaBrowserViewController *browser=(MediaBrowserViewController *)self.tabPages[@2];
             if(browser)[browser refreshSources];
         }
@@ -401,7 +403,7 @@
     if(silent&&self.subscriptionTasks.count>=3){[self.deferredLocalSubscriptions addObject:sourceKey];return;}
     NSUInteger requestVersion = [self.subscriptionRequestVersions[sourceKey] unsignedIntegerValue] + 1;
     self.subscriptionRequestVersions[sourceKey] = @(requestVersion);
-    NSURL *url = [NSURL URLWithString:urlString];
+    NSURL *url = sourceURL;
     if (!url) return;
     NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
     NSString *playlistUserAgent=[ProfileStore metadata:sourceKey][@"userAgent"];
@@ -418,7 +420,7 @@
         NSString *text = data.length ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
         NSError *parseError=nil;
         NSDictionary *udpxyMap=[NSUserDefaults.standardUserDefaults dictionaryForKey:@"cctv.subscription.udpxy.v1"];
-        NSString *udpxyOverride=[udpxyMap isKindOfClass:NSDictionary.class]?udpxyMap[url.absoluteString]:nil;
+        NSString *udpxyOverride=[udpxyMap isKindOfClass:NSDictionary.class]?(udpxyMap[sourceKey]?:udpxyMap[url.absoluteString]):nil;
         NSArray<M3UChannel *> *list = text.length ? [M3UParser parse:text baseURL:resp.URL?:url udpxyOverride:udpxyOverride error:&parseError] : nil;
         dispatch_async(dispatch_get_main_queue(), ^{
             if ([weakSelf.subscriptionRequestVersions[sourceKey] unsignedIntegerValue] != requestVersion) return;
@@ -641,7 +643,7 @@
             [NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:sourceKey];
             [self applyFilter];
             [self refreshChannelPreviewSnapshotsForChannels:owned force:YES];
-            if([self.tabPage isKindOfClass:ConfigCenterViewController.class])[(ConfigCenterViewController *)self.tabPage reloadProfiles];
+            [self refreshConfigurationPage];
             if (skippedInvalidURLs) [self log:@"订阅跳过 %lu 条无效地址（仅允许有效 HTTP/HTTPS URL）", (unsigned long)skippedInvalidURLs];
             [self log:@"订阅 %@ 新增 %lu 个频道（共 %lu）", CCTVServiceLogAddress(sourceKey), (unsigned long)added, (unsigned long)list.count];
     return YES;
@@ -682,6 +684,9 @@
     return source;
 }
 - (void)replaceSubscription:(NSString *)source URL:(NSString *)url values:(NSDictionary *)values disabled:(BOOL)disabled completion:(void (^)(NSError *error))completion {
+    NSString *normalizedURL=[self stableURLKey:url];
+    if(!normalizedURL.length){completion([NSError errorWithDomain:@"SubscriptionEdit" code:1 userInfo:@{NSLocalizedDescriptionKey:@"请输入有效的 HTTP/HTTPS 订阅地址"}]);return;}
+    url=normalizedURL;
     if([self.subscriptionURLs containsObject:url]){completion([NSError errorWithDomain:@"SubscriptionEdit" code:1 userInfo:@{NSLocalizedDescriptionKey:@"该地址已存在，请编辑已有订阅"}]);return;}
     if(!self.subscriptionEditTasks)self.subscriptionEditTasks=[NSMutableDictionary dictionary];
     [self.subscriptionEditTasks[source] cancel];
@@ -701,7 +706,7 @@
                 if(!channels.count){completion(error?:[NSError errorWithDomain:@"SubscriptionEdit" code:2 userInfo:@{NSLocalizedDescriptionKey:@"新地址没有返回有效频道，已保留原订阅"}]);return;}
                 if(![owner.subscriptionURLs containsObject:source]){completion([NSError errorWithDomain:@"SubscriptionEdit" code:3 userInfo:@{NSLocalizedDescriptionKey:@"原订阅已被移除，未保存此次编辑"}]);return;}
                 NSArray *ordered=[ProfileStore orderedSources:owner.subscriptionURLs.allObjects];NSMutableArray *replacement=[ordered mutableCopy];NSUInteger index=[replacement indexOfObject:source];if(index!=NSNotFound)replacement[index]=url;
-                BOOL selected=[owner.activeSource isEqual:source];NSMutableDictionary *metadata=[values mutableCopy];[metadata removeObjectForKey:@"cachedChannels"];[metadata removeObjectForKey:@"detectedEPGURL"];
+                BOOL selected=[owner.activeSource isEqual:source];NSMutableDictionary *metadata=[values mutableCopy];[metadata removeObjectForKey:@"cachedChannels"];[metadata removeObjectForKey:@"detectedEPGURL"];[metadata removeObjectForKey:@"status"];[metadata removeObjectForKey:@"updatedAt"];
                 NSString *epg=[M3UParser epgURL:text baseURL:response.URL?:[NSURL URLWithString:url]];if(epg.length)metadata[@"detectedEPGURL"]=epg;
                 if(![owner installPlaylist:channels source:url]){
                     completion([NSError errorWithDomain:@"SubscriptionEdit" code:4 userInfo:@{NSLocalizedDescriptionKey:@"新订阅超过频道容量限制，原订阅已保留"}]);
@@ -712,7 +717,7 @@
                 [owner.subscriptionURLs addObject:url];[ProfileStore update:url values:metadata];
                 NSMutableArray *disabledSources=[[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[] mutableCopy];[disabledSources removeObject:source];[disabledSources removeObject:url];if(disabled)[disabledSources addObject:url];[NSUserDefaults.standardUserDefaults setObject:disabledSources forKey:@"disabledSubscriptions"];
                 [NSUserDefaults.standardUserDefaults setObject:replacement forKey:@"subscriptions"];
-                if(selected)owner.activeSource=url;[owner.epgCache removeAllObjects];[owner refreshConfigurationPage];completion(nil);
+                if(selected)owner.activeSource=url;[owner.epgCache removeAllObjects];[owner applyFilter];[owner refreshConfigurationPage];completion(nil);
             }];
         });
     }];
@@ -749,17 +754,19 @@
         t.autocorrectionType=UITextAutocorrectionTypeNo;
     }];
     [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    __weak typeof(self) weakSelf=self;__weak UIAlertController *weakAlert=a;
     if (currentID.length) {
         [a addAction:[UIAlertAction actionWithTitle:@"恢复自动匹配" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *x){
+            RootViewController *owner=weakSelf;if(!owner)return;
             NSMutableDictionary *m=[[NSUserDefaults.standardUserDefaults dictionaryForKey:@"epgMappings"]?:@{} mutableCopy];
-            NSString *key=ch[@"id"];
+            NSString *key=[ch[@"id"] isKindOfClass:NSString.class]?ch[@"id"]:@"";
             if(key.length)[m removeObjectForKey:key];
             [NSUserDefaults.standardUserDefaults setObject:m forKey:@"epgMappings"];
-            if(key.length)[self.epgCache removeObjectForKey:key];
-            [self saveEPGCache];[self applyFilter];
+            if(key.length)[owner.epgCache removeObjectForKey:key];
+            [owner saveEPGCache];[owner applyFilter];
         }]];
     }
-    [a addAction:[UIAlertAction actionWithTitle:@"保存" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){NSMutableDictionary *m=[[NSUserDefaults.standardUserDefaults dictionaryForKey:@"epgMappings"]?:@{} mutableCopy];NSString *key=ch[@"id"];NSString *value=[a.textFields.firstObject.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];if(value.length)m[key]=value;else[m removeObjectForKey:key];[NSUserDefaults.standardUserDefaults setObject:m forKey:@"epgMappings"];[self.epgCache removeObjectForKey:key];[self saveEPGCache];[self applyFilter];}]];
+    [a addAction:[UIAlertAction actionWithTitle:@"保存" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x){RootViewController *owner=weakSelf;if(!owner)return;NSString *key=[ch[@"id"] isKindOfClass:NSString.class]?ch[@"id"]:@"";if(!key.length)return;NSMutableDictionary *m=[[NSUserDefaults.standardUserDefaults dictionaryForKey:@"epgMappings"]?:@{} mutableCopy];NSString *value=[weakAlert.textFields.firstObject.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];if(value.length)m[key]=value;else[m removeObjectForKey:key];[NSUserDefaults.standardUserDefaults setObject:m forKey:@"epgMappings"];[owner.epgCache removeObjectForKey:key];[owner saveEPGCache];[owner applyFilter];}]];
     [self presentViewController:a animated:YES completion:nil];
 }
 - (void)showRemoteTools:(NSDictionary *)ch {

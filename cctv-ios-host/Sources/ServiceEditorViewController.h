@@ -11,6 +11,8 @@
 @property(nonatomic, copy) NSString *path;
 @property(nonatomic, copy, nullable) NSString *bundledResourcePath;
 @property(nonatomic, assign) BOOL readOnly;
+@property(nonatomic, copy, nullable) BOOL (^onWillSaveCode)(NSString *code, NSError * _Nullable * _Nullable error);
 @property(nonatomic, copy, nullable) dispatch_block_t onSaveCode;
+@property(nonatomic, copy, nullable) dispatch_block_t onCloseCode;
 - (void)reloadThemeAppearance;
 @end

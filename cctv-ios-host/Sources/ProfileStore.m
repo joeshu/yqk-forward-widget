@@ -47,7 +47,8 @@ static NSMutableDictionary<NSString *, NSDictionary *> *gProfileMetadataCache = 
     return [directory stringByAppendingPathComponent:[name stringByAppendingPathExtension:@"plist"]];
 }
 + (NSDictionary *)metadata:(NSString *)source {
-    if(![source isKindOfClass:NSString.class]||!source.length)return @{};
+    if(source&&![source isKindOfClass:NSString.class])return @{};
+    source=source.length?source:CCTVNativeLogoSourceKey;
     @synchronized(self){
         NSDictionary *cached=gProfileMetadataCache[source];
         if(cached)return cached;
@@ -67,6 +68,8 @@ static NSMutableDictionary<NSString *, NSDictionary *> *gProfileMetadataCache = 
         [merged removeObjectForKey:@"_hasDiskPayload"];
         [merged removeObjectForKey:@"_payloadFile"];
         for(NSString *key in @[@"text",@"cachedChannels"])if(!merged[key]&&disk[key])merged[key]=disk[key];
+        if(merged[@"text"]&&![merged[@"text"] isKindOfClass:NSString.class])[merged removeObjectForKey:@"text"];
+        if(merged[@"cachedChannels"]&&![merged[@"cachedChannels"] isKindOfClass:NSArray.class])[merged removeObjectForKey:@"cachedChannels"];
         NSDictionary *result=[merged copy];
         // 大条目不缓存：text/cachedChannels 超落盘阈值时每次读盘，不把大数组常驻内存。
         BOOL heavy=([result[@"text"] length]>65536)||([result[@"cachedChannels"] count]>200);
@@ -85,7 +88,9 @@ static NSMutableDictionary<NSString *, NSDictionary *> *gProfileMetadataCache = 
             NSMutableDictionary *profile=[profiles[source] mutableCopy];
             [profile removeObjectForKey:@"_payloadFile"];
             [profile removeObjectForKey:@"_hasDiskPayload"];
-            BOOL offload=([profile[@"text"] length]>65536)||([profile[@"cachedChannels"] count]>200);
+            NSString *textVal=[profile[@"text"] isKindOfClass:NSString.class]?profile[@"text"]:nil;
+            NSArray *channelsVal=[profile[@"cachedChannels"] isKindOfClass:NSArray.class]?profile[@"cachedChannels"]:nil;
+            BOOL offload=(textVal.length>65536)||(channelsVal.count>200);
             if(offload) {
                 NSMutableDictionary *payload=[NSMutableDictionary dictionary];
                 for(NSString *key in @[@"text",@"cachedChannels"])if(profile[key])payload[key]=profile[key];
@@ -98,6 +103,9 @@ static NSMutableDictionary<NSString *, NSDictionary *> *gProfileMetadataCache = 
                 profile[@"_payloadFile"]=name;
             }
             replacement[source]=profile;
+        }
+        if(!failed && ![NSPropertyListSerialization propertyList:replacement isValidForFormat:NSPropertyListBinaryFormat_v1_0]){
+            failed=YES;
         }
         if(failed){
             for(NSString *path in created)[NSFileManager.defaultManager removeItemAtPath:path error:NULL];
@@ -120,7 +128,9 @@ static NSMutableDictionary<NSString *, NSDictionary *> *gProfileMetadataCache = 
 + (void)storeProfile:(NSMutableDictionary *)profile forSource:(NSString *)source inMetadata:(NSMutableDictionary *)all {
     NSDictionary *oldProfile=[all[source] isKindOfClass:NSDictionary.class]?all[source]:@{};
     NSString *oldName=[oldProfile[@"_payloadFile"] isKindOfClass:NSString.class]?oldProfile[@"_payloadFile"]:nil;
-    BOOL offload=([profile[@"text"] length]>65536)||([profile[@"cachedChannels"] count]>200);
+    NSString *textVal=[profile[@"text"] isKindOfClass:NSString.class]?profile[@"text"]:nil;
+    NSArray *channelsVal=[profile[@"cachedChannels"] isKindOfClass:NSArray.class]?profile[@"cachedChannels"]:nil;
+    BOOL offload=(textVal.length>65536)||(channelsVal.count>200);
     NSString *path=[self payloadFilePathForSource:source];
     if(offload){
         NSMutableDictionary *payload=[NSMutableDictionary dictionary];
@@ -128,6 +138,9 @@ static NSMutableDictionary<NSString *, NSDictionary *> *gProfileMetadataCache = 
         if([payload writeToFile:path atomically:YES]){
             [profile removeObjectsForKeys:payload.allKeys];
             profile[@"_hasDiskPayload"]=@2;
+        }else{
+            // 落盘失败时保留原磁盘载荷，避免删除旧文件或把超大载荷写入 NSUserDefaults。
+            return;
         }
     }
     if(!profile[@"_hasDiskPayload"])[NSFileManager.defaultManager removeItemAtPath:path error:NULL];
@@ -161,6 +174,7 @@ static NSMutableDictionary<NSString *, NSDictionary *> *gProfileMetadataCache = 
     }
 }
 + (void)remove:(NSString *)source {
+    if(![source isKindOfClass:NSString.class]||!source.length)return;
     @synchronized(self){
     NSDictionary *metadata=ProfileMetadataDefaultsSnapshot();NSDictionary *profile=[metadata[source] isKindOfClass:NSDictionary.class]?metadata[source]:@{};NSString *name=[profile[@"_payloadFile"] isKindOfClass:NSString.class]?profile[@"_payloadFile"]:nil;
     if([name isKindOfClass:NSString.class]&&name.length&&[name.lastPathComponent isEqual:name]){NSString *directory=[[self payloadFilePathForSource:source] stringByDeletingLastPathComponent];[NSFileManager.defaultManager removeItemAtPath:[directory stringByAppendingPathComponent:name] error:NULL];}

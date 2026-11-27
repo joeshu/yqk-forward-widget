@@ -330,7 +330,7 @@
     __weak typeof(self) weakSelf=self;
     NSUInteger restartGeneration=++self.restartGeneration;
     self.onRestart(^(NSError *error){
-        dispatch_async(dispatch_get_main_queue(),^{PluginViewController *owner=weakSelf;if(!owner)return;owner.restarting=NO;[owner refreshStatus];if(error)[owner showRestartError:error];});
+        dispatch_async(dispatch_get_main_queue(),^{PluginViewController *owner=weakSelf;if(!owner||restartGeneration!=owner.restartGeneration)return;owner.restarting=NO;[owner refreshStatus];if(error)[owner showRestartError:error];});
     });
     // onRestart 回调若永不触发，重启按钮会永久锁死：30 秒看门狗兜底复位（与服务详情页一致）。
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,30*NSEC_PER_SEC),dispatch_get_main_queue(),^{PluginViewController *owner=weakSelf;if(!owner||restartGeneration!=owner.restartGeneration||!owner.restarting)return;owner.restarting=NO;[owner refreshStatus];[owner showRestartError:[NSError errorWithDomain:@"CCTVHost" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"重启超时，服务未重新启动，请查看运行日志。"}]];});

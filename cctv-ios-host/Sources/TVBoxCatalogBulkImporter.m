@@ -36,6 +36,9 @@
     }
     return self;
 }
+- (void)dealloc {
+    for(MediaPackageDownloader *downloader in self.active.allValues)[downloader cancel];
+}
 
 - (NSString *)identityForSite:(NSDictionary *)site {
     NSString *api=[site[@"api"] isKindOfClass:NSString.class]?site[@"api"]:@"";
@@ -90,7 +93,7 @@
         NSURL *targetURL=[NSURL URLWithString:api];
         if(!targetURL){NSMutableCharacterSet *allowed=[NSCharacterSet.URLQueryAllowedCharacterSet mutableCopy];[allowed addCharactersInString:@"#%/:?@[]!$&'()*+,;="];NSString *encoded=[api stringByAddingPercentEncodingWithAllowedCharacters:allowed];if(encoded.length)targetURL=[NSURL URLWithString:encoded];}
         [downloader importURL:targetURL headers:site[@"header"] runtimeHint:nil completion:^(NSDictionary *service,NSError *error){
-            TVBoxCatalogBulkImporter *owner=weakSelf;if(!owner)return;[owner.active removeObjectForKey:jobID];owner.completedCount++;
+            TVBoxCatalogBulkImporter *owner=weakSelf;if(!owner){if(service)[ServiceStore remove:service[@"id"]];return;}[owner.active removeObjectForKey:jobID];owner.completedCount++;
             if(owner.cancelled){if(service)[ServiceStore remove:service[@"id"]];}
             else if(error||!service){owner.failedCount++;[owner.failures addObject:@{@"name":name,@"message":error.localizedDescription?:@"站点脚本无法识别"}];}
             else{

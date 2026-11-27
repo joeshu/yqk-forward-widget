@@ -322,8 +322,8 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
     }return self;
 }
 - (void)restoreSnapshot:(NSDictionary *)snapshot {
-    self.restoringSnapshot=YES;NSArray *rows=[snapshot[@"candidates"] isKindOfClass:NSArray.class]?snapshot[@"candidates"]:@[];for(NSDictionary *row in rows)if([row isKindOfClass:NSDictionary.class])[self.candidates addObject:[row mutableCopy]];self.restoredAddress=[snapshot[@"address"] isKindOfClass:NSString.class]?snapshot[@"address"]:@"";self.taskKind=[snapshot[@"taskKind"] isKindOfClass:NSString.class]?snapshot[@"taskKind"]:@"";self.finished=[snapshot[@"finished"] boolValue];self.restoredDuplicatePolicy=[snapshot[@"duplicatePolicy"] respondsToSelector:@selector(integerValue)]?[snapshot[@"duplicatePolicy"] integerValue]:0;self.restoredRuntimeSelection=[snapshot[@"runtimeSelection"] respondsToSelector:@selector(integerValue)]?[snapshot[@"runtimeSelection"] integerValue]:0;self.selectedImportCategory=[snapshot[@"importCategory"] respondsToSelector:@selector(integerValue)]?[snapshot[@"importCategory"] integerValue]:-1;if([snapshot[@"busy"] boolValue])self.stage=[self.taskKind isEqual:@"save"]?@"上次保存中断 · 可重试未保存项目":([self.taskKind isEqual:@"url"]?@"上次链接识别中断 · 点按识别链接重试":@"上次本地识别中断 · 重新选择文件，或重试单项");else self.stage=[snapshot[@"stage"] isKindOfClass:NSString.class]?snapshot[@"stage"]:@"已恢复上次导入任务";
-    if(self.isViewLoaded){self.address.text=self.restoredAddress;self.runtime.selectedSegmentIndex=self.restoredRuntimeSelection;self.duplicatePolicy.selectedSegmentIndex=self.restoredDuplicatePolicy;[self updateView];}self.restoringSnapshot=NO;[self persistSnapshot];
+    self.restoringSnapshot=YES;NSArray *rows=[snapshot[@"candidates"] isKindOfClass:NSArray.class]?snapshot[@"candidates"]:@[];for(NSDictionary *row in rows)if([row isKindOfClass:NSDictionary.class])[self.candidates addObject:[row mutableCopy]];self.restoredAddress=[snapshot[@"address"] isKindOfClass:NSString.class]?snapshot[@"address"]:@"";self.taskKind=[snapshot[@"taskKind"] isKindOfClass:NSString.class]?snapshot[@"taskKind"]:@"";self.finished=[snapshot[@"finished"] boolValue];NSInteger dup=[snapshot[@"duplicatePolicy"] respondsToSelector:@selector(integerValue)]?[snapshot[@"duplicatePolicy"] integerValue]:0;NSInteger rt=[snapshot[@"runtimeSelection"] respondsToSelector:@selector(integerValue)]?[snapshot[@"runtimeSelection"] integerValue]:0;self.restoredDuplicatePolicy=MAX((NSInteger)0,MIN((NSInteger)1,dup));self.restoredRuntimeSelection=MAX((NSInteger)0,MIN((NSInteger)2,rt));self.selectedImportCategory=[snapshot[@"importCategory"] respondsToSelector:@selector(integerValue)]?[snapshot[@"importCategory"] integerValue]:-1;if([snapshot[@"busy"] boolValue])self.stage=[self.taskKind isEqual:@"save"]?@"上次保存中断 · 可重试未保存项目":([self.taskKind isEqual:@"url"]?@"上次链接识别中断 · 点按识别链接重试":@"上次本地识别中断 · 重新选择文件，或重试单项");else self.stage=[snapshot[@"stage"] isKindOfClass:NSString.class]?snapshot[@"stage"]:@"已恢复上次导入任务";
+    if(self.isViewLoaded){self.address.text=self.restoredAddress;self.addressPlaceholder.hidden=self.address.text.length>0;if(self.runtime.numberOfSegments>0)self.runtime.selectedSegmentIndex=MIN(self.restoredRuntimeSelection,(NSInteger)self.runtime.numberOfSegments-1);if(self.duplicatePolicy.numberOfSegments>0)self.duplicatePolicy.selectedSegmentIndex=MIN(self.restoredDuplicatePolicy,(NSInteger)self.duplicatePolicy.numberOfSegments-1);[self updateView];}self.restoringSnapshot=NO;[self persistSnapshot];
 }
 
 - (NSString *)taskSummary {if(!self.candidates.count&&!self.restoredAddress.length&&([self.stage isEqual:@"粘贴地址，或选择本地文件"]||!self.stage.length))return nil;return self.stage?:@"添加资源";}
@@ -672,17 +672,20 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
     __weak typeof(self) weakSelf=self;
     return [UIContextMenuConfiguration configurationWithIdentifier:ip previewProvider:nil actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggested){
         NSMutableArray<UIMenuElement *> *actions=[NSMutableArray array];
-        if(!row[@"saved"]&&!row[@"error"]){
+        BOOL selectable=!row[@"saved"]&&!row[@"error"]&&!row[@"saveError"]&&![row[@"kind"] isEqual:@"page"]&&![row[@"unsupportedOnly"] boolValue];
+        if(selectable){
             BOOL sel=[row[@"selected"] boolValue];
-            [actions addObject:[UIAction actionWithTitle:sel?@"取消勾选此项":@"勾选此项" image:[UIImage systemImageNamed:sel?@"circle":@"checkmark.circle.fill"] identifier:nil handler:^(__unused UIAction *a){weakSelf.editRevision++;row[@"selected"]=@(!sel);weakSelf.finished=NO;[weakSelf updateView];}]];
-            [actions addObject:[UIAction actionWithTitle:@"重命名此资源" image:[UIImage systemImageNamed:@"pencil"] identifier:nil handler:^(__unused UIAction *a){[weakSelf promptRenameCandidateAtIndex:index];}]];
+            [actions addObject:[UIAction actionWithTitle:sel?@"取消勾选此项":@"勾选此项" image:[UIImage systemImageNamed:sel?@"circle":@"checkmark.circle.fill"] identifier:nil handler:^(__unused UIAction *a){ResourceImportWorkflowViewController *owner=weakSelf;if(!owner||owner.busy)return;owner.editRevision++;row[@"selected"]=@(!sel);owner.finished=NO;[owner updateView];}]];
+        }
+        if(!row[@"saved"]&&!row[@"error"]){
+            [actions addObject:[UIAction actionWithTitle:@"重命名此资源" image:[UIImage systemImageNamed:@"pencil"] identifier:nil handler:^(__unused UIAction *a){ResourceImportWorkflowViewController *owner=weakSelf;if(!owner||owner.busy)return;[owner promptRenameCandidateAtIndex:index];}]];
         }
         if(row[@"error"]||row[@"saveError"]){
-            [actions addObject:[UIAction actionWithTitle:@"重试此项" image:[UIImage systemImageNamed:@"arrow.clockwise"] identifier:nil handler:^(__unused UIAction *a){[weakSelf retryCandidateAtIndex:index];}]];
+            [actions addObject:[UIAction actionWithTitle:@"重试此项" image:[UIImage systemImageNamed:@"arrow.clockwise"] identifier:nil handler:^(__unused UIAction *a){ResourceImportWorkflowViewController *owner=weakSelf;if(!owner||owner.busy)return;[owner retryCandidateAtIndex:index];}]];
         }
         [actions addObject:[UIAction actionWithTitle:@"复制名称与识别摘要" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){UIPasteboard.generalPasteboard.string=summary.length?[NSString stringWithFormat:@"%@ · %@",name,summary]:name;}]];
         if(!weakSelf.busy){
-            UIAction *remove=[UIAction actionWithTitle:@"从预览列表移除" image:[UIImage systemImageNamed:@"trash"] identifier:nil handler:^(__unused UIAction *a){if(index<weakSelf.candidates.count){NSDictionary *r=weakSelf.candidates[index];if(r[@"service"]&&![r[@"saved"] boolValue])[ServiceStore remove:r[@"service"][@"id"]];[weakSelf.candidates removeObjectAtIndex:index];[weakSelf updateView];}}];
+            UIAction *remove=[UIAction actionWithTitle:@"从预览列表移除" image:[UIImage systemImageNamed:@"trash"] identifier:nil handler:^(__unused UIAction *a){ResourceImportWorkflowViewController *owner=weakSelf;if(!owner||owner.busy||index>=owner.candidates.count)return;NSDictionary *r=owner.candidates[index];if(r[@"service"]&&![r[@"saved"] boolValue])[ServiceStore remove:r[@"service"][@"id"]];[owner.candidates removeObjectAtIndex:index];[owner updateView];}];
             remove.attributes=UIMenuElementAttributesDestructive;
             [actions addObject:remove];
         }
@@ -881,11 +884,12 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
         field.clearButtonMode=UITextFieldViewModeWhileEditing;
     }];
     __weak typeof(self) weakSelf=self;
+    __weak UIAlertController *weakAlert=alert;
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     [alert addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
         ResourceImportWorkflowViewController *owner=weakSelf;
         if(!owner||index>=owner.candidates.count)return;
-        NSString *newName=[alert.textFields.firstObject.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        NSString *newName=[weakAlert.textFields.firstObject.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
         if(!newName.length)return;
         NSMutableDictionary *target=owner.candidates[index];
         owner.editRevision++;target[@"name"]=newName;
@@ -974,10 +978,12 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
     for(NSUInteger i=0;i<labels.count;i++){NSUInteger index=i;[form addTextFieldWithConfigurationHandler:^(UITextField *field){field.placeholder=labels[index];field.autocorrectionType=UITextAutocorrectionTypeNo;field.autocapitalizationType=UITextAutocapitalizationTypeNone;field.secureTextEntry=index==3||index==4;if(index==1)field.keyboardType=UIKeyboardTypeURL;}];}
     [form addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     __weak typeof(self) weakSelf=self;
+    __weak UIAlertController *weakForm=form;
     [form addAction:[UIAlertAction actionWithTitle:@"识别并预览" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
         ResourceImportWorkflowViewController *owner=weakSelf;if(!owner)return;
         NSMutableDictionary *config=[@{@"cctvhostServer":@1,@"type":type} mutableCopy];NSArray *keys=@[@"name",@"url",@"username",@"password",@"apiKey",@"userId"];
-        for(NSUInteger i=0;i<keys.count;i++)config[keys[i]]=form.textFields[i].text?:@"";
+        NSArray<UITextField *> *fields=weakForm.textFields;
+        for(NSUInteger i=0;i<keys.count&&i<fields.count;i++)config[keys[i]]=fields[i].text?:@"";
         NSData *data=[NSJSONSerialization dataWithJSONObject:config options:0 error:NULL];NSURL *file=[NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"server-%@.json",NSUUID.UUID.UUIDString]]];
         NSError *writeError=nil;
         if(![data writeToURL:file options:NSDataWritingAtomic|NSDataWritingFileProtectionCompleteUntilFirstUserAuthentication error:&writeError]){owner.stage=@"服务器配置写入失败，请重试";[owner updateView];return;}
@@ -1032,7 +1038,62 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
 - (void)retryCandidateAtIndex:(NSUInteger)index {
     if(self.busy||index>=self.candidates.count)return;NSMutableDictionary *row=self.candidates[index];
     if(row[@"saveError"]){[self retrySaveCandidateAtIndex:index];return;}
+    NSString *retryOrigin=[row[@"retryOrigin"] isKindOfClass:NSString.class]?row[@"retryOrigin"]:([row[@"origin"] isKindOfClass:NSString.class]?row[@"origin"]:@"");
+    NSString *retryHint=[row[@"retryHint"] isKindOfClass:NSString.class]?row[@"retryHint"]:[self runtimeHint];
     NSData *data=[row[@"retryData"] isKindOfClass:NSData.class]?row[@"retryData"]:nil;NSString *filename=row[@"retryFileName"]?:row[@"localFileName"]?:row[@"name"]?:@"resource.json";NSURL *sourceURL=nil;
+    if(!data&&retryOrigin.length&&[ProfileStore isHTTP:retryOrigin]){
+        NSURL *url=ResourceImportNormalizedURL(retryOrigin);
+        if(url){
+            self.busy=YES;self.taskKind=@"url";self.stage=[NSString stringWithFormat:@"正在重试 %@…",row[@"name"]?:url.host?:@"链接"];NSUInteger generation=++self.generation;[self updateView];__weak typeof(self) weakSelf=self;
+            if([@[@"py",@"js",@"hjs",@"mjs",@"cjs",@"zip",@"md5"] containsObject:url.pathExtension.lowercaseString]){
+                self.downloader=[MediaPackageDownloader new];
+                [self.downloader importURL:url headers:nil runtimeHint:retryHint completion:^(NSDictionary *service,NSError *error){
+                    ResourceImportWorkflowViewController *owner=weakSelf;
+                    if(!owner||owner.generation!=generation){if(service)[ServiceStore remove:service[@"id"]];return;}
+                    if(service&&index<owner.candidates.count){
+                        ResourceImportRecordRecentURL(url.absoluteString);
+                        NSMutableDictionary *candidate=[@{@"kind":@"service",@"service":service,@"name":service[@"name"]?:@"脚本资源",@"summary":[NSString stringWithFormat:@"已识别 · %@ · %@",service[@"engine"]?:@"",service[@"protocol"]?:@""],@"selected":@YES} mutableCopy];
+                        [owner decorateCandidate:candidate file:nil origin:url.absoluteString];
+                        [owner.candidates replaceObjectAtIndex:index withObject:candidate];
+                        owner.stage=@"单项识别成功 · 已更新预览";
+                    }else{
+                        row[@"error"]=error.localizedDescription?:@"下载或识别失败";
+                        owner.stage=@"单项重试失败 · 可再次重试";
+                    }
+                    owner.busy=NO;[owner updateView];if(owner.batchRetrying)[owner advanceBatchRetry];
+                }];
+                return;
+            }
+            self.fetcher=[ResourceImportFetcher new];self.fetcher.fallbackDataProvider=^NSData *(NSURL *u){return ResourceImportBundledFallbackForURL(u);};
+            self.fetcher.completion=^(NSData *fetched,NSURLResponse *response,NSError *error){
+                ResourceImportWorkflowViewController *owner=weakSelf;
+                if(!owner||owner.generation!=generation)return;
+                if(error||!fetched.length){
+                    row[@"error"]=error.localizedDescription?:@"无法读取链接内容";
+                    owner.busy=NO;owner.stage=@"单项重试失败 · 可再次重试";[owner updateView];if(owner.batchRetrying)[owner advanceBatchRetry];return;
+                }
+                dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{
+                    NSString *ext=ResourceContentExtension(fetched,response.suggestedFilename?:response.URL.lastPathComponent);
+                    NSString *path=[NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"retry-url-%@.%@",NSUUID.UUID.UUIDString,ext]];
+                    [fetched writeToFile:path atomically:YES];
+                    NSMutableDictionary *candidate=[owner candidateForData:fetched file:[NSURL fileURLWithPath:path] origin:response.URL.absoluteString?:url.absoluteString companions:@{} hint:retryHint];
+                    if([candidate[@"kind"] isEqual:@"catalog"]){NSMutableDictionary *catalog=[candidate[@"catalog"] mutableCopy];catalog[@"url"]=url.absoluteString;candidate[@"catalog"]=catalog;}
+                    else if([candidate[@"kind"] isEqual:@"playlist"]){candidate[@"origin"]=url.absoluteString;candidate[@"resolvedURL"]=response.URL.absoluteString?:url.absoluteString;}
+                    else if(candidate[@"service"]){NSMutableDictionary *service=[candidate[@"service"] mutableCopy];service[@"url"]=url.absoluteString;candidate[@"service"]=service;}
+                    [owner decorateCandidate:candidate file:nil origin:url.absoluteString];
+                    [NSFileManager.defaultManager removeItemAtPath:path error:NULL];
+                    dispatch_async(dispatch_get_main_queue(),^{
+                        if(owner.generation!=generation){if(candidate[@"service"])[ServiceStore remove:candidate[@"service"][@"id"]];return;}
+                        if(!candidate[@"error"]&&index<owner.candidates.count){ResourceImportRecordRecentURL(url.absoluteString);candidate[@"selected"]=@YES;[owner.candidates replaceObjectAtIndex:index withObject:candidate];owner.stage=@"单项识别成功 · 已更新预览";}
+                        else{row[@"error"]=candidate[@"error"]?:@"重新识别失败";owner.stage=@"单项重试失败 · 可再次重试";}
+                        owner.busy=NO;[owner updateView];if(owner.batchRetrying)[owner advanceBatchRetry];
+                    });
+                });
+            };
+            [self.fetcher load:url];
+            return;
+        }
+    }
     if(!data&&[row[@"retryBookmark"] isKindOfClass:NSData.class])sourceURL=[NSURL URLByResolvingBookmarkData:row[@"retryBookmark"] options:0 relativeToURL:nil bookmarkDataIsStale:nil error:NULL];
     if(!data&&sourceURL){BOOL scope=[sourceURL startAccessingSecurityScopedResource];data=ResourceImportReadBounded(sourceURL,32*1024*1024);if(scope)[sourceURL stopAccessingSecurityScopedResource];}
     if(!data){self.retryCandidateIndex=(NSInteger)index;if(self.batchRetrying){self.busy=YES;self.stage=[NSString stringWithFormat:@"请重新选择 %@",filename];[self updateView];}UIDocumentPickerViewController *picker=[[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeData] asCopy:YES];picker.allowsMultipleSelection=NO;picker.delegate=self;self.pickingFolder=NO;[self presentViewController:picker animated:YES completion:nil];return;}
@@ -1167,7 +1228,7 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
                 [owner decorateCandidate:row file:nil origin:url.absoluteString];
                 [owner.candidates addObject:row];
             }else{
-                NSMutableDictionary *failed=[@{@"name":(url.lastPathComponent.stringByRemovingPercentEncoding?:url.lastPathComponent)?:@"脚本资源",@"error":error.localizedDescription?:@"下载或识别失败",@"selected":@NO} mutableCopy];
+                NSMutableDictionary *failed=[@{@"name":(url.lastPathComponent.stringByRemovingPercentEncoding?:url.lastPathComponent)?:@"脚本资源",@"error":error.localizedDescription?:@"下载或识别失败",@"selected":@NO,@"retryOrigin":url.absoluteString?:@"",@"retryHint":hint?:@""} mutableCopy];
                 [owner.candidates addObject:failed];
             }
             [owner recognizeBatchURLs:urlStrings index:index+1 generation:generation hint:hint];
@@ -1179,7 +1240,7 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
         ResourceImportWorkflowViewController *owner=weakSelf;
         if(!owner||owner.generation!=generation)return;
         if(error||!data.length){
-            NSMutableDictionary *failed=[@{@"name":(url.lastPathComponent.stringByRemovingPercentEncoding?:url.host)?:@"资源",@"error":error.localizedDescription?:@"无法读取链接内容",@"selected":@NO} mutableCopy];
+            NSMutableDictionary *failed=[@{@"name":(url.lastPathComponent.stringByRemovingPercentEncoding?:url.host)?:@"资源",@"error":error.localizedDescription?:@"无法读取链接内容",@"selected":@NO,@"retryOrigin":url.absoluteString?:@"",@"retryHint":hint?:@""} mutableCopy];
             [owner.candidates addObject:failed];
             [owner recognizeBatchURLs:urlStrings index:index+1 generation:generation hint:hint];
             return;
@@ -1252,7 +1313,7 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
         self.downloader=[MediaPackageDownloader new];self.downloader.onProgress=^(NSString *stage,int64_t received,int64_t expected){ResourceImportWorkflowViewController *owner=weakSelf;if(!owner||owner.generation!=generation)return;owner.stage=expected>0?[NSString stringWithFormat:@"%@ · %.1f / %.1f MiB",stage,received/1048576.0,expected/1048576.0]:[NSString stringWithFormat:@"%@ · %.1f MiB",stage,received/1048576.0];if(owner.onStateChanged)owner.onStateChanged();[owner.tableView reloadSections:[NSIndexSet indexSetWithIndex:1] withRowAnimation:UITableViewRowAnimationNone];};
         [self.downloader importURL:url headers:nil runtimeHint:hint completion:^(NSDictionary *service,NSError *error){ResourceImportWorkflowViewController *owner=weakSelf;if(!owner||owner.generation!=generation){if(service)[ServiceStore remove:service[@"id"]];return;}if(!service){[owner showFailure:error.localizedDescription];return;}ResourceImportRecordRecentURL(url.absoluteString);NSMutableDictionary *row=[@{@"kind":@"service",@"service":service,@"name":service[@"name"]?:@"脚本资源",@"summary":[NSString stringWithFormat:@"已识别 · %@ · %@",service[@"engine"]?:@"",service[@"protocol"]?:@""],@"selected":@YES} mutableCopy];[owner decorateCandidate:row file:nil origin:url.absoluteString];[owner.candidates addObject:row];owner.busy=NO;owner.stage=@"识别完成 · 尚未保存";[owner updateView];}];return;
     }
-    self.fetcher=[ResourceImportFetcher new];self.fetcher.fallbackDataProvider=^NSData *(NSURL *url){return ResourceImportBundledFallbackForURL(url);};self.fetcher.completion=^(NSData *data,NSURLResponse *response,NSError *error){ResourceImportWorkflowViewController *owner=weakSelf;if(!owner||owner.generation!=generation)return;if(error){[owner showFailure:error.localizedDescription];return;}
+    self.fetcher=[ResourceImportFetcher new];self.fetcher.fallbackDataProvider=^NSData *(NSURL *url){return ResourceImportBundledFallbackForURL(url);};self.fetcher.completion=^(NSData *data,NSURLResponse *response,NSError *error){ResourceImportWorkflowViewController *owner=weakSelf;if(!owner||owner.generation!=generation)return;if(error||!data.length){[owner showFailure:error.localizedDescription?:@"无法读取链接内容"];return;}
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{NSString *ext=ResourceContentExtension(data,response.suggestedFilename?:response.URL.lastPathComponent);NSString *path=[NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"resource-%@.%@",NSUUID.UUID.UUIDString,ext]];[data writeToFile:path atomically:YES];NSMutableDictionary *row=[owner candidateForData:data file:[NSURL fileURLWithPath:path] origin:response.URL.absoluteString?:raw companions:@{} hint:hint];if([row[@"kind"] isEqual:@"catalog"]){NSMutableDictionary *catalog=[row[@"catalog"] mutableCopy];catalog[@"url"]=raw;row[@"catalog"]=catalog;}else if([row[@"kind"] isEqual:@"playlist"]){row[@"origin"]=raw;row[@"resolvedURL"]=response.URL.absoluteString?:raw;}else if(row[@"service"]){NSMutableDictionary *service=[row[@"service"] mutableCopy];service[@"url"]=raw;row[@"service"]=service;}[owner decorateCandidate:row file:nil origin:raw];[NSFileManager.defaultManager removeItemAtPath:path error:NULL];
             dispatch_async(dispatch_get_main_queue(),^{if(owner.generation!=generation){if(row[@"service"])[ServiceStore remove:row[@"service"][@"id"]];return;}if(!row[@"error"])ResourceImportRecordRecentURL(raw);[owner.candidates addObject:row];owner.busy=NO;owner.stage=@"识别完成 · 请选择要保存的资源";[owner updateView];});
         });
@@ -1264,7 +1325,7 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
 }
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {self.retryCandidateIndex=NSNotFound;if(self.batchRetrying){self.busy=NO;self.stage=@"已跳过需要重新选择的失败文件";[self updateView];[self advanceBatchRetry];}}
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
-    if(!urls.count){self.retryCandidateIndex=NSNotFound;return;}BOOL folder=self.pickingFolder;NSInteger retryIndex=self.retryCandidateIndex;self.retryCandidateIndex=NSNotFound;self.busy=YES;self.taskKind=retryIndex!=NSNotFound?@"file-retry":@"file";self.stage=retryIndex!=NSNotFound?@"正在重新识别此文件…":@"正在检查本地文件…";NSUInteger generation=++self.generation;NSString *hint=[self runtimeHint];[self updateView];__weak typeof(self) weakSelf=self;
+    if(!urls.count){self.retryCandidateIndex=NSNotFound;self.busy=NO;if(self.batchRetrying){[self updateView];[self advanceBatchRetry];}return;}BOOL folder=self.pickingFolder;NSInteger retryIndex=self.retryCandidateIndex;self.retryCandidateIndex=NSNotFound;self.busy=YES;self.taskKind=retryIndex!=NSNotFound?@"file-retry":@"file";self.stage=retryIndex!=NSNotFound?@"正在重新识别此文件…":@"正在检查本地文件…";NSUInteger generation=++self.generation;NSString *hint=[self runtimeHint];[self updateView];__weak typeof(self) weakSelf=self;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{@autoreleasepool{
         NSURL *root=folder?urls.firstObject:nil;BOOL scoped=[root startAccessingSecurityScopedResource];NSMutableArray *files=[NSMutableArray array];BOOL truncated=NO;
         NSMutableDictionary *folderBundleCandidate=nil;
@@ -1280,7 +1341,7 @@ static NSDictionary *ResourceCatalogDiff(NSArray *oldRows,NSArray *newRows,NSArr
             }
         }
         if(folder&&!folderBundleCandidate){NSDirectoryEnumerator *enumerator=[NSFileManager.defaultManager enumeratorAtURL:root includingPropertiesForKeys:@[NSURLIsRegularFileKey,NSURLIsSymbolicLinkKey] options:NSDirectoryEnumerationSkipsHiddenFiles errorHandler:^BOOL(NSURL *url,NSError *error){return NO;}];NSUInteger scanned=0;for(NSURL *url in enumerator){if(++scanned>4096||weakSelf.generation!=generation){truncated=YES;break;}NSNumber *regular=nil,*link=nil;[url getResourceValue:&regular forKey:NSURLIsRegularFileKey error:NULL];[url getResourceValue:&link forKey:NSURLIsSymbolicLinkKey error:NULL];if(link.boolValue){[enumerator skipDescendants];continue;}if(!regular.boolValue)continue;if(![@[@"json",@"hawk",@"js",@"hjs",@"mjs",@"cjs",@"py",@"zip",@"txt",@"m3u",@"m3u8",@"php"] containsObject:url.pathExtension.lowercaseString])continue;if(files.count==128){truncated=YES;break;}[files addObject:url];}}
-        else {truncated=urls.count>128;[files addObjectsFromArray:[urls subarrayWithRange:NSMakeRange(0,MIN((NSUInteger)128,urls.count))]];}
+        else if(!folder) {truncated=urls.count>128;[files addObjectsFromArray:[urls subarrayWithRange:NSMakeRange(0,MIN((NSUInteger)128,urls.count))]];}
         NSMutableArray *rows=[NSMutableArray array];if(folderBundleCandidate)[rows addObject:folderBundleCandidate];NSUInteger total=0;NSMutableSet *batchPorts=[NSMutableSet set];for(NSDictionary *s in [ServiceStore services])if(s[@"port"])[batchPorts addObject:s[@"port"]];
         for(NSURL *file in files){if([file.lastPathComponent isEqual:@"index.config.js"]){BOOL companion=NO;for(NSURL *main in files)if(![main isEqual:file]&&[@[@"js",@"hjs",@"mjs",@"cjs"] containsObject:main.pathExtension.lowercaseString]&&[main.URLByDeletingLastPathComponent isEqual:file.URLByDeletingLastPathComponent]){companion=YES;break;}if(companion)continue;}ResourceImportWorkflowViewController *owner=weakSelf;if(!owner||owner.generation!=generation)break;BOOL childScope=[file startAccessingSecurityScopedResource];NSNumber *size=nil;[file getResourceValue:&size forKey:NSURLFileSizeKey error:NULL];NSData *data=nil;if(size.unsignedLongLongValue<=32*1024*1024&&total+size.unsignedLongLongValue<=64*1024*1024)data=ResourceImportReadBounded(file,MIN((NSUInteger)32*1024*1024,(NSUInteger)64*1024*1024-total));if(data)total+=data.length;
             NSMutableDictionary *companions=[NSMutableDictionary dictionary];if([@[@"js",@"hjs",@"mjs",@"cjs"] containsObject:file.pathExtension.lowercaseString]&&![file.lastPathComponent isEqual:@"index.config.js"]){for(NSURL *other in files)if([other.lastPathComponent isEqual:@"index.config.js"]&&[other.URLByDeletingLastPathComponent isEqual:file.URLByDeletingLastPathComponent]){BOOL access=[other startAccessingSecurityScopedResource];NSNumber *bytes=nil;[other getResourceValue:&bytes forKey:NSURLFileSizeKey error:NULL];if(bytes.unsignedLongLongValue<=65536){NSData *configuration=ResourceImportReadBounded(other,65536);if(configuration)companions[@"index.config.js"]=configuration;}if(access)[other stopAccessingSecurityScopedResource];break;}}

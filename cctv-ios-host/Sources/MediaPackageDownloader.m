@@ -256,11 +256,23 @@ static BOOL PackageSameCredentialScope(NSURL *origin,NSURL *target) {
     self.session=[NSURLSession sessionWithConfiguration:configuration delegate:self delegateQueue:queue];[self begin:url];
 }
 - (void)begin:(NSURL *)url {
-    if(self.finished)return;
-    if(!url){[self finish:nil error:[self error:@"资源下载地址无效"]];return;}self.body=[NSMutableData data];self.responseStatus=0;self.redirects=0;self.expectedBytes=-1;self.lastProgressTime=0;self.lastProgressStage=nil;
-    NSTimeInterval reqTimeout=[url.host.lowercaseString isEqualToString:@"sub.lytvs.top"]?8:20;NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:reqTimeout];BOOL canSendCredentials=PackageSameCredentialScope(self.credentialOrigin,url);for(NSString *name in self.requestHeaders){if(PackageHeaderIsSensitive(name)&&!canSendCredentials)continue;[request setValue:self.requestHeaders[name] forHTTPHeaderField:name];}
+    if(!url){[self finish:nil error:[self error:@"资源下载地址无效"]];return;}
+    NSURLSessionDataTask *task=nil;
+    NSString *stage=nil;
+    NSTimeInterval reqTimeout=[url.host.lowercaseString isEqualToString:@"sub.lytvs.top"]?8:20;
+    NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:reqTimeout];
+    BOOL canSendCredentials=PackageSameCredentialScope(self.credentialOrigin,url);
+    for(NSString *name in self.requestHeaders){if(PackageHeaderIsSensitive(name)&&!canSendCredentials)continue;[request setValue:self.requestHeaders[name] forHTTPHeaderField:name];}
     if(![request valueForHTTPHeaderField:@"User-Agent"])[request setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
-    self.task=[self.session dataTaskWithRequest:request];[self progress:self.stage];[self.task resume];
+    @synchronized(self){
+        if(self.finished||!self.session)return;
+        self.body=[NSMutableData data];self.responseStatus=0;self.redirects=0;self.expectedBytes=-1;self.lastProgressTime=0;self.lastProgressStage=nil;
+        task=[self.session dataTaskWithRequest:request];
+        self.task=task;
+        stage=self.stage;
+    }
+    [self progress:stage];
+    [task resume];
 }
 - (NSURL *)configURL:(BOOL)checksum {
     NSURLComponents *c=[NSURLComponents componentsWithURL:self.effectiveURL resolvingAgainstBaseURL:NO];
@@ -293,7 +305,7 @@ static BOOL PackageSameCredentialScope(NSURL *origin,NSURL *target) {
     if(!valid){
         if(self.phase==PackageScript){
             NSData *bundledWeBox=PackageFallbackScriptForFailedURL(self.targetURL?:self.originalURL);
-            if(bundledWeBox.length){self.scriptData=bundledWeBox;[self install:@{}];return;}
+            if(bundledWeBox.length){@synchronized(self){if(self.finished)return;self.scriptData=bundledWeBox;}[self install:@{}];return;}
         }
         NSString *statusHint=self.responseStatus==403?@"（源站拒绝此请求，请确认来源允许当前客户端访问）":(self.responseStatus==401?@"（源站要求有效登录或订阅凭据）":(self.responseStatus==404?@"（远端脚本文件不存在）":@"，或响应超过大小上限"));[self finish:nil error:[self error:[NSString stringWithFormat:@"%@失败：HTTP %ld%@",self.stage,(long)self.responseStatus,statusHint]]];
     }
@@ -308,18 +320,23 @@ static BOOL PackageSameCredentialScope(NSURL *origin,NSURL *target) {
     if(exceeded){[task cancel];[self finish:nil error:[self error:[self.stage stringByAppendingString:@"超过大小上限"]]];return;}
     [self progress:self.stage];
 }
-- (NSString *)readChecksum {
-    NSString *text=[[NSString alloc] initWithData:self.body encoding:NSUTF8StringEncoding];
+- (NSString *)readChecksumFromData:(NSData *)data {
+    NSString *text=[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
     text=[text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     NSArray *parts=[text componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];NSString *hash=parts.firstObject;
     return hash.length==32&&[hash rangeOfString:@"^[0-9a-fA-F]{32}$" options:NSRegularExpressionSearch].location!=NSNotFound?hash.lowercaseString:nil;
 }
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
-    if(self.finished||task!=self.task)return;BOOL missing=(self.phase==PackageConfigChecksum||self.phase==PackageConfig)&&self.responseStatus==404;
+    NSData *bodySnapshot=nil;
+    @synchronized(self){
+        if(self.finished||task!=self.task)return;
+        bodySnapshot=[self.body copy];
+    }
+    BOOL missing=(self.phase==PackageConfigChecksum||self.phase==PackageConfig)&&self.responseStatus==404;
     if(error&&!(missing&&error.code==NSURLErrorCancelled)){
         if(self.phase==PackageScript&&error.code!=NSURLErrorCancelled){
             NSData *bundledWeBox=PackageFallbackScriptForFailedURL(self.targetURL?:self.originalURL);
-            if(bundledWeBox.length){self.scriptData=bundledWeBox;[self install:@{}];return;}
+            if(bundledWeBox.length){@synchronized(self){if(self.finished)return;self.scriptData=bundledWeBox;}[self install:@{}];return;}
             BOOL transientTimeout=[error.domain isEqualToString:NSURLErrorDomain]&&(error.code==NSURLErrorTimedOut||error.code==NSURLErrorNetworkConnectionLost||error.code==NSURLErrorCannotConnectToHost);
             if(transientTimeout&&self.retryCount<1){
                 self.retryCount++;
@@ -331,40 +348,47 @@ static BOOL PackageSameCredentialScope(NSURL *origin,NSURL *target) {
         [self finish:nil error:error];return;
     }
     if(self.phase==PackageChecksum||self.phase==PackageConfigChecksum){
-        BOOL config=self.phase==PackageConfigChecksum;NSString *hash=self.responseStatus==404?nil:[self readChecksum];
-        if(self.responseStatus!=404&&PackageLooksLikeHTML(self.body)){[self finish:nil error:[self error:config?@"配套配置校验地址返回了 HTML 网页，请检查资源权限或登录状态":@"资源校验地址返回了 HTML 网页，不是 MD5 校验文件"]];return;}
+        BOOL config=self.phase==PackageConfigChecksum;NSString *hash=self.responseStatus==404?nil:[self readChecksumFromData:bodySnapshot];
+        if(self.responseStatus!=404&&PackageLooksLikeHTML(bodySnapshot)){[self finish:nil error:[self error:config?@"配套配置校验地址返回了 HTML 网页，请检查资源权限或登录状态":@"资源校验地址返回了 HTML 网页，不是 MD5 校验文件"]];return;}
         if(self.responseStatus!=404&&!hash){[self finish:nil error:[self error:config?@"配套配置 MD5 格式无效":@"资源 MD5 校验文件格式无效"]];return;}
         if(config){self.configChecksum=hash;if(hash)[self progress:@"配套配置 MD5 校验值已读取"];self.phase=PackageConfig;[self begin:[self configURL:NO]];}
         else{self.checksum=hash;if(![@[@"js",@"hjs",@"mjs",@"cjs",@"py",@"zip"] containsObject:self.targetURL.pathExtension.lowercaseString]){[self finish:nil error:[self error:@"MD5 地址最终没有指向受支持的 JS、Python 或 ZIP 文件"]];return;}if(hash)[self progress:@"资源 MD5 校验值已读取"];self.phase=PackageScript;[self begin:self.targetURL];}return;
     }
     if(self.phase==PackageConfig){
         if(self.responseStatus==404){if(self.configChecksum){[self finish:nil error:[self error:@"配置校验文件存在，但对应配置文件缺失，未安装"]];return;}self.configurationState=@"missing_using_defaults";[self install:@{}];return;}
-        if(PackageLooksLikeHTML(self.body)){[self finish:nil error:[self error:@"配套配置地址返回了 HTML 网页，不是配置文件；请检查权限或登录状态"]];return;}
-        if(!self.body.length||![[NSString alloc] initWithData:self.body encoding:NSUTF8StringEncoding]){[self finish:nil error:[self error:@"配套配置不是有效 UTF-8 文件"]];return;}
-        if(self.configChecksum&&![PackageMD5(self.body) isEqual:self.configChecksum]){[self finish:nil error:[self error:@"配套配置与 MD5 校验值不一致，未安装"]];return;}
+        if(PackageLooksLikeHTML(bodySnapshot)){[self finish:nil error:[self error:@"配套配置地址返回了 HTML 网页，不是配置文件；请检查权限或登录状态"]];return;}
+        if(!bodySnapshot.length||![[NSString alloc] initWithData:bodySnapshot encoding:NSUTF8StringEncoding]){[self finish:nil error:[self error:@"配套配置不是有效 UTF-8 文件"]];return;}
+        if(self.configChecksum&&![PackageMD5(bodySnapshot) isEqual:self.configChecksum]){[self finish:nil error:[self error:@"配套配置与 MD5 校验值不一致，未安装"]];return;}
         [self progress:self.configChecksum?@"配套配置 MD5 校验通过":@"配套配置没有 MD5 · 未验证来源完整性"];
-        self.configContentChecksum=PackageMD5(self.body);
+        self.configContentChecksum=PackageMD5(bodySnapshot);
         self.configurationState=self.configChecksum?@"verified":@"downloaded_without_checksum";
-        [self install:@{@"index.config.js":[self.body copy]}];return;
+        [self install:@{@"index.config.js":bodySnapshot}];return;
     }
-    if(PackageLooksLikeHTML(self.body)){
+    if(PackageLooksLikeHTML(bodySnapshot)){
         NSData *bundledWeBox=PackageBundledWeBoxScriptForURL(self.targetURL?:self.originalURL);
-        if(bundledWeBox.length){self.scriptData=bundledWeBox;[self install:@{}];return;}
+        if(bundledWeBox.length){@synchronized(self){if(self.finished)return;self.scriptData=bundledWeBox;}[self install:@{}];return;}
         [self finish:nil error:[self error:@"资源地址返回了 HTML 网页而非脚本或 ZIP；请检查直链、访问权限或登录状态"]];return;
     }
-    if(self.checksum&&![PackageMD5(self.body) isEqual:self.checksum]){[self finish:nil error:[self error:@"资源与 MD5 校验值不一致，未安装"]];return;}
+    if(self.checksum&&![PackageMD5(bodySnapshot) isEqual:self.checksum]){[self finish:nil error:[self error:@"资源与 MD5 校验值不一致，未安装"]];return;}
     [self progress:self.checksum?@"主资源 MD5 校验通过":@"来源没有 MD5 · 未验证来源完整性"];
-    self.scriptData=[self.body copy];NSError *adapterError=nil;NSData *adapted=PackageAdaptForADMSignedSource(self.scriptData,self.effectiveURL?:self.originalURL,&adapterError);if(!adapted){[self finish:nil error:adapterError];return;}self.scriptData=adapted;
-    NSString *text=[@[@"js",@"hjs",@"mjs",@"cjs"] containsObject:self.targetURL.pathExtension.lowercaseString]?[[NSString alloc] initWithData:self.scriptData encoding:NSUTF8StringEncoding]:nil;
+    NSError *adapterError=nil;NSData *adapted=PackageAdaptForADMSignedSource(bodySnapshot,self.effectiveURL?:self.originalURL,&adapterError);if(!adapted){[self finish:nil error:adapterError];return;}
+    @synchronized(self){if(self.finished)return;self.scriptData=adapted;}
+    NSString *text=[@[@"js",@"hjs",@"mjs",@"cjs"] containsObject:self.targetURL.pathExtension.lowercaseString]?[[NSString alloc] initWithData:adapted encoding:NSUTF8StringEncoding]:nil;
     BOOL catpaw=[text containsString:@"/config"]&&[text containsString:@"/spider"]&&([text containsString:@"catServerFactory"]||[text containsString:@"createService"]||[text containsString:@"serverFactory"]);
     if(catpaw){self.phase=PackageConfigChecksum;[self begin:[self configURL:YES]];return;}
     [self install:@{}];
 }
 - (void)install:(NSDictionary<NSString *,NSData *> *)companions {
-    if(self.finished)return;self.lastProgressTime=0;[self progress:@"检查资源入口、运行时与协议"];
+    NSData *scriptPayload=nil;
+    @synchronized(self){
+        if(self.finished)return;
+        scriptPayload=self.scriptData;
+    }
+    if(!scriptPayload.length){[self finish:nil error:[self error:@"资源文件内容为空"]];return;}
+    self.lastProgressTime=0;[self progress:@"检查资源入口、运行时与协议"];
     NSError *error=nil;NSString *directory=[NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];NSFileManager *fm=NSFileManager.defaultManager;
     [fm createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:&error];NSString *path=[directory stringByAppendingPathComponent:self.targetURL.lastPathComponent];NSDictionary *service=nil;
-    if(!error&&[self.scriptData writeToFile:path options:NSDataWritingAtomic error:&error])service=[MediaPackageImporter importFile:[NSURL fileURLWithPath:path] companionFiles:companions runtimeHint:self.runtimeHint error:&error];
+    if(!error&&[scriptPayload writeToFile:path options:NSDataWritingAtomic error:&error])service=[MediaPackageImporter importFile:[NSURL fileURLWithPath:path] companionFiles:companions runtimeHint:self.runtimeHint error:&error];
     [fm removeItemAtPath:directory error:NULL];
     if(self.finished){if(service)[ServiceStore remove:service[@"id"]];return;}
     if(service){[self progress:@"识别完成 · 保存到本机资源库"];NSMutableDictionary *saved=[service mutableCopy];saved[@"url"]=self.originalURL.absoluteString;if(self.requestHeaders.count)saved[@"importHeaders"]=self.requestHeaders;

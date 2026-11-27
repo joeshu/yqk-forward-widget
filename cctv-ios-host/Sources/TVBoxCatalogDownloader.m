@@ -55,13 +55,28 @@ static NSData *TVBoxBundledWeBoxIndexForURL(NSString *sourceURL) {
 @implementation TVBoxCatalogDownloader
 - (NSError *)failure:(NSString *)message {return [NSError errorWithDomain:@"CCTVHostTVBox" code:1 userInfo:@{NSLocalizedDescriptionKey:message}];}
 - (void)loadURL:(NSURL *)url completion:(void (^)(NSDictionary *,NSError *))completion {
-    self.completion=completion;self.source=url.absoluteString;self.redirectCount=0;NSURLComponents *parts=[NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:NO];
+    NSURLSession *previousSession=nil;
+    @synchronized(self){
+        previousSession=self.session;
+        self.session=nil;self.task=nil;self.data=nil;
+        self.finished=NO;
+        self.completion=[completion copy];self.source=url.absoluteString;self.redirectCount=0;
+    }
+    [previousSession invalidateAndCancel];
+    NSURLComponents *parts=[NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:NO];
     if(!parts||![@[@"https",@"http"] containsObject:parts.scheme.lowercaseString]||!parts.host.length||parts.user.length||parts.password.length){[self finish:nil error:[self failure:@"请输入有效的 HTTP/HTTPS TVBox JSON 地址"]];return;}
     NSURLSessionConfiguration *config=NSURLSessionConfiguration.ephemeralSessionConfiguration;config.URLCache=nil;config.HTTPCookieStorage=nil;config.HTTPShouldSetCookies=NO;NSTimeInterval savedTimeout=[[NSUserDefaults standardUserDefaults] objectForKey:@"cctv.networkTimeout.v1"]?[[NSUserDefaults standardUserDefaults] doubleForKey:@"cctv.networkTimeout.v1"]:20;NSTimeInterval timeout=MIN(40,MAX(5,savedTimeout));config.timeoutIntervalForRequest=timeout;config.timeoutIntervalForResource=timeout+5;
-    NSOperationQueue *queue=[NSOperationQueue new];queue.maxConcurrentOperationCount=1;self.session=[NSURLSession sessionWithConfiguration:config delegate:self delegateQueue:queue];self.data=[NSMutableData data];
+    NSOperationQueue *queue=[NSOperationQueue new];queue.maxConcurrentOperationCount=1;
+    NSURLSession *session=[NSURLSession sessionWithConfiguration:config delegate:self delegateQueue:queue];
     NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:timeout];
     [req setValue:ResourceImportUserAgent() forHTTPHeaderField:@"User-Agent"];
-    self.task=[self.session dataTaskWithRequest:req];[self.task resume];
+    NSURLSessionDataTask *task=[session dataTaskWithRequest:req];
+    BOOL shouldResume=NO;
+    @synchronized(self){
+        if(!self.finished){self.session=session;self.data=[NSMutableData data];self.task=task;shouldResume=YES;}
+    }
+    if(shouldResume)[task resume];
+    else [session invalidateAndCancel];
 }
 - (void)cancel {[self finish:nil error:[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil]];}
 - (void)finish:(NSDictionary *)catalog error:(NSError *)error {

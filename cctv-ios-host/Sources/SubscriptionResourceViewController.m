@@ -12,6 +12,7 @@
 @property(nonatomic) BOOL editingResource;
 @property(nonatomic) BOOL saving;
 @property(nonatomic) BOOL refreshing;
+@property(nonatomic) NSUInteger refreshGeneration;
 @property(nonatomic) BOOL hasAppearedOnce;
 @property(nonatomic) BOOL suppressMetadataReload;
 @property(nonatomic,copy) NSString *notice;
@@ -39,7 +40,7 @@
 @implementation SubscriptionResourceViewController
 - (instancetype)init {return [super initWithStyle:UITableViewStyleInsetGrouped];}
 - (UITextField *)field:(NSString *)placeholder allowPaste:(BOOL)allowPaste tag:(NSInteger)tag {
-    UITextField *field=[UITextField new];field.placeholder=placeholder;field.textColor=HostText();field.tintColor=HostAccent();field.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];field.adjustsFontForContentSizeCategory=YES;field.autocapitalizationType=UITextAutocapitalizationTypeNone;field.autocorrectionType=UITextAutocorrectionTypeNo;field.clearButtonMode=UITextFieldViewModeWhileEditing;[field addTarget:self action:@selector(changed) forControlEvents:UIControlEventEditingChanged];
+    UITextField *field=[UITextField new];field.placeholder=placeholder;field.textColor=HostText();field.tintColor=HostAccent();field.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];field.adjustsFontForContentSizeCategory=YES;field.autocapitalizationType=UITextAutocapitalizationTypeNone;field.autocorrectionType=UITextAutocorrectionTypeNo;field.clearButtonMode=UITextFieldViewModeWhileEditing;[field addTarget:self action:@selector(changed) forControlEvents:UIControlEventEditingChanged];[field.heightAnchor constraintGreaterThanOrEqualToConstant:44].active=YES;
     if(allowPaste){
         UIButton *pasteBtn=[UIButton buttonWithType:UIButtonTypeSystem];
         pasteBtn.tag=tag;
@@ -291,7 +292,7 @@
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     UIGestureRecognizer *gesture=self.navigationController.interactivePopGestureRecognizer;
-    self.previousPopDelegate=gesture.delegate;
+    if(gesture.delegate!=self)self.previousPopDelegate=gesture.delegate;
     gesture.delegate=self;
     if(self.hasAppearedOnce&&!self.editingResource){
         [self metadataChanged];
@@ -315,11 +316,13 @@
 - (BOOL)beginRefreshActionWithPrompt:(NSString *)prompt {
     if(self.refreshing||self.saving)return NO;
     self.refreshing=YES;
+    NSUInteger gen=++self.refreshGeneration;
     if(prompt.length)[self showTransientPrompt:prompt];
     __weak typeof(self) weakSelf=self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(10*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
-        SubscriptionResourceViewController *owner=weakSelf;if(!owner||!owner.refreshing)return;
-        owner.refreshing=NO;[owner loadFields];if(owner.isViewLoaded)[owner.tableView reloadData];
+        SubscriptionResourceViewController *owner=weakSelf;if(!owner||!owner.refreshing||gen!=owner.refreshGeneration)return;
+        owner.refreshing=NO;
+        if(!owner.editingResource&&!owner.saving){[owner loadFields];if(owner.isViewLoaded)[owner.tableView reloadData];}
     });
     return YES;
 }
@@ -490,7 +493,6 @@
             stack.axis=UILayoutConstraintAxisVertical;
             stack.alignment=UIStackViewAlignmentFill;
             stack.spacing=6;
-            [field.heightAnchor constraintGreaterThanOrEqualToConstant:44].active=YES;
             [cell.contentView addSubview:stack];
             [NSLayoutConstraint activateConstraints:@[
                 [stack.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:16],
@@ -625,7 +627,7 @@
         else if([action isEqual:@"refresh"]){if(self.onRefresh&&[self beginRefreshActionWithPrompt:self.source.length?@"正在刷新订阅…":@"已同步内置官方频道与节目单"]){self.onRefresh();[self loadFields];[self.tableView reloadData];}}
         else if([action isEqual:@"recheck"]){if(self.onRecheckHealth&&[self beginRefreshActionWithPrompt:self.source.length?@"正在重新检测订阅健康状态…":@"内置官方频道健康状态正常"]){self.onRecheckHealth();[self loadFields];[self.tableView reloadData];}}
         else if([action isEqual:@"rematch"]){if(self.onRematchEPG&&[self beginRefreshActionWithPrompt:@"已发起节目单（EPG）重新匹配"]){self.onRematchEPG();[self loadFields];[self.tableView reloadData];}}
-        else if([action isEqual:@"matchLogos"]){if(self.onMatchStationLogos&&[self beginRefreshActionWithPrompt:@"已完成官方高清台标与节目单归一匹配"]){self.onMatchStationLogos();[self loadFields];[self.tableView reloadData];}}
+        else if([action isEqual:@"matchLogos"]){if(self.onMatchStationLogos&&[self beginRefreshActionWithPrompt:@"已完成官方高清台标与节目单归一匹配"]){self.onMatchStationLogos();self.refreshing=NO;[self loadFields];[self.tableView reloadData];}}
         else if([action isEqual:@"export"]){if(self.onExport)self.onExport();}
         else if([action isEqual:@"udpxy"]){
             NSDictionary *saved=[NSUserDefaults.standardUserDefaults dictionaryForKey:@"cctv.subscription.udpxy.v1"];
@@ -634,9 +636,10 @@
             [alert addTextFieldWithConfigurationHandler:^(UITextField *tf){tf.placeholder=@"http://192.168.1.1:4022";tf.text=current?:@"";tf.keyboardType=UIKeyboardTypeURL;tf.autocapitalizationType=UITextAutocapitalizationTypeNone;}];
             [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
             __weak typeof(self) weakSelf=self;
+            __weak UIAlertController *weakAlert=alert;
             [alert addAction:[UIAlertAction actionWithTitle:@"保存" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){
                 SubscriptionResourceViewController *owner=weakSelf;if(!owner||!owner.source.length)return;
-                NSString *val=[alert.textFields.firstObject.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]?:@"";
+                NSString *val=[weakAlert.textFields.firstObject.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]?:@"";
                 NSMutableDictionary *map=[[NSUserDefaults.standardUserDefaults dictionaryForKey:@"cctv.subscription.udpxy.v1"] mutableCopy]?:[NSMutableDictionary dictionary];
                 if(val.length)map[owner.source]=val;else [map removeObjectForKey:owner.source];
                 [NSUserDefaults.standardUserDefaults setObject:map forKey:@"cctv.subscription.udpxy.v1"];

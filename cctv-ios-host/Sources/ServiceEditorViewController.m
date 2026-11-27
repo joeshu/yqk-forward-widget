@@ -182,9 +182,9 @@
         NSString *text=data?[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]:nil;
         for(NSUInteger trim=1;!text && truncated && trim<=3;trim++)text=[[NSString alloc] initWithData:[data subdataWithRange:NSMakeRange(0,data.length-trim)] encoding:NSUTF8StringEncoding];
         dispatch_async(dispatch_get_main_queue(),^{ServiceCodeViewController *owner=weakSelf;if(!owner)return;
-            if(!text || error){owner->_editor.text=@"无法读取 UTF-8 代码文件";owner.navigationItem.rightBarButtonItem=nil;[owner updateCodeStatusBar];return;}
+            if(!text || error){owner->_editor.text=@"无法读取 UTF-8 代码文件";if(owner.navigationItem.rightBarButtonItems.count>1)owner.navigationItem.rightBarButtonItems=@[owner.navigationItem.rightBarButtonItems.lastObject];[owner updateCodeStatusBar];return;}
             owner.initialCodeText=text;
-            owner->_editor.text=text;if(truncated){owner.readOnly=YES;owner.navigationItem.rightBarButtonItem=nil;owner.navigationItem.prompt=@"只读预览已截断，导出包含完整文件";}
+            owner->_editor.text=text;if(truncated){owner.readOnly=YES;if(owner.navigationItem.rightBarButtonItems.count>1)owner.navigationItem.rightBarButtonItems=@[owner.navigationItem.rightBarButtonItems.lastObject];owner.navigationItem.prompt=@"只读预览已截断，导出包含完整文件";}
             owner->_editor.editable=!owner.readOnly;owner.navigationItem.rightBarButtonItem.enabled=YES;
             [owner applySyntaxHighlightingIfNeeded];
             [owner updateCodeStatusBar];
@@ -285,6 +285,7 @@
 - (void)promptFindInCode {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"搜索代码" message:@"输入要定位的函数名、字段或配置键（支持循环查找下一处）" preferredStyle:UIAlertControllerStyleAlert];
     __weak typeof(self) weakSelf = self;
+    __weak UIAlertController *weakAlert = alert;
     [alert addTextFieldWithConfigurationHandler:^(UITextField *field){
         field.placeholder = @"输入关键字";
         field.text = weakSelf.lastSearchQuery ?: @"";
@@ -294,7 +295,7 @@
     [alert addAction:[UIAlertAction actionWithTitle:@"定位下一处" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){
         ServiceCodeViewController *owner = weakSelf;
         if (!owner) return;
-        NSString *query = alert.textFields.firstObject.text ?: @"";
+        NSString *query = weakAlert.textFields.firstObject.text ?: @"";
         if (!query.length || !owner->_editor.text.length) return;
         owner.lastSearchQuery = query;
         NSString *fullText = owner->_editor.text;
@@ -333,6 +334,7 @@
     if (self.readOnly || !_editor.editable) return;
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"查找并替换代码" message:@"支持单步替换下一处或全文批量替换（如批量更换域名、请求头或参数名）" preferredStyle:UIAlertControllerStyleAlert];
     __weak typeof(self) weakSelf = self;
+    __weak UIAlertController *weakAlert = alert;
     [alert addTextFieldWithConfigurationHandler:^(UITextField *field){
         field.placeholder = @"要查找的内容";
         field.text = weakSelf.lastSearchQuery ?: @"";
@@ -347,17 +349,17 @@
     [alert addAction:[UIAlertAction actionWithTitle:@"替换下一处" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){
         ServiceCodeViewController *owner = weakSelf;
         if (!owner || !owner->_editor.editable) return;
-        NSString *findStr = alert.textFields.firstObject.text ?: @"";
-        NSString *replaceStr = alert.textFields.count > 1 ? (alert.textFields[1].text ?: @"") : @"";
+        NSString *findStr = weakAlert.textFields.firstObject.text ?: @"";
+        NSString *replaceStr = weakAlert.textFields.count > 1 ? (weakAlert.textFields[1].text ?: @"") : @"";
         if (!findStr.length || !owner->_editor.text.length) return;
         owner.lastSearchQuery = findStr;
         owner.lastReplaceText = replaceStr;
         NSString *fullText = owner->_editor.text;
-        NSUInteger startLoc = owner->_editor.selectedRange.location != NSNotFound ? owner->_editor.selectedRange.location : 0;
+        NSUInteger startLoc = owner->_editor.selectedRange.location != NSNotFound ? NSMaxRange(owner->_editor.selectedRange) : 0;
         NSRange forwardRange = NSMakeRange(MIN(startLoc, fullText.length), fullText.length - MIN(startLoc, fullText.length));
         NSRange found = [fullText rangeOfString:findStr options:0 range:forwardRange];
         if (found.location == NSNotFound && startLoc > 0) {
-            found = [fullText rangeOfString:findStr options:0 range:NSMakeRange(0, startLoc)];
+            found = [fullText rangeOfString:findStr options:0 range:NSMakeRange(0, MIN(startLoc, fullText.length))];
         }
         if (found.location == NSNotFound) {
             [owner showTemporaryPrompt:[NSString stringWithFormat:@"未找到「%@」", findStr]];
@@ -374,8 +376,8 @@
     [alert addAction:[UIAlertAction actionWithTitle:@"全部替换" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *a){
         ServiceCodeViewController *owner = weakSelf;
         if (!owner || !owner->_editor.editable) return;
-        NSString *findStr = alert.textFields.firstObject.text ?: @"";
-        NSString *replaceStr = alert.textFields.count > 1 ? (alert.textFields[1].text ?: @"") : @"";
+        NSString *findStr = weakAlert.textFields.firstObject.text ?: @"";
+        NSString *replaceStr = weakAlert.textFields.count > 1 ? (weakAlert.textFields[1].text ?: @"") : @"";
         if (!findStr.length || !owner->_editor.text.length) return;
         owner.lastSearchQuery = findStr;
         owner.lastReplaceText = replaceStr;
@@ -412,10 +414,11 @@
     }];
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     __weak typeof(self) weakSelf = self;
+    __weak UIAlertController *weakAlert = alert;
     [alert addAction:[UIAlertAction actionWithTitle:@"跳转" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){
         ServiceCodeViewController *owner = weakSelf;
         if (!owner) return;
-        NSInteger targetLine = [alert.textFields.firstObject.text integerValue];
+        NSInteger targetLine = [weakAlert.textFields.firstObject.text integerValue];
         if (targetLine < 1) return;
         NSString *currentText = owner->_editor.text ?: @"";
         NSArray<NSString *> *currentLines = [currentText componentsSeparatedByString:@"\n"];
@@ -597,6 +600,21 @@
     }
 }
 
+- (void)viewWillDisappear:(BOOL)animated {
+    [super viewWillDisappear:animated];
+    if (self.isMovingFromParentViewController || self.isBeingDismissed) {
+        dispatch_block_t onClose = self.onCloseCode;
+        self.onCloseCode = nil;
+        if (onClose) onClose();
+    }
+}
+
+- (void)dealloc {
+    dispatch_block_t onClose = self.onCloseCode;
+    self.onCloseCode = nil;
+    if (onClose) onClose();
+}
+
 - (void)requestCloseCodeEditor {
     if (self.readOnly || !_editor.editable || [_editor.text isEqualToString:self.initialCodeText ?: @""]) {
         [self.navigationController popViewControllerAnimated:YES];
@@ -612,10 +630,22 @@
 
 - (void)save {
     if(!_editor.editable)return;
+    if (self.onWillSaveCode) {
+        NSError *validationError = nil;
+        if (!self.onWillSaveCode(_editor.text ?: @"", &validationError)) {
+            UIAlertController *a = [UIAlertController alertControllerWithTitle:@"内容校验未通过"
+                                                                       message:validationError.localizedDescription ?: @"请检查输入格式后重试。"
+                                                                preferredStyle:UIAlertControllerStyleAlert];
+            [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+            [self presentViewController:a animated:YES completion:nil];
+            return;
+        }
+    }
     NSError *error = nil;
     BOOL ok = [_editor.text writeToFile:self.path atomically:YES encoding:NSUTF8StringEncoding error:&error];
     if (ok) {
         self.initialCodeText = [_editor.text copy];
+        self.onCloseCode = nil;
         if (self.onSaveCode) self.onSaveCode();
         [self.navigationController popViewControllerAnimated:YES];
     } else {
@@ -1202,10 +1232,10 @@
     __weak typeof(self) weakSelf=self;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{
         BOOL scoped=[u startAccessingSecurityScopedResource];
-        NSFileHandle *handle=[NSFileHandle fileHandleForReadingFromURL:u error:NULL];NSData *data=nil;
-        @try{data=[handle readDataUpToLength:2*1024*1024+1 error:NULL];if(data.length>2*1024*1024)data=nil;}@catch(NSException *exception){NSLog(@"[CCTVHost] code import read raised %@",exception.name);data=nil;}@finally{[handle closeAndReturnError:NULL];}
+        NSFileHandle *handle=[NSFileHandle fileHandleForReadingFromURL:u error:NULL];NSData *data=nil;BOOL tooLarge=NO;
+        @try{data=[handle readDataUpToLength:2*1024*1024+1 error:NULL];if(data.length>2*1024*1024){tooLarge=YES;data=nil;}}@catch(NSException *exception){NSLog(@"[CCTVHost] code import read raised %@",exception.name);data=nil;}@finally{[handle closeAndReturnError:NULL];}
         if(scoped)[u stopAccessingSecurityScopedResource];
-        dispatch_async(dispatch_get_main_queue(),^{ServiceEditorViewController *owner=weakSelf;if(owner)[owner acceptCode:data];});
+        dispatch_async(dispatch_get_main_queue(),^{ServiceEditorViewController *owner=weakSelf;if(!owner)return;if(tooLarge)[owner message:@"文件超过 2 MB，请选择较小的 Python 脚本。"];else [owner acceptCode:data];});
     });
 }
 - (NSString *)draftPath {
@@ -1269,6 +1299,9 @@
 - (void)viewWillDisappear:(BOOL)animated {
     [super viewWillDisappear:animated];UIGestureRecognizer *gesture=self.navigationController.interactivePopGestureRecognizer;
     if(gesture.delegate==self)gesture.delegate=self.previousPopDelegate;
+    if(self.isMovingFromParentViewController||self.isBeingDismissed){
+        [self.downloadTask cancel];self.downloadTask=nil;[self.downloadSession invalidateAndCancel];self.downloadSession=nil;self.downloadGeneration++;self.downloading=NO;
+    }
 }
 - (NSDictionary *)draftSnapshot {
     return @{@"name":self.nameField.text?:@"",@"port":self.portField.text?:@"",@"url":self.urlField.text?:@"",@"arguments":self.argsField.text?:@"",@"playlist":self.playlistPathField.text?:@"",@"lan":@(self.lanSwitch.on),@"code":self.code?:@"",@"options":self.optionsText?:@"",@"entryCodeEdited":@(self.entryCodeEdited)};
@@ -1298,7 +1331,7 @@
 }
 - (void)requestClose {
     if(self.applyingPortChange)return;
-    if([[self draftSnapshot] isEqual:self.initialDraft]){[self.navigationController popViewControllerAnimated:YES];return;}
+    if([[self draftSnapshot] isEqual:self.initialDraft]){[self.downloadTask cancel];self.downloadTask=nil;[self.downloadSession invalidateAndCancel];self.downloadSession=nil;self.downloadGeneration++;self.downloading=NO;[self.navigationController popViewControllerAnimated:YES];return;}
     UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"有尚未保存的更改" message:@"可以继续编辑、保存，或放弃本次更改。" preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"继续编辑" style:UIAlertActionStyleCancel handler:nil]];
     __weak typeof(self) weakSelf=self;
@@ -1342,7 +1375,7 @@
         }
     }
     NSString *playlistPath=[self.playlistPathField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    if(playlistPath.length){if(![playlistPath hasPrefix:@"/"]||[playlistPath hasPrefix:@"//"]||playlistPath.length>=128||[playlistPath containsString:@".."]||[playlistPath containsString:@"?"]||[playlistPath containsString:@"#"]||[playlistPath containsString:@"\\"]||[playlistPath containsString:@":"]||[playlistPath rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location!=NSNotFound){[self message:@"直播列表路径须以单个 / 开头，且不能包含 ..、查询参数、片段或控制字符。例：/all.m3u"];return;}service[@"playlistPath"]=playlistPath;service[@"playlistPathSource"]=@"manual";}else if(![service[@"playlistPathSource"] isEqual:@"detected"]){[service removeObjectForKey:@"playlistPath"];[service removeObjectForKey:@"playlistPathSource"];} // Keep a verified path when users save unrelated settings.
+    if(playlistPath.length){if(![playlistPath hasPrefix:@"/"]||[playlistPath hasPrefix:@"//"]||playlistPath.length>=128||[playlistPath containsString:@".."]||[playlistPath containsString:@"?"]||[playlistPath containsString:@"#"]||[playlistPath containsString:@"\\"]||[playlistPath containsString:@":"]||[playlistPath rangeOfCharacterFromSet:NSCharacterSet.whitespaceAndNewlineCharacterSet].location!=NSNotFound||[playlistPath rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location!=NSNotFound){[self message:@"直播列表路径须以单个 / 开头，且不能包含空格、..、查询参数、片段或控制字符。例：/all.m3u"];return;}service[@"playlistPath"]=playlistPath;service[@"playlistPathSource"]=@"manual";}else if(![service[@"playlistPathSource"] isEqual:@"detected"]){[service removeObjectForKey:@"playlistPath"];[service removeObjectForKey:@"playlistPathSource"];} // Keep a verified path when users save unrelated settings.
     service[@"updated"] = @(NSDate.date.timeIntervalSince1970);
     if (self.entryCodeEdited) {
         NSString *factoryPath = [self bundledFactoryCodePath];
@@ -1379,7 +1412,7 @@
         UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"端口已被占用" message:[NSString stringWithFormat:@"端口 %ld 已被“%@”使用（%@）。同时运行会冲突；只保留一个运行中的服务才能正常监听该端口。",(long)port,conflictingService[@"name"]?:conflictingService[@"id"],conflictingRunning?@"当前运行中":@"当前已停止"] preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
         __weak typeof(self) weakSelf=self;
-        [alert addAction:[UIAlertAction actionWithTitle:@"仍要保存" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[weakSelf applySaveForService:service];}]];
+        [alert addAction:[UIAlertAction actionWithTitle:@"仍要保存" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){service[@"userConfirmedPort"]=@YES;[weakSelf applySaveForService:service];}]];
         [self presentViewController:alert animated:YES completion:nil];
         return;
     }
@@ -1440,6 +1473,9 @@
 }
 - (void)applyPortChange:(NSDictionary *)service {
     if(self.applyingPortChange)return;
+    BOOL hasCustomCode=![service[@"builtin"] boolValue]&&![service[@"manifest"] isKindOfClass:NSDictionary.class];
+    NSString *codePath=hasCustomCode?[ServiceStore codePath:service]:nil;
+    NSData *previousCodeData=codePath.length?[NSData dataWithContentsOfFile:codePath]:nil;
     if(![self writeCodeForService:service])return;
     self.applyingPortChange=YES;
     self.navigationItem.rightBarButtonItem.enabled=NO;
@@ -1447,11 +1483,17 @@
     NSUInteger applyGeneration=++self.applyPortGeneration;
     self.onApplyService(self.service,service,^(NSError *error){
         dispatch_async(dispatch_get_main_queue(),^{
-            ServiceEditorViewController *owner=weakSelf;if(!owner)return;
+            ServiceEditorViewController *owner=weakSelf;if(!owner||applyGeneration!=owner.applyPortGeneration)return;
             owner.applyingPortChange=NO;
             owner.navigationItem.rightBarButtonItem.enabled=YES;
             if(error){
                 BOOL saved=[error.userInfo[@"CCTVHostServiceConfigurationSaved"] boolValue];
+                if(!saved&&codePath.length&&previousCodeData){[previousCodeData writeToFile:codePath atomically:YES];}
+                if(saved){
+                    [NSFileManager.defaultManager removeItemAtPath:[owner draftPath] error:NULL];
+                    [NSFileManager.defaultManager removeItemAtPath:[owner optionsDraftPath] error:NULL];
+                    if(owner.onSave)owner.onSave();
+                }
                 UIAlertController *alert=[UIAlertController alertControllerWithTitle:saved?@"端口已保存，服务未启动":@"端口更新失败"
                                                                                 message:error.localizedDescription?:@"请查看此服务的独立日志。"
                                                                          preferredStyle:UIAlertControllerStyleAlert];

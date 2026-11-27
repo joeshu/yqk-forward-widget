@@ -524,7 +524,8 @@ static NSCache<NSString *,NSDictionary *> *ServiceEntryAnalysisCache(void){
         NSMutableSet *usedPorts=[NSMutableSet setWithObjects:@8767,@18770,nil];
         for(NSDictionary *row in rows)if(row[@"port"])[usedPorts addObject:row[@"port"]];
         NSInteger port=[mutableService[@"port"] integerValue];
-        if(port<1024||port>65535||[usedPorts containsObject:@(port)]){
+        BOOL userConfirmed=[mutableService[@"userConfirmedPort"] boolValue];
+        if(port<1024||port>65535||(!userConfirmed&&[usedPorts containsObject:@(port)])){
             NSInteger nextPort=18780;while([usedPorts containsObject:@(nextPort)]&&nextPort<65535)nextPort++;
             mutableService[@"port"]=@(nextPort);
         }
@@ -665,15 +666,31 @@ static NSCache<NSString *,NSDictionary *> *ServiceEntryAnalysisCache(void){
         NSString *dataDir = [self dataDirectoryForService:resolved error:error];
         if (!dataDir.length) return NO;
         NSFileManager *fm = NSFileManager.defaultManager;
-        NSString *pkgRoot = [resolved[@"packageRoot"] isKindOfClass:NSString.class] ? [resolved[@"packageRoot"] stringByStandardizingPath] : @"";
-        NSString *archivePath = [resolved[@"archivePath"] isKindOfClass:NSString.class] ? [resolved[@"archivePath"] stringByStandardizingPath] : @"";
-        NSString *codeFile = [[self codePath:resolved] stringByStandardizingPath] ?: @"";
-        NSString *versionsDir = [[dataDir stringByAppendingPathComponent:@"versions"] stringByStandardizingPath];
+        NSMutableArray<NSString *> *protectedPaths = [NSMutableArray array];
+        void (^addProtected)(NSString *) = ^(NSString *rawPath) {
+            if ([rawPath isKindOfClass:NSString.class] && rawPath.length) {
+                [protectedPaths addObject:[rawPath stringByStandardizingPath]];
+            }
+        };
+        addProtected(resolved[@"packageRoot"]);
+        addProtected(resolved[@"archivePath"]);
+        addProtected([self codePath:resolved]);
+        addProtected([dataDir stringByAppendingPathComponent:@"versions"]);
+        addProtected([dataDir stringByAppendingPathComponent:@"plugin-logs"]);
+        NSDictionary *previousImport = [resolved[@"previousImport"] isKindOfClass:NSDictionary.class] ? [self resolvedService:resolved[@"previousImport"]] : nil;
+        if (previousImport) {
+            addProtected(previousImport[@"packageRoot"]);
+            addProtected(previousImport[@"archivePath"]);
+            addProtected([self codePath:previousImport]);
+        }
         for (NSString *name in [fm contentsOfDirectoryAtPath:dataDir error:NULL]) {
             NSString *fullPath = [[dataDir stringByAppendingPathComponent:name] stringByStandardizingPath];
-            if ([fullPath isEqualToString:pkgRoot] || [fullPath isEqualToString:archivePath] || [fullPath isEqualToString:codeFile] || [fullPath isEqualToString:versionsDir]) continue;
-            if (pkgRoot.length && [pkgRoot hasPrefix:[fullPath stringByAppendingString:@"/"]]) continue;
-            if (codeFile.length && [codeFile hasPrefix:[fullPath stringByAppendingString:@"/"]]) continue;
+            NSString *prefix = [fullPath stringByAppendingString:@"/"];
+            BOOL isProtected = NO;
+            for (NSString *p in protectedPaths) {
+                if ([fullPath isEqualToString:p] || [p hasPrefix:prefix]) { isProtected = YES; break; }
+            }
+            if (isProtected) continue;
             [fm removeItemAtPath:fullPath error:NULL];
         }
         return YES;

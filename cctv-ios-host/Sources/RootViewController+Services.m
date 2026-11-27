@@ -79,7 +79,7 @@ static NSArray *CCTVBackupServices(NSError **error) {
     };
     page.onUse=^(NSDictionary *item,NSString *kind){[weakSelf usePluginService:item kind:kind];};
     page.onLog=^(NSDictionary *item){[weakSelf openDiagnosticLogForIdentifier:item[@"id"] name:item[@"name"]];};page.onEdit=^(NSDictionary *item){[weakSelf openServiceEditorForService:item];};page.onRemove=^(NSDictionary *item){RootViewController *owner=weakSelf;if([PyHost isManagedServiceIdentifier:item[@"id"]]){[owner showServiceError:@"请先停止此资源服务，再移除代码和配置。"];return;}[ServiceStore remove:item[@"id"]];[owner.navigationController popViewControllerAnimated:YES];[owner refreshConfigurationPage];};
-    page.onUpdate=^(NSDictionary *item){RootViewController *owner=weakSelf;[owner downloadPackageURL:[NSURL URLWithString:item[@"url"]] headers:item[@"importHeaders"] completion:^(NSDictionary *value,NSError *error){[weakSelf acceptImportedMedia:value error:error];}];};
+    page.onUpdate=^(NSDictionary *item){RootViewController *owner=weakSelf;if(!owner)return;NSURL *updateURL=CCTVURLFromPossiblyUnescapedString([item[@"url"] isKindOfClass:NSString.class]?item[@"url"]:@"");if(!updateURL){[owner showServiceError:@"此资源缺少有效的更新地址"];return;}[owner downloadPackageURL:updateURL headers:item[@"importHeaders"] completion:^(NSDictionary *value,NSError *error){[weakSelf acceptImportedMedia:value error:error];}];};
     __weak PluginResourceDetailViewController *weakPage=page;
     page.onRollback=^(NSDictionary *item){RootViewController *owner=weakSelf;dispatch_block_t rollback=^{NSError *error=nil;NSDictionary *restored=[ServiceStore rollbackImportedService:item error:&error];if(!restored){[owner showServiceError:error.localizedDescription];return;}weakPage.service=restored;[weakPage.tableView reloadData];[owner refreshConfigurationPage];};if([PyHost isManagedServiceIdentifier:item[@"id"]])[owner changeService:item enabled:NO completion:^(NSError *error){if(error)[owner showServiceError:error.localizedDescription];else rollback();}];else rollback();};
     if(self.activeTab==3)[(ConfigCenterViewController *)self.tabPages[@3] prepareForNavigationTransition];
@@ -209,7 +209,8 @@ static NSArray *CCTVBackupServices(NSError **error) {
     [self downloadPackageURL:url headers:headers runtimeHint:nil completion:completion];
 }
 - (void)downloadPackageURL:(NSURL *)url headers:(NSDictionary<NSString *,NSString *> *)headers runtimeHint:(NSString *)runtimeHint completion:(void (^)(NSDictionary *,NSError *))completion {
-    [self.packageDownloader cancel];MediaPackageDownloader *downloader=[MediaPackageDownloader new];self.packageDownloader=downloader;
+    if(self.packageDownloader){[self.packageDownloader cancel];self.pendingTVBoxSiteName=nil;self.pendingTVBoxExt=nil;}
+    MediaPackageDownloader *downloader=[MediaPackageDownloader new];self.packageDownloader=downloader;
     NSString *title=[runtimeHint isEqual:@"node"]?@"导入 Node.js Mobile 资源":([runtimeHint isEqual:@"python"]?@"导入 Python Spider":@"导入影视 / 插件资源");UIAlertController *progress=[UIAlertController alertControllerWithTitle:title message:@"准备下载…" preferredStyle:UIAlertControllerStyleAlert];
     __weak typeof(self) weakSelf=self;__weak UIAlertController *weakProgress=progress;__block BOOL delivered=NO;__block NSString *lastStage=nil;NSString *traceID=NSUUID.UUID.UUIDString.lowercaseString;
     [RuntimeDiagnostics.shared recordEvent:@"resource_import_started" category:@"import" fields:@{@"correlation_id":traceID, @"source_host":url.host?:@"", @"source_extension":url.pathExtension?:@""}];
@@ -251,8 +252,8 @@ static NSArray *CCTVBackupServices(NSError **error) {
     UIAlertController *credential=[UIAlertController alertControllerWithTitle:@"Hawk iOS 资源访问令牌" message:message preferredStyle:UIAlertControllerStyleAlert];
     [credential addTextFieldWithConfigurationHandler:^(UITextField *field){field.placeholder=@"token 或完整订阅链接";field.secureTextEntry=YES;field.autocorrectionType=UITextAutocorrectionTypeNo;field.autocapitalizationType=UITextAutocapitalizationTypeNone;field.clearButtonMode=UITextFieldViewModeWhileEditing;}];
     [credential addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    __weak typeof(self) weakSelf=self;
-    [credential addAction:[UIAlertAction actionWithTitle:@"保存并重试该站点" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){RootViewController *owner=weakSelf;if(!owner)return;NSString *entered=CCTVTVBoxTokenFromInput(credential.textFields.firstObject.text?:@"");if(!entered.length){[owner showServiceError:@"请输入有效的订阅令牌或完整订阅链接"];return;}if(!CCTVTVBoxSaveSubscriptionToken(entered)){[owner showServiceError:@"令牌未能保存到本机钥匙串，请检查设备设置后重试"];return;}NSString *resolvedURL=CCTVTVBoxURLByResolvingToken(rawAPI,entered);if(!resolvedURL.length){[owner showServiceError:@"无法将订阅令牌应用到此站点地址"];return;}NSMutableDictionary *resolvedSite=[site mutableCopy];resolvedSite[@"api"]=resolvedURL;dispatch_async(dispatch_get_main_queue(),^{[owner importTVBoxSite:resolvedSite browseAfterImport:browseAfterImport];});}]];
+    __weak typeof(self) weakSelf=self;__weak UIAlertController *weakCredential=credential;
+    [credential addAction:[UIAlertAction actionWithTitle:@"保存并重试该站点" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){RootViewController *owner=weakSelf;if(!owner)return;NSString *entered=CCTVTVBoxTokenFromInput(weakCredential.textFields.firstObject.text?:@"");if(!entered.length){[owner showServiceError:@"请输入有效的订阅令牌或完整订阅链接"];return;}if(!CCTVTVBoxSaveSubscriptionToken(entered)){[owner showServiceError:@"令牌未能保存到本机钥匙串，请检查设备设置后重试"];return;}NSString *resolvedURL=CCTVTVBoxURLByResolvingToken(rawAPI,entered);if(!resolvedURL.length){[owner showServiceError:@"无法将订阅令牌应用到此站点地址"];return;}NSMutableDictionary *resolvedSite=[site mutableCopy];resolvedSite[@"api"]=resolvedURL;dispatch_async(dispatch_get_main_queue(),^{[owner importTVBoxSite:resolvedSite browseAfterImport:browseAfterImport];});}]];
     [self presentViewController:credential animated:YES completion:nil];
 }
 - (void)reportAuthenticTVBoxSiteFailure:(NSDictionary *)site rawAPI:(NSString *)rawAPI url:(NSURL *)downloadURL error:(NSError *)error browseAfterImport:(BOOL)browseAfterImport {
@@ -303,8 +304,10 @@ static NSArray *CCTVBackupServices(NSError **error) {
                 updated[@"tvboxCatalogID"]=catalogID;
                 updated[@"tvboxSiteKey"]=siteKey;
                 NSMutableDictionary *manifest=[updated[@"manifest"] mutableCopy]?:[NSMutableDictionary dictionary];
-                if([site[@"ext"] length])manifest[@"options"]=site[@"ext"];
-                if([site[@"name"] length]){manifest[@"name"]=site[@"name"];updated[@"name"]=site[@"name"];}
+                NSString *siteExt=[site[@"ext"] isKindOfClass:NSString.class]?site[@"ext"]:@"";
+                NSString *siteName=[site[@"name"] isKindOfClass:NSString.class]?site[@"name"]:@"";
+                if(siteExt.length)manifest[@"options"]=siteExt;
+                if(siteName.length){manifest[@"name"]=siteName;updated[@"name"]=siteName;}
                 updated[@"manifest"]=manifest;
             }
             dispatch_async(dispatch_get_main_queue(), ^{[self acceptImportedMedia:updated error:error autoBrowse:browseAfterImport];});
@@ -458,7 +461,9 @@ static NSArray *CCTVBackupServices(NSError **error) {
             [runtimeOptions addEntriesFromDictionary:credentials];runtimeManifest[@"options"]=runtimeOptions;
         }
         NSData *data=[NSJSONSerialization dataWithJSONObject:runtimeManifest options:0 error:error];if(!data)return NO;
-        [args addObjectsFromArray:@[[NSString stringWithFormat:@"%ld",(long)port],@"--bind",bind,@"--package",service[@"packageRoot"],@"--manifest",[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding],@"--data-dir",dataDir]];
+        NSString *packageRoot=[service[@"packageRoot"] isKindOfClass:NSString.class]?service[@"packageRoot"]:@"";
+        if(!packageRoot.length){if(error)*error=[NSError errorWithDomain:@"CCTVHostService" code:5 userInfo:@{NSLocalizedDescriptionKey:@"媒体服务缺少有效的包目录配置"}];return NO;}
+        [args addObjectsFromArray:@[[NSString stringWithFormat:@"%ld",(long)port],@"--bind",bind,@"--package",packageRoot,@"--manifest",[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding],@"--data-dir",dataDir]];
     }else if([service[@"builtin"] boolValue]){
         [args addObjectsFromArray:@[[NSString stringWithFormat:@"%ld",(long)port],@"--bind",bind,@"--data-dir",dataDir]];
         if(![service[@"id"] isEqual:@"builtin-yangshipin-js"])[args addObjectsFromArray:@[@"--no-engine",@"--cache-mb",@"32",@"--links-per-device",@"2",@"--zap-debounce",@"15",@"--stable-playback"]];
@@ -528,10 +533,11 @@ static NSArray *CCTVBackupServices(NSError **error) {
 }
 - (void)changeService:(NSDictionary *)service enabled:(BOOL)enabled completion:(void (^)(NSError *))completion {
     NSString *serviceID=service[@"id"]?:@"";if(!self.serviceOperations)self.serviceOperations=[NSMutableSet set];
-    if([self.serviceOperations containsObject:serviceID]){if(completion)completion([NSError errorWithDomain:@"CCTVHostService" code:4 userInfo:@{NSLocalizedDescriptionKey:@"该服务正在启停，请稍候。"}]);return;}
+    if([self.serviceOperations containsObject:serviceID]){[self refreshConfigurationPage];if(completion)completion([NSError errorWithDomain:@"CCTVHostService" code:4 userInfo:@{NSLocalizedDescriptionKey:@"该服务正在启停，请稍候。"}]);return;}
     if(enabled && [PyHost isRunningServiceIdentifier:serviceID]){
         int port=[service[@"port"] intValue];
         if(port>0){
+            [self.serviceOperations addObject:serviceID];
             __weak typeof(self) weakSelf=self;
             dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
                 BOOL needsRestart=NO;
@@ -543,6 +549,7 @@ static NSArray *CCTVBackupServices(NSError **error) {
                 dispatch_async(dispatch_get_main_queue(),^{
                     RootViewController *owner=weakSelf;
                     if(!owner){if(completion)completion(nil);return;}
+                    [owner.serviceOperations removeObject:serviceID];
                     if(needsRestart){[owner restartMediaService:service completion:completion];return;}
                     [owner refreshConfigurationPage];if(completion)completion(nil);
                 });
@@ -601,7 +608,6 @@ static NSArray *CCTVBackupServices(NSError **error) {
     [(MediaBrowserViewController *)self.tabPages[@2] invalidateServiceIdentifier:serviceID];
     NSDictionary *stopped=nil;for(NSDictionary *service in [ServiceStore services])if([service[@"id"] isEqualToString:serviceID]){stopped=service;break;}if(serviceID.length){[self logPluginLine:@"插件服务已停止" identifier:serviceID name:stopped[@"name"]?:@"插件"];[PluginLogStore.shared finishRunForIdentifier:serviceID status:@"已停止"];}
     for(NSString *source in self.subscriptionURLs.allObjects){NSDictionary *owner=[self localServiceForURL:[NSURL URLWithString:source]];if([owner[@"id"] isEqual:serviceID]){[ProfileStore update:source values:@{@"status":@"服务已停止 · 保留最近一次频道清单"}];[NSNotificationCenter.defaultCenter postNotificationName:ProfileStoreMetadataDidChangeNotification object:source];}}
-    for(NSString *origin in self.readyLocalOrigins.allKeys.copy){for(NSDictionary *service in [ServiceStore services])if([service[@"id"] isEqualToString:serviceID] && [origin containsString:[NSString stringWithFormat:@":%@",service[@"port"]]])[self.readyLocalOrigins removeObjectForKey:origin];}
     if(stopped[@"port"]){NSInteger stoppedPort=[stopped[@"port"] integerValue];for(NSString *origin in self.readyLocalOrigins.allKeys.copy)if([NSURL URLWithString:origin].port.integerValue==stoppedPort)[self.readyLocalOrigins removeObjectForKey:origin];for(NSString *key in self.subscriptionReadiness.allKeys.copy){NSDictionary *owner=[self localServiceForURL:[NSURL URLWithString:key]];if([owner[@"id"] isEqualToString:serviceID]){[self.subscriptionReadiness[key] cancel];[self.subscriptionReadiness removeObjectForKey:key];}}}
     NSDictionary *currentService=[self localServiceForURL:[NSURL URLWithString:self.currentRemoteURL?:@""]];
     if([currentService[@"id"] isEqualToString:serviceID]){
@@ -694,7 +700,7 @@ static NSArray *CCTVBackupServices(NSError **error) {
         NSError *restoreError=nil;if(![HostBackup restore:backup error:&restoreError]){[self showServiceError:restoreError.localizedDescription?:@"恢复配置失败"];return;}
         NSSet *restoredSources=[NSSet setWithArray:backup[@"subscriptions"]?:@[]];
         for(NSString *source in self.subscriptionURLs.allObjects){self.subscriptionRequestVersions[source]=@([self.subscriptionRequestVersions[source] unsignedIntegerValue]+1);[self.subscriptionTasks[source] cancel];[self.subscriptionTasks removeObjectForKey:source];[self.subscriptionEditTasks[source] cancel];[self.subscriptionEditTasks removeObjectForKey:source];if(![restoredSources containsObject:source])[self removeSubscriptionSource:source];}
-        NSDictionary *versions=self.subscriptionRequestVersions.copy;[self loadChannels];[self.subscriptionRequestVersions addEntriesFromDictionary:versions];self.recents=[[HostLibraryStore.shared recents] mutableCopy]?:[NSMutableArray array];self.activeSource=nil;self.gridMode=CCTVBoolPreference(@"channelGridMode",YES);NSInteger restoredCols=[NSUserDefaults.standardUserDefaults integerForKey:@"cctv.channelGridColumns.v1"];self.gridColumns=(restoredCols==3)?3:4;self.channelSortMode=[NSUserDefaults.standardUserDefaults integerForKey:@"cctv.channelSortMode.v1"];if(self.channelSortMode<0||self.channelSortMode>2)self.channelSortMode=0;[RuntimeDiagnostics.shared setEnabled:CCTVBoolPreference(@"runtimeDiagnosticsEnabled",NO)];MediaAdaptationMonitor.shared.monitoringEnabled=CCTVBoolPreference(@"cctv.adaptationMonitor.enabled",YES);[self configureSDKLogging];for(NSString *source in self.subscriptionURLs)[self fetchSubscription:source silent:YES];[self activateAudioSession];[self configureCatalogNavigation];[self applyFilter];[self selectBottomTab:(UIButton *)self.bottomBar.arrangedSubviews.firstObject];
+        NSDictionary *versions=self.subscriptionRequestVersions.copy;[self loadChannels];[self.subscriptionRequestVersions addEntriesFromDictionary:versions];self.recents=[[HostLibraryStore.shared recents] mutableCopy]?:[NSMutableArray array];self.activeSource=nil;self.gridMode=CCTVBoolPreference(@"channelGridMode",YES);NSInteger restoredCols=[NSUserDefaults.standardUserDefaults integerForKey:@"cctv.channelGridColumns.v1"];self.gridColumns=(restoredCols==3)?3:4;self.channelSortMode=[NSUserDefaults.standardUserDefaults integerForKey:@"cctv.channelSortMode.v1"];if(self.channelSortMode<0||self.channelSortMode>2)self.channelSortMode=0;[RuntimeDiagnostics.shared setEnabled:CCTVBoolPreference(@"runtimeDiagnosticsEnabled",NO)];MediaAdaptationMonitor.shared.monitoringEnabled=CCTVBoolPreference(@"cctv.adaptationMonitor.enabled",YES);[self configureSDKLogging];for(NSString *source in self.subscriptionURLs.allObjects)[self fetchSubscription:source silent:YES];[self activateAudioSession];[self configureCatalogNavigation];[self applyFilter];[self selectBottomTab:(UIButton *)self.bottomBar.arrangedSubviews.firstObject];
         // 备份里的主题与字号刚恢复：立即应用到窗口并重刷可见页面，
         // 否则要等下次启动才生效。
         UIWindow *window=self.view.window;if(window){HostApplyThemeToWindow(window);HostStyleNavigation(self.navigationController);HostRefreshAppearanceLayers(window);}[self reloadThemeAppearance];[self applyFontSizeOverride];MediaBrowserViewController *browser=(MediaBrowserViewController *)self.tabPages[@2];if(browser)[browser reloadMediaDisplayConfigurationIfLoaded];[NSNotificationCenter.defaultCenter postNotificationName:CCTVMediaEpisodeLayoutStyleDidChangeNotification object:nil];[self.table reloadData];[self.view setNeedsLayout];

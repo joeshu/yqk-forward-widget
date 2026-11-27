@@ -19,7 +19,14 @@
 @end
 @implementation XMLTVReader
 - (instancetype)init {if(self=[super init]){_channels=[NSMutableDictionary dictionary];_aliases=[NSMutableDictionary dictionary];_formatter=[NSDateFormatter new];_formatter.locale=[NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];_formatter.timeZone=[NSTimeZone timeZoneForSecondsFromGMT:0];_formatter.dateFormat=@"yyyyMMddHHmmss Z";}return self;}
-- (NSTimeInterval)timestamp:(NSString *)s {if(!s.length)return 0;NSString *value=s;if(s.length==14)value=[s stringByAppendingString:@" +0000"];return [[self.formatter dateFromString:value] timeIntervalSince1970];}
+- (NSTimeInterval)timestamp:(NSString *)s {
+    if(!s.length)return 0;
+    NSString *value=[s stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if(value.length==14)value=[value stringByAppendingString:@" +0000"];
+    else if(value.length==15&&([value hasSuffix:@"Z"]||[value hasSuffix:@"z"]))value=[[value substringToIndex:14] stringByAppendingString:@" +0000"];
+    else if(value.length==19&&([value characterAtIndex:14]=='+'||[value characterAtIndex:14]=='-'))value=[NSString stringWithFormat:@"%@ %@",[value substringToIndex:14],[value substringFromIndex:14]];
+    return [[self.formatter dateFromString:value] timeIntervalSince1970];
+}
 - (void)parser:(NSXMLParser *)p didStartElement:(NSString *)e namespaceURI:(NSString *)n qualifiedName:(NSString *)q attributes:(NSDictionary *)a {
     self.element=e;self.text=[NSMutableString string];
     if([e isEqual:@"channel"])self.channel=a[@"id"];
@@ -43,6 +50,7 @@ static const NSUInteger XMLTVDiskFileCountLimit = 32;
 @property(nonatomic,strong) NSMutableDictionary *cache;
 @property(nonatomic,strong) NSMutableDictionary *tasks;
 @property(nonatomic,strong) NSMutableDictionary *callbacks;
+@property(nonatomic,strong) NSMutableSet<NSString *> *forcedSources;
 @property(nonatomic,assign) BOOL paused;
 @property(nonatomic,assign) NSUInteger generation;
 @property(nonatomic,strong) dispatch_queue_t diskQueue;
@@ -50,7 +58,7 @@ static const NSUInteger XMLTVDiskFileCountLimit = 32;
 - (void)evictDiskCacheLocked;
 @end
 @implementation XMLTVStore
-+ (instancetype)shared {static XMLTVStore *s;static dispatch_once_t once;dispatch_once(&once,^{s=[self new];s.cache=[NSMutableDictionary dictionary];s.tasks=[NSMutableDictionary dictionary];s.callbacks=[NSMutableDictionary dictionary];s.diskQueue=dispatch_queue_create("com.cctvhost.xmltv",DISPATCH_QUEUE_SERIAL);
++ (instancetype)shared {static XMLTVStore *s;static dispatch_once_t once;dispatch_once(&once,^{s=[self new];s.cache=[NSMutableDictionary dictionary];s.tasks=[NSMutableDictionary dictionary];s.callbacks=[NSMutableDictionary dictionary];s.forcedSources=[NSMutableSet set];s.diskQueue=dispatch_queue_create("com.cctvhost.xmltv",DISPATCH_QUEUE_SERIAL);
 #if TARGET_OS_IOS
     [NSNotificationCenter.defaultCenter addObserver:s selector:@selector(evictMemoryCache) name:UIApplicationDidReceiveMemoryWarningNotification object:nil];
 #endif
@@ -96,26 +104,38 @@ invalid:
         _paused=paused;if(!paused)return;self.generation++;
         tasksToCancel=[self.tasks.allValues copy];[self.tasks removeAllObjects];
         pending=[self.callbacks copy];[self.callbacks removeAllObjects];
+        [self.forcedSources removeAllObjects];
     }
     for(NSURLSessionDataTask *task in tasksToCancel)[task cancel];
-    for(NSArray *blocks in pending.allValues)for(void (^block)(NSDictionary *,NSError *) in blocks)block(nil,[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil]);
+    if(!pending.count)return;
+    void (^notifyCancelled)(void)=^{
+        NSError *err=[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil];
+        for(NSArray *blocks in pending.allValues)for(void (^block)(NSDictionary *,NSError *) in blocks)block(nil,err);
+    };
+    if(NSThread.isMainThread)notifyCancelled();
+    else dispatch_async(dispatch_get_main_queue(),notifyCancelled);
 }
 - (void)loadSource:(NSString *)source channel:(NSString *)identifier force:(BOOL)force completion:(void (^)(NSArray<NSDictionary *> *,NSError *))completion {
     if(![ProfileStore isHTTP:source]){completion(@[],[NSError errorWithDomain:@"XMLTV" code:2 userInfo:@{NSLocalizedDescriptionKey:@"请先配置有效的 XMLTV 地址。"}]);return;}
-    if(self.paused){NSArray *rows=[self cachedRowsForSource:source channel:identifier];completion(rows,rows.count?nil:[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil]);return;}
     void (^finish)(NSDictionary *,NSError *)=^(NSDictionary *cache,NSError *error){completion(cache[@"rows"][identifier.lowercaseString]?:@[],error);};
-    NSUInteger generation=0;NSDictionary *memory=nil;BOOL joinedExisting=NO;
+    NSUInteger generation=0;NSDictionary *memory=nil;BOOL joinedExisting=NO;BOOL isPaused=NO;NSArray *pausedRows=nil;
     @synchronized(self){
-        if(self.callbacks[source]){[self.callbacks[source] addObject:[finish copy]];joinedExisting=YES;}
-        else{self.callbacks[source]=[NSMutableArray arrayWithObject:[finish copy]];generation=self.generation;memory=self.cache[source];}
+        if(_paused){isPaused=YES;pausedRows=self.cache[source][@"rows"][identifier.lowercaseString]?:@[];}
+        else if(self.callbacks[source]){if(force)[self.forcedSources addObject:source];[self.callbacks[source] addObject:[finish copy]];joinedExisting=YES;}
+        else{self.callbacks[source]=[NSMutableArray arrayWithObject:[finish copy]];if(force)[self.forcedSources addObject:source];generation=self.generation;memory=self.cache[source];}
     }
+    if(isPaused){completion(pausedRows,pausedRows.count?nil:[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil]);return;}
     if(joinedExisting)return;
     NSString *path=[self pathForSource:source];
     dispatch_async(self.diskQueue,^{[self evictDiskCacheLocked];NSDictionary *cached=memory?:[NSDictionary dictionaryWithContentsOfFile:path]; if(cached){ [[NSFileManager defaultManager] setAttributes:@{NSFileModificationDate:NSDate.date} ofItemAtPath:path error:NULL]; } dispatch_async(dispatch_get_main_queue(),^{
-        if(generation!=self.generation)return;
-        if(cached){@synchronized(self){self.cache[source]=cached;}}
+        BOOL effectiveForce=force;
+        @synchronized(self){
+            if(generation!=self.generation||_paused)return;
+            if(cached)self.cache[source]=cached;
+            if([self.forcedSources containsObject:source])effectiveForce=YES;
+        }
         NSTimeInterval age=NSDate.date.timeIntervalSince1970-[cached[@"ts"] doubleValue];
-        if(!force&&cached&&age>=0&&age<6*3600){[self complete:source cache:cached error:nil];return;}
+        if(!effectiveForce&&cached&&age>=0&&age<6*3600){[self complete:source cache:cached error:nil];return;}
         NSURL *requestURL=[NSURL URLWithString:source];
         if(!requestURL){[self complete:source cache:cached error:[NSError errorWithDomain:@"XMLTV" code:2 userInfo:@{NSLocalizedDescriptionKey:@"请先配置有效的 XMLTV 地址。"}]];return;}
         NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:requestURL];request.timeoutInterval=20;
@@ -127,7 +147,13 @@ invalid:
                 NSDictionary *entry=rows?@{@"rows":rows,@"ts":@(NSDate.date.timeIntervalSince1970)}:cached;
                 dispatch_async(dispatch_get_main_queue(),^{if(generation!=self.generation)return;if(entry){@synchronized(self){self.cache[source]=entry;}}[self complete:source cache:entry error:parseError];if(rows)dispatch_async(self.diskQueue,^{NSData *encoded=[NSPropertyListSerialization dataWithPropertyList:entry format:NSPropertyListBinaryFormat_v1_0 options:0 error:NULL];if(encoded.length&&encoded.length<=XMLTVDiskEntryLimit){[encoded writeToFile:path options:NSDataWritingAtomic error:NULL];[self evictDiskCacheLocked];}});});
             });
-        });@synchronized(self){self.tasks[source]=task;}[task resume];
+        });
+        BOOL shouldResume=NO;
+        @synchronized(self){
+            if(generation==self.generation&&!_paused){self.tasks[source]=task;shouldResume=YES;}
+        }
+        if(shouldResume)[task resume];
+        else [task cancel];
     });});
 }
 - (void)evictDiskCacheLocked {
@@ -136,7 +162,7 @@ invalid:
     [items sortUsingComparator:^NSComparisonResult(NSDictionary *a,NSDictionary *b){return [a[@"date"] compare:b[@"date"]];}];
     while(items.count>XMLTVDiskFileCountLimit||total>XMLTVDiskTotalLimit){NSDictionary *oldest=items.firstObject;if(!oldest)break;total-=[oldest[@"size"] unsignedLongLongValue];[NSFileManager.defaultManager removeItemAtPath:oldest[@"path"] error:NULL];[items removeObjectAtIndex:0];}
 }
-- (void)complete:(NSString *)source cache:(NSDictionary *)cache error:(NSError *)error {NSArray *blocks=nil;@synchronized(self){blocks=[self.callbacks[source] copy];[self.callbacks removeObjectForKey:source];[self.tasks removeObjectForKey:source];}for(void (^block)(NSDictionary *,NSError *) in blocks)block(cache,error);}
+- (void)complete:(NSString *)source cache:(NSDictionary *)cache error:(NSError *)error {NSArray *blocks=nil;@synchronized(self){blocks=[self.callbacks[source] copy];[self.callbacks removeObjectForKey:source];[self.tasks removeObjectForKey:source];[self.forcedSources removeObject:source];}for(void (^block)(NSDictionary *,NSError *) in blocks)block(cache,error);}
 - (void)evictMemoryCache {if(NSThread.isMainThread){@synchronized(self){[self.cache removeAllObjects];}}else dispatch_async(dispatch_get_main_queue(),^{@synchronized(self){[self.cache removeAllObjects];}});}
 - (void)clear {[self setPaused:YES];@synchronized(self){[self.cache removeAllObjects];}NSString *dir=[[self pathForSource:@"clear"] stringByDeletingLastPathComponent];dispatch_async(self.diskQueue,^{@synchronized(self){[NSFileManager.defaultManager removeItemAtPath:dir error:NULL];[NSFileManager.defaultManager createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:NULL];}});[self setPaused:NO];}
 @end

@@ -402,21 +402,32 @@ static NSString *ServiceResolvedVersionText(NSDictionary *service){
     return @"已停止 · 端口状态未知";
 }
 - (void)refreshCurrentRunStart {
-    NSString *value=nil;
-    if([self running]){
-        NSArray<NSDictionary *> *runs=[PluginLogStore.shared runsForIdentifier:self.service[@"id"]];
+    if(![self running]){
+        if(self.currentRunStartedAt){self.currentRunStartedAt=nil;if(self.isViewLoaded&&self.view.window)[self.tableView reloadSections:[NSIndexSet indexSetWithIndex:2] withRowAnimation:UITableViewRowAnimationNone];}
+        return;
+    }
+    NSString *identifier=[self.service[@"id"] isKindOfClass:NSString.class]?self.service[@"id"]:@"";
+    if(!identifier.length)return;
+    __weak typeof(self) weakSelf=self;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{
+        NSString *value=nil;
+        NSArray<NSDictionary *> *runs=[PluginLogStore.shared runsForIdentifier:identifier];
         for(NSDictionary *record in runs){
             if([record[@"legacy"] boolValue])continue;
             NSTimeInterval started=[record[@"startedAt"] doubleValue];
             if(started>0){value=ServiceFormatDateWithPattern([NSDate dateWithTimeIntervalSince1970:started],@"yyyy-MM-dd HH:mm");break;}
         }
-    }
-    if((value&&![value isEqualToString:self.currentRunStartedAt])||(!value&&self.currentRunStartedAt)){self.currentRunStartedAt=value;if(self.isViewLoaded&&self.view.window)[self.tableView reloadSections:[NSIndexSet indexSetWithIndex:2] withRowAnimation:UITableViewRowAnimationNone];}
+        dispatch_async(dispatch_get_main_queue(),^{
+            ServiceDetailViewController *owner=weakSelf;if(!owner||![owner running])return;
+            if((value&&![value isEqualToString:owner.currentRunStartedAt])||(!value&&owner.currentRunStartedAt)){owner.currentRunStartedAt=value;if(owner.isViewLoaded&&owner.view.window)[owner.tableView reloadSections:[NSIndexSet indexSetWithIndex:2] withRowAnimation:UITableViewRowAnimationNone];}
+        });
+    });
 }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
     return 5;
 }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    if (section == 2 && [ServiceStore subscriptionURLForService:self.service].length > 0) return 13;
     return section == 0   ? 2
            : section == 1 ? 3
            : section == 2 ? ([ServiceStore isLiveMediaService:self.service]?13:7)
@@ -917,7 +928,7 @@ static NSString *ServiceResolvedVersionText(NSDictionary *service){
     self.runtimeSummary.text=[NSString stringWithFormat:@"运行 %lu · 待处理 %lu · 已停止 %lu",(unsigned long)running.count,(unsigned long)pending.count,(unsigned long)stopped.count];
     NSInteger scope=self.statusFilter.selectedSegmentIndex;if(scope>0){NSArray *chosen=@[running,pending,stopped][scope-1];visibleSections=[NSMutableArray array];titles=[NSMutableArray array];if(chosen.count){[visibleSections addObject:chosen];[titles addObject:@[@"运行时活跃 · HTTP 状态单独检测",@"启停结果待确认",@"已停止"][scope-1]];}}
     self.sections=visibleSections;self.sectionTitles=titles;
-    self.emptyLabel.hidden=filtered.count>0;
+    self.emptyLabel.hidden=visibleSections.count>0;
     [self.table reloadData];
 }
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController {
@@ -927,7 +938,7 @@ static NSString *ServiceResolvedVersionText(NSDictionary *service){
     if(self.onImportResource){
         __weak typeof(self) weakSelf=self;
         NSArray<HostGlassSheetAction *> *actions=@[
-            [HostGlassSheetAction actionWithTitle:@"导入资源 · URL / 文件 / 文件夹" subtitle:@"自动识别 M3U、TVBox 合集或本地脚本" value:nil icon:@"square.and.arrow.down.on.square" tint:HostAccent() destructive:NO selected:NO handler:^{if(weakSelf.onImportResource)self.onImportResource();}],
+            [HostGlassSheetAction actionWithTitle:@"导入资源 · URL / 文件 / 文件夹" subtitle:@"自动识别 M3U、TVBox 合集或本地脚本" value:nil icon:@"square.and.arrow.down.on.square" tint:HostAccent() destructive:NO selected:NO handler:^{ServicesViewController *self=weakSelf;if(self.onImportResource)self.onImportResource();}],
             [HostGlassSheetAction actionWithTitle:@"添加 Python HTTP 服务" subtitle:@"手动新建自定义本机脚本与端口配置" value:nil icon:@"terminal.fill" tint:UIColor.systemBlueColor destructive:NO selected:NO handler:^{ServiceEditorViewController *editor=[ServiceEditorViewController new];[weakSelf.navigationController pushViewController:editor animated:YES];}]
         ];
         [HostGlassActionSheetViewController presentOn:self
@@ -1015,7 +1026,34 @@ static NSString *ServiceResolvedVersionText(NSDictionary *service){
         NSMutableArray<UIAction *> *actions=[NSMutableArray array];
         [actions addObject:[UIAction actionWithTitle:managed?@"停止服务":@"启动服务" image:[UIImage systemImageNamed:managed?@"stop.circle":@"play.circle"] identifier:nil handler:^(__unused UIAction *a){[weakSelf performServiceChange:service enabled:!managed];}]];
         if(running&&weakSelf.onRestartService){
-            [actions addObject:[UIAction actionWithTitle:@"重启服务" image:[UIImage systemImageNamed:@"arrow.triangle.2.circlepath"] identifier:nil handler:^(__unused UIAction *a){weakSelf.onRestartService(service,^(NSError *error){dispatch_async(dispatch_get_main_queue(),^{weakSelf.displayedRunningID=nil;[weakSelf refresh];});});}]];
+            [actions addObject:[UIAction actionWithTitle:@"重启服务" image:[UIImage systemImageNamed:@"arrow.triangle.2.circlepath"] identifier:nil handler:^(__unused UIAction *a){
+                ServicesViewController *owner=weakSelf;if(!owner||!owner.onRestartService)return;
+                if(!owner.changingServiceIDs)owner.changingServiceIDs=[NSMutableSet set];
+                if(!owner.changingServiceTargets)owner.changingServiceTargets=[NSMutableDictionary dictionary];
+                if(!owner.changingServiceGenerations)owner.changingServiceGenerations=[NSMutableDictionary dictionary];
+                if([owner.changingServiceIDs containsObject:identifier])return;
+                NSUInteger opGen=[owner.changingServiceGenerations[identifier] unsignedIntegerValue]+1;
+                owner.changingServiceGenerations[identifier]=@(opGen);
+                [owner.changingServiceIDs addObject:identifier];owner.changingServiceTargets[identifier]=@YES;[owner.table reloadData];
+                owner.onRestartService(service,^(NSError *error){
+                    dispatch_async(dispatch_get_main_queue(),^{
+                        ServicesViewController *cb=weakSelf;if(!cb||[cb.changingServiceGenerations[identifier] unsignedIntegerValue]!=opGen)return;
+                        [cb.changingServiceIDs removeObject:identifier];[cb.changingServiceTargets removeObjectForKey:identifier];
+                        cb.displayedRunningID=nil;[cb refresh];
+                        if(error){
+                            UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"重启服务失败" message:error.localizedDescription?:@"服务未重新启动，请查看运行日志。" preferredStyle:UIAlertControllerStyleAlert];
+                            if(cb.onOpenLog)[alert addAction:[UIAlertAction actionWithTitle:@"查看日志" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act){cb.onOpenLog(service);}]];
+                            [alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleCancel handler:nil]];
+                            [cb presentViewController:alert animated:YES completion:nil];
+                        }
+                    });
+                });
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW,30*NSEC_PER_SEC),dispatch_get_main_queue(),^{
+                    ServicesViewController *to=weakSelf;if(!to||[to.changingServiceGenerations[identifier] unsignedIntegerValue]!=opGen||![to.changingServiceIDs containsObject:identifier])return;
+                    [to.changingServiceIDs removeObject:identifier];[to.changingServiceTargets removeObjectForKey:identifier];
+                    to.displayedRunningID=nil;[to refresh];
+                });
+            }]];
         }
         if(weakSelf.onOpenResource){
             [actions addObject:[UIAction actionWithTitle:@"打开资源详情与配置" image:[UIImage systemImageNamed:@"slider.horizontal.3"] identifier:nil handler:^(__unused UIAction *a){weakSelf.onOpenResource(service);}]];

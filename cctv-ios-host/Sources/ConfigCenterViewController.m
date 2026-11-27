@@ -185,6 +185,7 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
 @property(nonatomic, strong) UIButton *emptyActionButton;
 @property(nonatomic, strong) UILabel *toastLabel;
 @property(nonatomic, assign) NSUInteger searchGeneration;
+@property(nonatomic, assign) NSUInteger probeGeneration;
 @property(nonatomic,strong) NSMutableDictionary<NSString *,NSDictionary *> *latencyResults;
 @property(nonatomic,strong) NSMutableDictionary<NSString *,NSString *> *detailSummaryCache;
 @property(nonatomic,strong) NSCache<NSString *,NSNumber *> *rowHeightCache;
@@ -243,6 +244,7 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
 - (void)persistUnifiedOrderWithProfiles:(NSArray<NSDictionary *> *)orderedProfiles;
 - (void)openServices;
 - (void)openAdaptationMonitor;
+- (void)reloadProfilesForcingTableReload:(BOOL)force;
 - (void)reloadVisibleRowForSource:(NSString *)source;
 - (void)showResourceToast:(NSString *)message;
 - (void)add;
@@ -1054,6 +1056,7 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     if(self.latencyResults.count){
         [toolActions addObject:[HostGlassSheetAction actionWithTitle:@"清除连接测速结果" subtitle:@"重置所有节点的响应延迟记录" value:nil icon:@"arrow.counterclockwise" tint:UIColor.systemOrangeColor destructive:NO selected:NO handler:^{
             ConfigCenterViewController *owner=weakSelf;if(!owner)return;
+            owner.probeGeneration++;owner.probingResources=NO;
             [owner.latencyResults removeAllObjects];[owner updateDashboardCard];[owner.tableView reloadData];[owner showResourceToast:@"已清除连接测速结果"];
         }]];
     }
@@ -1077,9 +1080,10 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     }];
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     __weak typeof(self) weakSelf=self;
+    __weak UIAlertController *weakAlert=alert;
     [alert addAction:[UIAlertAction actionWithTitle:@"保存" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action){
         ConfigCenterViewController *owner=weakSelf;if(!owner)return;
-        NSString *val=[alert.textFields.firstObject.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]?:@"";
+        NSString *val=[weakAlert.textFields.firstObject.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]?:@"";
         if(val.length&&![val hasPrefix:@"http://"]&&![val hasPrefix:@"https://"]){
             [owner showResourceToast:@"代理地址需以 http:// 或 https:// 开头"];
             return;
@@ -1108,6 +1112,9 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     return [[profile description].lowercaseString containsString:query];
 }
 - (void)reloadProfiles {
+    [self reloadProfilesForcingTableReload:NO];
+}
+- (void)reloadProfilesForcingTableReload:(BOOL)force {
     NSString *task=self.importTaskSummaryProvider?self.importTaskSummaryProvider():nil;BOOL hasTask=task.length>0;self.importTaskContainer.hidden=!hasTask;self.importTaskHeight.constant=hasTask?(self.importTaskExpanded?76:44):0;self.importTaskButtonHeight.constant=hasTask?44:0;self.importTaskToggleHeight.constant=hasTask?44:0;self.importTaskDetailHeight.constant=hasTask&&self.importTaskExpanded?28:0;self.importTaskDetailLabel.hidden=!hasTask||!self.importTaskExpanded;self.importTaskDetailLabel.text=task?:@"";[self.importTaskButton setTitle:!hasTask?@"":(self.importTaskExpanded?@"继续查看导入任务":[@"导入任务 · " stringByAppendingString:task]) forState:UIControlStateNormal];[self.importTaskToggleButton setImage:[UIImage systemImageNamed:self.importTaskExpanded?@"chevron.up":@"chevron.down"] forState:UIControlStateNormal];[self.importTaskToggleButton setAccessibilityValue:self.importTaskExpanded?@"已展开":@"已收起"];[self updateResourceHeaderLayout];
     [self.detailSummaryCache removeAllObjects];
     [self.rowHeightCache removeAllObjects];
@@ -1161,7 +1168,17 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
         [self.emptyActionButton setTitle:btnTitle forState:UIControlStateNormal];
         self.emptyActionButton.hidden=NO;
     }
-    if([self.profiles isEqualToArray:profiles]){return;}self.profiles=profiles;
+    if(!force&&[self.profiles isEqualToArray:profiles]){
+        for(NSIndexPath *ip in self.tableView.indexPathsForVisibleRows){
+            if(ip.row<0||ip.row>=(NSInteger)profiles.count)continue;
+            NSDictionary *p=profiles[ip.row];
+            UITableViewCell *cell=[self.tableView cellForRowAtIndexPath:ip];
+            UISwitch *sw=[cell.accessoryView.subviews.firstObject isKindOfClass:UISwitch.class]?(UISwitch *)cell.accessoryView.subviews.firstObject:nil;
+            if(sw){BOOL expected=[p[@"enabled"] boolValue];if(sw.on!=expected)[sw setOn:expected animated:YES];}
+        }
+        return;
+    }
+    self.profiles=profiles;
     [self.tableView reloadData];
 }
 - (void)kindChanged {[self reloadProfiles];}
@@ -1290,16 +1307,17 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     if(!url){self.latencyResults[source]=@{@"notProbeable":@YES};[self reloadVisibleRowForSource:source];return;}
     self.latencyResults[source]=@{@"probing":@YES};
     [self reloadVisibleRowForSource:source];
+    NSUInteger probeGen=self.probeGeneration;
     __weak typeof(self) weakSelf=self;
     NSURLSessionConfiguration *configuration=[NSURLSessionConfiguration ephemeralSessionConfiguration];configuration.timeoutIntervalForRequest=4;configuration.timeoutIntervalForResource=5;configuration.requestCachePolicy=NSURLRequestReloadIgnoringLocalCacheData;
     NSURLSession *session=[NSURLSession sessionWithConfiguration:configuration];
     void (^finishProbe)(NSDictionary *) = ^(NSDictionary *result){
         [session finishTasksAndInvalidate];
         dispatch_async(dispatch_get_main_queue(),^{
-            ConfigCenterViewController *owner=weakSelf;if(!owner)return;
+            ConfigCenterViewController *owner=weakSelf;if(!owner||probeGen!=owner.probeGeneration)return;
             NSMutableDictionary *dated=[result mutableCopy];dated[@"checkedAt"]=@(NSDate.date.timeIntervalSince1970);owner.latencyResults[source]=dated;
             [owner updateDashboardCard];
-            if([owner.sortMode isEqual:@"latency"])[owner reloadProfiles];
+            if([owner.sortMode isEqual:@"latency"])[owner reloadProfilesForcingTableReload:YES];
             else [owner reloadVisibleRowForSource:source];
         });
     };
@@ -1334,6 +1352,7 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
 - (void)probeResources {
     if(self.probingResources)return;
     self.probingResources=YES;
+    NSUInteger probeGen=self.probeGeneration;
     NSArray<NSDictionary *> *profiles=[self.allProfiles isKindOfClass:NSArray.class]?self.allProfiles:@[];
     if(!profiles.count){self.probingResources=NO;return;}
     dispatch_group_t group=dispatch_group_create();
@@ -1355,7 +1374,7 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
         NSDate *start=[NSDate date];
         void (^recordResult)(NSDictionary *) = ^(NSDictionary *result){
             dispatch_async(dispatch_get_main_queue(),^{
-                ConfigCenterViewController *owner=weakSelf;if(!owner||!source.length)return;NSMutableDictionary *dated=[result mutableCopy];dated[@"checkedAt"]=@(NSDate.date.timeIntervalSince1970);owner.latencyResults[source]=dated;
+                ConfigCenterViewController *owner=weakSelf;if(!owner||!source.length||probeGen!=owner.probeGeneration)return;NSMutableDictionary *dated=[result mutableCopy];dated[@"checkedAt"]=@(NSDate.date.timeIntervalSince1970);owner.latencyResults[source]=dated;
                 [owner reloadVisibleRowForSource:source];
             });
             dispatch_group_leave(group);
@@ -1382,8 +1401,8 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
     }
     dispatch_group_notify(group,dispatch_get_main_queue(),^{
         [session finishTasksAndInvalidate];
-        ConfigCenterViewController *owner=weakSelf;if(!owner)return;owner.probingResources=NO;[owner updateDashboardCard];
-        if([owner.sortMode isEqual:@"latency"])[owner reloadProfiles];
+        ConfigCenterViewController *owner=weakSelf;if(!owner)return;if(probeGen!=owner.probeGeneration)return;owner.probingResources=NO;[owner updateDashboardCard];
+        if([owner.sortMode isEqual:@"latency"])[owner reloadProfilesForcingTableReload:YES];
         else [UIView transitionWithView:owner.tableView duration:.18 options:UIViewAnimationOptionTransitionCrossDissolve animations:^{[owner.tableView reloadData];} completion:nil];
     });
 }
@@ -1863,7 +1882,7 @@ static NSDateFormatter *CCTVResourceListDateFormatter(void) {
             [actions addObject:toggleCorner];
             [actions addObject:togglePreview];
             [actions addObject:toggleTelemetry];
-            if(w.onMatchStationLogos)[actions addObject:[UIAction actionWithTitle:@"智能匹配官方台标与节目单" image:[UIImage systemImageNamed:@"sparkles.tv"] identifier:nil handler:^(UIAction *a){w.onMatchStationLogos(source);}]];
+            if(w.onMatchStationLogos)[actions addObject:[UIAction actionWithTitle:@"智能匹配官方台标与节目单" image:[UIImage systemImageNamed:@"sparkles.tv"] identifier:nil handler:^(UIAction *a){if(w.onMatchStationLogos)w.onMatchStationLogos(source);}]];
         }
         [actions addObject:[UIAction actionWithTitle:@"导出单项资源文件" image:[UIImage systemImageNamed:@"square.and.arrow.up"] identifier:nil handler:^(UIAction *a){if(w.onExportResource)w.onExportResource(source,@"single");}]];
         if(canProbe)[actions addObject:[UIAction actionWithTitle:@"单条测速连接" image:[UIImage systemImageNamed:@"network"] identifier:nil handler:^(UIAction *a){[w probeSingleProfile:source];}]];
