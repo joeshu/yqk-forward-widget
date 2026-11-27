@@ -107,7 +107,7 @@ static BOOL PackageIDJHostPattern(NSString *host){
 }
 static NSArray *PackageIDJHosts(id raw,BOOL required,NSError **error){
     if(![raw isKindOfClass:NSArray.class]||[raw count]>(NSUInteger)1024||(required&&![raw count])){PackageError(error,@"iDuanJu 插件域名权限列表无效或超过 1024 项");return nil;}
-    NSMutableOrderedSet *clean=[NSMutableOrderedSet orderedSet];for(id value in raw){if(![value isKindOfClass:NSString.class]||![PackageIDJHostPattern(value)]){PackageError(error,@"iDuanJu 插件声明了无效的网络域名权限");return nil;}[clean addObject:[value lowercaseString]];}
+    NSMutableOrderedSet *clean=[NSMutableOrderedSet orderedSet];for(id value in raw){if(![value isKindOfClass:NSString.class]||!PackageIDJHostPattern(value)){PackageError(error,@"iDuanJu 插件声明了无效的网络域名权限");return nil;}[clean addObject:[value lowercaseString]];}
     return clean.array.copy;
 }
 static NSDictionary *PackageIDJMetadata(id raw,NSString *mainSource,NSError **error){
