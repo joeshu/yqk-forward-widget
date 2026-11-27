@@ -9,6 +9,7 @@
 #import "TVBoxCatalogStore.h"
 #import "ServiceStore.h"
 #import "M3UParser.h"
+#import "ProfileStore.h"
 #import "RuntimeDiagnostics.h"
 #import <CommonCrypto/CommonDigest.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
