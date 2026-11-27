@@ -19,7 +19,7 @@ class ResourcePagesFullAuditFixesTests(unittest.TestCase):
         self.assertIn("self.pendingTVBoxSiteName=nil;self.pendingTVBoxExt=nil;", src)
         self.assertIn("__weak UIAlertController *weakCredential=credential;", src)
         self.assertIn("[site[@\"ext\"] isKindOfClass:NSString.class]", src)
-        self.assertIn("![packageRoot isKindOfClass:NSString.class]||!packageRoot.length", src)
+        self.assertIn("if(!packageRoot.length)", src)
         self.assertIn("self.subscriptionURLs.allObjects", src)
 
     def test_batch1_root_subscriptions_hardening(self):
