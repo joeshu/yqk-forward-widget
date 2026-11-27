@@ -75,8 +75,16 @@ static const NSUInteger HostSubtitleMaxBytes = 2 * 1024 * 1024;
             [result addObject:cue];
         }
     } else {
-        // SRT & WebVTT cue blocks
-        NSArray<NSString *> *blocks = [normalized componentsSeparatedByString:@"\n\n"];
+        // SRT & WebVTT cue blocks (tolerate blank lines containing spaces/tabs)
+        static NSRegularExpression *blankLineRegex = nil;
+        static dispatch_once_t blankOnce;
+        dispatch_once(&blankOnce, ^{
+            blankLineRegex = [NSRegularExpression regularExpressionWithPattern:@"\n[ \t]+\n" options:0 error:NULL];
+        });
+        NSString *blockNormalized = blankLineRegex
+            ? [blankLineRegex stringByReplacingMatchesInString:normalized options:0 range:NSMakeRange(0, normalized.length) withTemplate:@"\n\n"]
+            : normalized;
+        NSArray<NSString *> *blocks = [blockNormalized componentsSeparatedByString:@"\n\n"];
         for (NSString *block in blocks) {
             NSArray<NSString *> *lines = [block componentsSeparatedByString:@"\n"];
             NSInteger timingIdx = -1;
@@ -110,6 +118,10 @@ static const NSUInteger HostSubtitleMaxBytes = 2 * 1024 * 1024;
         return NSOrderedSame;
     }];
     return result.copy;
+}
+
+- (void)dealloc {
+    [_fetchTask cancel];
 }
 
 - (instancetype)initWithFrame:(CGRect)frame {
@@ -205,8 +217,14 @@ static const NSUInteger HostSubtitleMaxBytes = 2 * 1024 * 1024;
             NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:url.path error:NULL];
             NSNumber *size = attrs[NSFileSize];
             if (!size || size.unsignedIntegerValue <= HostSubtitleMaxBytes) {
-                NSString *raw = [NSString stringWithContentsOfURL:url encoding:NSUTF8StringEncoding error:NULL];
-                parsed = [HostSubtitleOverlayView parseSubtitleText:raw ?: @""];
+                NSData *data = [NSData dataWithContentsOfURL:url];
+                if (data.length && data.length <= HostSubtitleMaxBytes) {
+                    NSStringEncoding gbEncoding = CFStringConvertEncodingToNSStringEncoding(kCFStringEncodingGB_18030_2000);
+                    NSString *raw = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]
+                        ?: [[NSString alloc] initWithData:data encoding:gbEncoding]
+                        ?: [[NSString alloc] initWithData:data encoding:NSISOLatin1StringEncoding];
+                    parsed = raw.length ? [HostSubtitleOverlayView parseSubtitleText:raw] : @[];
+                }
             }
             dispatch_async(dispatch_get_main_queue(), ^{
                 HostSubtitleOverlayView *owner = weakSelf;

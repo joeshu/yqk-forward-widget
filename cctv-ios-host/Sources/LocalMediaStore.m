@@ -14,9 +14,13 @@ NSNotificationName const LocalMediaStoreDidChangeNotification = @"LocalMediaStor
 @property(nonatomic) NSUInteger lastDuplicateCount;
 @property(nonatomic,copy) NSString *currentFileName;
 @property(nonatomic,copy) NSArray<NSURL *> *cachedFiles;
+@property(nonatomic,copy) NSArray<NSURL *> *cachedMountedURLs;
 @property(nonatomic,copy) NSDictionary<NSString *,id> *cachedState;
 -  (NSArray<NSURL *> *)readFilesFromDisk;
 -  (void)refreshCachedFiles;
+-  (NSURL *)bookmarksFileURL;
+-  (NSArray<NSURL *> *)resolveMountedBookmarksFromDisk;
+-  (void)refreshCachedBookmarks;
 @end
 
 @implementation LocalMediaStore
@@ -27,8 +31,8 @@ NSNotificationName const LocalMediaStoreDidChangeNotification = @"LocalMediaStor
         NSURL *support=[NSFileManager.defaultManager URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask].firstObject;
         _directory=[[support URLByAppendingPathComponent:@"CCTVHost/LocalMedia" isDirectory:YES] URLByStandardizingPath];
         [NSFileManager.defaultManager createDirectoryAtURL:_directory withIntermediateDirectories:YES attributes:nil error:nil];
-        _cachedFiles=[self readFilesFromDisk];_cachedState=@{@"importing":@NO,@"stopRequested":@NO,@"completed":@0,@"total":@0,@"currentFileName":@"",@"failureCount":@0,@"duplicateCount":@0};
-        dispatch_async(_queue,^{for(NSURL *entry in [NSFileManager.defaultManager contentsOfDirectoryAtURL:self.directory includingPropertiesForKeys:nil options:0 error:nil])if([entry.lastPathComponent hasPrefix:@".staging-"]) [NSFileManager.defaultManager removeItemAtURL:entry error:nil];[self refreshCachedFiles];});
+        _cachedFiles=[self readFilesFromDisk];_cachedMountedURLs=[self resolveMountedBookmarksFromDisk];_cachedState=@{@"importing":@NO,@"stopRequested":@NO,@"completed":@0,@"total":@0,@"currentFileName":@"",@"failureCount":@0,@"duplicateCount":@0};
+        dispatch_async(_queue,^{for(NSURL *entry in [NSFileManager.defaultManager contentsOfDirectoryAtURL:self.directory includingPropertiesForKeys:nil options:0 error:nil])if([entry.lastPathComponent hasPrefix:@".staging-"]) [NSFileManager.defaultManager removeItemAtURL:entry error:nil];[self refreshCachedFiles];[self refreshCachedBookmarks];});
     }
     return self;
 }
@@ -36,6 +40,20 @@ NSNotificationName const LocalMediaStoreDidChangeNotification = @"LocalMediaStor
 - (NSArray<NSURL *> *)filesSnapshot {@synchronized(self){return self.cachedFiles?:@[];}}
 - (NSDictionary<NSString *,id> *)stateSnapshot {@synchronized(self){return self.cachedState?:@{};}}
 - (void)refreshCachedFiles {NSArray *files=[self readFilesFromDisk];@synchronized(self){self.cachedFiles=files;}}
+- (NSArray<NSURL *> *)resolveMountedBookmarksFromDisk {
+    NSArray<NSData *> *bookmarks=[NSArray arrayWithContentsOfURL:[self bookmarksFileURL]]?:@[];
+    NSMutableArray<NSURL *> *resolved=[NSMutableArray array];
+    NSMutableSet<NSString *> *seenPaths=[NSMutableSet set];
+    for(NSData *data in bookmarks){
+        if(![data isKindOfClass:NSData.class])continue;
+        BOOL stale=NO;
+        NSURL *u=[NSURL URLByResolvingBookmarkData:data options:0 relativeToURL:nil bookmarkDataIsStale:&stale error:nil];
+        NSString *path=u.URLByStandardizingPath.path;
+        if(u&&path.length&&![seenPaths containsObject:path]){[seenPaths addObject:path];[resolved addObject:u];}
+    }
+    return resolved.copy;
+}
+- (void)refreshCachedBookmarks {NSArray<NSURL *> *mounted=[self resolveMountedBookmarksFromDisk];@synchronized(self){self.cachedMountedURLs=mounted;}}
 - (void)notifyChange {@synchronized(self){self.cachedState=@{@"importing":@(self.importing),@"stopRequested":@(self.stopRequested),@"completed":@(self.completedCount),@"total":@(self.totalCount),@"currentFileName":self.currentFileName?:@"",@"failureCount":@(self.lastFailureCount),@"duplicateCount":@(self.lastDuplicateCount)};}dispatch_async(dispatch_get_main_queue(),^{[NSNotificationCenter.defaultCenter postNotificationName:LocalMediaStoreDidChangeNotification object:self];});}
 + (NSString *)displayNameForFileURL:(NSURL *)url {NSString *name=url.lastPathComponent?:@"媒体文件";if(name.length>37&&[name characterAtIndex:36]=='-')return [name substringFromIndex:37];return name;}
 - (BOOL)isCopiedFileURL:(NSURL *)url {NSURL *candidate=url.URLByStandardizingPath;if(!candidate.isFileURL)return NO;return [candidate.URLByDeletingLastPathComponent.path isEqualToString:self.directory.path];}
@@ -54,13 +72,14 @@ NSNotificationName const LocalMediaStoreDidChangeNotification = @"LocalMediaStor
         for(NSURL *url in items){
             if([self stopWasRequested])break;
             @synchronized(self){self.currentFileName=url.lastPathComponent?:@"media";}[self notifyChange];
+            BOOL scoped=[url startAccessingSecurityScopedResource];
             // T17：重复文件——同展示名且同大小的已在库文件不再重复复制，记为跳过（不占失败数）。
             NSString *displayName=[LocalMediaStore displayNameForFileURL:url];
             NSNumber *sourceSize=nil;[url getResourceValue:&sourceSize forKey:NSURLFileSizeKey error:nil];
             BOOL duplicate=NO;
             if(displayName.length&&sourceSize){for(NSURL *existing in [self readFilesFromDisk]){NSNumber *existingSize=nil;[existing getResourceValue:&existingSize forKey:NSURLFileSizeKey error:nil];if([[LocalMediaStore displayNameForFileURL:existing] isEqualToString:displayName]&&[existingSize isEqualToNumber:sourceSize]){duplicate=YES;break;}}}
-            if(duplicate){@synchronized(self){self.lastDuplicateCount++;self.completedCount++;}[self notifyChange];continue;}
-            BOOL scoped=[url startAccessingSecurityScopedResource];__block NSError *error=nil;NSURL *staging=[self.directory URLByAppendingPathComponent:[@".staging-" stringByAppendingString:NSUUID.UUID.UUIDString]];NSURL *target=[self.directory URLByAppendingPathComponent:[self safeNameForURL:url]];__block BOOL copied=NO;
+            if(duplicate){if(scoped)[url stopAccessingSecurityScopedResource];@synchronized(self){self.lastDuplicateCount++;self.completedCount++;}[self notifyChange];continue;}
+            __block NSError *error=nil;NSURL *staging=[self.directory URLByAppendingPathComponent:[@".staging-" stringByAppendingString:NSUUID.UUID.UUIDString]];NSURL *target=[self.directory URLByAppendingPathComponent:[self safeNameForURL:url]];__block BOOL copied=NO;
             NSFileCoordinator *coordinator=[[NSFileCoordinator alloc] initWithFilePresenter:nil];[coordinator coordinateReadingItemAtURL:url options:0 error:&error byAccessor:^(NSURL *source){copied=[NSFileManager.defaultManager copyItemAtURL:source toURL:staging error:&error];}];
             NSNumber *regular=nil;if(copied)[staging getResourceValue:&regular forKey:NSURLIsRegularFileKey error:&error];if(copied&&!regular.boolValue){error=[NSError errorWithDomain:@"LocalMediaStore" code:2 userInfo:@{NSLocalizedDescriptionKey:@"所选项目不是普通媒体文件"}];copied=NO;}
             if(scoped)[url stopAccessingSecurityScopedResource];
@@ -72,7 +91,7 @@ NSNotificationName const LocalMediaStoreDidChangeNotification = @"LocalMediaStor
                 [NSFileManager.defaultManager removeItemAtURL:staging error:nil];[failures addObject:@{@"fileName":url.lastPathComponent?:@"media",@"error":error.localizedDescription?:@"文件复制失败"}];}
             @synchronized(self){self.completedCount++;} [self notifyChange];
         }
-        @synchronized(self){self.importing=NO;self.currentFileName=@"";self.lastFailureCount=failures.count;}NSArray *done=[imported copy],*failed=[failures copy];[self notifyChange];if(completion)dispatch_async(dispatch_get_main_queue(),^{completion(done,failed);});
+        @synchronized(self){self.importing=NO;self.currentFileName=@"";self.lastFailureCount=failures.count;if(self.completedCount>=self.totalCount)self.stopRequested=NO;}NSArray *done=[imported copy],*failed=[failures copy];[self notifyChange];if(completion)dispatch_async(dispatch_get_main_queue(),^{completion(done,failed);});
     });
 }
 - (void)stopAfterCurrentFile {@synchronized(self){if(!self.importing||self.stopRequested)return;self.stopRequested=YES;self.cachedState=@{@"importing":@YES,@"stopRequested":@YES,@"completed":@(self.completedCount),@"total":@(self.totalCount),@"currentFileName":self.currentFileName?:@"",@"failureCount":@(self.lastFailureCount),@"duplicateCount":@(self.lastDuplicateCount)};}dispatch_async(dispatch_get_main_queue(),^{[NSNotificationCenter.defaultCenter postNotificationName:LocalMediaStoreDidChangeNotification object:self];});}
@@ -87,31 +106,33 @@ NSNotificationName const LocalMediaStoreDidChangeNotification = @"LocalMediaStor
     dispatch_async(self.queue,^{
         NSURL *plistURL=[self bookmarksFileURL];
         NSMutableArray<NSData *> *bookmarks=[NSMutableArray arrayWithContentsOfURL:plistURL]?:[NSMutableArray array];
+        NSMutableSet<NSString *> *existingPaths=[NSMutableSet set];
+        for(NSData *existingData in bookmarks){
+            if(![existingData isKindOfClass:NSData.class])continue;
+            BOOL stale=NO;
+            NSURL *resolved=[NSURL URLByResolvingBookmarkData:existingData options:0 relativeToURL:nil bookmarkDataIsStale:&stale error:nil];
+            if(resolved.URLByStandardizingPath.path.length)[existingPaths addObject:resolved.URLByStandardizingPath.path];
+        }
         NSMutableArray<NSURL *> *mounted=[NSMutableArray array];
         NSMutableArray<NSDictionary<NSString *, NSString *> *> *failures=[NSMutableArray array];
         for(NSURL *url in items){
+            NSString *stdPath=url.URLByStandardizingPath.path;
+            if(stdPath.length&&[existingPaths containsObject:stdPath])continue;
             BOOL scoped=[url startAccessingSecurityScopedResource];
             NSError *err=nil;
             NSData *data=[url bookmarkDataWithOptions:NSURLBookmarkCreationMinimalBookmark includingResourceValuesForKeys:nil relativeToURL:nil error:&err];
             if(scoped)[url stopAccessingSecurityScopedResource];
-            if(data.length){[bookmarks addObject:data];[mounted addObject:url];}
+            if(data.length){[bookmarks addObject:data];[mounted addObject:url];if(stdPath.length)[existingPaths addObject:stdPath];}
             else {[failures addObject:@{@"fileName":url.lastPathComponent?:@"media",@"error":err.localizedDescription?:@"无法创建外部引用书签"}];}
         }
         [bookmarks writeToURL:plistURL atomically:YES];
+        [self refreshCachedBookmarks];
         [self notifyChange];
         if(completion)dispatch_async(dispatch_get_main_queue(),^{completion(mounted.copy,failures.copy);});
     });
 }
 - (NSArray<NSURL *> *)mountedBookmarkURLsSnapshot {
-    NSArray<NSData *> *bookmarks=[NSArray arrayWithContentsOfURL:[self bookmarksFileURL]]?:@[];
-    NSMutableArray<NSURL *> *resolved=[NSMutableArray array];
-    for(NSData *data in bookmarks){
-        if(![data isKindOfClass:NSData.class])continue;
-        BOOL stale=NO;
-        NSURL *u=[NSURL URLByResolvingBookmarkData:data options:0 relativeToURL:nil bookmarkDataIsStale:&stale error:nil];
-        if(u)[resolved addObject:u];
-    }
-    return resolved.copy;
+    @synchronized(self){return self.cachedMountedURLs?:@[];}
 }
 - (void)removeBookmarkForURL:(NSURL *)url completion:(void (^)(BOOL))completion {
     NSURL *target=url.URLByStandardizingPath;
@@ -126,7 +147,7 @@ NSNotificationName const LocalMediaStoreDidChangeNotification = @"LocalMediaStor
             if(resolved&&[resolved.URLByStandardizingPath.path isEqualToString:target.path]){removed=YES;continue;}
             [kept addObject:data];
         }
-        if(removed){[kept writeToURL:plistURL atomically:YES];[self notifyChange];}
+        if(removed){[kept writeToURL:plistURL atomically:YES];[self refreshCachedBookmarks];[self notifyChange];}
         if(completion)dispatch_async(dispatch_get_main_queue(),^{completion(removed);});
     });
 }

@@ -16,6 +16,8 @@ static const NSUInteger MediaPlaybackSniffMaximumBytes=2*1024*1024;
 @implementation MediaPlaybackSniffFetch
 - (void)startWithRequest:(NSURLRequest *)request completion:(void (^)(NSData *,NSURLResponse *,NSError *))completion {
     NSAssert(NSThread.isMainThread,@"Media page sniffing starts on the main thread");
+    if(self.session||self.task)[self cancel];
+    @synchronized(self){self.finished=NO;self.redirectCount=0;self.response=nil;}
     self.completion=completion;self.body=[NSMutableData data];
     NSURLSessionConfiguration *configuration=NSURLSessionConfiguration.ephemeralSessionConfiguration;
     configuration.timeoutIntervalForRequest=3.5;configuration.timeoutIntervalForResource=8.0;

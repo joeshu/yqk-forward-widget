@@ -9,6 +9,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic,copy,nullable) void (^onSelectItem)(NSDictionary *item, NSDictionary *section);
 @property(nonatomic,copy,nullable) void (^onSelectSection)(NSDictionary *section);
 @property(nonatomic,copy,nullable) void (^onScroll)(UIScrollView *scrollView);
+@property(nonatomic,copy,nullable) void (^onScrollEnd)(UIScrollView *scrollView);
 @property(nonatomic,copy,nullable) void (^onNearEnd)(void);
 @property(nonatomic,copy,nullable) void (^onVisibleCategories)(NSArray<NSString *> *categoryIDs);
 @property(nonatomic,copy,readonly) NSArray<NSDictionary *> *sections;

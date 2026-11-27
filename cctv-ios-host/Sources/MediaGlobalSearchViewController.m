@@ -236,7 +236,7 @@ static NSDictionary *MediaSearchPageState(NSString *name, NSArray *items, NSDict
     self.tableView.tableHeaderView = header;
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"搜索" style:UIBarButtonItemStyleDone target:self action:@selector(submitSearch)];
     [self updateSearchScopePresentation];[self updateFilters];[self.tableView reloadData];[self updateEmptyState];
-    NSString *initial=self.initialKeyword.length?[self.initialKeyword stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]:@"";if(initial.length){self.searchBar.text=initial;__weak typeof(self) weakSelf=self;dispatch_async(dispatch_get_main_queue(),^{MediaGlobalSearchViewController *owner=weakSelf;if(owner&&owner.isViewLoaded&&owner.initialKeyword.length&&[owner.searchBar.text isEqual:owner.initialKeyword])[owner submitSearch];});}
+    NSString *initial=self.initialKeyword.length?[self.initialKeyword stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]:@"";if(initial.length){self.initialKeyword=initial;self.searchBar.text=initial;__weak typeof(self) weakSelf=self;dispatch_async(dispatch_get_main_queue(),^{MediaGlobalSearchViewController *owner=weakSelf;if(owner&&owner.isViewLoaded&&owner.initialKeyword.length&&[owner.searchBar.text isEqual:owner.initialKeyword])[owner submitSearch];});}
 }
 
 - (void)updateSearchScopePresentation {
@@ -383,7 +383,7 @@ static NSDictionary *MediaSearchPageState(NSString *name, NSArray *items, NSDict
     if([query isEqual:self.keyword]){[self updateProgress];return;}
     if(self.searching)[self cancelSearch];else [self cancelJobsAndAdvanceGeneration];
     self.navigationItem.rightBarButtonItem.title=@"搜索";self.navigationItem.rightBarButtonItem.action=@selector(submitSearch);
-    if(!query.length){self.keyword=@"";self.resultCount=0;[self.rows removeAllObjects];self.selectedSourceSection=-1;self.selectedProvider=nil;[self.filterOffsets removeAllObjects];[self updateFilters];[self.tableView reloadData];}
+    if(!query.length){self.keyword=@"";self.resultCount=0;self.scheduledCount=0;self.completedCount=0;self.resultLimitReached=NO;[self.retrySections removeAllObjects];[self.rows removeAllObjects];self.selectedSourceSection=-1;self.selectedProvider=nil;[self.filterOffsets removeAllObjects];[self updateFilters];[self.tableView reloadData];}
     self.progressLabel.text=query.length?@"关键词已修改 · 按搜索开始；下方为上次查询结果":@"请输入影片名称搜索";
 }
 
@@ -589,6 +589,41 @@ static NSDictionary *MediaSearchPageState(NSString *name, NSArray *items, NSDict
     return job && job.generation == self.generation && self.jobs[@(job.section)] == job;
 }
 
+- (void)applyProviders:(NSArray<NSDictionary *> *)providers toJob:(MediaGlobalSearchJob *)job {
+    NSMutableArray *valid = [providers mutableCopy] ?: [NSMutableArray array];
+    MediaGlobalSearchViewController *page = self;
+    if (page.currentSiteScope) {
+        NSMutableArray *selected = [NSMutableArray array];
+        NSString *selectedProviderID=page.currentProviderID?:@"";
+        for (NSDictionary *candidate in valid) {
+            if ([candidate[@"id"] isEqual:selectedProviderID]) { [selected addObject:candidate]; break; }
+        }
+        if (!selected.count) {
+            [self finishJob:job error:[NSError errorWithDomain:@"CCTVHostSearch" code:5 userInfo:@{NSLocalizedDescriptionKey:@"当前站点已不可用。请返回媒体页重新选择站点，或切换搜索范围。"}]];
+            return;
+        }
+        valid = selected;
+    }
+    NSArray *retryTargets = [self.rows[job.section][@"retryProviders"] isKindOfClass:NSArray.class] ? self.rows[job.section][@"retryProviders"] : @[];
+    if (retryTargets.count) {
+        NSMutableArray *retry = [NSMutableArray array];
+        for (NSDictionary *target in retryTargets)
+            for (NSDictionary *candidate in valid)
+                if ([candidate[@"id"] isEqual:target[@"id"]]) { [retry addObject:candidate]; break; }
+        job.providers = retry.count ? retry : valid;
+    } else {
+        job.providers = valid;
+    }
+    job.failedProviders = @[];
+    self.rows[job.section][@"retryProviders"] = @[];
+    for (NSDictionary *station in job.providers) {
+        NSMutableDictionary *states = self.rows[job.section][@"providerStates"];
+        states[station[@"id"]] = @{@"name":station[@"name"], @"state":@"等待搜索"};
+    }
+    [self updateFilters];
+    [self searchNextProviderForJob:job];
+}
+
 - (void)loadCapabilitiesForJob:(MediaGlobalSearchJob *)job {
     NSString *sourceID = [job.source[@"id"] isKindOfClass:NSString.class] ? job.source[@"id"] : @"";
     if (sourceID.length) {
@@ -599,37 +634,7 @@ static NSDictionary *MediaSearchPageState(NSString *name, NSArray *items, NSDict
         NSTimeInterval age = cachedEntry ? (CACurrentMediaTime() - [cachedEntry[@"at"] doubleValue]) : DBL_MAX;
         NSArray *cachedProviders = [cachedEntry[@"providers"] isKindOfClass:NSArray.class] ? cachedEntry[@"providers"] : nil;
         if (cachedProviders.count && age >= 0 && age < MediaGlobalSearchProviderCacheTTL) {
-            NSMutableArray *valid = [cachedProviders mutableCopy];
-            if (self.currentSiteScope) {
-                NSMutableArray *selected = [NSMutableArray array];
-                NSString *selectedProviderID = self.currentProviderID ?: @"";
-                for (NSDictionary *candidate in valid) {
-                    if ([candidate[@"id"] isEqual:selectedProviderID]) { [selected addObject:candidate]; break; }
-                }
-                if (!selected.count) {
-                    [self finishJob:job error:[NSError errorWithDomain:@"CCTVHostSearch" code:5 userInfo:@{NSLocalizedDescriptionKey:@"当前站点已不可用。请返回媒体页重新选择站点，或切换搜索范围。"}]];
-                    return;
-                }
-                valid = selected;
-            }
-            NSArray *retryTargets = [self.rows[job.section][@"retryProviders"] isKindOfClass:NSArray.class] ? self.rows[job.section][@"retryProviders"] : @[];
-            if (retryTargets.count) {
-                NSMutableArray *retry = [NSMutableArray array];
-                for (NSDictionary *target in retryTargets)
-                    for (NSDictionary *candidate in valid)
-                        if ([candidate[@"id"] isEqual:target[@"id"]]) { [retry addObject:candidate]; break; }
-                job.providers = retry.count ? retry : valid;
-            } else {
-                job.providers = valid;
-            }
-            job.failedProviders = @[];
-            self.rows[job.section][@"retryProviders"] = @[];
-            for (NSDictionary *station in job.providers) {
-                NSMutableDictionary *states = self.rows[job.section][@"providerStates"];
-                states[station[@"id"]] = @{@"name":station[@"name"], @"state":@"等待搜索"};
-            }
-            [self updateFilters];
-            [self searchNextProviderForJob:job];
+            [self applyProviders:cachedProviders toJob:job];
             return;
         }
     }
@@ -651,8 +656,7 @@ static NSDictionary *MediaSearchPageState(NSString *name, NSArray *items, NSDict
                     MediaGlobalSearchProviderCache()[sourceID] = @{@"providers":single, @"at":@(CACurrentMediaTime())};
                 }
             }
-            job.providers = single;
-            [owner searchNextProviderForJob:job];
+            [owner applyProviders:single toJob:job];
             return;
         }
         [job.client call:@"providers" arguments:@{} completion:^(id providers, NSError *providerError) {
@@ -673,16 +677,7 @@ static NSDictionary *MediaSearchPageState(NSString *name, NSArray *items, NSDict
                     MediaGlobalSearchProviderCache()[sourceID] = @{@"providers":[valid copy], @"at":@(CACurrentMediaTime())};
                 }
             }
-            if(page.currentSiteScope){
-                NSMutableArray *selected=[NSMutableArray array];NSString *selectedProviderID=page.currentProviderID?:@"";
-                for(NSDictionary *candidate in valid)if([candidate[@"id"] isEqual:selectedProviderID]){[selected addObject:candidate];break;}
-                if(!selected.count){[page finishJob:job error:[NSError errorWithDomain:@"CCTVHostSearch" code:5 userInfo:@{NSLocalizedDescriptionKey:@"当前站点已不可用。请返回媒体页重新选择站点，或切换搜索范围。"}]];return;}
-                valid=selected;
-            }
-            NSArray *retryTargets=[page.rows[job.section][@"retryProviders"] isKindOfClass:NSArray.class]?page.rows[job.section][@"retryProviders"]:@[];
-            if(retryTargets.count){NSMutableArray *retry=[NSMutableArray array];for(NSDictionary *target in retryTargets)for(NSDictionary *candidate in valid)if([candidate[@"id"] isEqual:target[@"id"]]){[retry addObject:candidate];break;}job.providers=retry.count?retry:valid;}else job.providers=valid;
-            job.failedProviders=@[];page.rows[job.section][@"retryProviders"]=@[];for(NSDictionary *station in job.providers){NSMutableDictionary *states=page.rows[job.section][@"providerStates"];states[station[@"id"]]=@{@"name":station[@"name"],@"state":@"等待搜索"};}[page updateFilters];
-            [page searchNextProviderForJob:job];
+            [page applyProviders:valid toJob:job];
         }];
     }];
 }
@@ -822,9 +817,11 @@ static NSDictionary *MediaSearchPageState(NSString *name, NSArray *items, NSDict
 }
 
 - (void)startStoppedSourceAtSection:(NSUInteger)section {
-    if (section >= self.searchSources.count) return;
+    if (section >= self.searchSources.count || section >= self.rows.count) return;
     NSDictionary *source = self.searchSources[section];
     if (MediaSourceUsesNativeCatalogAPI(source)) return;
+    NSString *currentState = [self.rows[section][@"state"] description] ?: @"";
+    if ([currentState containsString:@"正在请求启动"] || [currentState containsString:@"等待健康检查"]) return;
     if (!self.onActivateService) {
         self.rows[section][@"error"] = @"当前页面无法启动该插件，请到资源页单独启动。";
         [self reloadSection:section];
@@ -836,16 +833,18 @@ static NSDictionary *MediaSearchPageState(NSString *name, NSArray *items, NSDict
     [self reloadSection:section];
     __weak typeof(self) weakSelf = self;
     self.onActivateService(source, ^(NSError *error) {
-        MediaGlobalSearchViewController *owner = weakSelf;
-        if (!owner || owner.generation != requestGeneration || section >= owner.rows.count) return;
-        if (error) {
-            owner.rows[section][@"state"] = @"启动失败";
-            owner.rows[section][@"error"] = error.localizedDescription ?: @"插件启动失败。";
-            [owner reloadSection:section];
-            return;
-        }
-        owner.rows[section][@"state"] = @"启动请求已接受 · 正在检查服务";
-        [owner enqueueStartedSection:section];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            MediaGlobalSearchViewController *owner = weakSelf;
+            if (!owner || owner.generation != requestGeneration || section >= owner.rows.count) return;
+            if (error) {
+                owner.rows[section][@"state"] = @"启动失败";
+                owner.rows[section][@"error"] = error.localizedDescription ?: @"插件启动失败。";
+                [owner reloadSection:section];
+                return;
+            }
+            owner.rows[section][@"state"] = @"启动请求已接受 · 正在检查服务";
+            [owner enqueueStartedSection:section];
+        });
     });
 }
 
@@ -925,9 +924,16 @@ static NSDictionary *MediaSearchPageState(NSString *name, NSArray *items, NSDict
         return;
     }
     NSDictionary *source=self.searchSources[section];
+    BOOL isNative=MediaSourceUsesNativeCatalogAPI(source);
+    NSInteger port=[source[@"port"] respondsToSelector:@selector(integerValue)]?[source[@"port"] integerValue]:0;
+    if(!isNative&&(port<1||port>65535)){
+        NSMutableDictionary *failed=[state mutableCopy];failed[@"state"]=@"加载更多失败 · 端口无效";failed[@"error"]=@"本机影视服务端口无效。";
+        row[@"providerStates"][providerID]=failed;[self reloadSection:section];return;
+    }
+    NSString *catalogID=[source[@"catalogID"] isKindOfClass:NSString.class]?source[@"catalogID"]:([source[@"tvboxCatalogID"] isKindOfClass:NSString.class]?source[@"tvboxCatalogID"]:@"");
     MediaGlobalSearchJob *job=[MediaGlobalSearchJob new];
     job.section=section;job.generation=self.generation;job.source=source;
-    job.client=MediaSourceUsesNativeCatalogAPI(source)?[[MediaAPIClient alloc] initWithTVBoxSource:source]:[[MediaAPIClient alloc] initWithPort:[source[@"port"] integerValue]];
+    job.client=isNative?[[MediaAPIClient alloc] initWithTVBoxSource:source]:[[MediaAPIClient alloc] initWithPort:port catalogID:catalogID];
     self.jobs[@(section)]=job;self.searching=YES;
     NSMutableDictionary *loading=[state mutableCopy];loading[@"state"]=@"正在加载更多";row[@"providerStates"][providerID]=loading;
     self.navigationItem.rightBarButtonItem.title=@"停止";self.navigationItem.rightBarButtonItem.action=@selector(cancelSearch);
@@ -1053,9 +1059,11 @@ static NSDictionary *MediaSearchPageState(NSString *name, NSArray *items, NSDict
         if ([[row[@"state"] description] containsString:@"未运行"]) { [self startStoppedSourceAtSection:indexPath.section]; return; }
         if ([row[@"state"] isEqual:@"搜索失败"] || [row[@"state"] isEqual:@"部分完成"] || [row[@"state"] isEqual:@"启动失败"]) {
             if (self.searching) { self.progressLabel.text = @"其他来源仍在搜索；当前失败来源可在本轮结束后重试。"; return; }
+            if (self.resultCount >= MediaGlobalSearchMaximumResults) { self.progressLabel.text = [NSString stringWithFormat:@"结果已达 %lu 条上限，请修改关键词后重试。", (unsigned long)MediaGlobalSearchMaximumResults]; return; }
             if ([self sourceAvailableForSearch:self.searchSources[indexPath.section]]) {
+                [self cancelJobsAndAdvanceGeneration];
                 self.pendingSections = [NSMutableArray arrayWithObject:@(indexPath.section)];
-                self.scheduledCount = 1; self.completedCount = 0; self.searching = YES;
+                self.scheduledCount = 1; self.completedCount = 0; self.searching = YES; self.resultLimitReached = NO;
                 self.retrySections = [NSMutableSet setWithObject:@(indexPath.section)];
                 self.rows[indexPath.section][@"state"] = @"等待重试"; self.rows[indexPath.section][@"error"] = @""; self.rows[indexPath.section][@"providerError"] = @"";self.rows[indexPath.section][@"retryProviders"]=[self.rows[indexPath.section][@"failedProviders"] isKindOfClass:NSArray.class]?[self.rows[indexPath.section][@"failedProviders"] copy]:@[];self.rows[indexPath.section][@"failedProviders"]=@[];
                 self.navigationItem.rightBarButtonItem.title = @"停止"; self.navigationItem.rightBarButtonItem.action = @selector(cancelSearch);

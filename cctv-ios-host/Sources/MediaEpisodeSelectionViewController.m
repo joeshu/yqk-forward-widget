@@ -174,11 +174,12 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
     NSDictionary *manifest=[self.source[@"manifest"] isKindOfClass:NSDictionary.class]?self.source[@"manifest"]:@{};
     NSDictionary *options=[manifest[@"options"] isKindOfClass:NSDictionary.class]?manifest[@"options"]:([self.source[@"options"] isKindOfClass:NSDictionary.class]?self.source[@"options"]:@{});
     NSInteger playTimeout=[options[@"playTimeoutMs"] respondsToSelector:@selector(integerValue)]?[options[@"playTimeoutMs"] integerValue]:0;
+    NSString *catalogID=[self.source[@"catalogID"] isKindOfClass:NSString.class]?self.source[@"catalogID"]:([self.source[@"tvboxCatalogID"] isKindOfClass:NSString.class]?self.source[@"tvboxCatalogID"]:@"");
     if(!self.client){
-        NSString *catalogID=[self.source[@"catalogID"] isKindOfClass:NSString.class]?self.source[@"catalogID"]:([self.source[@"tvboxCatalogID"] isKindOfClass:NSString.class]?self.source[@"tvboxCatalogID"]:@"");self.client=MediaSourceUsesNativeCatalogAPI(self.source)?[[MediaAPIClient alloc] initWithTVBoxSource:self.source?:@{}]:[[MediaAPIClient alloc] initWithPort:[self.source[@"port"] integerValue] catalogID:catalogID];
+        self.client=MediaSourceUsesNativeCatalogAPI(self.source)?[[MediaAPIClient alloc] initWithTVBoxSource:self.source?:@{}]:[[MediaAPIClient alloc] initWithPort:[self.source[@"port"] integerValue] catalogID:catalogID];
     }
     if(playTimeout>0)self.client.playTimeoutMilliseconds=MIN(120000,MAX(1000,playTimeout));
-    self.refreshClient=MediaSourceUsesNativeCatalogAPI(self.source)?[[MediaAPIClient alloc] initWithTVBoxSource:self.source?:@{}]:[[MediaAPIClient alloc] initWithPort:[self.source[@"port"] integerValue]];
+    self.refreshClient=MediaSourceUsesNativeCatalogAPI(self.source)?[[MediaAPIClient alloc] initWithTVBoxSource:self.source?:@{}]:[[MediaAPIClient alloc] initWithPort:[self.source[@"port"] integerValue] catalogID:catalogID];
     [self buildLayout];
     [self rebuildSelection];
     [self refreshBackdrop];
@@ -357,7 +358,7 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
     NSUInteger firstSource=end>start?CCTVEpisodeSourceIndex(start,episodes.count,self.episodeOrderReversed):0,lastSource=end>start?CCTVEpisodeSourceIndex(end-1,episodes.count,self.episodeOrderReversed):0;
     self.pageLabel.text=episodes.count?[NSString stringWithFormat:@"第 %ld/%lu 组 · 第 %lu–%lu 集 · %@",(long)self.page+1,(unsigned long)pages,(unsigned long)firstSource+1,(unsigned long)lastSource+1,self.episodeOrderReversed?@"倒序":@"正序"]:@"当前线路没有可选分集";
     self.episodeCountLabel.text=episodes.count?[NSString stringWithFormat:@"· %lu 集 · 当前第 %lu 集",(unsigned long)episodes.count,(unsigned long)self.selectedEpisodeIndex+1]:@"· 暂无分集";
-    if(!self.lines.count)self.statusLabel.text=@"此影片没有可用分集，请返回详情页重新加载或更换来源。";else if(!episodes.count)self.statusLabel.text=@"当前线路没有可选分集，请切换其他线路。";else self.statusLabel.text=@"";
+    if(!self.lines.count&&!episodes.count)self.statusLabel.text=@"此影片没有可用分集，请返回详情页重新加载或更换来源。";else if(!episodes.count)self.statusLabel.text=@"当前线路没有可选分集，请切换其他线路。";else self.statusLabel.text=@"";
     self.statusLabel.hidden=!self.statusLabel.text.length;
     BOOL expanded=self.episodeExpanded;self.episodeDisclosureLabel.text=expanded?@"收起":@"展开";self.episodeDisclosureIcon.image=[UIImage systemImageNamed:expanded?@"chevron.up":@"chevron.down"];self.episodeDetails.hidden=!expanded;self.episodeDisclosureButton.accessibilityValue=expanded?@"已展开":@"已收起";
     CCTVEpisodeLayoutStyle epStyle=CCTVEpisodeCurrentLayoutStyle();
@@ -370,6 +371,7 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
     NSUInteger quickLimit=MIN((NSUInteger)24,episodes.count);
     self.quickEpisodeScroll.hidden=episodes.count==0;
     NSArray<UIView *> *existingChips=self.quickEpisodeStack.arrangedSubviews.copy;
+    NSInteger activeQuickChipIndex=-1;
     for(NSUInteger quickIdx=0;quickIdx<MAX(quickLimit,existingChips.count);quickIdx++){
         UIButton *chip=quickIdx<existingChips.count&&( [existingChips[quickIdx] isKindOfClass:UIButton.class])?(UIButton *)existingChips[quickIdx]:nil;
         if(quickIdx>=quickLimit){if(chip)chip.hidden=YES;continue;}
@@ -381,17 +383,21 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
             [self.quickEpisodeStack addArrangedSubview:chip];
         }
         chip.hidden=NO;
-        NSDictionary *ep=episodes[quickIdx];
-        NSString *epName=[ep[@"name"] isKindOfClass:NSString.class]&&[ep[@"name"] length]?ep[@"name"]:[NSString stringWithFormat:@"第 %lu 集",(unsigned long)quickIdx+1];
-        chip.tag=(NSInteger)quickIdx;
+        NSUInteger sourceIdx=CCTVEpisodeSourceIndex(quickIdx,episodes.count,self.episodeOrderReversed);
+        NSDictionary *ep=episodes[sourceIdx];
+        NSString *epName=[ep[@"name"] isKindOfClass:NSString.class]&&[ep[@"name"] length]?ep[@"name"]:[NSString stringWithFormat:@"第 %lu 集",(unsigned long)sourceIdx+1];
+        chip.tag=(NSInteger)sourceIdx;
         [chip setTitle:epName forState:UIControlStateNormal];
-        HostStylePillButton(chip,(NSInteger)quickIdx==self.selectedEpisodeIndex);
+        BOOL isSelected=(NSInteger)sourceIdx==self.selectedEpisodeIndex;
+        if(isSelected)activeQuickChipIndex=(NSInteger)quickIdx;
+        HostStylePillButton(chip,isSelected);
     }
     [self.episodeButtons removeAllObjects];
     BOOL isAccessibilitySize=UIContentSizeCategoryIsAccessibilityCategory(self.traitCollection.preferredContentSizeCategory);
     NSUInteger columns=CCTVEpisodeColumnsForStyle(epStyle,isAccessibilitySize);
     NSUInteger visibleCount=end>start?end-start:0;
     NSUInteger neededRows=(visibleCount+columns-1)/columns;
+    CGFloat targetRowHeight=epStyle==CCTVEpisodeLayoutStyleCard2?52:(epStyle==CCTVEpisodeLayoutStyleList?48:44);
     NSArray<UIView *> *existingRows=self.episodeGrid.arrangedSubviews.copy;
     for(NSUInteger rowIndex=0;rowIndex<MAX(neededRows,existingRows.count);rowIndex++){
         UIStackView *row=(rowIndex<existingRows.count&&[existingRows[rowIndex] isKindOfClass:UIStackView.class])?(UIStackView *)existingRows[rowIndex]:nil;
@@ -402,7 +408,13 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
             row.spacing=7;
             row.distribution=UIStackViewDistributionFillEqually;
             [self.episodeGrid addArrangedSubview:row];
-            [row.heightAnchor constraintGreaterThanOrEqualToConstant:epStyle==CCTVEpisodeLayoutStyleCard2?52:(epStyle==CCTVEpisodeLayoutStyleList?48:44)].active=YES;
+            NSLayoutConstraint *heightConstraint=[row.heightAnchor constraintGreaterThanOrEqualToConstant:targetRowHeight];
+            heightConstraint.identifier=@"media-episode-row-height";
+            heightConstraint.active=YES;
+        }else{
+            for(NSLayoutConstraint *constraint in row.constraints){
+                if([constraint.identifier isEqualToString:@"media-episode-row-height"]){constraint.constant=targetRowHeight;break;}
+            }
         }
         row.hidden=NO;
         NSArray<UIView *> *rowChildren=row.arrangedSubviews.copy;
@@ -468,8 +480,8 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
             UIView *activeRoute=owner.routeButtons.arrangedSubviews[(NSUInteger)owner.selectedLineIndex];
             [(UIScrollView *)owner.routeButtons.superview scrollRectToVisible:[activeRoute convertRect:activeRoute.bounds toView:owner.routeButtons.superview] animated:YES];
         }
-        if(owner.selectedEpisodeIndex>=0&&(NSUInteger)owner.selectedEpisodeIndex<owner.quickEpisodeStack.arrangedSubviews.count&&owner.quickEpisodeScroll){
-            UIView *activeChip=owner.quickEpisodeStack.arrangedSubviews[(NSUInteger)owner.selectedEpisodeIndex];
+        if(activeQuickChipIndex>=0&&(NSUInteger)activeQuickChipIndex<owner.quickEpisodeStack.arrangedSubviews.count&&owner.quickEpisodeScroll){
+            UIView *activeChip=owner.quickEpisodeStack.arrangedSubviews[(NSUInteger)activeQuickChipIndex];
             [owner.quickEpisodeScroll scrollRectToVisible:[activeChip convertRect:activeChip.bounds toView:owner.quickEpisodeScroll] animated:YES];
         }
     });
@@ -479,10 +491,11 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
     self.generation++;self.inFlightEpisodeSignature=nil;self.inFlightEpisodeStartedAt=0;[self.client cancel];[self.playSpinner stopAnimating];self.playSpinner.hidden=YES;NSInteger line=MAX(0,sender.tag);if(self.lines.count)line=MIN(line,(NSInteger)self.lines.count-1);self.selectedLineIndex=line;NSArray *newEpisodes=[self episodesForLine:self.selectedLineIndex];NSInteger match=-1;
     if(episodeID.length){for(NSUInteger index=0;index<newEpisodes.count;index++){NSDictionary *episode=newEpisodes[index];if([[episode[@"id"] description] isEqual:episodeID]){match=(NSInteger)index;break;}}}
     if(match<0&&episodeName.length){for(NSUInteger index=0;index<newEpisodes.count;index++){NSDictionary *episode=newEpisodes[index];if([[episode[@"name"] description] localizedCaseInsensitiveCompare:episodeName]==NSOrderedSame){match=(NSInteger)index;break;}}}
-    self.selectedEpisodeIndex=newEpisodes.count?(match>=0?match:MIN(MAX(0,oldIndex),(NSInteger)newEpisodes.count-1)):0;self.page=CCTVEpisodeGroupForSourceIndex((NSUInteger)self.selectedEpisodeIndex,newEpisodes.count,self.episodeOrderReversed);self.statusLabel.text=@"";self.statusLabel.hidden=YES;[self rebuildSelection];
+    self.selectedEpisodeIndex=newEpisodes.count?(match>=0?match:MIN(MAX(0,oldIndex),(NSInteger)newEpisodes.count-1)):0;NSInteger routeGroup=CCTVEpisodeGroupForSourceIndex((NSUInteger)self.selectedEpisodeIndex,newEpisodes.count,self.episodeOrderReversed);self.page=routeGroup==NSNotFound?0:routeGroup;self.statusLabel.text=@"";self.statusLabel.hidden=YES;[self rebuildSelection];
 }
 - (void)selectSeason:(UIButton *)sender {
-    self.generation++;self.inFlightEpisodeSignature=nil;self.inFlightEpisodeStartedAt=0;[self.client cancel];[self.playSpinner stopAnimating];self.playSpinner.hidden=YES;self.selectedSeasonIndex=sender.tag;self.selectedEpisodeIndex=0;self.page=0;self.statusLabel.text=@"";self.statusLabel.hidden=YES;[self rebuildSelection];
+    if(sender.tag<0||sender.tag>=(NSInteger)self.seasonCollections.count)return;
+    self.generation++;self.inFlightEpisodeSignature=nil;self.inFlightEpisodeStartedAt=0;[self.client cancel];[self.playSpinner stopAnimating];self.playSpinner.hidden=YES;self.selectedSeasonIndex=sender.tag;self.selectedLineIndex=0;self.selectedEpisodeIndex=0;NSArray *seasonEpisodes=[self episodesForLine:0];NSInteger seasonGroup=CCTVEpisodeGroupForSourceIndex(0,seasonEpisodes.count,self.episodeOrderReversed);self.page=seasonGroup==NSNotFound?0:seasonGroup;self.statusLabel.text=@"";self.statusLabel.hidden=YES;[self rebuildSelection];
 }
 - (void)toggleEpisodeGrid {
     self.episodeExpanded=!self.episodeExpanded;[self rebuildSelection];if(!UIAccessibilityIsReduceMotionEnabled())[UIView animateWithDuration:.22 animations:^{[self.view layoutIfNeeded];}];
@@ -535,9 +548,10 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
     [alert addTextFieldWithConfigurationHandler:^(UITextField *field){field.placeholder=@"例如：12 或 第12集";field.keyboardType=UIKeyboardTypeNumbersAndPunctuation;}];
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     __weak typeof(self) weakSelf=self;
+    __weak UIAlertController *weakAlert=alert;
     [alert addAction:[UIAlertAction actionWithTitle:@"定位并展开" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action){
-        MediaEpisodeSelectionViewController *owner=weakSelf;if(!owner)return;
-        NSString *query=[alert.textFields.firstObject.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];if(!query.length)return;
+        MediaEpisodeSelectionViewController *owner=weakSelf;UIAlertController *strongAlert=weakAlert;if(!owner||!strongAlert)return;
+        NSString *query=[strongAlert.textFields.firstObject.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];if(!query.length)return;
         NSArray *currentEpisodes=[owner episodesForLine:owner.selectedLineIndex];if(!currentEpisodes.count)return;
         NSInteger targetIndex=-1;NSInteger numeric=[query integerValue];
         if(numeric>=1&&numeric<=(NSInteger)currentEpisodes.count)targetIndex=numeric-1;
@@ -554,7 +568,7 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
 - (void)nextPage {NSArray *episodes=[self episodesForLine:self.selectedLineIndex];if(self.page+1<(NSInteger)((episodes.count+CCTVEpisodesPerGroup-1)/CCTVEpisodesPerGroup)){self.page++;[self rebuildSelection];}}
 - (void)playSelectedEpisode {if(self.selectedEpisodeIndex<0||self.selectedEpisodeIndex>=[self episodesForLine:self.selectedLineIndex].count)return;UIButton *button=[UIButton buttonWithType:UIButtonTypeCustom];button.tag=self.selectedEpisodeIndex;[self selectEpisode:button];}
 - (void)selectEpisode:(UIButton *)sender {
-    if(self.selectedLineIndex<0||self.selectedLineIndex>=self.lines.count)return;NSArray *episodes=[self episodesForLine:self.selectedLineIndex];if(sender.tag<0||sender.tag>=episodes.count)return;
+    if(self.lines.count&&(self.selectedLineIndex<0||self.selectedLineIndex>=self.lines.count))return;NSArray *episodes=[self episodesForLine:self.selectedLineIndex];if(sender.tag<0||sender.tag>=episodes.count)return;
     NSDictionary *episode=episodes[sender.tag];NSString *episodeID=[episode[@"id"] description]?:@"",*episodeName=[episode[@"name"] description]?:@"当前分集",*episodeLineID=[episode[@"lineId"] description]?:@"";NSInteger selectedIndex=sender.tag;
     if(episodeLineID.length){for(NSUInteger index=0;index<self.lines.count;index++){NSDictionary *routeLine=[self.lines[index] isKindOfClass:NSDictionary.class]?self.lines[index]:@{};NSString *lineID=[routeLine[@"id"] description]?:@"",*lineName=[routeLine[@"name"] description]?:@"";if([episodeLineID isEqual:lineID]||[episodeLineID isEqual:lineName]){NSArray *routeEpisodes=[self episodesForLine:(NSInteger)index];NSInteger match=-1;for(NSUInteger candidate=0;candidate<routeEpisodes.count;candidate++){NSDictionary *row=routeEpisodes[candidate];if((episodeID.length&&[[row[@"id"] description] isEqual:episodeID])||[[row[@"name"] description] isEqual:episodeName]){match=(NSInteger)candidate;break;}}if(match<0&&sender.tag<routeEpisodes.count)match=sender.tag;if(match>=0){self.selectedLineIndex=(NSInteger)index;selectedIndex=match;}break;}}}
     episodes=[self episodesForLine:self.selectedLineIndex];if(selectedIndex<0||selectedIndex>=episodes.count)return;episode=episodes[(NSUInteger)selectedIndex];NSDictionary *line=self.selectedLineIndex<self.lines.count?([self.lines[self.selectedLineIndex] isKindOfClass:NSDictionary.class]?self.lines[self.selectedLineIndex]:@{}):@{};

@@ -151,6 +151,9 @@
     }
     self.files=filtered.copy;
     self.sortBarButton.menu=[self buildSortFilterMenu];
+    BOOL importing=[[self.store stateSnapshot][@"importing"] boolValue];
+    self.emptyLabel.hidden=self.files.count>0||importing;
+    self.tableView.backgroundView.hidden=self.emptyLabel.hidden;
     [self.tableView reloadData];
 }
 - (void)viewDidLoad {
@@ -203,7 +206,9 @@
     NSMutableDictionary<NSURL *, NSNumber *> *sizes=[NSMutableDictionary dictionaryWithCapacity:self.allFiles.count];
     long long totalBytes=0;NSUInteger videoCount=0,audioCount=0;
     for(NSURL *u in self.allFiles){
+        BOOL scoped=[u startAccessingSecurityScopedResource];
         NSNumber *sz=nil;[u getResourceValue:&sz forKey:NSURLFileSizeKey error:nil];
+        if(scoped)[u stopAccessingSecurityScopedResource];
         NSNumber *safeSize=sz?:@0;sizes[u]=safeSize;totalBytes+=safeSize.longLongValue;
         if([self isAudioURL:u])audioCount++;else videoCount++;
     }
@@ -221,7 +226,6 @@
         else self.navigationItem.prompt=self.allFiles.count?@"点击播放 · 长按分享 · 左滑删除":@"添加视频或音频；支持零拷贝挂载或本机副本";
     }
     [self applyFilterAndSort];
-    self.emptyLabel.hidden=self.files.count>0||importing;self.tableView.backgroundView.hidden=self.emptyLabel.hidden;
 }
 - (void)storeDidChange:(NSNotification *)notification {if(!NSThread.isMainThread){__weak typeof(self) weakSelf=self;dispatch_async(dispatch_get_main_queue(),^{[weakSelf storeDidChange:notification];});return;}[self updateFromStore];}
 - (void)presentDocumentPickerForBookmark:(BOOL)useBookmark {
@@ -254,7 +258,7 @@
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {return self.files.count;}
 - (void)tableView:(UITableView *)tableView willDisplayHeaderView:(UIView *)view forSection:(NSInteger)section { (void)tableView;(void)section;HostStyleSectionHeaderView(view); }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)path {
-    UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:@"local"];if(!cell)cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"local"];cell.transform=CGAffineTransformIdentity;if(path.row<0||path.row>=self.files.count)return cell;NSURL *url=self.files[path.row];NSString *name=[self displayNameForURL:url];NSNumber *size=self.fileSizesByURL[url];if(!size){[url getResourceValue:&size forKey:NSURLFileSizeKey error:nil];if(size)self.fileSizesByURL[url]=size;}BOOL isAudio=[self isAudioURL:url];NSString *kind=isAudio?@"音频文件":@"视频文件";NSString *ext=url.pathExtension.uppercaseString;if(!ext.length)ext=isAudio?@"AUDIO":@"VIDEO";
+    UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:@"local"];if(!cell)cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"local"];cell.transform=CGAffineTransformIdentity;if(path.row<0||path.row>=self.files.count)return cell;NSURL *url=self.files[path.row];NSString *name=[self displayNameForURL:url];NSNumber *size=self.fileSizesByURL[url];if(!size){BOOL scoped=[url startAccessingSecurityScopedResource];[url getResourceValue:&size forKey:NSURLFileSizeKey error:nil];if(scoped)[url stopAccessingSecurityScopedResource];if(size)self.fileSizesByURL[url]=size;}BOOL isAudio=[self isAudioURL:url];NSString *kind=isAudio?@"音频文件":@"视频文件";NSString *ext=url.pathExtension.uppercaseString;if(!ext.length)ext=isAudio?@"AUDIO":@"VIDEO";
     cell.textLabel.text=name;cell.detailTextLabel.text=[NSString stringWithFormat:@"%@ · %@",kind,[NSByteCountFormatter stringFromByteCount:size.longLongValue countStyle:NSByteCountFormatterCountStyleFile]];cell.imageView.image=[UIImage systemImageNamed:isAudio?@"waveform.circle.fill":@"film.fill"];cell.imageView.tintColor=isAudio?UIColor.systemPurpleColor:HostAccent();cell.textLabel.numberOfLines=2;cell.textLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody];cell.textLabel.adjustsFontForContentSizeCategory=YES;cell.detailTextLabel.font=HostMonospacedDigitFont(12,UIFontWeightRegular,UIFontTextStyleCaption1);cell.detailTextLabel.adjustsFontForContentSizeCategory=YES;cell.backgroundColor=HostCard();cell.layer.cornerRadius=14;cell.layer.cornerCurve=kCACornerCurveContinuous;cell.clipsToBounds=YES;cell.layer.borderWidth=0.6;HostSetLayerBorderColor(cell,HostBorder());cell.textLabel.textColor=HostText();cell.detailTextLabel.textColor=HostSecondaryText();
     UIView *accentBar=[cell.contentView viewWithTag:8801];
     if(!accentBar){accentBar=[[UIView alloc] initWithFrame:CGRectMake(2,10,3,MAX(0,CGRectGetHeight(cell.contentView.bounds)-20))];accentBar.tag=8801;accentBar.autoresizingMask=UIViewAutoresizingFlexibleHeight|UIViewAutoresizingFlexibleRightMargin;accentBar.layer.cornerRadius=1.5;accentBar.userInteractionEnabled=NO;accentBar.accessibilityElementsHidden=YES;[cell.contentView addSubview:accentBar];}
@@ -286,7 +290,11 @@
         UIAction *playAct=[UIAction actionWithTitle:@"播放此文件" image:[UIImage systemImageNamed:@"play.fill"] identifier:nil handler:^(__unused UIAction *a){[weakSelf tableView:tableView didSelectRowAtIndexPath:path];}];
         UIAction *shareAct=[UIAction actionWithTitle:@"分享或导出文件" image:[UIImage systemImageNamed:@"square.and.arrow.up"] identifier:nil handler:^(__unused UIAction *a){
             LocalMediaViewController *owner=weakSelf;if(!owner)return;
+            BOOL scoped=[url startAccessingSecurityScopedResource];
             UIActivityViewController *av=[[UIActivityViewController alloc] initWithActivityItems:@[url] applicationActivities:nil];
+            av.completionWithItemsHandler=^(__unused UIActivityType activityType,__unused BOOL completed,__unused NSArray *returnedItems,__unused NSError *activityError){
+                if(scoped)[url stopAccessingSecurityScopedResource];
+            };
             UITableViewCell *c=[tableView cellForRowAtIndexPath:path];av.popoverPresentationController.sourceView=c?:owner.view;av.popoverPresentationController.sourceRect=c?c.bounds:CGRectMake(CGRectGetMidX(owner.view.bounds),CGRectGetMidY(owner.view.bounds),1,1);
             [owner presentViewController:av animated:YES completion:nil];
         }];
@@ -300,7 +308,9 @@
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)path {
     [tableView deselectRowAtIndexPath:path animated:YES];if(path.row<0||path.row>=self.files.count)return;NSURL *url=self.files[path.row];
     // T17：挂载文件被移动/删除后不进播放器，提示后由用户左滑移除挂载。
+    BOOL scoped=[url startAccessingSecurityScopedResource];
     NSNumber *regular=nil;[url.URLByStandardizingPath getResourceValue:&regular forKey:NSURLIsRegularFileKey error:nil];
+    if(scoped)[url stopAccessingSecurityScopedResource];
     if(!regular.boolValue){self.navigationItem.prompt=[self.store isCopiedFileURL:url]?@"该文件已不存在":@"该文件已移动或删除，可左滑移除挂载";return;}
     NSString *name=[self displayNameForURL:url];MediaPlaybackViewController *page=[MediaPlaybackViewController new];page.title=name;page.context=@{@"localMedia":@YES,@"source":@{@"id":@"local-media",@"name":@"本地媒体"},@"item":@{@"name":name,@"id":url.absoluteString},@"detail":@{@"name":name,@"id":url.absoluteString}};page.result=@{@"url":url.absoluteString,@"directMedia":@YES};[self.navigationController pushViewController:page animated:YES];
 }

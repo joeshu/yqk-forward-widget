@@ -16,7 +16,7 @@
 + (NSArray<NSDictionary *> *)filteredChoices:(NSArray<NSDictionary *> *)choices
                                         query:(NSString *)query
                                         scope:(NSString *)scope {
-    NSString *normalizedQuery = query ?: @"";
+    NSString *normalizedQuery = [(query ?: @"") stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     NSString *activeScope = scope ?: @"*";
     BOOL scopeAll = [activeScope isEqual:@"*"];
     NSMutableArray<NSDictionary *> *results = [NSMutableArray arrayWithCapacity:choices.count];
@@ -41,8 +41,9 @@
 }
 
 + (NSString *)emptyMessageForQuery:(NSString *)query {
-    return query.length ? @"没有匹配的选项，请修改或清除搜索词"
-                        : @"当前分组暂无选项，请切换到全部";
+    NSString *trimmed = [(query ?: @"") stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    return trimmed.length ? @"没有匹配的选项，请修改或清除搜索词"
+                          : @"当前分组暂无选项，请切换到全部";
 }
 
 @end

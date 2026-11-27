@@ -66,7 +66,7 @@ FOUNDATION_EXPORT NSArray<NSDictionary *> *MediaPlaybackDecodeRouteCandidatesFor
 FOUNDATION_EXPORT NSString * _Nullable MediaPlaybackDecodeRouteRejectionReasonForResult(NSDictionary * _Nullable result);
 FOUNDATION_EXPORT NSString * _Nullable MediaPlaybackDecodeRouteRejectionReasonForResultForLive(NSDictionary * _Nullable result, BOOL forLive);
 
-// 供日志/诊断用：路由名（@"avplayer" / @"cicada" / @"webview" / @"none"）。
+// 供日志/诊断用：路由名（@"avplayer" / @"mpv" / @"cicada" / @"webview" / @"none"）。
 FOUNDATION_EXPORT NSString *MediaPlaybackDecodeRouteName(MediaPlaybackDecodeRoute route);
 FOUNDATION_EXPORT BOOL MediaPlaybackCicadaErrorAllowsSoftwareRetry(NSError * _Nullable error);
 FOUNDATION_EXPORT NSString * _Nullable MediaPlaybackSniffContainerFormat(NSData * _Nullable headerBytes);

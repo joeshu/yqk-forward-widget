@@ -2,6 +2,7 @@
 #import <AVFoundation/AVFoundation.h>
 @interface PlaybackCoordinator ()
 @property(nonatomic,weak,readwrite) id<PlaybackSession> currentSession;
+@property(nonatomic) uintptr_t currentSessionIdentity;
 @property(nonatomic,weak) id<PlaybackSession> interruptedSession;
 @property(nonatomic) BOOL resumeAfterInterruption;
 -  (MPRemoteCommandHandlerStatus)onMain:(MPRemoteCommandHandlerStatus(^)(void))action;
@@ -25,10 +26,21 @@
 - (void)acquireSession:(id<PlaybackSession>)session {
     NSAssert(NSThread.isMainThread,@"Playback ownership is main-thread confined");
     if(self.currentSession==session)return;
-    [self.currentSession sessionPause];self.currentSession=session;
+    [self.currentSession sessionPause];
+    self.currentSession=session;
+    self.currentSessionIdentity=(uintptr_t)(__bridge void *)session;
     self.interruptedSession=nil;self.resumeAfterInterruption=NO;
 }
-- (void)releaseSession:(id<PlaybackSession>)session {if(self.currentSession==session){self.currentSession=nil;MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo=nil;}}
+- (void)releaseSession:(id<PlaybackSession>)session {
+    uintptr_t identity=(uintptr_t)(__bridge void *)session;
+    if(self.currentSession==session||(identity!=0&&self.currentSessionIdentity==identity)){
+        self.currentSession=nil;
+        self.currentSessionIdentity=0;
+        self.interruptedSession=nil;
+        self.resumeAfterInterruption=NO;
+        MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo=nil;
+    }
+}
 - (MPRemoteCommandHandlerStatus)play {self.resumeAfterInterruption=NO;if(!self.currentSession||![self.currentSession sessionHasContent])return MPRemoteCommandHandlerStatusNoSuchContent;[self.currentSession sessionPlay];return MPRemoteCommandHandlerStatusSuccess;}
 - (MPRemoteCommandHandlerStatus)pause {self.resumeAfterInterruption=NO;if(!self.currentSession||![self.currentSession sessionHasContent])return MPRemoteCommandHandlerStatusNoSuchContent;[self.currentSession sessionPause];return MPRemoteCommandHandlerStatusSuccess;}
 - (MPRemoteCommandHandlerStatus)togglePlayPause {id<PlaybackSession> session=self.currentSession;if(!session||![session sessionHasContent])return MPRemoteCommandHandlerStatusNoSuchContent;BOOL wants=[session respondsToSelector:@selector(sessionWantsPlayback)]?[session sessionWantsPlayback]:[session sessionIsPlaying];return wants?[self pause]:[self play];}
@@ -38,7 +50,7 @@
 - (MPRemoteCommandHandlerStatus)handleTogglePlayPause:(MPRemoteCommandEvent *)event {return [self onMain:^MPRemoteCommandHandlerStatus(void){return [self togglePlayPause];}];}
 - (MPRemoteCommandHandlerStatus)handleNext:(MPRemoteCommandEvent *)event {return [self onMain:^MPRemoteCommandHandlerStatus(void){return [self step:1];}];}
 - (MPRemoteCommandHandlerStatus)handlePrevious:(MPRemoteCommandEvent *)event {return [self onMain:^MPRemoteCommandHandlerStatus(void){return [self step:-1];}];}
-- (MPRemoteCommandHandlerStatus)onMain:(MPRemoteCommandHandlerStatus(^)(void))action {if(NSThread.isMainThread)return action();if(!self.currentSession)return MPRemoteCommandHandlerStatusNoSuchContent;dispatch_async(dispatch_get_main_queue(),^{(void)action();});return MPRemoteCommandHandlerStatusSuccess;}
+- (MPRemoteCommandHandlerStatus)onMain:(MPRemoteCommandHandlerStatus(^)(void))action {if(NSThread.isMainThread)return action();dispatch_async(dispatch_get_main_queue(),^{(void)action();});return MPRemoteCommandHandlerStatusSuccess;}
 - (void)interruption:(NSNotification *)note {
     NSDictionary *info=note.userInfo;
     void (^apply)(void)=^{

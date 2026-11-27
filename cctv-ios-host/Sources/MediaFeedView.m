@@ -40,7 +40,7 @@ static void MediaFeedLoadPosterWithRetry(NSString *url, UIImageView *imageView, 
         self.isAccessibilityElement=YES;self.accessibilityTraits=UIAccessibilityTraitButton;
     }return self;
 }
-- (void)prepareForReuse {[super prepareForReuse];self.transform=CGAffineTransformIdentity;self.poster.accessibilityIdentifier=nil;self.poster.image=nil;self.nameLabel.text=nil;self.detailLabel.text=nil;self.badgeLabel.text=nil;self.accessibilityLabel=nil;self.accessibilityIdentifier=nil;}
+- (void)prepareForReuse {[super prepareForReuse];self.transform=CGAffineTransformIdentity;self.poster.alpha=1.0;self.poster.accessibilityIdentifier=nil;self.poster.image=nil;self.nameLabel.text=nil;self.detailLabel.text=nil;self.badgeLabel.text=nil;self.accessibilityLabel=nil;self.accessibilityIdentifier=nil;}
 - (void)setHighlighted:(BOOL)highlighted {
     [super setHighlighted:highlighted];
     if(UIAccessibilityIsReduceMotionEnabled())return;
@@ -52,7 +52,7 @@ static void MediaFeedLoadPosterWithRetry(NSString *url, UIImageView *imageView, 
 - (void)configureItem:(NSDictionary *)item {
     self.poster.backgroundColor=HostNeutralSurface();HostSetLayerBorderColor(self.poster,HostBorder());
     self.nameLabel.textColor=HostText();self.detailLabel.textColor=HostSecondaryText();
-    BOOL directory=[item[@"directory"] boolValue];self.poster.accessibilityIdentifier=nil;self.poster.image=[UIImage systemImageNamed:directory?@"folder.fill":@"film"];self.poster.contentMode=UIViewContentModeCenter;self.poster.tintColor=HostSecondaryText();
+    id dirVal=item[@"directory"];BOOL directory=[dirVal respondsToSelector:@selector(boolValue)]&&[dirVal boolValue];self.poster.accessibilityIdentifier=nil;self.poster.image=[UIImage systemImageNamed:directory?@"folder.fill":@"film"];self.poster.contentMode=UIViewContentModeCenter;self.poster.tintColor=HostSecondaryText();
     self.nameLabel.text=MediaFeedString(item[@"name"]).length?item[@"name"]:@"影片";
     NSString *remarks=MediaFeedString(item[@"remarks"]),*subtitle=MediaFeedString(item[@"feedSubtitle"]);
     NSString *badgeText=remarks;
@@ -292,7 +292,8 @@ static void MediaFeedLoadPosterWithRetry(NSString *url, UIImageView *imageView, 
     __weak typeof(self) weakSelf=self;
     return [UIContextMenuConfiguration configurationWithIdentifier:indexPath previewProvider:nil actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggested){
         NSMutableArray<UIMenuElement *> *actions=[NSMutableArray array];
-        [actions addObject:[UIAction actionWithTitle:[item[@"directory"] boolValue]?@"打开文件夹":@"查看影片详情" image:[UIImage systemImageNamed:[item[@"directory"] boolValue]?@"folder":@"play.rectangle"] identifier:nil handler:^(__unused UIAction *a){if(weakSelf.onSelectItem)weakSelf.onSelectItem(item,section);}]];
+        id dirFlag=item[@"directory"];BOOL isDir=[dirFlag respondsToSelector:@selector(boolValue)]&&[dirFlag boolValue];
+        [actions addObject:[UIAction actionWithTitle:isDir?@"打开文件夹":@"查看影片详情" image:[UIImage systemImageNamed:isDir?@"folder":@"play.rectangle"] identifier:nil handler:^(__unused UIAction *a){if(weakSelf.onSelectItem)weakSelf.onSelectItem(item,section);}]];
         [actions addObject:[UIAction actionWithTitle:@"复制影片名称" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){UIPasteboard.generalPasteboard.string=name;}]];
         if(remarks.length)[actions addObject:[UIAction actionWithTitle:@"复制名称与备注" image:[UIImage systemImageNamed:@"list.clipboard"] identifier:nil handler:^(__unused UIAction *a){UIPasteboard.generalPasteboard.string=[NSString stringWithFormat:@"%@ (%@)",name,remarks];}]];
         return [UIMenu menuWithTitle:name children:actions];
@@ -316,6 +317,12 @@ static void MediaFeedLoadPosterWithRetry(NSString *url, UIImageView *imageView, 
     if(self.onScroll)self.onScroll(scrollView);[self notifyVisibleCategories];
     if(!movingDown||!(scrollView.dragging||scrollView.decelerating)||!self.onNearEnd)return;BOOL hasGrid=NO;for(NSDictionary *section in self.sections)if([section[@"kind"] isEqual:@"grid"]){hasGrid=YES;break;}
     if(hasGrid&&scrollView.contentOffset.y+CGRectGetHeight(scrollView.bounds)>=scrollView.contentSize.height-MAX(360,CGRectGetHeight(scrollView.bounds)*.85))self.onNearEnd();
+}
+- (void)scrollViewDidEndDecelerating:(UIScrollView *)scrollView {
+    if(self.onScrollEnd)self.onScrollEnd(scrollView);
+}
+- (void)scrollViewDidEndDragging:(UIScrollView *)scrollView willDecelerate:(BOOL)decelerate {
+    if(!decelerate&&self.onScrollEnd)self.onScrollEnd(scrollView);
 }
 - (void)layoutSubviews {[super layoutSubviews];CGFloat width=CGRectGetWidth(self.bounds);if(width>0&&fabs(width-self.lastLayoutWidth)>.5){self.lastLayoutWidth=width;[self.collectionViewLayout invalidateLayout];}for(UICollectionViewCell *cell in self.visibleCells)if([cell isKindOfClass:MediaFeedHeroCell.class])[(MediaFeedHeroCell *)cell updateTimer];}
 - (void)traitCollectionDidChange:(UITraitCollection *)previous {[super traitCollectionDidChange:previous];if(![previous.preferredContentSizeCategory isEqual:self.traitCollection.preferredContentSizeCategory])[self.collectionViewLayout invalidateLayout];if([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previous]){self.backgroundColor=HostBackground();[super reloadData];}}

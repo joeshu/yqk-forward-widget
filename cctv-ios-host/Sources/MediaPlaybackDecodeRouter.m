@@ -59,9 +59,12 @@ NSString *MediaPlaybackSniffContainerFormat(NSData *headerBytes) {
     if (b[0] == 0x1A && b[1] == 0x45 && b[2] == 0xDF && b[3] == 0xA3) return @"mkv";
     if (len >= 8 && (memcmp(b + 4, "ftyp", 4) == 0 || memcmp(b + 4, "styp", 4) == 0 ||
                      memcmp(b + 4, "moof", 4) == 0 || memcmp(b + 4, "moov", 4) == 0)) return @"mp4";
-    if (b[0] == 0x47 && (len < 189 || b[188] == 0x47)) return @"ts";
+    if (len >= 189 && b[0] == 0x47 && b[188] == 0x47) return @"ts";
     if (b[0] == 'f' && b[1] == 'L' && b[2] == 'a' && b[3] == 'C') return @"flac";
     if (len >= 12 && memcmp(b, "RIFF", 4) == 0 && memcmp(b + 8, "WAVE", 4) == 0) return @"wav";
+    if (len >= 12 && memcmp(b, "RIFF", 4) == 0 && memcmp(b + 8, "AVI ", 4) == 0) return @"avi";
+    if (b[0] == 0x30 && b[1] == 0x26 && b[2] == 0xB2 && b[3] == 0x75) return @"asf";
+    if (memcmp(b, ".RMF", 4) == 0) return @"rm";
     if ((b[0] == 'I' && b[1] == 'D' && b[2] == '3') || (b[0] == 0xFF && (b[1] == 0xFB || b[1] == 0xF3 || b[1] == 0xF2))) return @"mp3";
     if (b[0] == 0xFF && (b[1] == 0xF1 || b[1] == 0xF9)) return @"aac";
     NSUInteger offset = (len >= 3 && b[0] == 0xEF && b[1] == 0xBB && b[2] == 0xBF) ? 3 : 0;
@@ -208,10 +211,18 @@ NSArray<NSDictionary *> *MediaPlaybackDecodeRouteCandidatesForResult(NSDictionar
     if (!probedContainer.length && [result[@"headerBytes"] isKindOfClass:NSData.class]) {
         probedContainer = MediaPlaybackSniffContainerFormat(result[@"headerBytes"]) ?: @"";
     }
-    BOOL probedCicadaOnly = [@[@"flv", @"live_flv", @"mkv", @"matroska", @"webm", @"3gp", @"3gpp", @"rtmp", @"mpegts"] containsObject:probedContainer];
+    BOOL probedCicadaOnly = [@[@"flv", @"live_flv", @"mkv", @"matroska", @"webm", @"3gp", @"3gpp", @"rtmp", @"mpegts", @"ts"] containsObject:probedContainer];
     NSString *urlExt = MediaPlaybackDecodeResultExtension(result);
-    BOOL rawProgressiveTS = ([urlExt isEqualToString:@"ts"] && ![MediaPlaybackDecodeResultFormat(result) isEqualToString:@"hls"] && ![MediaPlaybackDecodeResultFormat(result) isEqualToString:@"m3u8"]);
-    BOOL preferCicada = probedCicadaOnly || rawProgressiveTS || [decodeMode isEqualToString:@"cicada"] || [decodeMode isEqualToString:@"cicada_soft"] || [MediaPlaybackDecodeLowerString(result[@"playbackEngine"]) isEqualToString:@"cicada"];
+    NSString *resolvedFormat = MediaPlaybackDecodeResultFormat(result);
+    NSString *videoCodec = MediaPlaybackDecodeLowerString(result[@"videoCodec"]);
+    BOOL mpvOnlyMedia = ([MediaCapabilityMPVOnlyContainers() containsObject:resolvedFormat] ||
+                         [MediaCapabilityMPVOnlyContainers() containsObject:urlExt] ||
+                         [MediaCapabilityMPVOnlyVideoCodecs() containsObject:videoCodec]);
+    BOOL rawProgressiveTS = ([urlExt isEqualToString:@"ts"] && ![resolvedFormat isEqualToString:@"hls"] && ![resolvedFormat isEqualToString:@"m3u8"]);
+    NSString *requestedEngine = MediaPlaybackDecodeLowerString(result[@"playbackEngine"]);
+    BOOL explicitPreferMPV = [decodeMode isEqualToString:@"mpv"] || [requestedEngine isEqualToString:@"mpv"];
+    BOOL explicitPreferCicada = [decodeMode isEqualToString:@"cicada"] || [decodeMode isEqualToString:@"cicada_soft"] || [requestedEngine isEqualToString:@"cicada"];
+    BOOL preferCicada = !mpvOnlyMedia && !explicitPreferMPV && (probedCicadaOnly || rawProgressiveTS || explicitPreferCicada);
     BOOL legacyCicada = [decodeMode isEqualToString:@"cicada_legacy"];
     NSString *cicadaDecodeMode = ([decodeMode isEqualToString:@"cicada_soft"] || [result[@"preferSoftwareDecode"] boolValue]) ? @"cicada_soft" : @"cicada";
 
@@ -235,6 +246,8 @@ NSArray<NSDictionary *> *MediaPlaybackDecodeRouteCandidatesForResult(NSDictionar
         if (route == MediaPlaybackDecodeRouteMPV && legacyCicada) continue;
         // 直播默认不走实验中的 MPV，也没有网页播放器。
         if (forLive && (route == MediaPlaybackDecodeRouteMPV || route == MediaPlaybackDecodeRouteWebView)) continue;
+        // MPV-only 容器/编码（AVI/WMV/ASF/RM/VP8/VP9/AV1 等）Cicada 必败，直接跳过。
+        if (route == MediaPlaybackDecodeRouteCicadaPlayer && mpvOnlyMedia) continue;
         // 直连媒体不进 WebView：耗尽后返回 None，走统一终态。
         if (route == MediaPlaybackDecodeRouteWebView && directMedia) continue;
         // AVPlayer only leads the chain for formats it can decode. For Cicada-only
@@ -242,6 +255,7 @@ NSArray<NSDictionary *> *MediaPlaybackDecodeRouteCandidatesForResult(NSDictionar
         // returns NO; attempting AVPlayer first wastes a full startup-watchdog
         // budget on a deterministically-failing leg. Skip it so the ordered
         // chain starts at MPV/Cicada.
+        if (route == MediaPlaybackDecodeRouteAVPlayer && mpvOnlyMedia) continue;
         if (route == MediaPlaybackDecodeRouteAVPlayer && !avSupported) continue;
         NSUInteger bit = route == MediaPlaybackDecodeRouteAVPlayer ? MediaPlaybackDecodeRouteAttemptedAVPlayer :
             route == MediaPlaybackDecodeRouteMPV ? MediaPlaybackDecodeRouteAttemptedMPV :
@@ -255,8 +269,23 @@ NSArray<NSDictionary *> *MediaPlaybackDecodeRouteCandidatesForResult(NSDictionar
             route == MediaPlaybackDecodeRouteCicadaPlayer ? (preferCicada ? @"cicada_preferred" : @"cicada_fallback") : @"web_page";
         [out addObject:@{@"route": @(route), @"decodeMode": decodeModeForRoute, @"reason": reason}];
     }
-    // preferCicada 时 Cicada 排 MPV 之前：交换两者在候选中的位置。
-    if (preferCicada) {
+    // 显式指定 MPV 或 Cicada 时优先置顶。
+    if (explicitPreferMPV) {
+        NSUInteger mpvIndex = [out indexOfObjectPassingTest:^BOOL(NSDictionary *entry, NSUInteger idx, BOOL *stop) { return [entry[@"route"] integerValue] == MediaPlaybackDecodeRouteMPV; }];
+        if (mpvIndex != NSNotFound && mpvIndex > 0) {
+            NSDictionary *entry = out[mpvIndex];
+            [out removeObjectAtIndex:mpvIndex];
+            [out insertObject:entry atIndex:0];
+        }
+    } else if (explicitPreferCicada && !mpvOnlyMedia) {
+        NSUInteger cicadaIndex = [out indexOfObjectPassingTest:^BOOL(NSDictionary *entry, NSUInteger idx, BOOL *stop) { return [entry[@"route"] integerValue] == MediaPlaybackDecodeRouteCicadaPlayer; }];
+        if (cicadaIndex != NSNotFound && cicadaIndex > 0) {
+            NSDictionary *entry = out[cicadaIndex];
+            [out removeObjectAtIndex:cicadaIndex];
+            [out insertObject:entry atIndex:0];
+        }
+    } else if (preferCicada) {
+        // preferCicada 时 Cicada 排 MPV 之前：交换两者在候选中的位置。
         NSUInteger mpvIndex = [out indexOfObjectPassingTest:^BOOL(NSDictionary *entry, NSUInteger idx, BOOL *stop) { return [entry[@"route"] integerValue] == MediaPlaybackDecodeRouteMPV; }];
         NSUInteger cicadaIndex = [out indexOfObjectPassingTest:^BOOL(NSDictionary *entry, NSUInteger idx, BOOL *stop) { return [entry[@"route"] integerValue] == MediaPlaybackDecodeRouteCicadaPlayer; }];
         if (mpvIndex != NSNotFound && cicadaIndex != NSNotFound && cicadaIndex > mpvIndex) [out exchangeObjectAtIndex:mpvIndex withObjectAtIndex:cicadaIndex];

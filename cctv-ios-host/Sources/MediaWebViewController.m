@@ -16,12 +16,14 @@ static BOOL MediaWebIsOfficialWatchPageURL(NSURL *url) {
 @property(nonatomic) BOOL observingWebKVO;
 @property(nonatomic) NSUInteger mediaGeneration;
 @property(nonatomic) NSUInteger promptGeneration;
+@property(nonatomic) NSUInteger navigationGeneration;
 @property(nonatomic,strong) UIBarButtonItem *nativeButton;
 @property(nonatomic, strong) WKWebView *web;
 @property(nonatomic, strong) UIActivityIndicatorView *spinner;
 @property(nonatomic, strong) UIProgressView *webProgressView;
 @property(nonatomic, strong) UIView *statusCard;
 @property(nonatomic, strong) UILabel *statusLabel;
+- (nullable NSURL *)resultURL;
 - (void)installCookieHeader:(NSString *)cookie forURL:(NSURL *)url completion:(dispatch_block_t)completion;
 - (void)loadInitialPageAtURL:(NSURL *)url cookie:(NSString *)cookie;
 - (void)showStatusMessage:(NSString *)message;
@@ -32,6 +34,10 @@ static BOOL MediaWebIsOfficialWatchPageURL(NSURL *url) {
 @end
 @implementation MediaWebViewController
 - (instancetype)initWithResult:(NSDictionary *)result title:(NSString *)title {if((self=[super init])){_result=result;self.title=title;}return self;}
+- (nullable NSURL *)resultURL {
+    NSString *raw=[self.result[@"url"] isKindOfClass:NSString.class]?self.result[@"url"]:nil;
+    return raw.length?[NSURL URLWithString:raw]:nil;
+}
 - (void)viewDidLoad {
     [super viewDidLoad];self.overrideUserInterfaceStyle=HostSelectedInterfaceStyle();self.view.backgroundColor=HostBackground();self.view.tintColor=HostAccent();
     self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(close)];
@@ -52,12 +58,12 @@ static BOOL MediaWebIsOfficialWatchPageURL(NSURL *url) {
         UIAction *forwardAction=[UIAction actionWithTitle:@"前进下一页" image:[UIImage systemImageNamed:@"chevron.forward"] identifier:nil handler:^(__unused UIAction *a){if(weakSelf.web.canGoForward)[weakSelf.web goForward];}];
         navElement=[UIMenu menuWithTitle:@"" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:@[backAction,forwardAction]];
     }
-    UIAction *copyURLAction=[UIAction actionWithTitle:@"复制当前网页地址" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){NSString *current=weakSelf.web.URL.absoluteString?:weakSelf.result[@"url"];if([current isKindOfClass:NSString.class]&&current.length){UIPasteboard.generalPasteboard.string=current;[weakSelf showTransientPrompt:@"已复制当前网页地址"];}}];
-    UIAction *openSafariAction=[UIAction actionWithTitle:@"在系统浏览器中打开" image:[UIImage systemImageNamed:@"safari"] identifier:@"media.web.safari" handler:^(__unused UIAction *a){NSURL *u=weakSelf.web.URL?:[NSURL URLWithString:weakSelf.result[@"url"]?:@""];NSString *h=u.host.lowercaseString?:@"";BOOL loop=[h isEqualToString:@"127.0.0.1"]||[h isEqualToString:@"localhost"]||[h isEqualToString:@"::1"];if(u&&[@[@"http",@"https"] containsObject:u.scheme.lowercaseString]&&!loop)[UIApplication.sharedApplication openURL:u options:@{} completionHandler:nil];else [weakSelf showTransientPrompt:@"本机配置页仅限应用内打开"];}];
+    UIAction *copyURLAction=[UIAction actionWithTitle:@"复制当前网页地址" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){NSString *current=weakSelf.web.URL.absoluteString?:weakSelf.resultURL.absoluteString;if([current isKindOfClass:NSString.class]&&current.length){UIPasteboard.generalPasteboard.string=current;[weakSelf showTransientPrompt:@"已复制当前网页地址"];}}];
+    UIAction *openSafariAction=[UIAction actionWithTitle:@"在系统浏览器中打开" image:[UIImage systemImageNamed:@"safari"] identifier:@"media.web.safari" handler:^(__unused UIAction *a){NSURL *u=weakSelf.web.URL?:weakSelf.resultURL;NSString *h=u.host.lowercaseString?:@"";BOOL loop=[h isEqualToString:@"127.0.0.1"]||[h isEqualToString:@"localhost"]||[h isEqualToString:@"::1"];if(u&&[@[@"http",@"https"] containsObject:u.scheme.lowercaseString]&&!loop)[UIApplication.sharedApplication openURL:u options:@{} completionHandler:nil];else [weakSelf showTransientPrompt:@"本机配置页仅限应用内打开"];}];
     UIBarButtonItem *more=[[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"] menu:[UIMenu menuWithTitle:@"网页操作" children:@[navElement,copyURLAction,openSafariAction]]];
     more.accessibilityIdentifier=@"media.web.more";
     more.accessibilityLabel=@"更多网页操作";
-    BOOL officialWatchPage=MediaWebIsOfficialWatchPageURL([NSURL URLWithString:self.result[@"url"]]);
+    BOOL officialWatchPage=MediaWebIsOfficialWatchPageURL(self.resultURL);
     if(!officialWatchPage&&(self.onTryNativePlayback||self.onResolvedMedia)){UIBarButtonItem *native=[[UIBarButtonItem alloc] initWithTitle:@"原生播放" style:UIBarButtonItemStylePlain target:self action:@selector(tryNativePlayback)];self.nativeButton=native;self.navigationItem.rightBarButtonItems=@[native,more,refresh];}else self.navigationItem.rightBarButtonItems=@[more,refresh];
     WKWebViewConfiguration *configuration=[WKWebViewConfiguration new];configuration.websiteDataStore=WKWebsiteDataStore.nonPersistentDataStore;configuration.allowsInlineMediaPlayback=YES;configuration.mediaTypesRequiringUserActionForPlayback=WKAudiovisualMediaTypeNone;
     self.web=[[WKWebView alloc] initWithFrame:self.view.bounds configuration:configuration];self.web.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;self.web.navigationDelegate=self;self.web.allowsBackForwardNavigationGestures=YES;UIRefreshControl *webRefresh=[UIRefreshControl new];webRefresh.tintColor=HostAccent();[webRefresh addTarget:self action:@selector(refresh) forControlEvents:UIControlEventValueChanged];self.web.scrollView.keyboardDismissMode=UIScrollViewKeyboardDismissModeOnDrag;self.web.scrollView.refreshControl=webRefresh;[self.web addObserver:self forKeyPath:@"estimatedProgress" options:NSKeyValueObservingOptionNew context:NULL];[self.web addObserver:self forKeyPath:@"title" options:NSKeyValueObservingOptionNew context:NULL];self.observingWebKVO=YES;[self.view addSubview:self.web];
@@ -69,7 +75,7 @@ static BOOL MediaWebIsOfficialWatchPageURL(NSURL *url) {
     [NSLayoutConstraint activateConstraints:@[[self.statusCard.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],[self.statusCard.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor constant:48],[self.statusCard.leadingAnchor constraintGreaterThanOrEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor constant:24],[self.statusCard.trailingAnchor constraintLessThanOrEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-24],[self.statusLabel.leadingAnchor constraintEqualToAnchor:self.statusCard.leadingAnchor constant:16],[self.statusLabel.trailingAnchor constraintEqualToAnchor:self.statusCard.trailingAnchor constant:-16],[self.statusLabel.topAnchor constraintEqualToAnchor:self.statusCard.topAnchor constant:12],[self.statusLabel.bottomAnchor constraintEqualToAnchor:self.statusCard.bottomAnchor constant:-12]]];
     NSDictionary *headers=MediaPlaybackHeadersFromResult(self.result);for(NSString *key in headers)if([key.lowercaseString isEqual:@"user-agent"])self.web.customUserAgent=headers[key];
     self.configurationPage=[self.result[@"configurationPage"] boolValue];
-    NSURL *configurationURL=[NSURL URLWithString:self.result[@"url"]];
+    NSURL *configurationURL=self.resultURL;
     if(self.configurationPage){
         // host 为 nil（如 http:///path）时直接传给 containsObject: 会抛异常，先归一为空串。
         NSString *configurationHost=configurationURL.host.lowercaseString?:@"";
@@ -127,12 +133,12 @@ static BOOL MediaWebIsOfficialWatchPageURL(NSURL *url) {
 - (void)stopWebMediaPlayback {
     [self.web stopLoading];
     [self.web evaluateJavaScript:@"try{document.querySelectorAll('video,audio').forEach(function(e){e.muted=true;e.pause();e.removeAttribute('src');e.load();});}catch(e){}" completionHandler:nil];
+    [self.web loadHTMLString:@"" baseURL:nil];
 }
-- (void)viewDidDisappear:(BOOL)animated {[super viewDidDisappear:animated];if(self.isMovingFromParentViewController||self.isBeingDismissed||self.navigationController.isBeingDismissed){self.didClose=YES;[self removeWebKVOIfNeeded];[self invalidateMediaResolution];[self stopWebMediaPlayback];self.onResolvedMedia=nil;self.onTryNativePlayback=nil;}}
+- (void)viewDidDisappear:(BOOL)animated {[super viewDidDisappear:animated];if(self.isMovingFromParentViewController||self.isBeingDismissed||self.navigationController.isBeingDismissed){BOOL wasClosed=self.didClose;self.didClose=YES;[self removeWebKVOIfNeeded];[self invalidateMediaResolution];[self stopWebMediaPlayback];self.onResolvedMedia=nil;self.onTryNativePlayback=nil;dispatch_block_t closeCallback=!wasClosed?self.onClose:nil;self.onClose=nil;if(closeCallback)closeCallback();}}
 - (void)refresh {
     if(self.didClose)return;[self invalidateMediaResolution];
-    NSString *urlString=[self.result[@"url"] isKindOfClass:NSString.class]?self.result[@"url"]:nil;
-    NSURL *initialURL=urlString.length?[NSURL URLWithString:urlString]:nil;
+    NSURL *initialURL=self.resultURL;
     NSURL *targetURL=self.web.URL?:initialURL;
     if(!targetURL||!targetURL.scheme.length){[self.spinner stopAnimating];self.navigationItem.prompt=@"网页地址无效";[self showStatusMessage:@"网页地址无效，无法打开此页面"];return;}
     NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:targetURL cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:25];request.allHTTPHeaderFields=MediaPlaybackHeadersScopedToURL(MediaPlaybackHeadersFromResult(self.result),initialURL,targetURL);
@@ -146,11 +152,11 @@ static BOOL MediaWebIsOfficialWatchPageURL(NSURL *url) {
 }
 - (void)tryNativePlayback {
     if(self.didClose||self.resolvingMedia)return;
-    if(MediaWebIsOfficialWatchPageURL([NSURL URLWithString:self.result[@"url"]])){self.navigationItem.prompt=@"请在官方网页播放器中观看";return;}
+    if(MediaWebIsOfficialWatchPageURL(self.resultURL)){self.navigationItem.prompt=@"请在官方网页播放器中观看";return;}
     if(!self.onResolvedMedia){if(self.onTryNativePlayback){self.didClose=YES;[self stopWebMediaPlayback];dispatch_block_t callback=self.onTryNativePlayback;self.onTryNativePlayback=nil;self.onClose=nil;[self dismissViewControllerAnimated:YES completion:callback];}return;}
     self.resolvingMedia=YES;self.nativeButton.enabled=NO;NSUInteger generation=++self.mediaGeneration;self.navigationItem.prompt=@"正在读取网页媒体地址…";
     [self recordMediaEvent:@"web_media_extraction_started" fields:nil];
-    NSString *script=@"(function scan(w){try{for(const v of w.document.querySelectorAll('video,audio')){const s=v.currentSrc||v.src;if(/^https?:/i.test(s))return s;}for(const f of w.frames){const s=scan(f);if(s)return s;}}catch(e){}return ''; })(window)";
+    NSString *script=@"(function scan(w){try{for(const v of w.document.querySelectorAll('video,audio')){const s=v.currentSrc||v.src||(v.querySelector('source[src]')?v.querySelector('source[src]').src:'');if(/^https?:/i.test(s))return s;}for(const f of w.frames){const s=scan(f);if(s)return s;}}catch(e){}return ''; })(window)";
     __weak typeof(self) weakSelf=self;
     [self.web evaluateJavaScript:script completionHandler:^(id value,NSError *error){
         MediaWebViewController *owner=weakSelf;if(!owner||owner.didClose||owner.mediaGeneration!=generation)return;
@@ -159,7 +165,7 @@ static BOOL MediaWebIsOfficialWatchPageURL(NSURL *url) {
         BOOL targetLoopback=[targetHost isEqualToString:@"localhost"]||[targetHost isEqualToString:@"::1"]||[targetHost isEqualToString:@"[::1]"]||[targetHost hasPrefix:@"127."]||[targetHost hasPrefix:@"169.254."]||[targetHost hasPrefix:@"0."];
         BOOL pageLoopback=[pageHost isEqualToString:@"localhost"]||[pageHost isEqualToString:@"::1"]||[pageHost isEqualToString:@"[::1]"]||[pageHost hasPrefix:@"127."];
         if(error||raw.length>8192||![@[@"http",@"https"] containsObject:url.scheme.lowercaseString]||!url.host.length||url.user.length||url.password.length||(targetLoopback&&!pageLoopback)||[raw rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location!=NSNotFound){[owner recordMediaEvent:@"web_media_extraction_failed" fields:@{@"failure_stage":error?@"javascript_evaluation":@"no_valid_http_media",@"result_has_media_url":@(raw.length>0),@"error_domain":error.domain?:@"",@"error_code":@(error.code)}];owner.resolvingMedia=NO;owner.nativeButton.enabled=YES;owner.navigationItem.prompt=@"尚未取得可交给原生播放器的地址，请先在网页内开始播放";return;}
-        NSURL *originalURL=[NSURL URLWithString:[owner.result[@"url"] isKindOfClass:NSString.class]?owner.result[@"url"]:@""];
+        NSURL *originalURL=owner.resultURL;
         NSURL *pageURL=owner.web.URL;
         NSDictionary *pageHeaders=MediaPlaybackHeadersScopedToURL(MediaPlaybackHeadersFromResult(owner.result),originalURL,pageURL);
         NSMutableDictionary *headers=[MediaPlaybackHeadersScopedToURL(pageHeaders,pageURL,url) mutableCopy];
@@ -189,13 +195,13 @@ static BOOL MediaWebIsOfficialWatchPageURL(NSURL *url) {
 - (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context {if(object==self.web){if([keyPath isEqualToString:@"estimatedProgress"]){float p=(float)self.web.estimatedProgress;self.webProgressView.hidden=(p>=1.0f);[self.webProgressView setProgress:MAX(0.12f,p) animated:YES];return;}if([keyPath isEqualToString:@"title"]){NSString *t=[self.web.title stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];if(t.length&&!self.title.length)self.title=t;return;}}[super observeValueForKeyPath:keyPath ofObject:object change:change context:context];}
 - (void)dealloc {[self removeWebKVOIfNeeded];self.web.navigationDelegate=nil;[self.web stopLoading];}
 - (void)webView:(WKWebView *)webView decidePolicyForNavigationAction:(WKNavigationAction *)action decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
-    NSURL *url=action.request.URL;NSString *scheme=url.scheme.lowercaseString?:@"";BOOL allowed=[@[@"http",@"https",@"about"] containsObject:scheme];if(self.configurationPage&&(action.targetFrame.isMainFrame||!action.targetFrame)){NSURL *base=[NSURL URLWithString:self.result[@"url"]];allowed=allowed&&[url.scheme.lowercaseString isEqual:base.scheme.lowercaseString]&&[url.host.lowercaseString isEqual:base.host.lowercaseString]&&[(url.port?:@0) isEqual:(base.port?:@0)];if(!allowed)self.navigationItem.prompt=@"此操作需要离开源配置页，当前未打开";}
+    NSURL *url=action.request.URL;NSString *scheme=url.scheme.lowercaseString?:@"";BOOL allowed=[@[@"http",@"https",@"about"] containsObject:scheme];if(self.configurationPage&&(action.targetFrame.isMainFrame||!action.targetFrame)){NSURL *base=self.resultURL;allowed=allowed&&base&&[url.scheme.lowercaseString isEqual:base.scheme.lowercaseString]&&[url.host.lowercaseString isEqual:base.host.lowercaseString]&&[(url.port?:@0) isEqual:(base.port?:@0)];if(!allowed)self.navigationItem.prompt=@"此操作需要离开源配置页，当前未打开";}
     decisionHandler(allowed?WKNavigationActionPolicyAllow:WKNavigationActionPolicyCancel);
     if(allowed && !action.targetFrame)[webView loadRequest:action.request];
 }
-- (void)webView:(WKWebView *)webView didStartProvisionalNavigation:(WKNavigation *)navigation {[self.spinner startAnimating];self.webProgressView.hidden=NO;[self.webProgressView setProgress:0.35 animated:YES];[self showStatusMessage:nil];}
-- (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {[self.spinner stopAnimating];[self.web.scrollView.refreshControl endRefreshing];[self.webProgressView setProgress:1.0 animated:YES];__weak typeof(self) weakSelf=self;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,350*NSEC_PER_MSEC),dispatch_get_main_queue(),^{MediaWebViewController *owner=weakSelf;if(!owner||owner.didClose)return;owner.webProgressView.hidden=YES;owner.webProgressView.progress=0;});[self showStatusMessage:nil];}
+- (void)webView:(WKWebView *)webView didStartProvisionalNavigation:(WKNavigation *)navigation {self.navigationGeneration++;[self.spinner startAnimating];self.webProgressView.hidden=NO;[self.webProgressView setProgress:0.35 animated:YES];[self showStatusMessage:nil];}
+- (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {NSUInteger navGen=++self.navigationGeneration;[self.spinner stopAnimating];[self.web.scrollView.refreshControl endRefreshing];[self.webProgressView setProgress:1.0 animated:YES];__weak typeof(self) weakSelf=self;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,350*NSEC_PER_MSEC),dispatch_get_main_queue(),^{MediaWebViewController *owner=weakSelf;if(!owner||owner.didClose)return;if(owner.navigationGeneration!=navGen)return;owner.webProgressView.hidden=YES;owner.webProgressView.progress=0;});[self showStatusMessage:nil];}
 - (void)webView:(WKWebView *)webView didFailProvisionalNavigation:(WKNavigation *)navigation withError:(NSError *)error {[self failed:error];}
 - (void)webView:(WKWebView *)webView didFailNavigation:(WKNavigation *)navigation withError:(NSError *)error {[self failed:error];}
-- (void)failed:(NSError *)error {[self.web.scrollView.refreshControl endRefreshing];if(error.code==NSURLErrorCancelled)return;[self.spinner stopAnimating];self.webProgressView.hidden=YES;self.webProgressView.progress=0;[self recordMediaEvent:@"web_media_navigation_failed" fields:@{@"failure_stage":@"web_navigation",@"error_domain":error.domain?:@"",@"error_code":@(error.code)}];self.navigationItem.prompt=error.localizedDescription;[self showStatusMessage:error.localizedDescription];}
+- (void)failed:(NSError *)error {self.navigationGeneration++;[self.web.scrollView.refreshControl endRefreshing];if(error.code==NSURLErrorCancelled)return;[self.spinner stopAnimating];self.webProgressView.hidden=YES;self.webProgressView.progress=0;[self recordMediaEvent:@"web_media_navigation_failed" fields:@{@"failure_stage":@"web_navigation",@"error_domain":error.domain?:@"",@"error_code":@(error.code)}];self.navigationItem.prompt=error.localizedDescription;[self showStatusMessage:error.localizedDescription];}
 @end

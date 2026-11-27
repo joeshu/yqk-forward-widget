@@ -200,6 +200,7 @@ typedef NS_ENUM(NSInteger, ShortDramaSlotState) {
 /// T17：当前集的 1s 进度观察（只跟当前集，切换/退出时移除）。
 @property (nonatomic, strong, nullable) id progressObserver;
 @property (nonatomic, weak, nullable) AVPlayer *observedPlayer;
+- (void)teardownFeed;
 - (void)closeFeed;
 - (void)showEpisodeDrawer;
 - (void)updateSlidingPoolAroundIndex:(NSInteger)centerIndex;
@@ -308,9 +309,12 @@ typedef NS_ENUM(NSInteger, ShortDramaSlotState) {
 
 - (void)viewDidDisappear:(BOOL)animated {
     [super viewDidDisappear:animated];
-    // 被其它方式解散（如手势）时同样释放会话；正常 closeFeed 已释放，
-    // releaseSession 对非当前会话是 no-op，可安全重入。
-    if (!self.feedActive) [[PlaybackCoordinator shared] releaseSession:(id<PlaybackSession>)self];
+    // 被其它方式解散（如手势）时同样完整清理槽位并释放会话；正常 closeFeed 已清理，可安全重入。
+    if (self.isBeingDismissed || self.isMovingFromParentViewController) {
+        [self teardownFeed];
+    } else if (!self.feedActive) {
+        [[PlaybackCoordinator shared] releaseSession:(id<PlaybackSession>)self];
+    }
 }
 
 #pragma mark - PlaybackSession（统一播放会话，M02/S6）
@@ -364,19 +368,24 @@ typedef NS_ENUM(NSInteger, ShortDramaSlotState) {
     }
 }
 
-- (void)closeFeed {
+- (void)teardownFeed {
     // T17：退出前先把当前集进度落库（有证据才记），再立退场 flag。
     [self persistSlotProgress:self.playerPool[@(self.activeIndex)] completed:NO];
     [self removeProgressObserver];
-    // M02：退场先立 flag 再取消解析、暂停全部槽位、释放会话，最后才解散。
+    // M02：退场先立 flag 再取消解析、暂停并清空全部槽位、释放会话。
     // 此后到达的异步解析回调在 applyURL 里按 feedActive 丢弃，杜绝退场后出声。
     self.feedActive = NO;
     for (ShortDramaPlayerSlot *slot in self.playerPool.allValues) {
         if (slot.resolveCancel) { slot.resolveCancel(); slot.resolveCancel = nil; }
         slot.state = ShortDramaSlotStateCancelled;
         [slot.player pause];
+        [slot.player replaceCurrentItemWithPlayerItem:nil];
     }
     [[PlaybackCoordinator shared] releaseSession:(id<PlaybackSession>)self];
+}
+
+- (void)closeFeed {
+    [self teardownFeed];
     [self dismissViewControllerAnimated:YES completion:nil];
 }
 
@@ -392,7 +401,10 @@ typedef NS_ENUM(NSInteger, ShortDramaSlotState) {
 
 - (void)openFailedEpisodeInStandardPlayer:(UIButton *)sender {
     if (!self.feedActive || !self.onOpenInStandardPlayer) return;
-    self.onOpenInStandardPlayer(sender.tag);
+    NSInteger index = sender.tag;
+    void (^handoff)(NSInteger) = [self.onOpenInStandardPlayer copy];
+    [self teardownFeed];
+    handoff(index);
 }
 
 /// T17：把一集进度写入观看历史（一集一条，与标准播放器同一条目）。
@@ -445,15 +457,13 @@ typedef NS_ENUM(NSInteger, ShortDramaSlotState) {
 
 - (void)showEpisodeDrawer {
     __weak typeof(self) weakSelf = self;
-    NSUInteger maxShow = MIN(self.episodes.count, (NSUInteger)30);
-    NSMutableArray<HostGlassSheetAction *> *rows = [NSMutableArray array];
-    for (NSUInteger i = 0; i < maxShow; i++) {
+    NSMutableArray<HostGlassSheetAction *> *rows = [NSMutableArray arrayWithCapacity:self.episodes.count];
+    for (NSUInteger i = 0; i < self.episodes.count; i++) {
         NSString *name = [self.episodes[i][@"name"] isKindOfClass:NSString.class] ? self.episodes[i][@"name"] : [NSString stringWithFormat:@"第 %lu 集", (unsigned long)i + 1];
         BOOL selected = ((NSInteger)i == self.activeIndex);
         [rows addObject:[HostGlassSheetAction actionWithTitle:name subtitle:nil value:nil icon:nil tint:(selected ? HostAccent() : UIColor.systemBlueColor) destructive:NO selected:selected handler:^{
             ShortDramaVerticalFeedController *owner = weakSelf;
-            if (!owner) return;
-            owner.activeIndex = (NSInteger)i;
+            if (!owner || !owner.feedActive) return;
             [owner.collectionView scrollToItemAtIndexPath:[NSIndexPath indexPathForItem:(NSInteger)i inSection:0]
                                          atScrollPosition:UICollectionViewScrollPositionTop
                                                  animated:YES];
@@ -509,7 +519,10 @@ typedef NS_ENUM(NSInteger, ShortDramaSlotState) {
     if (existing) {
         switch (existing.state) {
             case ShortDramaSlotStateReady:
-                if (autoPlay) [existing.player play];
+                if (autoPlay) {
+                    existing.player.currentItem.preferredForwardBufferDuration = 10.0;
+                    [existing.player play];
+                }
                 if (cell) { [cell attachPlayerLayer:existing.playerLayer]; [cell.spinner stopAnimating]; }
                 break;
             case ShortDramaSlotStateResolving:
@@ -545,6 +558,8 @@ typedef NS_ENUM(NSInteger, ShortDramaSlotState) {
     slot.state = ShortDramaSlotStateResolving;
     slot.resolveCancel = nil;
     slot.failureReason = nil;
+    slot.evidenceReady = NO;
+    slot.lastPersistedPosition = 0;
     slot.completedPersisted = NO;
     ShortDramaFeedCell *cell = (ShortDramaFeedCell *)[self.collectionView cellForItemAtIndexPath:[NSIndexPath indexPathForItem:index inSection:0]];
     if (cell) [cell hideFailure];
@@ -580,8 +595,15 @@ typedef NS_ENUM(NSInteger, ShortDramaSlotState) {
                 // T17：进入时那一集有续播位置，seek 一次再播（只做一次）。
                 if (index == owner.entryIndex && owner.initialResumePosition > 0 && !slot.resumeSeekDone) {
                     slot.resumeSeekDone = YES;
-                    [slot.player seekToTime:CMTimeMakeWithSeconds(owner.initialResumePosition, 600) toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero completionHandler:^(BOOL finished) {
-                        if (finished && owner.feedActive && index == owner.activeIndex) [slot.player play];
+                    __weak ShortDramaPlayerSlot *weakSlot = slot;
+                    [slot.player seekToTime:CMTimeMakeWithSeconds(owner.initialResumePosition, 600) toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero completionHandler:^(__unused BOOL finished) {
+                        dispatch_async(dispatch_get_main_queue(), ^{
+                            ShortDramaVerticalFeedController *strongOwner = weakSelf;
+                            ShortDramaPlayerSlot *strongSlot = weakSlot;
+                            if (strongOwner && strongSlot && strongOwner.feedActive && index == strongOwner.activeIndex) {
+                                [strongSlot.player play];
+                            }
+                        });
                     }];
                 } else {
                     [slot.player play];
@@ -603,6 +625,11 @@ typedef NS_ENUM(NSInteger, ShortDramaSlotState) {
 }
 
 - (void)handlePlaybackEnded:(NSNotification *)note {
+    if (!NSThread.isMainThread) {
+        __weak typeof(self) weakSelf = self;
+        dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf handlePlaybackEnded:note]; });
+        return;
+    }
     if (!self.feedActive) return;
     ShortDramaPlayerSlot *current = self.playerPool[@(self.activeIndex)];
     if (!current || note.object != current.player.currentItem) return;
@@ -618,6 +645,11 @@ typedef NS_ENUM(NSInteger, ShortDramaSlotState) {
 }
 
 - (void)handlePlaybackFailed:(NSNotification *)note {
+    if (!NSThread.isMainThread) {
+        __weak typeof(self) weakSelf = self;
+        dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf handlePlaybackFailed:note]; });
+        return;
+    }
     if (!self.feedActive) return;
     AVPlayerItem *item = note.object;
     if (![item isKindOfClass:AVPlayerItem.class]) return;
@@ -644,6 +676,12 @@ typedef NS_ENUM(NSInteger, ShortDramaSlotState) {
     NSString *epName = [ep[@"name"] isKindOfClass:NSString.class] ? ep[@"name"] : [NSString stringWithFormat:@"第 %ld 集", (long)indexPath.item + 1];
     cell.episodeBadge.text = [NSString stringWithFormat:@"  %@  ", epName];
     cell.titleLabel.text = self.dramaTitle;
+    [cell.failureRetryButton removeTarget:nil action:NULL forControlEvents:UIControlEventAllEvents];
+    [cell.failureRetryButton addTarget:self action:@selector(retryFailedEpisode:) forControlEvents:UIControlEventTouchUpInside];
+    cell.failureRetryButton.tag = indexPath.item;
+    [cell.failureStandardButton removeTarget:nil action:NULL forControlEvents:UIControlEventAllEvents];
+    [cell.failureStandardButton addTarget:self action:@selector(openFailedEpisodeInStandardPlayer:) forControlEvents:UIControlEventTouchUpInside];
+    cell.failureStandardButton.tag = indexPath.item;
     ShortDramaPlayerSlot *slot = self.playerPool[@(indexPath.item)];
     if (slot) {
         [cell attachPlayerLayer:slot.playerLayer];
@@ -652,12 +690,6 @@ typedef NS_ENUM(NSInteger, ShortDramaSlotState) {
         else [cell.spinner stopAnimating];
         if (slot.state == ShortDramaSlotStateFailed) [cell showFailureWithReason:slot.failureReason ?: @"无法播放此集" canOpenInStandardPlayer:self.onOpenInStandardPlayer != nil];
         else [cell hideFailure];
-        [cell.failureRetryButton removeTarget:nil action:NULL forControlEvents:UIControlEventAllEvents];
-        [cell.failureRetryButton addTarget:self action:@selector(retryFailedEpisode:) forControlEvents:UIControlEventTouchUpInside];
-        cell.failureRetryButton.tag = indexPath.item;
-        [cell.failureStandardButton removeTarget:nil action:NULL forControlEvents:UIControlEventAllEvents];
-        [cell.failureStandardButton addTarget:self action:@selector(openFailedEpisodeInStandardPlayer:) forControlEvents:UIControlEventTouchUpInside];
-        cell.failureStandardButton.tag = indexPath.item;
     } else {
         [cell.spinner startAnimating];
         [cell hideFailure];
@@ -670,13 +702,22 @@ typedef NS_ENUM(NSInteger, ShortDramaSlotState) {
     return collectionView.bounds.size;
 }
 
-- (void)scrollViewDidEndDecelerating:(UIScrollView *)scrollView {
+- (void)syncActiveIndexForScrollView:(UIScrollView *)scrollView {
+    if (!self.episodes.count) return;
     CGFloat h = MAX(1.0, scrollView.bounds.size.height);
     NSInteger page = (NSInteger)llround(scrollView.contentOffset.y / h);
     page = MAX(0, MIN(page, (NSInteger)self.episodes.count - 1));
     if (page != self.activeIndex) {
         [self updateSlidingPoolAroundIndex:page];
     }
+}
+
+- (void)scrollViewDidEndDecelerating:(UIScrollView *)scrollView {
+    [self syncActiveIndexForScrollView:scrollView];
+}
+
+- (void)scrollViewDidEndDragging:(UIScrollView *)scrollView willDecelerate:(BOOL)decelerate {
+    if (!decelerate) [self syncActiveIndexForScrollView:scrollView];
 }
 
 @end

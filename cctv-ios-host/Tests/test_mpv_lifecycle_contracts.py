@@ -74,7 +74,7 @@ class MPVLifecycleContractTests(unittest.TestCase):
         self.assertIn("#if !defined(__APPLE__)", LIFECYCLE_C)
         self.assertIn("pthread_condattr_setclock", LIFECYCLE_C)
         self.assertIn("#ifdef __APPLE__", LIFECYCLE_C)
-        self.assertIn("clock_gettime(CLOCK_REALTIME, &deadline)", LIFECYCLE_C)
+        self.assertIn("pthread_cond_timedwait_relative_np", LIFECYCLE_C)
         self.assertIn("clock_gettime(CLOCK_MONOTONIC, &deadline)", LIFECYCLE_C)
 
     def test_lifecycle_core_is_pure_c(self):

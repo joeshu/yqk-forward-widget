@@ -30,14 +30,34 @@
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)ip;
 @end
 
+static BOOL TVBoxCatalogSiteIsNativeAPI(NSDictionary *row) {
+    return [row[@"apiKind"] isEqual:@"tvbox-api"]||[row[@"apiKind"] isEqual:@"maccms-api"]||[row[@"apiKind"] isEqual:@"douban-index"]||[row[@"apiKind"] isEqual:@"jar-bridge"];
+}
+
 @implementation TVBoxCatalogViewController
 - (instancetype)init { return [super initWithStyle:UITableViewStyleInsetGrouped]; }
+- (void)setCatalog:(NSDictionary *)catalog {
+    _catalog=[catalog copy];
+    self.cachedFilteredSites=nil;
+    self.cachedFilteredLives=nil;
+    self.cachedFilterQuery=nil;
+}
 - (void)viewWillDisappear:(BOOL)animated {
     [super viewWillDisappear:animated];self.alertPresentationGeneration++;
     if(self.pendingAlertRetry){dispatch_block_cancel(self.pendingAlertRetry);self.pendingAlertRetry=nil;}
 }
-- (NSArray *)sites { return [self.catalog[@"sites"] isKindOfClass:NSArray.class]?self.catalog[@"sites"]:@[]; }
-- (NSArray *)lives { return [self.catalog[@"lives"] isKindOfClass:NSArray.class]?self.catalog[@"lives"]:@[]; }
+- (NSArray *)sites {
+    NSArray *raw=[self.catalog[@"sites"] isKindOfClass:NSArray.class]?self.catalog[@"sites"]:@[];
+    NSMutableArray *clean=[NSMutableArray arrayWithCapacity:raw.count];
+    for(id item in raw)if([item isKindOfClass:NSDictionary.class])[clean addObject:item];
+    return clean;
+}
+- (NSArray *)lives {
+    NSArray *raw=[self.catalog[@"lives"] isKindOfClass:NSArray.class]?self.catalog[@"lives"]:@[];
+    NSMutableArray *clean=[NSMutableArray arrayWithCapacity:raw.count];
+    for(id item in raw)if([item isKindOfClass:NSDictionary.class])[clean addObject:item];
+    return clean;
+}
 - (void)rebuildFilteredCatalogCache {
     NSString *query=[[self.searchText stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] lowercaseString]?:@"";
     NSInteger scope=self.contentFilter?self.contentFilter.selectedSegmentIndex:0;
@@ -83,8 +103,8 @@
     for(NSDictionary *site in self.sites){
         if([site[@"supported"] boolValue]){
             supportedSites++;
-            if([site[@"apiKind"] isEqual:@"script"])scriptSites++;
-            else nativeSites++;
+            if(TVBoxCatalogSiteIsNativeAPI(site))nativeSites++;
+            else scriptSites++;
         }
     }
     for(NSDictionary *live in self.lives)if([live[@"supported"] boolValue])supportedLives++;
@@ -143,7 +163,7 @@
         @{@"icon":@"square.and.arrow.down",@"title":@"全量导入（较慢）",@"action":[UIAction actionWithHandler:^(UIAction *a){
             TVBoxCatalogViewController *owner=weakSelf;if(!owner)return;
             NSUInteger scripts=0,native=0,live=0,unsupported=0;
-            for(NSDictionary *site in owner.sites){if(![site[@"supported"] boolValue])unsupported++;else if([site[@"apiKind"] isEqual:@"script"])scripts++;else native++;}
+            for(NSDictionary *site in owner.sites){if(![site[@"supported"] boolValue])unsupported++;else if(TVBoxCatalogSiteIsNativeAPI(site))native++;else scripts++;}
             for(NSDictionary *row in owner.lives){if([row[@"supported"] boolValue])live++;else unsupported++;}
             NSString *message=[NSString stringWithFormat:@"推荐按需加载：打开媒体页，点左侧资源胶囊选择本合集，再点右侧站点胶囊选择需要的站点。这样只会下载所选脚本。\n\n全量影视导入会检查并下载 %lu 个脚本站点，耗时较长；%lu 个原生 API 站点可直接按需使用，%lu 个不兼容项仍保留在合集里。%lu 个直播清单不会整包订阅，会继续留在本合集，点选其中一个后才加载。",(unsigned long)scripts,(unsigned long)native,(unsigned long)unsupported,(unsigned long)live];
             UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"全量影视导入（较慢）" message:message preferredStyle:UIAlertControllerStyleAlert];
@@ -320,7 +340,7 @@
     [tableView deselectRowAtIndexPath:ip animated:YES];NSArray *rows=[self filteredRowsForSection:ip.section];if(ip.row<0||ip.row>=rows.count)return;NSDictionary *row=rows[ip.row];if(![row isKindOfClass:NSDictionary.class])return;
     if(ip.section==1){if([row[@"supported"] boolValue]&&self.onSubscribeLive)self.onSubscribeLive(row);return;}
     if(![row[@"supported"] boolValue])return;
-    BOOL nativeAPI=[row[@"apiKind"] isEqual:@"tvbox-api"]||[row[@"apiKind"] isEqual:@"maccms-api"]||[row[@"apiKind"] isEqual:@"douban-index"]||[row[@"apiKind"] isEqual:@"jar-bridge"];if(nativeAPI){if(self.onUseNativeSite)self.onUseNativeSite(row);return;}
+    BOOL nativeAPI=TVBoxCatalogSiteIsNativeAPI(row);if(nativeAPI){if(self.onUseNativeSite)self.onUseNativeSite(row);return;}
     NSDictionary *existing=self.serviceForSite?self.serviceForSite(row):nil;
     __weak typeof(self) weakSelf=self;
     NSMutableArray<HostGlassSheetAction *> *actions=[NSMutableArray array];

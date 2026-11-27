@@ -876,6 +876,10 @@ static dispatch_queue_t MediaPlaybackCicadaQuarantineQueue(void) {
 - (void)onLoadingStart:(id)player {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (![self acceptsCallbacksFromPlayer:player]) return;
+        if (!self.loading && self.firstFrameReported) {
+            self.stallCount++;
+            [self updateBufferConfiguration];
+        }
         self.loading = YES;
         if ([self.delegate respondsToSelector:@selector(cicadaAdapter:didUpdateLoading:progress:)]) {
             [self.delegate cicadaAdapter:self didUpdateLoading:YES progress:0];

@@ -111,11 +111,19 @@ static id MediaSanitizedJSONObjectWithData(NSData *data,NSError **error) {
         NSString *prefix=[[trimmed substringToIndex:firstBrace.location] lowercaseString];
         if(![prefix containsString:@"<html"]&&![prefix containsString:@"<!doctype"])trimmed=[trimmed substringFromIndex:firstBrace.location];
     }
-    NSMutableString *clean=[NSMutableString stringWithCapacity:trimmed.length];
-    for(NSUInteger i=0;i<trimmed.length;i++){
-        unichar ch=[trimmed characterAtIndex:i];
-        if(ch<0x20&&ch!='\n'&&ch!='\r'&&ch!='\t')continue;
-        [clean appendFormat:@"%C",ch];
+    NSUInteger trimmedLen=trimmed.length;
+    unichar *buf=trimmedLen?(unichar *)malloc(trimmedLen*sizeof(unichar)):NULL;
+    NSString *clean=trimmed;
+    if(buf){
+        [trimmed getCharacters:buf range:NSMakeRange(0,trimmedLen)];
+        NSUInteger outLen=0;
+        for(NSUInteger i=0;i<trimmedLen;i++){
+            unichar ch=buf[i];
+            if(ch<0x20&&ch!='\n'&&ch!='\r'&&ch!='\t')continue;
+            buf[outLen++]=ch;
+        }
+        clean=[[NSString alloc] initWithCharacters:buf length:outLen];
+        free(buf);
     }
     NSData *cleanData=[clean dataUsingEncoding:NSUTF8StringEncoding];
     if(!cleanData.length){if(error)*error=firstError;return nil;}
@@ -126,6 +134,14 @@ static NSString *MediaTVBoxString(id value) {
     if([value isKindOfClass:NSString.class])return value;
     if([value isKindOfClass:NSNumber.class])return [value stringValue];
     return @"";
+}
+static NSInteger MediaTVBoxInteger(id value) {
+    if([value isKindOfClass:NSNumber.class]||[value isKindOfClass:NSString.class])return [value integerValue];
+    return 0;
+}
+static BOOL MediaTVBoxBool(id value) {
+    if([value isKindOfClass:NSNumber.class]||[value isKindOfClass:NSString.class])return [value boolValue];
+    return NO;
 }
 static NSDictionary *MediaTVBoxObject(id value) {return [value isKindOfClass:NSDictionary.class]?value:@{};}
 static NSArray *MediaTVBoxArray(id value) {return [value isKindOfClass:NSArray.class]?value:@[];}
@@ -333,8 +349,8 @@ static id MediaTVBoxNormalize(NSString *operation,NSDictionary *arguments,NSDict
     if(macCMS&&[@[@"home",@"category",@"search",@"detail"] containsObject:operation]&&![root[@"list"] isKindOfClass:NSArray.class]&&![root[@"class"] isKindOfClass:NSArray.class]){NSString *message=MediaTVBoxFirstString(root,@[@"msg",@"message",@"errMsg"]);return @{@"error":message.length?message:@"MacCMS JSON 已返回，但没有识别到 list 或 class 数据"};}
     if([operation isEqual:@"capabilities"])return @{@"engine":macCMS?@"MacCMS JSON/XML API":@"TVBox JSON API",@"protocol":source[@"protocol"]?:@"tvbox-api",@"capabilities":@[@"home",@"category",@"search",@"detail",@"play"]};
     if([operation isEqual:@"providers"])return @[@{@"id":@"",@"name":source[@"name"]?: (macCMS?@"MacCMS 站点":@"TVBox 站点")}];
-    if([operation isEqual:@"home"]){NSMutableArray *items=[NSMutableArray array];for(id row in MediaTVBoxArray(root[@"list"])) {NSDictionary *item=MediaTVBoxItem(row,source);if(item)[items addObject:item];}NSInteger pageCount=[root[@"pagecount"] integerValue];if(pageCount<1)pageCount=[root[@"pageCount"] integerValue];NSInteger page=MAX(1,[root[@"page"] integerValue]);return @{@"categories":MediaTVBoxCategories(root),@"items":items,@"filters":MediaTVBoxFilters(root),@"hasMore":@(pageCount>page),@"page":@(page),@"pageCount":@(pageCount)};}
-    if([operation isEqual:@"category"]||[operation isEqual:@"search"]){NSMutableArray *items=[NSMutableArray array];for(id row in MediaTVBoxArray(root[@"list"])) {NSDictionary *item=MediaTVBoxItem(row,source);if(item)[items addObject:item];}NSInteger page=MAX(1,[arguments[@"page"] integerValue]);NSInteger pageCount=[root[@"pagecount"] integerValue];if(pageCount<1)pageCount=[root[@"pageCount"] integerValue];if(pageCount<1){NSInteger total=[root[@"total"] integerValue],limit=[root[@"limit"] integerValue];if(total>0&&limit>0)pageCount=(total+limit-1)/limit;}if(pageCount<1)pageCount=page;return @{@"items":items,@"hasMore":@(page<pageCount),@"page":@(page),@"pageCount":@(pageCount)};}
+    if([operation isEqual:@"home"]){NSMutableArray *items=[NSMutableArray array];for(id row in MediaTVBoxArray(root[@"list"])) {NSDictionary *item=MediaTVBoxItem(row,source);if(item)[items addObject:item];}NSInteger pageCount=MediaTVBoxInteger(root[@"pagecount"]);if(pageCount<1)pageCount=MediaTVBoxInteger(root[@"pageCount"]);NSInteger page=MAX(1,MediaTVBoxInteger(root[@"page"]));return @{@"categories":MediaTVBoxCategories(root),@"items":items,@"filters":MediaTVBoxFilters(root),@"hasMore":@(pageCount>page),@"page":@(page),@"pageCount":@(pageCount)};}
+    if([operation isEqual:@"category"]||[operation isEqual:@"search"]){NSMutableArray *items=[NSMutableArray array];for(id row in MediaTVBoxArray(root[@"list"])) {NSDictionary *item=MediaTVBoxItem(row,source);if(item)[items addObject:item];}NSInteger page=MAX(1,MediaTVBoxInteger(arguments[@"page"]));NSInteger pageCount=MediaTVBoxInteger(root[@"pagecount"]);if(pageCount<1)pageCount=MediaTVBoxInteger(root[@"pageCount"]);if(pageCount<1){NSInteger total=MediaTVBoxInteger(root[@"total"]),limit=MediaTVBoxInteger(root[@"limit"]);if(total>0&&limit>0)pageCount=(total+limit-1)/limit;}if(pageCount<1)pageCount=page;return @{@"items":items,@"hasMore":@(page<pageCount),@"page":@(page),@"pageCount":@(pageCount)};}
     if([operation isEqual:@"detail"])return MediaTVBoxDetail(root,arguments,source);
     if([operation isEqual:@"play"]){
         NSDictionary *headers=MediaTVBoxPlaybackHeaders(source,root);
@@ -498,6 +514,7 @@ static NSDictionary *MediaParserCleanHeaders(id value,NSURL *mediaURL,NSURL *par
 @interface MediaAPIClient () <NSURLSessionDataDelegate>
 @property(nonatomic, strong) NSURLSession *session;
 @property(nonatomic, strong) NSURLSession *playSession;
+@property(nonatomic, strong) id<NSURLSessionDataDelegate> sessionDelegateProxy;
 @property(nonatomic, strong) NSURLSessionDataTask *task;
 @property(nonatomic,strong) NSOperationQueue *delegateQueue;
 @property(nonatomic,strong) NSLock *contextLock;
@@ -530,6 +547,28 @@ static NSDictionary *MediaParserCleanHeaders(id value,NSURL *mediaURL,NSURL *par
 - (BOOL)sameCredentialScope:(NSURL *)origin as:(NSURL *)target;
 @end
 
+@interface MediaAPISessionDelegateProxy : NSObject <NSURLSessionDataDelegate>
+@property(nonatomic,weak) MediaAPIClient *target;
+@end
+@implementation MediaAPISessionDelegateProxy
+- (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)dataTask didReceiveResponse:(NSURLResponse *)response completionHandler:(void (^)(NSURLSessionResponseDisposition))completionHandler {
+    MediaAPIClient *owner=self.target;
+    if(!owner){completionHandler(NSURLSessionResponseCancel);return;}
+    [owner URLSession:session dataTask:dataTask didReceiveResponse:response completionHandler:completionHandler];
+}
+- (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)dataTask didReceiveData:(NSData *)data {
+    [self.target URLSession:session dataTask:dataTask didReceiveData:data];
+}
+- (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLRequest *)request completionHandler:(void (^)(NSURLRequest * _Nullable))completionHandler {
+    MediaAPIClient *owner=self.target;
+    if(!owner){completionHandler(nil);return;}
+    [owner URLSession:session task:task willPerformHTTPRedirection:response newRequest:request completionHandler:completionHandler];
+}
+- (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
+    [self.target URLSession:session task:task didCompleteWithError:error];
+}
+@end
+
 @implementation MediaAPIClient
 @synthesize playTimeoutMilliseconds = _playTimeoutMilliseconds;
 - (instancetype)initWithPort:(NSInteger)port {
@@ -549,7 +588,8 @@ static NSDictionary *MediaParserCleanHeaders(id value,NSURL *mediaURL,NSURL *par
         configuration.HTTPMaximumConnectionsPerHost=6;configuration.HTTPShouldUsePipelining=YES;
         _delegateQueue=[NSOperationQueue new];_delegateQueue.name=@"com.cctvhost.media-api";_delegateQueue.maxConcurrentOperationCount=1;
         _contextLock=[NSLock new];_requestContexts=[NSMapTable strongToStrongObjectsMapTable];
-        _session=[NSURLSession sessionWithConfiguration:configuration delegate:self delegateQueue:_delegateQueue];
+        MediaAPISessionDelegateProxy *proxy=[MediaAPISessionDelegateProxy new];proxy.target=self;_sessionDelegateProxy=proxy;
+        _session=[NSURLSession sessionWithConfiguration:configuration delegate:proxy delegateQueue:_delegateQueue];
     }
     return self;
 }
@@ -568,7 +608,7 @@ static NSDictionary *MediaParserCleanHeaders(id value,NSURL *mediaURL,NSURL *par
         configuration.timeoutIntervalForResource=125;
         configuration.URLCache=nil;
         configuration.HTTPMaximumConnectionsPerHost=6;configuration.HTTPShouldUsePipelining=YES;
-        self.playSession=[NSURLSession sessionWithConfiguration:configuration delegate:self delegateQueue:self.delegateQueue];
+        self.playSession=[NSURLSession sessionWithConfiguration:configuration delegate:self.sessionDelegateProxy delegateQueue:self.delegateQueue];
     }
     return self.playSession;
 }
@@ -626,7 +666,7 @@ static NSDictionary *MediaParserCleanHeaders(id value,NSURL *mediaURL,NSURL *par
     BOOL isFixtureWatchPage=[playURL.lowercaseString containsString:@"/fixture/"]||[playURL.lowercaseString containsString:@"fixture-"];
     BOOL officialWatchPage=[playComponents.scheme.lowercaseString isEqual:@"https"]&&
         [@[@"youku.com",@"www.youku.com",@"v.youku.com",@"m.youku.com",@"v.qq.com",@"m.v.qq.com"] containsObject:playHost]&&isFixtureWatchPage;
-    BOOL asksForParser=[operation isEqual:@"play"]&&dictionary&&!officialWatchPage&&(manualSelection||[dictionary[@"requiresWebPlayback"] boolValue]||[dictionary[@"webPlayback"] boolValue]||[dictionary[@"parse"] boolValue]||[dictionary[@"jx"] boolValue])&&!MediaPlaybackResultSupportsNativePlayback(dictionary);
+    BOOL asksForParser=[operation isEqual:@"play"]&&dictionary&&!officialWatchPage&&(manualSelection||MediaTVBoxBool(dictionary[@"requiresWebPlayback"])||MediaTVBoxBool(dictionary[@"webPlayback"])||MediaTVBoxBool(dictionary[@"parse"])||MediaTVBoxBool(dictionary[@"jx"]))&&!MediaPlaybackResultSupportsNativePlayback(dictionary);
     if(!error&&asksForParser){[self resolveParserResult:dictionary generation:generation correlationID:correlationID completion:completion];return;}
     if(completion)completion(result,error);
 }
@@ -721,7 +761,7 @@ static void MediaParserRecordOutcome(NSDictionary *parser, BOOL succeeded) {
     MediaAPIRequestContext *context=[MediaAPIRequestContext new];context.data=[NSMutableData data];context.parserRequest=YES;__weak typeof(self) weakSelf=self;__weak MediaAPIRequestContext *weakContext=context;NSString *parserName=parser[@"name"]?:@"解析接口";
     context.processor=^(NSData *data,NSURLResponse *response,NSError *networkError){MediaAPIRequestContext *requestContext=weakContext;if(!requestContext)return;dispatch_async(dispatch_get_main_queue(),^{MediaAPIClient *owner=weakSelf;if(!owner||owner.generation!=generation||!owner.parserCompletion)return;owner.task=nil;owner.activeRequestID=nil;owner.activeCorrelationID=nil;owner.activeOperation=nil;NSDictionary *resolved=nil;
             if(requestContext.parserDirectURL.length){NSURL *directURL=[NSURL URLWithString:requestContext.parserDirectURL];NSMutableDictionary *native=[@{@"url":requestContext.parserDirectURL,@"originalURL":requestContext.parserDirectURL,@"format":requestContext.parserDirectMIME?:@"",@"nativePlayable":@YES,@"directMedia":@YES,@"parse":@0,@"jx":@0,@"requiresWebPlayback":@NO,@"parserName":parserName} mutableCopy];if(![native[@"format"] length])[native removeObjectForKey:@"format"];native[@"playbackEngine"]=MediaPlaybackResultSupportsCicada(native)?@"cicada":@"avplayer";NSDictionary *mediaHeaders=MediaParserCleanHeaders(MediaParserExtractHeaderValue(parser),directURL,targetURL);if(mediaHeaders.count)native[@"headers"]=mediaHeaders;resolved=native.copy;}
-            else if(!networkError&&[response isKindOfClass:NSHTTPURLResponse.class]&&[(NSHTTPURLResponse *)response statusCode]>=200&&[(NSHTTPURLResponse *)response statusCode]<300&&data.length<=1024*1024){id payload=[NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingFragmentsAllowed error:NULL];if(!payload){NSString *text=[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];payload=text;}NSDictionary *found=MediaParserObjectWithURL(payload,0);NSString *address=[found[@"url"] isKindOfClass:NSString.class]?found[@"url"]:@"";NSURL *candidateURL=[NSURL URLWithString:address];NSString *pathExt=candidateURL.pathExtension.lowercaseString?:@"";NSString *format=[found[@"format"] isKindOfClass:NSString.class]?[(NSString *)found[@"format"] lowercaseString]:([found[@"type"] isKindOfClass:NSString.class]?[(NSString *)found[@"type"] lowercaseString]:@"");BOOL isDirectStream=MediaParserCandidateSupportsNativePlayer(address,found);BOOL page=(!isDirectStream&&([@[@"html",@"htm",@"php",@"asp",@"aspx",@"jsp"] containsObject:pathExt]||[found[@"parse"] boolValue]||[found[@"jx"] boolValue]||[@[@"web",@"html",@"page"] containsObject:format]));if(address.length&&!page&&isDirectStream){NSURL *mediaURL=[NSURL URLWithString:address];NSMutableDictionary *candidate=[found mutableCopy];candidate[@"url"]=address;candidate[@"originalURL"]=address;candidate[@"parse"]=@0;candidate[@"jx"]=@0;candidate[@"requiresWebPlayback"]=@NO;candidate[@"directMedia"]=@YES;candidate[@"nativePlayable"]=@YES;candidate[@"parserName"]=parserName;if(format.length)candidate[@"format"]=format;candidate[@"playbackEngine"]=MediaPlaybackResultSupportsCicada(candidate)?@"cicada":@"avplayer";NSDictionary *mediaHeaders=MediaParserCleanHeaders(found[@"headers"]?:found[@"header"],mediaURL,targetURL);if(mediaHeaders.count)candidate[@"headers"]=mediaHeaders;else[candidate removeObjectForKey:@"headers"];resolved=candidate.copy;}}
+            else if(!networkError&&[response isKindOfClass:NSHTTPURLResponse.class]&&[(NSHTTPURLResponse *)response statusCode]>=200&&[(NSHTTPURLResponse *)response statusCode]<300&&data.length<=1024*1024){id payload=[NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingFragmentsAllowed error:NULL];if(!payload){NSString *text=[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];payload=text;}NSDictionary *found=MediaParserObjectWithURL(payload,0);NSString *address=[found[@"url"] isKindOfClass:NSString.class]?found[@"url"]:@"";NSURL *candidateURL=[NSURL URLWithString:address];NSString *pathExt=candidateURL.pathExtension.lowercaseString?:@"";NSString *format=[found[@"format"] isKindOfClass:NSString.class]?[(NSString *)found[@"format"] lowercaseString]:([found[@"type"] isKindOfClass:NSString.class]?[(NSString *)found[@"type"] lowercaseString]:@"");BOOL isDirectStream=MediaParserCandidateSupportsNativePlayer(address,found);BOOL page=(!isDirectStream&&([@[@"html",@"htm",@"php",@"asp",@"aspx",@"jsp"] containsObject:pathExt]||MediaTVBoxBool(found[@"parse"])||MediaTVBoxBool(found[@"jx"])||[@[@"web",@"html",@"page"] containsObject:format]));if(address.length&&!page&&isDirectStream){NSURL *mediaURL=[NSURL URLWithString:address];NSMutableDictionary *candidate=[found mutableCopy];candidate[@"url"]=address;candidate[@"originalURL"]=address;candidate[@"parse"]=@0;candidate[@"jx"]=@0;candidate[@"requiresWebPlayback"]=@NO;candidate[@"directMedia"]=@YES;candidate[@"nativePlayable"]=@YES;candidate[@"parserName"]=parserName;if(format.length)candidate[@"format"]=format;candidate[@"playbackEngine"]=MediaPlaybackResultSupportsCicada(candidate)?@"cicada":@"avplayer";NSDictionary *mediaHeaders=MediaParserCleanHeaders(found[@"headers"]?:found[@"header"],mediaURL,targetURL);if(mediaHeaders.count)candidate[@"headers"]=mediaHeaders;else[candidate removeObjectForKey:@"headers"];resolved=candidate.copy;}}
             MediaParserRecordOutcome(parser,resolved!=nil);if(resolved){[RuntimeDiagnostics.shared recordEvent:@"media_parser_endpoint_succeeded" category:@"playback" fields:@{@"correlation_id":owner.parserCorrelationID?:@"",@"parser_name":parserName,@"parser_host":targetURL.host.lowercaseString?:@"",@"native_media":@YES}];[owner finishParserWithResult:resolved];}else{[RuntimeDiagnostics.shared recordEvent:@"media_parser_endpoint_failed" category:@"playback" fields:@{@"correlation_id":owner.parserCorrelationID?:@"",@"parser_name":parserName,@"parser_host":targetURL.host.lowercaseString?:@"",@"failure_stage":networkError?@"network_or_timeout":@"unrecognized_result",@"error_code":@(networkError.code)}];[owner tryParserAtIndex:index+1];}
         });};
     self.task=[[self sessionForOperation:@"play"] dataTaskWithRequest:request];[self.contextLock lock];[self.requestContexts setObject:context forKey:self.task];[self.contextLock unlock];[self.task resume];
@@ -1251,7 +1291,7 @@ static id MediaJARBridgeNormalize(NSString *operation,NSDictionary *arguments,NS
     id rawOptions=source[@"options"];
     NSDictionary *cfg=MediaJARBridgeJSONDictionary(rawOptions);
     if([api isEqual:@"csp_app3q"]){
-        NSDictionary *root=MediaTVBoxObject(raw);id data=root[@"data"];NSInteger code=[root[@"code"] integerValue];
+        NSDictionary *root=MediaTVBoxObject(raw);id data=root[@"data"];NSInteger code=MediaTVBoxInteger(root[@"code"]);
         if([operation isEqual:@"play"]){
             NSString *direct=MediaTVBoxString(arguments[@"id"]);
             if(MediaPlaybackResultIsDirectMedia(@{@"url":direct}))return MediaJARBridgeBuildPlayResult(direct,source,nil);
@@ -1566,8 +1606,6 @@ static id MediaJARBridgeNormalize(NSString *operation,NSDictionary *arguments,NS
             MediaAPIRequestContext *mirrorCtx=[MediaAPIRequestContext new];
             mirrorCtx.data=[NSMutableData data];
             mirrorCtx.processor=^(NSData *mData,NSURLResponse *mResp,NSError *mErr){
-                MediaAPIClient *owner=weakMirrorSelf;
-                if(!owner||owner.generation!=generation)return;
                 if(!mErr&&mData.length){
                     NSString *mText=[[NSString alloc] initWithData:mData encoding:NSUTF8StringEncoding]?:@"";
                     NSString *resolved=MediaJARBridgeFirstValidURL(mText);
@@ -1576,7 +1614,8 @@ static id MediaJARBridgeNormalize(NSString *operation,NSDictionary *arguments,NS
                 NSMutableDictionary *nextArgs=[arguments mutableCopy]?:[NSMutableDictionary dictionary];
                 nextArgs[@"_jar_txt_resolved"]=@YES;
                 dispatch_async(dispatch_get_main_queue(),^{
-                    if(owner.generation==generation)[owner call:operation arguments:nextArgs correlationID:correlationID completion:completion];
+                    MediaAPIClient *owner=weakMirrorSelf;
+                    if(owner&&owner.generation==generation)[owner call:operation arguments:nextArgs correlationID:correlationID completion:completion];
                 });
             };
             self.task=[[self sessionForOperation:operation] dataTaskWithRequest:mirrorReq];
@@ -1593,10 +1632,9 @@ static id MediaJARBridgeNormalize(NSString *operation,NSDictionary *arguments,NS
     if(!request){NSError *failure=requestError?:[NSError errorWithDomain:@"CCTVHostMedia" code:5 userInfo:@{NSLocalizedDescriptionKey:@"无法创建资源请求"}];if(diagnosticsEnabled){NSMutableDictionary *fields=[@{@"request_id":requestID,@"operation":operation?:@"unknown",@"protocol":self.tvboxSource[@"protocol"]?:@"plugin",@"failure_stage":@"invalid_request",@"error_domain":failure.domain?:@"",@"error_code":@(failure.code),@"error_message":failure.localizedDescription?:@""} mutableCopy];if(correlationID.length)fields[@"correlation_id"]=correlationID;[RuntimeDiagnostics.shared recordEvent:@"media_api_failed" category:@"media_api" fields:fields];}self.activeRequestID=nil;self.activeCorrelationID=nil;self.activeOperation=nil;if(completion)completion(nil,failure);return;}
     request.timeoutInterval=[operation isEqual:@"play"]?self.playTimeoutMilliseconds/1000.0:self.requestTimeout;
     __weak typeof(self) weakSelf=self;
-    // processor 存入 requestContexts（self 持有），块内再强引 self.tvboxSource/self.port
-    // 会形成保留环（仅靠请求完成/40s 超时打破）；tvboxSource/port 初始化后不变，
-    // 改为块前捕获局部值，彻底断开循环引用。
-    NSDictionary *tvboxSource=self.tvboxSource;NSInteger port=self.port;
+    // processor 存入 requestContexts（self 持有），块内再强引 self.tvboxSource/self.port/maximumResponseBytes
+    // 会形成保留环（仅靠请求完成/40s 超时打破）；改为块前捕获局部值，彻底断开循环引用。
+    NSDictionary *tvboxSource=self.tvboxSource;NSInteger port=self.port;NSUInteger maxResponseBytes=[self maximumResponseBytes];
     void (^processor)(NSData *,NSURLResponse *,NSError *)=^(NSData *data,NSURLResponse *response,NSError *networkError){
         __block NSError *failure=networkError;
         id reply=nil;
@@ -1606,8 +1644,8 @@ static id MediaJARBridgeNormalize(NSString *operation,NSDictionary *arguments,NS
         NSString *pluginMessage=@"";
         BOOL pluginRetryable=NO;
         NSString *failureStage=failure?@"network_or_timeout":@"none";
-        if(!failure && data.length>[self maximumResponseBytes]){
-            failure=[NSError errorWithDomain:@"CCTVHostMedia" code:3 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"资源服务响应超过 %lu MiB",(unsigned long)([self maximumResponseBytes]/(1024*1024))]}];
+        if(!failure && data.length>maxResponseBytes){
+            failure=[NSError errorWithDomain:@"CCTVHostMedia" code:3 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"资源服务响应超过 %lu MiB",(unsigned long)(maxResponseBytes/(1024*1024))]}];
             failureStage=@"response_too_large";
         } else if(!failure && !data.length){
             failure=[NSError errorWithDomain:@"CCTVHostMedia" code:4 userInfo:@{NSLocalizedDescriptionKey:@"资源服务返回空响应"}];
@@ -1629,7 +1667,7 @@ static id MediaJARBridgeNormalize(NSString *operation,NSDictionary *arguments,NS
                     if(html.length){jsonError=nil;reply=html;}
                 }
             }
-            NSInteger srcType=[tvboxSource[@"tvboxType"] integerValue];
+            NSInteger srcType=MediaTVBoxInteger(tvboxSource[@"tvboxType"]);
             BOOL allowXML=tvboxSource&&([tvboxSource[@"protocol"] isEqual:@"maccms-api"]||[tvboxSource[@"protocol"] isEqual:@"jar-bridge"]||(tvboxSource[@"tvboxType"]!=nil&&(srcType==0||srcType==1)));
             if(jsonError&&allowXML){jsonError=nil;reply=MediaCMSXMLObject(data,&jsonError);if(!reply&&jsonError){failure=jsonError;failureStage=@"invalid_xml";}}
             else if(jsonError){failure=jsonError;failureStage=@"invalid_json";}
@@ -1648,7 +1686,7 @@ static id MediaJARBridgeNormalize(NSString *operation,NSDictionary *arguments,NS
         }
         BOOL responseOK=[reply isKindOfClass:NSDictionary.class]&&[reply[@"ok"] isKindOfClass:NSNumber.class]&&[reply[@"ok"] boolValue];
         if(!failure && tvboxSource && [reply isKindOfClass:NSDictionary.class]){
-            NSDictionary *rootPayload=MediaTVBoxObject(reply);NSDictionary *payload=([rootPayload[@"data"] isKindOfClass:NSDictionary.class]&&![rootPayload[@"list"] isKindOfClass:NSArray.class])?rootPayload[@"data"]:rootPayload;NSInteger apiCode=[rootPayload[@"code"] integerValue];NSString *apiMessage=MediaTVBoxFirstString(rootPayload,@[@"msg",@"message",@"errMsg"]);
+            NSDictionary *rootPayload=MediaTVBoxObject(reply);NSDictionary *payload=([rootPayload[@"data"] isKindOfClass:NSDictionary.class]&&![rootPayload[@"list"] isKindOfClass:NSArray.class])?rootPayload[@"data"]:rootPayload;NSInteger apiCode=MediaTVBoxInteger(rootPayload[@"code"]);NSString *apiMessage=MediaTVBoxFirstString(rootPayload,@[@"msg",@"message",@"errMsg"]);
             BOOL hasUsablePayload=[payload[@"list"] isKindOfClass:NSArray.class]||[payload[@"class"] isKindOfClass:NSArray.class]||([payload[@"data"] isKindOfClass:NSDictionary.class]&&payload[@"data"]!=NSNull.null)||MediaTVBoxString(payload[@"url"]).length>0||MediaTVBoxString(payload[@"playUrl"]).length>0;
             // CMS forks disagree on success codes. Treat code 0 as an error only
             // when an error message is present and the response carries no usable data.
@@ -1723,18 +1761,19 @@ static id MediaJARBridgeNormalize(NSString *operation,NSDictionary *arguments,NS
                 NSString *sHost=[NSURL URLWithString:jarBase].host?:jarBase;
                 failure=[NSError errorWithDomain:@"CCTVHostJARBridge" code:4 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"站点「%@」（%@）未返回有效影视列表（远端返回了非标准 JSON/加密网页或源已失效）",sName,sHost.length?sHost:MediaTVBoxString(tvboxSource[@"api"])]}];
             }
-            NSInteger srcType=[tvboxSource[@"tvboxType"] integerValue];
+            NSInteger srcType=MediaTVBoxInteger(tvboxSource[@"tvboxType"]);
             BOOL cmsStyle=tvboxSource&&([tvboxSource[@"protocol"] isEqual:@"maccms-api"]||[tvboxSource[@"protocol"] isEqual:@"jar-bridge"]||(tvboxSource[@"tvboxType"]!=nil&&(srcType==0||srcType==1)));
             BOOL needsCategories=!failure&&cmsStyle&&[operation isEqual:@"home"]&&![arguments[@"_maccms_ac"] length]&&[result isKindOfClass:NSDictionary.class]&&![result[@"categories"] count];
             if(needsCategories){
                 NSMutableDictionary *listArgs=[arguments mutableCopy]?:[NSMutableDictionary dictionary];
                 listArgs[@"_maccms_ac"]=@"list";
-                NSURLRequest *listReq=[client tvboxRequestForOperation:@"home" arguments:listArgs error:NULL];
+                NSMutableURLRequest *listReq=[[client tvboxRequestForOperation:@"home" arguments:listArgs error:NULL] mutableCopy];
                 if(listReq){
+                    listReq.timeoutInterval=client.requestTimeout;
                     MediaAPIRequestContext *listCtx=[MediaAPIRequestContext new];listCtx.data=[NSMutableData data];
                     listCtx.processor=^(NSData *listData,NSURLResponse *listResp,NSError *listErr){
                         NSMutableDictionary *merged=[result mutableCopy];
-                        if(!listErr&&listData.length&&listData.length<=[client maximumResponseBytes]){
+                        if(!listErr&&listData.length&&listData.length<=maxResponseBytes){
                             id listReply=MediaSanitizedJSONObjectWithData(listData,NULL)?:MediaCMSXMLObject(listData,NULL);
                             if([listReply isKindOfClass:NSDictionary.class]){
                                 NSDictionary *listNorm=MediaTVBoxNormalize(@"home",listArgs,tvboxSource,listReply);

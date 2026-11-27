@@ -8,6 +8,7 @@
 
 #include "HostMPVLifecycle.h"
 
+#include <errno.h>
 #include <stdlib.h>
 #include <time.h>
 
@@ -157,15 +158,7 @@ int host_mpv_lifecycle_wait_event_thread_exit(host_mpv_lifecycle_t *lc, int time
     struct timespec deadline;
     if (!lc) return 0;
     if (timeout_ms < 0) timeout_ms = 0;
-    /* Deadline in the cond's own clock: CLOCK_MONOTONIC where the cond
-     * was created with setclock (Linux), CLOCK_REALTIME on Apple where
-     * the cond uses the default clock. A mismatched clock would make
-     * the bounded wait return immediately or far too late. */
-#ifdef __APPLE__
-    (void)clock_gettime(CLOCK_REALTIME, &deadline);
-#else
     (void)clock_gettime(CLOCK_MONOTONIC, &deadline);
-#endif
     deadline.tv_sec += timeout_ms / 1000;
     deadline.tv_nsec += (long)(timeout_ms % 1000) * 1000000L;
     if (deadline.tv_nsec >= 1000000000L) {
@@ -178,7 +171,24 @@ int host_mpv_lifecycle_wait_event_thread_exit(host_mpv_lifecycle_t *lc, int time
         exited = 1;
     } else {
         while (!lc->event_thread_exited) {
+#ifdef __APPLE__
+            struct timespec now;
+            struct timespec remaining;
+            (void)clock_gettime(CLOCK_MONOTONIC, &now);
+            remaining.tv_sec = deadline.tv_sec - now.tv_sec;
+            remaining.tv_nsec = deadline.tv_nsec - now.tv_nsec;
+            if (remaining.tv_nsec < 0) {
+                remaining.tv_sec -= 1;
+                remaining.tv_nsec += 1000000000L;
+            }
+            if (remaining.tv_sec < 0 || (remaining.tv_sec == 0 && remaining.tv_nsec <= 0)) {
+                break;
+            }
+            int rc = pthread_cond_timedwait_relative_np(&lc->exited_cond, &lc->mutex, &remaining);
+#else
             int rc = pthread_cond_timedwait(&lc->exited_cond, &lc->mutex, &deadline);
+#endif
+            if (rc == EINTR) continue;
             if (rc != 0) break; /* timeout (or error): bounded wait ends here */
         }
         exited = lc->event_thread_exited ? 1 : 0;
