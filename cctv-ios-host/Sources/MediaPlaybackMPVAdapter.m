@@ -474,7 +474,7 @@ enum {
         }
         [strongSelf.mpvLock unlock];
     }];
-    if(self.wantStartAfterPrepare&&self.state!=MediaPlaybackCicadaAdapterStateCompleted)[self start];
+    if(self.wantStartAfterPrepare&&self.state!=MediaPlaybackCicadaAdapterStateCompleted&&self.state!=MediaPlaybackCicadaAdapterStateFailed)[self start];
 }
 
 - (void)dealloc {

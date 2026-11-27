@@ -1573,6 +1573,7 @@ static void next(NSArray *steps, NSUInteger index) {
           ^{
             UIView *inlineHost=[mpvFullscreenProbe valueForKey:@"videoView"];
             check(![mpvFullscreenProbe valueForKey:@"cicadaFullscreenHost"]&&mpvSurfaceAdapter.playerView.superview==inlineHost&&[mpvFullscreenProbe valueForKey:@"cicadaAdapter"]==mpvSurfaceAdapter,@"MPV fullscreen closes back to the same inline render view and adapter");
+            [mpvFullscreenProbe setValue:@(16.0/9.0) forKey:@"videoAspectRatio"];
             MediaPlaybackCicadaControls *controls=[mpvFullscreenProbe valueForKey:@"cicadaControlsBuilder"];
             [controls.fullscreenButton sendActionsForControlEvents:UIControlEventTouchUpInside];
           },

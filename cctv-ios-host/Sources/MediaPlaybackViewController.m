@@ -2213,7 +2213,8 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
     dispatch_block_t didClose=^{
         MediaPlaybackViewController *owner=weakSelf;
         if(!owner||owner.cicadaFullscreenHost||owner.videoView.window.windowScene!=scene||!scene)return;
-        if(restoreOrientation&&scene.interfaceOrientation!=previousOrientation){
+        if(restoreOrientation){
+            // The landscape request can still be pending when Close is tapped.
             [owner setNeedsUpdateOfSupportedInterfaceOrientations];
             UIWindowSceneGeometryPreferencesIOS *preferences=[[UIWindowSceneGeometryPreferencesIOS alloc] initWithInterfaceOrientations:(1UL<<previousOrientation)];
             [scene requestGeometryUpdateWithPreferences:preferences errorHandler:nil];
