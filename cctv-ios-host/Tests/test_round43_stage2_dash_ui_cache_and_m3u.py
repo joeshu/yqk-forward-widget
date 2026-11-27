@@ -187,7 +187,8 @@ class Round43Stage2AndP3Tests(unittest.TestCase):
 
         playback_src = (SOURCES_DIR / "MediaPlaybackViewController.m").read_text(encoding="utf-8")
         self.assertIn("self.throughputLabel.hidden)return;", playback_src)
-        self.assertIn("media-cicada-fullscreen-playpause", playback_src)
+        fullscreen_src = (SOURCES_DIR / "MediaPlaybackFullscreenHost.m").read_text(encoding="utf-8")
+        self.assertIn("media-cicada-fullscreen-playpause", fullscreen_src)
 
         m3u_src = (SOURCES_DIR / "M3UParser.m").read_text(encoding="utf-8")
         self.assertIn("M3UMaximumChannels = 25000", m3u_src)

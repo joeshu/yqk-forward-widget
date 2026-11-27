@@ -10,6 +10,7 @@
 @property(nonatomic,weak) UIWindowScene *orientationScene;
 @property(nonatomic) UIInterfaceOrientationMask orientationToRestore;
 - (void)closeFullscreen;
+- (void)notifyClosed;
 @end
 
 @implementation MediaPlaybackFullscreenHost

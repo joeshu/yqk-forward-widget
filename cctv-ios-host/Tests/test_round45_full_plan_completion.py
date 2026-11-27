@@ -162,7 +162,8 @@ class Round45FullPlanCompletionTests(unittest.TestCase):
         self.assertIn("clearJARRuntimeCache", settings_m)
 
         playback_m = (SOURCES_DIR / "MediaPlaybackViewController.m").read_text(encoding="utf-8")
-        self.assertIn("UIWindowSceneGeometryPreferencesIOS", playback_m)
+        fullscreen_m = (SOURCES_DIR / "MediaPlaybackFullscreenHost.m").read_text(encoding="utf-8")
+        self.assertIn("UIWindowSceneGeometryPreferencesIOS", fullscreen_m)
         self.assertIn("subtitleOverlay updateForPlaybackTime:", playback_m)
         self.assertIn("loadExternalSubtitlesForResult:result headers:requestHeaders", playback_m)
         self.assertIn("media.playback.menu.extsub", playback_m)
