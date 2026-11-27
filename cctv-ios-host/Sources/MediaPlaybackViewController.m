@@ -21,6 +21,7 @@
 #import "MediaPlaybackCicadaAdapter.h"
 #import "MediaPlaybackCicadaControls.h"
 #import "MediaPlaybackMPVAdapter.h"
+#import "MediaPlaybackFullscreenHost.h"
 #import "MediaProtocolCapabilities.h"
 #import "HostSubtitleOverlayView.h"
 #import "MediaPlaybackBufferPolicy.h"
@@ -61,74 +62,6 @@ static void MediaPlaybackSetDefaultRate(AVPlayer *player, float rate) {
         player.rate = clamped;
     }
 }
-
-// The playback controller owns the session. This host only presents its render view.
-@interface MediaPlaybackFullscreenHost : UIViewController <UIGestureRecognizerDelegate>
-@property(nonatomic,copy) dispatch_block_t onClose;
-@property(nonatomic,copy) dispatch_block_t onTogglePlayPause;
-@property(nonatomic,strong) UIButton *closeButton;
-@property(nonatomic,strong) UIButton *playPauseButton;
-@property(nonatomic,assign) BOOL controlsHidden;
-@property(nonatomic) BOOL closing;
-- (void)updatePlayingState:(BOOL)playing enabled:(BOOL)enabled;
-- (void)closeFullscreen;
-@end
-@implementation MediaPlaybackFullscreenHost
-- (BOOL)shouldAutorotate {return YES;}
-- (UIInterfaceOrientationMask)supportedInterfaceOrientations {return UIInterfaceOrientationMaskAllButUpsideDown;}
-- (void)viewDidLoad {
-    [super viewDidLoad];self.view.backgroundColor=UIColor.blackColor;
-    UITapGestureRecognizer *tap=[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(toggleControlsVisibility)];
-    tap.cancelsTouchesInView=NO;tap.delegate=self;[self.view addGestureRecognizer:tap];
-    UIButton *close=[UIButton buttonWithType:UIButtonTypeSystem];close.translatesAutoresizingMaskIntoConstraints=NO;close.tintColor=UIColor.whiteColor;close.backgroundColor=[UIColor colorWithWhite:0 alpha:0.6];close.layer.cornerRadius=22;
-    [close setImage:[UIImage systemImageNamed:@"xmark"] forState:UIControlStateNormal];close.accessibilityLabel=@"退出全屏";close.accessibilityIdentifier=@"media-cicada-close-fullscreen";[close addTarget:self action:@selector(closeFullscreen) forControlEvents:UIControlEventTouchUpInside];[self.view addSubview:close];
-    self.closeButton=close;
-    UIButton *playBtn=[UIButton buttonWithType:UIButtonTypeSystem];playBtn.translatesAutoresizingMaskIntoConstraints=NO;playBtn.tintColor=UIColor.whiteColor;playBtn.backgroundColor=[UIColor colorWithWhite:0 alpha:0.6];playBtn.layer.cornerRadius=24;
-    [playBtn setImage:[UIImage systemImageNamed:@"pause.fill"] forState:UIControlStateNormal];playBtn.accessibilityLabel=@"播放或暂停";playBtn.accessibilityIdentifier=@"media-cicada-fullscreen-playpause";[playBtn addTarget:self action:@selector(togglePlayPauseTapped) forControlEvents:UIControlEventTouchUpInside];[self.view addSubview:playBtn];
-    self.playPauseButton=playBtn;
-    [NSLayoutConstraint activateConstraints:@[
-        [close.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-12],
-        [close.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:8],
-        [close.widthAnchor constraintEqualToConstant:44],[close.heightAnchor constraintEqualToConstant:44],
-        [playBtn.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
-        [playBtn.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-20],
-        [playBtn.widthAnchor constraintEqualToConstant:48],[playBtn.heightAnchor constraintEqualToConstant:48]
-    ]];
-}
-- (void)toggleControlsVisibility {
-    if(UIAccessibilityIsVoiceOverRunning())return;
-    self.controlsHidden=!self.controlsHidden;
-    CGFloat alpha=self.controlsHidden?0.0:1.0;
-    [UIView animateWithDuration:UIAccessibilityIsReduceMotionEnabled()?0:0.2 animations:^{self.closeButton.alpha=alpha;self.playPauseButton.alpha=alpha;}];
-}
-- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer shouldReceiveTouch:(UITouch *)touch {
-    for(UIView *view=touch.view;view&&view!=self.view;view=view.superview){
-        if([view isKindOfClass:UIControl.class])return NO;
-    }
-    return YES;
-}
-- (void)togglePlayPauseTapped {if(self.onTogglePlayPause)self.onTogglePlayPause();}
-- (void)updatePlayingState:(BOOL)playing enabled:(BOOL)enabled {
-    [self.playPauseButton setImage:[UIImage systemImageNamed:playing?@"pause.fill":@"play.fill"] forState:UIControlStateNormal];
-    self.playPauseButton.accessibilityLabel=playing?@"暂停":@"播放";
-    self.playPauseButton.enabled=enabled;
-}
-- (void)closeFullscreen {
-    if(self.closing||self.isBeingPresented||self.isBeingDismissed||!self.presentingViewController)return;
-    self.closing=YES;
-    dispatch_block_t close=self.onClose;
-    self.onClose=nil;
-    if(close)close();
-}
-- (void)viewDidDisappear:(BOOL)animated {
-    [super viewDidDisappear:animated];
-    if(!self.isBeingDismissed||self.closing)return;
-    self.closing=YES;
-    dispatch_block_t close=self.onClose;
-    self.onClose=nil;
-    if(close)close();
-}
-@end
 
 static void *CCTVPlayerItemStatusContext = &CCTVPlayerItemStatusContext;
 static void *CCTVPlayerTimeControlContext = &CCTVPlayerTimeControlContext;
@@ -340,8 +273,6 @@ static NSData *MediaPlaybackNormalizedAES128KeyData(NSData *rawData, NSString *f
 @property(nonatomic) BOOL cicadaScrubWasPlaying;
 @property(nonatomic,strong) MediaPlaybackFullscreenHost *cicadaFullscreenHost;
 @property(nonatomic,copy) NSArray<NSLayoutConstraint *> *cicadaRenderConstraints;
-@property(nonatomic) UIInterfaceOrientation cicadaFullscreenOriginalOrientation;
-@property(nonatomic) BOOL cicadaFullscreenRequestedLandscape;
 @property(nonatomic,strong) UILabel *throughputLabel;
 @property(nonatomic,strong) UIView *gestureSurface;
 @property(nonatomic,strong) UILabel *gestureFeedbackLabel;
@@ -2160,8 +2091,6 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
         if(owner.presentedViewController||owner.isBeingDismissed||owner.isMovingFromParentViewController)return;
     }
 
-    UIWindowScene *scene=window.windowScene;
-    self.cicadaFullscreenOriginalOrientation=scene.interfaceOrientation;
     MediaPlaybackFullscreenHost *host=[MediaPlaybackFullscreenHost new];
     host.modalPresentationStyle=UIModalPresentationOverFullScreen;
     self.cicadaFullscreenHost=host;
@@ -2186,14 +2115,7 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
         [owner mountCicadaRenderView:renderView inHost:host.view];
         [RuntimeDiagnostics.shared recordEvent:@"playback_fullscreen_attached" category:@"playback" fields:diagnosticFields];
         UIAccessibilityPostNotification(UIAccessibilityScreenChangedNotification,host.closeButton);
-        if(scene&&UIInterfaceOrientationIsPortrait(scene.interfaceOrientation)&&owner.videoAspectRatio>=1.0){
-            owner.cicadaFullscreenRequestedLandscape=YES;
-            [host setNeedsUpdateOfSupportedInterfaceOrientations];
-            UIWindowSceneGeometryPreferencesIOS *preferences=[[UIWindowSceneGeometryPreferencesIOS alloc] initWithInterfaceOrientations:UIInterfaceOrientationMaskLandscape];
-            [scene requestGeometryUpdateWithPreferences:preferences errorHandler:^(NSError *error){
-                [RuntimeDiagnostics.shared recordEvent:@"playback_fullscreen_rotation_denied" category:@"playback" fields:@{@"error_code":@(error.code)}];
-            }];
-        }
+        if(owner.videoAspectRatio>=1.0)[host requestLandscapeIfPortrait];
     }];
 }
 - (void)restoreVideoFromCicadaFullscreen {
@@ -2205,20 +2127,11 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
 
     UIView *renderView=self.cicadaAdapter.playerView;
     if(renderView&&renderView.superview==host.view)[self mountCicadaRenderView:renderView inHost:self.videoView];
-    UIWindowScene *scene=self.videoView.window.windowScene;
-    UIInterfaceOrientation previousOrientation=self.cicadaFullscreenOriginalOrientation;
-    BOOL restoreOrientation=self.cicadaFullscreenRequestedLandscape;
-    self.cicadaFullscreenRequestedLandscape=NO;
     __weak typeof(self) weakSelf=self;
     dispatch_block_t didClose=^{
         MediaPlaybackViewController *owner=weakSelf;
-        if(!owner||owner.cicadaFullscreenHost||owner.videoView.window.windowScene!=scene||!scene)return;
-        if(restoreOrientation){
-            // The landscape request can still be pending when Close is tapped.
-            [owner setNeedsUpdateOfSupportedInterfaceOrientations];
-            UIWindowSceneGeometryPreferencesIOS *preferences=[[UIWindowSceneGeometryPreferencesIOS alloc] initWithInterfaceOrientations:(1UL<<previousOrientation)];
-            [scene requestGeometryUpdateWithPreferences:preferences errorHandler:nil];
-        }
+        if(!owner||owner.cicadaFullscreenHost||!owner.videoView.window)return;
+        [host restoreOrientationForPresenter:owner];
         UIAccessibilityPostNotification(UIAccessibilityScreenChangedNotification,owner.cicadaControlsBuilder.fullscreenButton);
     };
     if(host.presentingViewController&&!host.isBeingPresented&&!host.isBeingDismissed){

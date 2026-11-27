@@ -73,7 +73,7 @@ class TestBatch2PlayerCoreFixes(unittest.TestCase):
 
     def test_playback_vc_visibility_resume_and_cleanup_fixes(self) -> None:
         src = read_source("MediaPlaybackViewController.m")
-        self.assertIn("cicadaFullscreenOriginalOrientation", src)
+        self.assertIn("restoreOrientationForPresenter:owner", src)
         self.assertIn("dismissViewControllerAnimated:NO completion:didClose", src)
         self.assertIn("fabs(position-self.lastPersistedPosition)>=10.0", src)
         self.assertIn("[self.subtitleOverlay clearSubtitles];", src)
