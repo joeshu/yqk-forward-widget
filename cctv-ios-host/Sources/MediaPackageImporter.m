@@ -3,13 +3,17 @@
 #import "ServiceStore.h"
 #import "HostSecureStore.h"
 #include <zlib.h>
+#include <arpa/inet.h>
 #import <CommonCrypto/CommonDigest.h>
 
 static NSUInteger const PackageArchiveLimit=24*1024*1024;
 static NSUInteger const PackageFileLimit=8*1024*1024;
+static NSUInteger const PackageStandaloneScriptLimit=16*1024*1024;
 static NSUInteger const PackageTotalLimit=64*1024*1024;
 static NSUInteger const PackageCountLimit=2048;
 static BOOL PackageError(NSError **error,NSString *message){if(error)*error=[NSError errorWithDomain:@"CCTVHostPackage" code:1 userInfo:@{NSLocalizedDescriptionKey:message}];return NO;}
+static NSUInteger PackageScriptReadLimit(NSString *name){return [@[@"js",@"hjs",@"mjs",@"cjs"] containsObject:name.pathExtension.lowercaseString]?PackageStandaloneScriptLimit:PackageFileLimit;}
+static NSUInteger PackageInputReadLimit(NSURL *file){NSString *extension=file.pathExtension.lowercaseString;if([extension isEqual:@"zip"])return PackageArchiveLimit;if([extension isEqual:@"idjplugin"])return 2*1024*1024;if([extension isEqual:@"json"])return 512*1024;if([@[@"js",@"hjs",@"mjs",@"cjs"] containsObject:extension])return PackageStandaloneScriptLimit;return PackageFileLimit;}
 static uint16_t U16(const uint8_t *b,NSUInteger n){return (uint16_t)b[n]|((uint16_t)b[n+1]<<8);}
 static uint32_t U32(const uint8_t *b,NSUInteger n){return (uint32_t)U16(b,n)|((uint32_t)U16(b,n+2)<<16);}
 static BOOL SafeRelative(NSString *path){
@@ -95,6 +99,57 @@ static NSString *PackageMD5(NSData *data){
     unsigned char digest[CC_MD5_DIGEST_LENGTH];CC_MD5(data.bytes,(CC_LONG)data.length,digest);
     NSMutableString *value=[NSMutableString stringWithCapacity:CC_MD5_DIGEST_LENGTH*2];for(NSUInteger i=0;i<CC_MD5_DIGEST_LENGTH;i++)[value appendFormat:@"%02x",digest[i]];return value;
 }
+static BOOL PackageIDJHostPattern(NSString *host){
+    if(![host isKindOfClass:NSString.class]||!host.length||host.length>255||[host containsString:@".."]||[host hasSuffix:@"."])return NO;
+    NSString *domain=[host hasPrefix:@"*."]?[host substringFromIndex:2]:host;struct in_addr ipv4;struct in6_addr ipv6;if(inet_aton(domain.UTF8String,&ipv4)==1||inet_pton(AF_INET,domain.UTF8String,&ipv4)==1||inet_pton(AF_INET6,domain.UTF8String,&ipv6)==1)return NO;
+    static NSRegularExpression *pattern;static dispatch_once_t once;dispatch_once(&once,^{pattern=[NSRegularExpression regularExpressionWithPattern:@"^(?:\\*\\.)?[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$" options:0 error:NULL];});
+    return [pattern numberOfMatchesInString:host options:0 range:NSMakeRange(0,host.length)]==1;
+}
+static NSArray *PackageIDJHosts(id raw,BOOL required,NSError **error){
+    if(![raw isKindOfClass:NSArray.class]||[raw count]>(NSUInteger)1024||(required&&![raw count])){PackageError(error,@"iDuanJu 插件域名权限列表无效或超过 1024 项");return nil;}
+    NSMutableOrderedSet *clean=[NSMutableOrderedSet orderedSet];for(id value in raw){if(![value isKindOfClass:NSString.class]||!PackageIDJHostPattern(value)){PackageError(error,@"iDuanJu 插件声明了无效的网络域名权限");return nil;}[clean addObject:[value lowercaseString]];}
+    return clean.array.copy;
+}
+static NSDictionary *PackageIDJMetadata(id raw,NSString *mainSource,NSError **error){
+    if(![raw isKindOfClass:NSDictionary.class]||![mainSource isKindOfClass:NSString.class]||!mainSource.length||mainSource.length>2*1024*1024){PackageError(error,@"不是有效的 .idjplugin 插件包（缺少 manifest 或 main.js）");return nil;}
+    NSDictionary *manifest=[raw isKindOfClass:NSDictionary.class]?raw:@{};
+    if(![manifest[@"schema"] isKindOfClass:NSNumber.class]||[manifest[@"schema"] integerValue]!=1){PackageError(error,@"iDuanJu 插件 schema 版本不受支持");return nil;}
+    NSString *identifier=[manifest[@"id"] isKindOfClass:NSString.class]?manifest[@"id"]:@"",*name=[manifest[@"name"] isKindOfClass:NSString.class]?manifest[@"name"]:@"",*version=[manifest[@"version"] isKindOfClass:NSString.class]?manifest[@"version"]:@"",*type=[manifest[@"type"] isKindOfClass:NSString.class]?manifest[@"type"]:@"",*entry=[manifest[@"entry"] isKindOfClass:NSString.class]?manifest[@"entry"]:@"",*integrity=[manifest[@"integrity"] isKindOfClass:NSString.class]?manifest[@"integrity"]:@"";
+    if(!identifier.length||identifier.length>128||[identifier rangeOfString:@"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" options:NSRegularExpressionSearch].location==NSNotFound||!name.length||name.length>256||!version.length||version.length>128||![@[@"video",@"shortdrama"] containsObject:type]||![entry isEqual:@"main.js"]){PackageError(error,@"iDuanJu manifest 的 ID、名称、版本、类型或入口无效");return nil;}
+    NSString *expected=[integrity hasPrefix:@"sha256-"]?[integrity substringFromIndex:7]:@"";NSData *sourceData=[mainSource dataUsingEncoding:NSUTF8StringEncoding];unsigned char digest[CC_SHA256_DIGEST_LENGTH];CC_SHA256(sourceData.bytes,(CC_LONG)sourceData.length,digest);NSString *actual=[[NSData dataWithBytes:digest length:sizeof(digest)] base64EncodedStringWithOptions:0];
+    NSData *expectedBytes=[[NSData alloc] initWithBase64EncodedString:expected options:0];if(expectedBytes.length!=CC_SHA256_DIGEST_LENGTH||![actual isEqual:expected]){PackageError(error,@"iDuanJu 插件 SHA-256 完整性校验失败，未安装");return nil;}
+    NSDictionary *permissions=[manifest[@"permissions"] isKindOfClass:NSDictionary.class]?manifest[@"permissions"]:nil;if(!permissions){PackageError(error,@"iDuanJu 插件缺少 permissions 声明");return nil;}
+    NSArray *httpHosts=PackageIDJHosts(permissions[@"http"],YES,error);if(!httpHosts)return nil;NSArray *mediaHosts=PackageIDJHosts(permissions[@"media"]?:@[],NO,error);if(!mediaHosts)return nil;
+    for(NSString *key in @[@"storage",@"cloudflare",@"login"])if(permissions[key]&&![permissions[key] isKindOfClass:NSNumber.class]){PackageError(error,@"iDuanJu 插件 permissions 字段类型无效");return nil;}
+    NSArray *capabilities=[manifest[@"capabilities"] isKindOfClass:NSArray.class]?manifest[@"capabilities"]:@[];NSSet *allowedCapabilities=[NSSet setWithArray:@[@"home",@"category",@"search",@"detail",@"play"]];if(capabilities.count>16){PackageError(error,@"iDuanJu 插件能力列表过长");return nil;}NSMutableOrderedSet *cleanCapabilities=[NSMutableOrderedSet orderedSet];for(id item in capabilities){if(![item isKindOfClass:NSString.class]||![allowedCapabilities containsObject:item]){PackageError(error,@"iDuanJu 插件声明了未知能力");return nil;}[cleanCapabilities addObject:item];}for(NSString *required in @[@"home",@"category",@"search",@"detail",@"play"])if(![cleanCapabilities containsObject:required]){PackageError(error,[NSString stringWithFormat:@"iDuanJu 插件缺少 %@ 能力",required]);return nil;}
+    BOOL adult=[manifest[@"adult"] respondsToSelector:@selector(boolValue)]&&[manifest[@"adult"] boolValue];id description=manifest[@"description"];
+    if(description&&(![description isKindOfClass:NSString.class]||[description length]>4096)){PackageError(error,@"iDuanJu 插件说明过长或类型无效");return nil;}
+    NSMutableDictionary *cleanPermissions=[@{@"http":httpHosts,@"media":mediaHosts} mutableCopy];for(NSString *key in @[@"storage",@"cloudflare",@"login"])if(permissions[key])cleanPermissions[key]=@([permissions[key] boolValue]);
+    NSMutableDictionary *cleanManifest=[@{@"schema":@1,@"id":identifier,@"name":name,@"version":version,@"type":type,@"adult":@(adult),@"entry":@"main.js",@"permissions":cleanPermissions, @"capabilities":cleanCapabilities.array} mutableCopy];if([description isKindOfClass:NSString.class]&&[description length])cleanManifest[@"description"]=description;
+    NSString *author=[manifest[@"author"] isKindOfClass:NSDictionary.class]&&[manifest[@"author"][ @"name"] isKindOfClass:NSString.class]?manifest[@"author"][ @"name"]:@"";if(author.length&&author.length<=256)cleanManifest[@"author"]=@{@"name":author};
+    return cleanManifest.copy;
+}
+static NSDictionary *PackageIDJStoredMetadata(id raw,NSError **error){
+    if(![raw isKindOfClass:NSDictionary.class]){PackageError(error,@"iDuanJu 插件缺少宿主权限元数据");return nil;}NSDictionary *manifest=raw;
+    NSString *identifier=[manifest[@"id"] isKindOfClass:NSString.class]?manifest[@"id"]:@"",*name=[manifest[@"name"] isKindOfClass:NSString.class]?manifest[@"name"]:@"",*version=[manifest[@"version"] isKindOfClass:NSString.class]?manifest[@"version"]:@"",*type=[manifest[@"type"] isKindOfClass:NSString.class]?manifest[@"type"]:@"";
+    if(![manifest[@"schema"] isKindOfClass:NSNumber.class]||[manifest[@"schema"] integerValue]!=1||!identifier.length||identifier.length>128||[identifier rangeOfString:@"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" options:NSRegularExpressionSearch].location==NSNotFound||!name.length||name.length>256||!version.length||version.length>128||![@[@"video",@"shortdrama"] containsObject:type]||![manifest[@"entry"] isEqual:@"main.js"]){PackageError(error,@"iDuanJu 插件宿主元数据无效");return nil;}
+    NSDictionary *permissions=[manifest[@"permissions"] isKindOfClass:NSDictionary.class]?manifest[@"permissions"]:nil;if(!permissions){PackageError(error,@"iDuanJu 插件缺少 permissions 声明");return nil;}NSArray *http=PackageIDJHosts(permissions[@"http"],YES,error),*media=PackageIDJHosts(permissions[@"media"]?:@[],NO,error);if(!http||!media)return nil;
+    NSArray *caps=[manifest[@"capabilities"] isKindOfClass:NSArray.class]?manifest[@"capabilities"]:@[];NSSet *allowed=[NSSet setWithArray:@[@"home",@"category",@"search",@"detail",@"play"]];NSMutableOrderedSet *cleanCaps=[NSMutableOrderedSet orderedSet];for(id cap in caps){if(![cap isKindOfClass:NSString.class]||![allowed containsObject:cap]){PackageError(error,@"iDuanJu 插件宿主能力元数据无效");return nil;}[cleanCaps addObject:cap];}for(NSString *cap in @[@"home",@"category",@"search",@"detail",@"play"])if(![cleanCaps containsObject:cap]){PackageError(error,@"iDuanJu 插件缺少必要能力");return nil;}
+    NSMutableDictionary *cleanPermissions=[@{@"http":http,@"media":media} mutableCopy];for(NSString *key in @[@"storage",@"cloudflare",@"login"])if(permissions[key]){if(![permissions[key] isKindOfClass:NSNumber.class]){PackageError(error,@"iDuanJu 插件 permissions 字段类型无效");return nil;}cleanPermissions[key]=@([permissions[key] boolValue]);}
+    NSMutableDictionary *clean=[@{@"schema":@1,@"id":identifier,@"name":name,@"version":version,@"type":type,@"adult":@([manifest[@"adult"] boolValue]),@"entry":@"main.js",@"permissions":cleanPermissions,@"capabilities":cleanCaps.array} mutableCopy];NSString *description=[manifest[@"description"] isKindOfClass:NSString.class]?manifest[@"description"]:@"";if(description.length&&description.length<=4096)clean[@"description"]=description;NSString *author=[manifest[@"author"] isKindOfClass:NSDictionary.class]&&[manifest[@"author"][ @"name"] isKindOfClass:NSString.class]?manifest[@"author"][ @"name"]:@"";if(author.length&&author.length<=256)clean[@"author"]=@{@"name":author};return clean.copy;
+}
+static NSDictionary *PackageIPlayrRule(id value,NSError **error){
+    if(![value isKindOfClass:NSDictionary.class]){PackageError(error,@"WeBox iPlayr 规则不是 JSON 对象");return nil;}
+    NSDictionary *rule=value;NSArray *categories=[rule[@"category"] isKindOfClass:NSArray.class]?rule[@"category"]:@[];
+    NSArray *required=@[@"vod_node",@"vod_title",@"vod_link_id",@"playlist_group_node",@"playlist_title",@"playlist_link_id"];
+    if(!categories.count||categories.count>128){PackageError(error,@"WeBox iPlayr 规则缺少有效分类");return nil;}
+    for(id category in categories){if(![category isKindOfClass:NSDictionary.class]||![category[@"title"] isKindOfClass:NSString.class]||![category[@"url0"] isKindOfClass:NSString.class]||![category[@"url1"] isKindOfClass:NSString.class]){PackageError(error,@"WeBox iPlayr 分类模板无效");return nil;}for(NSString *key in @[@"url0",@"url1"]){NSString *raw=category[key];NSURLComponents *parts=[NSURLComponents componentsWithString:raw];if(raw.length>4096||![@[@"http",@"https"] containsObject:parts.scheme.lowercaseString]||!parts.host.length||parts.user.length||parts.password.length){PackageError(error,@"WeBox iPlayr 分类地址无效");return nil;}}}
+    for(NSString *field in required)if(![rule[field] isKindOfClass:NSString.class]||![rule[field] length]||[rule[field] length]>1024){PackageError(error,[NSString stringWithFormat:@"WeBox iPlayr 规则缺少 %@",field]);return nil;}
+    for(NSString *field in @[@"vod_info",@"vod_score",@"vod_image_id",@"vod_image_regex",@"vod_image_url",@"vod_link_url",@"play_regex",@"play_url",@"playlist_info",@"search_vod_node",@"search_vod_title",@"search_vod_image_id",@"search_vod_image_regex",@"search_vod_image_url",@"search_vod_link_id",@"search_vod_link_url",@"search_url_other_page"])if(rule[field]&&(![rule[field] isKindOfClass:NSString.class]||[rule[field] length]>4096)){PackageError(error,[NSString stringWithFormat:@"WeBox iPlayr 字段 %@ 类型无效或过长",field]);return nil;}
+    if(![rule[@"search_flag"] respondsToSelector:@selector(boolValue)]||![rule[@"search_flag"] boolValue]||![rule[@"search_url_first_page"] isKindOfClass:NSString.class]||[rule[@"search_url_first_page"] length]>4096){PackageError(error,@"WeBox iPlayr 搜索规则不完整");return nil;}
+    NSString *title=[rule[@"title"] isKindOfClass:NSString.class]?rule[@"title"]:@"WeBox iPlayr 规则";if(title.length>256){PackageError(error,@"WeBox iPlayr 规则名称过长");return nil;}
+    NSData *encoded=[NSJSONSerialization dataWithJSONObject:rule options:0 error:error];if(encoded.length>512*1024){PackageError(error,@"WeBox iPlayr 规则超过 512 KiB");return nil;}return rule;
+}
 static BOOL VerifyPackageChecksum(NSString *root,NSString *filename,NSError **error){
     NSString *checksumPath=[root stringByAppendingPathComponent:[filename stringByAppendingString:@".md5"]];
     if(![NSFileManager.defaultManager fileExistsAtPath:checksumPath])return YES;
@@ -104,7 +159,7 @@ static BOOL VerifyPackageChecksum(NSString *root,NSString *filename,NSError **er
     token=[[token componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] firstObject];
     if(token.length!=32||[token rangeOfString:@"^[0-9a-fA-F]{32}$" options:NSRegularExpressionSearch].location==NSNotFound)return PackageError(error,[NSString stringWithFormat:@"%@ 的 MD5 文件格式无效",filename]);
     NSString *targetPath=[root stringByAppendingPathComponent:filename];
-    NSData *target=ReadBounded([NSURL fileURLWithPath:targetPath],PackageFileLimit,error);
+    NSData *target=ReadBounded([NSURL fileURLWithPath:targetPath],PackageScriptReadLimit(filename),error);
     if(!target)return PackageError(error,[NSString stringWithFormat:@"%@ 的 MD5 校验文件存在，但内容文件缺失或超出大小限制",filename]);
     if(![[PackageMD5(target) lowercaseString] isEqual:token.lowercaseString])return PackageError(error,[NSString stringWithFormat:@"%@ 与 ZIP 内 MD5 校验值不一致，未导入",filename]);
     return YES;
@@ -240,7 +295,7 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
         if(!entry.length){NSMutableArray *candidates=[NSMutableArray array],*pythonServers=[NSMutableArray array];for(NSString *name in [fm contentsOfDirectoryAtPath:root error:NULL])if([@[@"py",@"js",@"hjs",@"mjs",@"cjs"] containsObject:name.pathExtension.lowercaseString]){[candidates addObject:name];if([name.pathExtension.lowercaseString isEqual:@"py"]){NSString *source=[[NSString alloc] initWithData:ReadBounded([NSURL fileURLWithPath:[root stringByAppendingPathComponent:name]],PackageFileLimit,NULL) encoding:NSUTF8StringEncoding];if([source containsString:@"ThreadingHTTPServer"] && PythonDeclaresArgument(source,@"--bind") && (PythonDeclaresArgument(source,@"port") || PythonDeclaresArgument(source,@"--port")))[pythonServers addObject:name];}}if(candidates.count==1)entry=candidates.firstObject;else if(pythonServers.count==1)entry=pythonServers.firstObject;}
     }
     if(!SafeRelative(entry) || ![fm fileExistsAtPath:[root stringByAppendingPathComponent:entry]]){PackageError(error,@"无法识别入口；请在 cctvhost.json 中指定 entry");return nil;}
-    NSString *text=[[NSString alloc] initWithData:ReadBounded([NSURL fileURLWithPath:[root stringByAppendingPathComponent:entry]],PackageFileLimit,error) encoding:NSUTF8StringEncoding];if(!text.length){PackageError(error,@"入口不是有效 UTF-8 文本或文件过大");return nil;}
+    NSString *text=[[NSString alloc] initWithData:ReadBounded([NSURL fileURLWithPath:[root stringByAppendingPathComponent:entry]],PackageScriptReadLimit(entry),error) encoding:NSUTF8StringEncoding];if(!text.length){PackageError(error,@"入口不是有效 UTF-8 文本或文件过大");return nil;}
     if([entry.pathExtension.lowercaseString isEqual:@"hjs"]){
         id envelope=[NSJSONSerialization JSONObjectWithData:[text dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL];
         if([envelope isKindOfClass:NSDictionary.class]&&[envelope[@"alg"] isKindOfClass:NSString.class]&&[envelope[@"cipher"] isKindOfClass:NSString.class]&&[envelope[@"iv"] isKindOfClass:NSString.class]){
@@ -335,7 +390,9 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
         BOOL catvodDependencies=YES;NSSet *jscPackages=[NSSet setWithArray:@[@"axios",@"buffer",@"cheerio",@"crypto",@"crypto-js",@"http2",@"iconv-lite",@"jpeg-js",@"qs",@"stream",@"url"]];for(NSString *name in dependencies)if(![jscPackages containsObject:name]){catvodDependencies=NO;break;}
         runtime=([@[@"catvod-spider"] containsObject:protocol] || ([protocol isEqual:@"catvod-js"]&&catvodDependencies))?@"javascript":((dependencies.count || (hasCommonJSRequire && !nodeProtocol))?@"node":@"javascript");
     }
-    if(runtimeHint.length){
+    if(runtimeHint.length&&[@[@"idj-plugin",@"iplayr-rule"] containsObject:runtimeHint]){
+        NSString *requiredProtocol=[runtimeHint isEqual:@"idj-plugin"]?@"idj1":@"iplayr-rule";if(![protocol isEqual:requiredProtocol]){PackageError(error,@"资源格式与指定适配器不匹配");return nil;}runtime=@"javascript";moduleType=@"esm";
+    }else if(runtimeHint.length){
         if(![@[@"python",@"node"] containsObject:runtimeHint]){PackageError(error,@"导入运行时提示无效");return nil;}
         NSString *extension=entry.pathExtension.lowercaseString;
         if([runtimeHint isEqual:@"python"] && ![extension isEqual:@"py"]){PackageError(error,@"Python Spider 快捷导入需要以 .py 文件作为入口；ZIP 中请使用智能识别导入");return nil;}
@@ -346,7 +403,7 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     }
     if([runtime isEqual:@"python"])moduleType=@"script";
     if(![@[@"esm",@"commonjs",@"script"] containsObject:moduleType] || ([runtime isEqual:@"python"] != [entry.pathExtension.lowercaseString isEqual:@"py"])){PackageError(error,@"入口类型与运行时声明不匹配");return nil;}
-    if(![@[@"python",@"javascript",@"node"] containsObject:runtime] || ![@[@"python-spider",@"python-http",@"cctvhost.media/1",@"catvod-js",@"catvod-spider",@"drpy",@"iptv-extractor",@"catpaw-http",@"widget-extractor",@"nanotv-service-v2",@"hamo-source-v3"] containsObject:protocol]){PackageError(error,@"资源声明了尚不支持的运行时或协议");return nil;}
+    if(![@[@"python",@"javascript",@"node"] containsObject:runtime] || ![@[@"python-spider",@"python-http",@"cctvhost.media/1",@"catvod-js",@"catvod-spider",@"drpy",@"iptv-extractor",@"catpaw-http",@"widget-extractor",@"nanotv-service-v2",@"hamo-source-v3",@"idj1",@"iplayr-rule"] containsObject:protocol]){PackageError(error,@"资源声明了尚不支持的运行时或协议");return nil;}
     if([protocol isEqual:@"catvod-spider"] && ![runtime isEqual:@"javascript"]){PackageError(error,@"CatPaw JS Spider 必须使用 JavaScriptCore 运行时（runtime: javascript）");return nil;}
     // Keep a small, typed manifest: no arbitrary paths or host control fields.
     NSString *defaultName=[result[@"name"] isKindOfClass:NSString.class]?result[@"name"]:(package[@"name"]?:entry.stringByDeletingPathExtension);
@@ -375,6 +432,8 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     if(pluginVersion.length)clean[@"pluginVersion"]=pluginVersion;
     if(result[@"capabilities"]){if(![result[@"capabilities"] isKindOfClass:NSArray.class]){PackageError(error,@"capabilities 必须是字符串数组");return nil;}for(id value in result[@"capabilities"])if(![value isKindOfClass:NSString.class]){PackageError(error,@"capabilities 包含无效类型");return nil;}clean[@"capabilities"]=result[@"capabilities"];}
     else if(weboxSource||hamoSourceV3){clean[@"capabilities"]=@[@"home",@"category",@"search",@"detail",@"play"];}
+    if([protocol isEqual:@"idj1"]){NSDictionary *idj=PackageIDJStoredMetadata(result[@"idjManifest"],error);if(!idj)return nil;clean[@"idjManifest"]=idj;clean[@"name"]=idj[@"name"];clean[@"pluginID"]=idj[@"id"];clean[@"pluginVersion"]=idj[@"version"];clean[@"pluginType"]=idj[@"type"];clean[@"adult"]=idj[@"adult"];clean[@"permissions"]=idj[@"permissions"];clean[@"capabilities"]=idj[@"capabilities"];}
+    if([protocol isEqual:@"iplayr-rule"]){NSData *ruleData=ReadBounded([NSURL fileURLWithPath:[root stringByAppendingPathComponent:@"rule.json"]],512*1024,error);id rule=ruleData?[NSJSONSerialization JSONObjectWithData:ruleData options:0 error:NULL]:nil;if(!PackageIPlayrRule(rule,error))return nil;clean[@"capabilities"]=@[@"home",@"category",@"search",@"detail",@"play"];clean[@"name"]=rule[@"title"]?:clean[@"name"]?:@"WeBox iPlayr";}
     if(nanoServiceV2){clean[@"name"]=[nanoManifest[@"name"] isKindOfClass:NSString.class]?nanoManifest[@"name"]:clean[@"name"];clean[@"capabilities"]=nanoCapabilities;clean[@"pluginVersion"]=[nanoManifest[@"version"] isKindOfClass:NSString.class]?nanoManifest[@"version"]:@"";clean[@"apiVersion"]=@2;}
     if(verifiedLocalChecksums.count)clean[@"verifiedLocalChecksums"]=verifiedLocalChecksums;
     if([result[@"options"] isKindOfClass:NSDictionary.class] || [result[@"options"] isKindOfClass:NSString.class])clean[@"options"]=result[@"options"];
@@ -393,7 +452,12 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     return [self importFile:file companionFiles:files runtimeHint:nil error:error];
 }
 + (NSDictionary *)importFile:(NSURL *)file companionFiles:(NSDictionary<NSString *,NSData *> *)files runtimeHint:(NSString *)runtimeHint error:(NSError **)error {
-    NSData *bytes=ReadBounded(file,PackageArchiveLimit,error);if(!bytes)return nil;
+    NSData *bytes=ReadBounded(file,PackageInputReadLimit(file),error);if(!bytes)return nil;
+    NSString *inputExtension=file.pathExtension.lowercaseString;BOOL idjInput=[inputExtension isEqual:@"idjplugin"],iplayrInput=[inputExtension isEqual:@"json"]&&[runtimeHint isEqual:@"iplayr-rule"];
+    if(idjInput&&![runtimeHint isEqual:@"idj-plugin"]){PackageError(error,@".idjplugin 必须通过魔蚁插件清单适配器导入");return nil;}
+    if([inputExtension isEqual:@"json"]&&!iplayrInput){PackageError(error,@"仅支持通过 WeBox iPlayr 规则目录选择的 JSON；普通 JSON 不是可执行影视源");return nil;}
+    if([runtimeHint isEqual:@"idj-plugin"]&&!idjInput){PackageError(error,@"魔蚁插件适配器只接受 .idjplugin 包");return nil;}
+    if([runtimeHint isEqual:@"iplayr-rule"]&&!iplayrInput){PackageError(error,@"WeBox iPlayr 适配器只接受 JSON 规则文件");return nil;}
     NSString *identifier=NSUUID.UUID.UUIDString,*stage=[[ServiceStore directory] stringByAppendingPathComponent:[@".import-" stringByAppendingString:identifier]];
     NSString *package=[stage stringByAppendingPathComponent:@"package"];NSFileManager *fm=NSFileManager.defaultManager;
     if(![fm createDirectoryAtPath:package withIntermediateDirectories:YES attributes:nil error:error])return nil;
@@ -403,7 +467,19 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
         if(ResourceContentIsHTML(bytes)){PackageError(error,@"此文件是 HTML 网页，请导入网页中的资源直链");return nil;}
         id connection=[NSJSONSerialization JSONObjectWithData:bytes options:0 error:NULL];
         BOOL serverConnection=[connection isKindOfClass:NSDictionary.class]&&[connection[@"cctvhostServer"] isKindOfClass:NSNumber.class]&&[connection[@"cctvhostServer"] integerValue]==1;
-        if(serverConnection){
+        if(idjInput){
+            if(![connection isKindOfClass:NSDictionary.class]){PackageError(error,@"不是有效的 .idjplugin JSON 包");return nil;}
+            NSDictionary *rawIDJ=[connection[@"manifest"] isKindOfClass:NSDictionary.class]?connection[@"manifest"]:nil;NSDictionary *rawFiles=[connection[@"files"] isKindOfClass:NSDictionary.class]?connection[@"files"]:nil;NSString *mainSource=[rawFiles[@"main.js"] isKindOfClass:NSString.class]?rawFiles[@"main.js"]:nil;
+            if(rawFiles.count!=1||!mainSource.length){PackageError(error,@"当前只支持单入口 main.js 的 iDuanJu 插件包");return nil;}
+            NSDictionary *idj=PackageIDJMetadata(rawIDJ,mainSource,error);if(!idj)return nil;
+            NSData *mainData=[mainSource dataUsingEncoding:NSUTF8StringEncoding];NSDictionary *idjHostManifest=@{@"schemaVersion":@1,@"entry":@"main.js",@"runtime":@"javascript",@"protocol":@"idj1",@"moduleType":@"esm",@"name":idj[@"name"],@"pluginVersion":idj[@"version"],@"pluginID":idj[@"id"],@"pluginType":idj[@"type"],@"adult":idj[@"adult"],@"permissions":idj[@"permissions"],@"capabilities":idj[@"capabilities"],@"idjManifest":idj};
+            if(![mainData writeToFile:[package stringByAppendingPathComponent:@"main.js"] options:NSDataWritingAtomic error:error]||![[NSJSONSerialization dataWithJSONObject:idjHostManifest options:0 error:error] writeToFile:[package stringByAppendingPathComponent:@"cctvhost.json"] options:NSDataWritingAtomic error:error])return nil;
+        }
+        else if(iplayrInput){
+            id rule=connection;NSDictionary *validated=PackageIPlayrRule(rule,error);if(!validated)return nil;NSData *ruleData=[NSJSONSerialization dataWithJSONObject:validated options:0 error:error];NSString *wrapper=@"export default {};\n";NSDictionary *ruleManifest=@{@"schemaVersion":@1,@"entry":@"index.js",@"runtime":@"javascript",@"protocol":@"iplayr-rule",@"moduleType":@"esm",@"name":validated[@"title"]?:@"WeBox iPlayr",@"capabilities":@[@"home",@"category",@"search",@"detail",@"play"]};
+            if(![ruleData writeToFile:[package stringByAppendingPathComponent:@"rule.json"] options:NSDataWritingAtomic error:error]||![[wrapper dataUsingEncoding:NSUTF8StringEncoding] writeToFile:[package stringByAppendingPathComponent:@"index.js"] options:NSDataWritingAtomic error:error]||![[NSJSONSerialization dataWithJSONObject:ruleManifest options:0 error:error] writeToFile:[package stringByAppendingPathComponent:@"cctvhost.json"] options:NSDataWritingAtomic error:error])return nil;
+        }
+        else if(serverConnection){
             if(![@[@"emby",@"jellyfin",@"xtream",@"webdav"] containsObject:connection[@"type"]]){PackageError(error,@"不支持的媒体服务器类型");return nil;}
             NSURL *url=[connection[@"url"] isKindOfClass:NSString.class]?[NSURL URLWithString:connection[@"url"]]:nil;
             if(!url.host.length||![@[@"http",@"https"] containsObject:url.scheme.lowercaseString]||url.user.length||url.password.length){PackageError(error,@"服务器地址必须是 HTTP/HTTPS，账号请填写到独立字段");return nil;}
@@ -429,7 +505,7 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
             NSString *name=file.lastPathComponent;
             NSString *detected=ResourceContentExtension(bytes,name);
             if(![@[@"js",@"hjs",@"mjs",@"cjs",@"py"] containsObject:file.pathExtension.lowercaseString]&&[@[@"py",@"js",@"mjs",@"cjs"] containsObject:detected])name=[[name stringByDeletingPathExtension] stringByAppendingPathExtension:detected];
-            if(![@[@"js",@"hjs",@"mjs",@"cjs",@"py"] containsObject:name.pathExtension.lowercaseString] || !SafeRelative(name) || bytes.length>PackageFileLimit){PackageError(error,@"请选择 JS、Python 或 ZIP 资源文件");return nil;}
+            if(![@[@"js",@"hjs",@"mjs",@"cjs",@"py"] containsObject:name.pathExtension.lowercaseString] || !SafeRelative(name) || bytes.length>PackageScriptReadLimit(name)){PackageError(error,@"请选择不超过 16 MiB 的 JS、Python 或 ZIP 资源文件");return nil;}
             bytes=PackageAdaptWeBoxScriptIfNeeded(bytes);
             if(![bytes writeToFile:[package stringByAppendingPathComponent:name] options:NSDataWritingAtomic error:error])return nil;
         }

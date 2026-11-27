@@ -227,7 +227,7 @@ static BOOL PackageSameCredentialScope(NSURL *origin,NSURL *target) {
 @implementation MediaPackageDownloader
 - (NSError *)error:(NSString *)message {return [NSError errorWithDomain:@"CCTVHostImport" code:1 userInfo:@{NSLocalizedDescriptionKey:message}];}
 - (BOOL)validURL:(NSURL *)url {return url&&url.scheme.length&&[@[@"http",@"https"] containsObject:url.scheme.lowercaseString]&&url.host.length&&!url.user.length&&!url.password.length;}
-- (NSUInteger)limit {return (self.phase==PackageChecksum||self.phase==PackageConfigChecksum)?4096:(self.phase==PackageConfig?65536:([self.targetURL.pathExtension.lowercaseString isEqual:@"zip"]?24:8)*1024*1024);}
+- (NSUInteger)limit {NSString *extension=self.targetURL.pathExtension.lowercaseString;if(self.phase==PackageChecksum||self.phase==PackageConfigChecksum)return 4096;if(self.phase==PackageConfig)return 65536;if([extension isEqual:@"zip"])return 24*1024*1024;if([extension isEqual:@"idjplugin"])return 2*1024*1024;if([extension isEqual:@"json"])return 512*1024;if([@[@"js",@"hjs",@"mjs",@"cjs"] containsObject:extension])return 16*1024*1024;return 8*1024*1024;}
 - (NSString *)stage {return @[@"读取资源校验值",@"下载主脚本 / 资源包",@"检查配套配置校验值",@"下载配套配置"][(NSUInteger)self.phase];}
 - (void)progress:(NSString *)stage {
     NSTimeInterval now=NSDate.timeIntervalSinceReferenceDate;BOOL stageChanged=![self.lastProgressStage isEqual:stage];if(!stageChanged&&self.lastProgressTime>0&&now-self.lastProgressTime<0.12)return;self.lastProgressTime=now;self.lastProgressStage=[stage copy];
@@ -250,7 +250,10 @@ static BOOL PackageSameCredentialScope(NSURL *origin,NSURL *target) {
     if(self.phase==PackageChecksum){NSURLComponents *c=[NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:NO];c.path=c.path.stringByDeletingPathExtension;self.targetURL=c.URL;}
     // A short checksum URL may redirect to the conventional index.js.md5 form;
     // validate the resolved script extension after reading the final checksum.
-    if(self.phase!=PackageChecksum && ![@[@"js",@"hjs",@"mjs",@"cjs",@"py",@"zip"] containsObject:self.targetURL.pathExtension.lowercaseString]){[self finish:nil error:[self error:@"链接须指向 JS、Python、ZIP 或对应的 .md5 校验文件"]];return;}
+    NSArray *allowedExtensions=@[@"js",@"hjs",@"mjs",@"cjs",@"py",@"zip",@"idjplugin",@"json"];
+    if(self.phase!=PackageChecksum && ![allowedExtensions containsObject:self.targetURL.pathExtension.lowercaseString]){[self finish:nil error:[self error:@"链接须指向 JS、Python、ZIP、iDuanJu 插件，或对应的 .md5 校验文件"]];return;}
+    if([self.targetURL.pathExtension.lowercaseString isEqual:@"idjplugin"]&&![runtimeHint isEqual:@"idj-plugin"]){[self finish:nil error:[self error:@"此 .idjplugin 需要从魔蚁插件目录按需导入"]];return;}
+    if([self.targetURL.pathExtension.lowercaseString isEqual:@"json"]&&![runtimeHint isEqual:@"iplayr-rule"]){[self finish:nil error:[self error:@"普通 JSON 不是影视脚本；请选择 WeBox iPlayr 规则源"]];return;}
     NSURLSessionConfiguration *configuration=NSURLSessionConfiguration.ephemeralSessionConfiguration;configuration.URLCache=nil;configuration.HTTPCookieStorage=nil;configuration.timeoutIntervalForRequest=20;configuration.timeoutIntervalForResource=60;
     NSOperationQueue *queue=[NSOperationQueue new];queue.maxConcurrentOperationCount=1;
     self.session=[NSURLSession sessionWithConfiguration:configuration delegate:self delegateQueue:queue];[self begin:url];
@@ -352,7 +355,7 @@ static BOOL PackageSameCredentialScope(NSURL *origin,NSURL *target) {
         if(self.responseStatus!=404&&PackageLooksLikeHTML(bodySnapshot)){[self finish:nil error:[self error:config?@"配套配置校验地址返回了 HTML 网页，请检查资源权限或登录状态":@"资源校验地址返回了 HTML 网页，不是 MD5 校验文件"]];return;}
         if(self.responseStatus!=404&&!hash){[self finish:nil error:[self error:config?@"配套配置 MD5 格式无效":@"资源 MD5 校验文件格式无效"]];return;}
         if(config){self.configChecksum=hash;if(hash)[self progress:@"配套配置 MD5 校验值已读取"];self.phase=PackageConfig;[self begin:[self configURL:NO]];}
-        else{self.checksum=hash;if(![@[@"js",@"hjs",@"mjs",@"cjs",@"py",@"zip"] containsObject:self.targetURL.pathExtension.lowercaseString]){[self finish:nil error:[self error:@"MD5 地址最终没有指向受支持的 JS、Python 或 ZIP 文件"]];return;}if(hash)[self progress:@"资源 MD5 校验值已读取"];self.phase=PackageScript;[self begin:self.targetURL];}return;
+        else{self.checksum=hash;if(![@[@"js",@"hjs",@"mjs",@"cjs",@"py",@"zip",@"idjplugin",@"json"] containsObject:self.targetURL.pathExtension.lowercaseString]){[self finish:nil error:[self error:@"MD5 地址最终没有指向受支持的 JS、Python、ZIP 或插件文件"]];return;}if(hash)[self progress:@"资源 MD5 校验值已读取"];self.phase=PackageScript;[self begin:self.targetURL];}return;
     }
     if(self.phase==PackageConfig){
         if(self.responseStatus==404){if(self.configChecksum){[self finish:nil error:[self error:@"配置校验文件存在，但对应配置文件缺失，未安装"]];return;}self.configurationState=@"missing_using_defaults";[self install:@{}];return;}

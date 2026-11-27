@@ -5,6 +5,15 @@ import tempfile
 import unittest
 
 
+class RuntimePermissionBridgeContractTests(unittest.TestCase):
+    def test_idj_runtime_enforces_storage_and_disallows_sync_bridge(self):
+        root = pathlib.Path(__file__).resolve().parents[1]
+        source = (root / 'Sources/JSPluginRuntime.m').read_text(encoding='utf-8')
+        self.assertIn('if([s.activeProtocol isEqual:@"idj1"])return @{@"error":@"E_PERMISSION: iDuanJu 插件不支持同步网络请求"};', source)
+        self.assertIn('if([s.activeProtocol isEqual:@"idj1"]&&!s.idjStorageAllowed)', source)
+        self.assertIn('self.idjStorageAllowed=[permissions[@"storage"] respondsToSelector:@selector(boolValue)]&&[permissions[@"storage"] boolValue]', source)
+
+
 @unittest.skipUnless(platform.system() == 'Darwin', 'requires macOS JavaScriptCore')
 class NativeJSTests(unittest.TestCase):
     def test_original_js_runs_in_real_javascriptcore_with_native_network_and_stop(self):

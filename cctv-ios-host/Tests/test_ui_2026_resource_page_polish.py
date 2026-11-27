@@ -55,7 +55,7 @@ class ResourcePage2026PolishTests(unittest.TestCase):
 
     def test_06_tvbox_catalog_semantic_icons_and_active_service_border(self):
         tvbox = read_source("TVBoxCatalogViewController.m")
-        self.assertIn('NSString *iconName=ip.section==0?([row[@"apiKind"] isEqual:@"script"]?@"terminal":@"bolt.horizontal.circle"):@"dot.radiowaves.left.and.right";', tvbox)
+        self.assertIn('NSString *apiKind=row[@"apiKind"]?:@"";NSString *iconName=ip.section==0?([@[@"script",@"idj-plugin",@"iplayr-rule"] containsObject:apiKind]?@"terminal":@"bolt.horizontal.circle"):@"dot.radiowaves.left.and.right";', tvbox)
         self.assertIn("if(serviceRunning){cell.layer.borderWidth=1.05;HostSetLayerBorderColor(cell,HostAccent());}", tvbox)
         self.assertIn("HostStyleSectionHeaderView(view);", tvbox)
         self.assertIn("HostStyleSectionFooterView(view);", tvbox)

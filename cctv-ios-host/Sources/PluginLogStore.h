@@ -9,6 +9,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)finishRunForIdentifier:(NSString *)identifier status:(NSString *)status;
 - (void)markUnmanagedRunsInterruptedForIdentifier:(NSString *)identifier;
 - (NSArray<NSDictionary *> *)runsForIdentifier:(NSString *)identifier;
+- (void)runsForIdentifier:(NSString *)identifier completion:(void (^)(NSArray<NSDictionary *> *runs))completion;
 - (NSString *)logForIdentifier:(NSString *)identifier runID:(NSString *)runID;
 - (void)appendLine:(NSString *)line forIdentifier:(NSString *)identifier;
 - (NSString *)logForIdentifier:(NSString *)identifier;

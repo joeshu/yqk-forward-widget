@@ -171,7 +171,7 @@ static NSArray *CCTVBackupServices(NSError **error) {
     for(NSDictionary *site in sites){
         if(![site[@"supported"] boolValue])continue;
         if([site[@"apiKind"] isEqual:@"tvbox-api"]||[site[@"apiKind"] isEqual:@"maccms-api"]||[site[@"apiKind"] isEqual:@"douban-index"]||[site[@"apiKind"] isEqual:@"jar-bridge"]){nativeCount++;continue;}
-        if(![site[@"apiKind"] isEqual:@"script"])continue;
+        if(![@[@"script",@"idj-plugin",@"iplayr-rule"] containsObject:site[@"apiKind"]?:@""])continue;
         NSString *api=[site[@"api"] isKindOfClass:NSString.class]?site[@"api"]:@"",*ext=[site[@"ext"] isKindOfClass:NSString.class]?site[@"ext"]:@"";
         BOOL exists=NO;
         for(NSDictionary *service in services){NSString *serviceExt=[service[@"manifest"][@"options"] description]?:@"";NSDictionary *siteHeaders=[site[@"header"] isKindOfClass:NSDictionary.class]?site[@"header"]:@{},*savedHeaders=service[@"tvboxSiteHeader"]?:service[@"importHeaders"]?:@{};NSString *playURL=[site[@"playUrl"] isKindOfClass:NSString.class]?site[@"playUrl"]:@"";if(api.length&&[service[@"url"] isEqual:api]&&[serviceExt isEqual:ext]&&[savedHeaders isEqual:siteHeaders]&&[(service[@"tvboxPlayURL"]?:@"") isEqual:playURL]){exists=YES;break;}}
@@ -335,7 +335,7 @@ static NSArray *CCTVBackupServices(NSError **error) {
     }
     self.pendingTVBoxExt=[site[@"ext"] isKindOfClass:NSString.class]?site[@"ext"]:@"";self.pendingTVBoxSiteName=[site[@"name"] isKindOfClass:NSString.class]?site[@"name"]:@"";
     __weak typeof(self) weakSelf=self;
-    NSString *runtimeHint=[[downloadURL pathExtension].lowercaseString isEqual:@"py"]?@"python":nil;
+    NSString *apiKind=site[@"apiKind"]?:@"";NSString *runtimeHint=[apiKind isEqual:@"idj-plugin"]?@"idj-plugin":([apiKind isEqual:@"iplayr-rule"]?@"iplayr-rule":([[downloadURL pathExtension].lowercaseString isEqual:@"py"]?@"python":nil));
     [self downloadPackageURL:downloadURL headers:site[@"header"] runtimeHint:runtimeHint completion:^(NSDictionary *service,NSError *error){RootViewController *owner=weakSelf;owner.navigationItem.prompt=nil;if(error||!service){owner.pendingTVBoxExt=nil;owner.pendingTVBoxSiteName=nil;[owner reportAuthenticTVBoxSiteFailure:site rawAPI:originalAPI url:downloadURL error:error browseAfterImport:browseAfterImport];return;}NSMutableDictionary *updated=[service mutableCopy];NSMutableDictionary *manifest=[service[@"manifest"] mutableCopy]?:[NSMutableDictionary dictionary];NSString *ext=[site[@"ext"] isKindOfClass:NSString.class]?site[@"ext"]:@"",*name=[site[@"name"] isKindOfClass:NSString.class]?site[@"name"]:@"";if(ext.length)manifest[@"options"]=ext;if(name.length){manifest[@"name"]=name;updated[@"name"]=name;}updated[@"manifest"]=manifest;updated[@"tvboxSiteKey"]=site[@"key"]?:@"";updated[@"tvboxSiteKeys"]=@[site[@"key"]?:@""];if(site[@"tvboxCatalogID"])updated[@"tvboxCatalogID"]=site[@"tvboxCatalogID"];if(site[@"playUrl"])updated[@"tvboxPlayURL"]=site[@"playUrl"];if(site[@"header"])updated[@"tvboxSiteHeader"]=site[@"header"];owner.pendingTVBoxExt=nil;owner.pendingTVBoxSiteName=nil;[owner acceptImportedMedia:updated error:nil autoBrowse:browseAfterImport];}];
 }
 - (void)acceptImportedMedia:(NSDictionary *)service error:(NSError *)error {

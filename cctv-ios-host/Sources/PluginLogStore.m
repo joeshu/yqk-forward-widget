@@ -118,6 +118,16 @@ static const NSUInteger PluginRunMaximumCount = 20;
 - (NSArray<NSDictionary *> *)runsForIdentifier:(NSString *)identifier {
     if(!identifier.length)return @[];__block NSArray *records=@[];dispatch_sync(self.queue,^{[self flushPathsForIdentifier:identifier];records=[self runRecordsForIdentifier:identifier];});return records;
 }
+- (void)runsForIdentifier:(NSString *)identifier completion:(void (^)(NSArray<NSDictionary *> *))completion {
+    if(!completion)return;
+    if(!identifier.length){dispatch_async(dispatch_get_main_queue(),^{completion(@[]);});return;}
+    NSString *scope=[identifier copy];
+    dispatch_async(self.queue,^{
+        [self flushPathsForIdentifier:scope];
+        NSArray<NSDictionary *> *records=[[self runRecordsForIdentifier:scope] copy];
+        dispatch_async(dispatch_get_main_queue(),^{completion(records);});
+    });
+}
 - (NSString *)readPath:(NSString *)path {
     NSString *utf8=[NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:NULL];
     if(utf8)return utf8;

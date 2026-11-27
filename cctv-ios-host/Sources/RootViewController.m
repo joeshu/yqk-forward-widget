@@ -960,7 +960,7 @@ NSCache<NSString *,UIImage *> *CCTVSharedChannelLogoCache(void) {
 - (void)openDiagnosticLogForIdentifier:(NSString *)identifier name:(NSString *)name {
     if(identifier.length){
         PluginRunHistoryViewController *history=[PluginRunHistoryViewController new];history.serviceName=name;__weak typeof(self) weakSelf=self;NSString *scope=[identifier copy];NSString *scopeName=[name copy];
-        history.runRecordsProvider=^NSArray<NSDictionary *> *{return [PluginLogStore.shared runsForIdentifier:scope];};history.willRefreshRuns=^{if(![weakSelf.serviceOperations containsObject:scope]&&![PyHost isManagedServiceIdentifier:scope])[PluginLogStore.shared markUnmanagedRunsInterruptedForIdentifier:scope];};
+        history.runRecordsLoader=^(void (^completion)(NSArray<NSDictionary *> *runs)){[PluginLogStore.shared runsForIdentifier:scope completion:completion];};history.willRefreshRuns=^{if(![weakSelf.serviceOperations containsObject:scope]&&![PyHost isManagedServiceIdentifier:scope])[PluginLogStore.shared markUnmanagedRunsInterruptedForIdentifier:scope];};
         history.onSelectRun=^(NSDictionary *run){[weakSelf openPluginRunLogForIdentifier:scope name:scopeName?:@"服务" run:run];};
         history.onExportAll=^{[PluginLogStore.shared prepareExportForIdentifier:scope displayName:scopeName?:@"插件" completion:^(NSURL *url,NSError *error){if(!url){[weakSelf showServiceError:error.localizedDescription?:@"该脚本还没有可导出的日志。"];return;}[weakSelf shareDiagnosticLogAtURL:url];}];};
         history.onClearAll=^{[PluginLogStore.shared clearLogForIdentifier:scope completion:^{[[NSNotificationCenter defaultCenter] postNotificationName:CCTVHostDiagnosticLogDidUpdateNotification object:scope];}];};

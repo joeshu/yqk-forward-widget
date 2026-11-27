@@ -56,6 +56,7 @@ class PersistentLogTests(unittest.TestCase):
   self.assertIn('plugin-logs',P)
   self.assertIn('prepareExportForIdentifier:',P)
   self.assertIn('runsForIdentifier:scope',S)
+  self.assertIn('runsForIdentifier:scope completion:completion',S)
   self.assertIn('logForIdentifier:scope runID:selectedRun',S)
  def test_each_service_start_has_an_independent_bounded_run_record(self):
   P=Path(__file__).resolve().parents[1].joinpath('Sources/PluginLogStore.m').read_text()
@@ -67,10 +68,16 @@ class PersistentLogTests(unittest.TestCase):
   self.assertIn('PluginRunMaximumCount = 20',P)
   self.assertIn('metadataPathForIdentifier:',P)
   self.assertIn('plugin.run-history.list',H)
+  self.assertIn('runRecordsLoader',H)
   self.assertIn('onSelectRun',S)
  def test_pre_upgrade_service_logs_remain_available_as_a_separate_record(self):
   P=Path(__file__).resolve().parents[1].joinpath('Sources/PluginLogStore.m').read_text()
   self.assertIn('@"legacy"',P)
   self.assertIn('@"更新前历史日志"',P)
   self.assertIn('markUnmanagedRunsInterruptedForIdentifier:',S)
+ def test_run_history_reads_async_on_the_store_queue(self):
+  P=Path(__file__).resolve().parents[1].joinpath('Sources/PluginLogStore.m').read_text()
+  body=P.split('- (void)runsForIdentifier:(NSString *)identifier completion:',1)[1].split('\n}',1)[0]
+  self.assertIn('dispatch_async(self.queue',body)
+  self.assertIn('dispatch_async(dispatch_get_main_queue()',body)
 if __name__=='__main__':unittest.main()

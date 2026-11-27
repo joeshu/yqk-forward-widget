@@ -62,7 +62,7 @@
     // and let the catalog map all of its keys back to the imported resource.
     NSMutableArray *jobs=[NSMutableArray array];NSMutableDictionary<NSString *,NSMutableDictionary *> *byIdentity=[NSMutableDictionary dictionary];
     for(id value in sites){
-        if(![value isKindOfClass:NSDictionary.class]||![value[@"supported"] boolValue]||![value[@"apiKind"] isEqual:@"script"])continue;
+        if(![value isKindOfClass:NSDictionary.class]||![value[@"supported"] boolValue]||![@[@"script",@"idj-plugin",@"iplayr-rule"] containsObject:value[@"apiKind"]?:@""])continue;
         NSString *api=[value[@"api"] isKindOfClass:NSString.class]?value[@"api"]:@"";NSURLComponents *parts=[NSURLComponents componentsWithString:api];
         if(!parts){NSMutableCharacterSet *allowed=[NSCharacterSet.URLQueryAllowedCharacterSet mutableCopy];[allowed addCharactersInString:@"#%/:?@[]!$&'()*+,;="];NSString *encoded=[api stringByAddingPercentEncodingWithAllowedCharacters:allowed];if(encoded.length)parts=[NSURLComponents componentsWithString:encoded];}
         if(!parts||![@[@"http",@"https"] containsObject:parts.scheme.lowercaseString]||!parts.host.length)continue;
@@ -92,7 +92,8 @@
         };
         NSURL *targetURL=[NSURL URLWithString:api];
         if(!targetURL){NSMutableCharacterSet *allowed=[NSCharacterSet.URLQueryAllowedCharacterSet mutableCopy];[allowed addCharactersInString:@"#%/:?@[]!$&'()*+,;="];NSString *encoded=[api stringByAddingPercentEncodingWithAllowedCharacters:allowed];if(encoded.length)targetURL=[NSURL URLWithString:encoded];}
-        [downloader importURL:targetURL headers:site[@"header"] runtimeHint:nil completion:^(NSDictionary *service,NSError *error){
+        NSString *apiKind=site[@"apiKind"]?:@"";NSString *runtimeHint=[apiKind isEqual:@"idj-plugin"]?@"idj-plugin":([apiKind isEqual:@"iplayr-rule"]?@"iplayr-rule":nil);
+        [downloader importURL:targetURL headers:site[@"header"] runtimeHint:runtimeHint completion:^(NSDictionary *service,NSError *error){
             TVBoxCatalogBulkImporter *owner=weakSelf;if(!owner){if(service)[ServiceStore remove:service[@"id"]];return;}[owner.active removeObjectForKey:jobID];owner.completedCount++;
             if(owner.cancelled){if(service)[ServiceStore remove:service[@"id"]];}
             else if(error||!service){owner.failedCount++;[owner.failures addObject:@{@"name":name,@"message":error.localizedDescription?:@"站点脚本无法识别"}];}

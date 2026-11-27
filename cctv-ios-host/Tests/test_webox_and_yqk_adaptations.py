@@ -26,8 +26,13 @@ class WeBoxAndYqkAdaptationTests(unittest.TestCase):
         index_path = builtin_dir / "webox-index.json"
         self.assertTrue(index_path.is_file())
         index_data = json.loads(index_path.read_text(encoding="utf-8"))
-        self.assertEqual(len(index_data["sites"]), 5)
-        self.assertEqual(len(index_data["sources"]), 5)
+        sources = index_data.get("sources")
+        self.assertIsInstance(sources, list)
+        self.assertEqual(len(sources), 10)
+        self.assertEqual(
+            {source.get("type") for source in sources},
+            {"json", "js", "vod", "xml"},
+        )
         for fname in ("webox-4kvm.js", "webox-hstream.js", "webox-guazi.js", "webox-rou.js", "webox-one.js"):
             p = builtin_dir / fname
             self.assertTrue(p.is_file(), f"Missing {fname}")

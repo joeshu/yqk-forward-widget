@@ -5,6 +5,7 @@ import CryptoJS from 'crypto-js'
 import iconvLite from 'iconv-lite'
 import * as cheerio from 'cheerio/lib/slim'
 import jpeg from 'jpeg-js'
+import { ungzip } from 'pako'
 import * as streamModule from 'node:stream'
 import { rollup } from 'rollup/dist/rollup.browser.js'
 
@@ -618,8 +619,195 @@ function hamoListing(value){value=result(value)||{};return {...value,items:hamoR
 function hamoEpisodeID(itemId,line,episode){const rawRef=episode?.ref??episode?.url??episode?.playUrl??episode?.id;const ref=rawRef&&typeof rawRef==='object'?rawRef:(rawRef?{playPath:String(rawRef),url:String(rawRef)}:{});return hamoEpisodePrefix+encodeURIComponent(JSON.stringify({itemId:String(itemId||''),lineId:String(line?.id||''),episodeId:String(episode?.id??episode?.url??''),ref}))}
 function hamoDetail(value,args){value=result(value)||{};if(Array.isArray(value.list)&&value.list.length&&typeof value.list[0]==='object')value=value.list[0];const itemId=String(value.id??value.vod_id??args.id??args.itemId??'');let rawSources=Array.isArray(value.sources)?value.sources:(Array.isArray(value.lines)?value.lines:(Array.isArray(value.groups)?value.groups:[]));if(!rawSources.length&&Array.isArray(value.episodes)&&value.episodes.length)rawSources=[{id:'default',name:'默认线路',episodes:value.episodes}];if(!rawSources.length&&(value.url||value.playUrl))rawSources=[{id:'default',name:'默认线路',episodes:[{id:String(value.url||value.playUrl),name:'正片',url:String(value.url||value.playUrl)}]}];const lines=rawSources.map((line,lineIndex)=>({id:String(line?.id??lineIndex),name:String(line?.name??`线路 ${lineIndex+1}`),episodes:(Array.isArray(line?.episodes)?line.episodes:[]).filter(episode=>episode&&typeof episode==='object').map((episode,epIndex)=>({id:hamoEpisodeID(itemId,line,episode),name:String(episode.name??episode.title??episode.id??`第 ${epIndex+1} 集`)}))})).filter(line=>line.episodes.length);const actors=Array.isArray(value.actors)?value.actors.join(' / '):String(value.actors??value.vod_actor??'');const genres=Array.isArray(value.genres)?value.genres.join(' / '):String(value.genres??value.vod_class??'');return {...value,id:itemId,name:String(value.name||value.title||value.vod_name||itemId),poster:String(value.poster??value.cover??value.vod_pic??''),description:String(value.description??value.summary??value.content??value.vod_content??''),actor:actors,type:genres,lines}}
 async function hamoPlay(args){let episode={itemId:String(args.id||''),lineId:String(args.lineId||''),episodeId:String(args.id||''),ref:{playPath:String(args.id||''),url:String(args.id||'')}};if(typeof args.id==='string'&&args.id.startsWith(hamoEpisodePrefix)){try{episode=JSON.parse(decodeURIComponent(args.id.slice(hamoEpisodePrefix.length)))}catch{throw new Error('Hamo 分集引用格式无效')}}const resolveFn=typeof plugin.resolve==='function'?plugin.resolve:plugin.play;if(typeof resolveFn!=='function'){const fallbackUrl=episode.ref?.url||episode.ref?.playPath||episode.episodeId;if(typeof fallbackUrl==='string'&&/^https?:\/\//i.test(fallbackUrl))return {url:fallbackUrl};throw new Error('Hamo 来源未定义 resolve/play 方法')}const resolved=result(await resolveFn.call(plugin,{id:String(episode.episodeId||''),itemId:String(episode.itemId||''),lineId:String(args.lineId||episode.lineId||''),episodeId:String(episode.episodeId||''),url:String(episode.ref?.url||episode.ref?.playPath||episode.episodeId||''),ref:episode.ref&&typeof episode.ref==='object'?episode.ref:{}},{lineId:String(args.lineId||episode.lineId||'')}));if(typeof resolved==='string')return {url:resolved};if(!resolved||typeof resolved!=='object')throw new Error('Hamo 来源未返回播放结果');const finalUrl=resolved.url||resolved.playUrl||(Array.isArray(resolved.sources)&&resolved.sources[0]?.url)||'';return {...resolved,...(finalUrl?{url:finalUrl}:{}),requiresWebPlayback:resolved.requiresWebPlayback??resolved.webPlayback??String(resolved.type||'').toLowerCase()==='web'}}
+
+const idjEpisodePrefix='idj1-episode:'
+function idjHostPatternAllowed(host,patterns){
+  const name=String(host||'').toLowerCase().replace(/\.$/,'')
+  if(!name||name==='localhost'||name.endsWith('.localhost')||name.endsWith('.local')||/^(?:(?:0x[0-9a-f]+)|(?:[0-9]+))(?:\.(?:(?:0x[0-9a-f]+)|(?:[0-9]+)))*$/i.test(name)||name.includes(':'))return false
+  return (Array.isArray(patterns)?patterns:[]).some(value=>{const pattern=String(value||'').toLowerCase();if(pattern.startsWith('*.')){const root=pattern.slice(2);return name.endsWith('.'+root)&&name.length>root.length+1}return name===pattern})
+}
+function idjURLAllowed(value,patterns){try{const url=new URL(String(value));return ['http:','https:'].includes(url.protocol)&&!url.username&&!url.password&&idjHostPatternAllowed(url.hostname,patterns)}catch{return false}}
+function idjBytes(value,encoding='utf8'){
+  const kind=String(encoding||'utf8').toLowerCase().replace(/[-_]/g,'')
+  if(kind==='base64')return Buffer.from(String(value||'').replace(/\s+/g,''),'base64')
+  if(kind==='hex')return Buffer.from(String(value||''),'hex')
+  if(kind==='latin1'||kind==='binary')return Buffer.from(String(value??''),'latin1')
+  if(kind==='ascii')return Buffer.from(String(value??''),'ascii')
+  if(kind==='utf16le'||kind==='ucs2')return Buffer.from(String(value??''),'utf16le')
+  try{return Buffer.from(iconvLite.encode(String(value??''),encoding))}catch{return Buffer.from(String(value??''),'utf8')}
+}
+function idjText(bytes,encoding='utf8'){
+  const data=Buffer.from(bytes),kind=String(encoding||'utf8').toLowerCase().replace(/[-_]/g,'')
+  if(kind==='base64')return data.toString('base64')
+  if(kind==='hex')return data.toString('hex')
+  if(kind==='latin1'||kind==='binary')return data.toString('latin1')
+  if(kind==='ascii')return data.toString('ascii')
+  if(kind==='utf16le'||kind==='ucs2')return data.toString('utf16le')
+  try{return iconvLite.decode(data,encoding)}catch{return data.toString('utf8')}
+}
+function idjWordArray(value,encoding='utf8'){return CryptoJS.lib.WordArray.create(Uint8Array.from(idjBytes(value,encoding)))}
+function idjWordBytes(word){const words=word?.words||[],sigBytes=Math.max(0,Number(word?.sigBytes)||0),out=Buffer.alloc(sigBytes);for(let i=0;i<sigBytes;i++)out[i]=(words[i>>>2]>>>(24-(i%4)*8))&255;return out}
+function idjCryptoOutput(word,encoding='hex'){return idjText(idjWordBytes(word),encoding)}
+function idjCryptoHash(name,value,options={}){
+  const algorithm=String(name||'').toLowerCase(),input=idjWordArray(value,options.in||'utf8'),hash=CryptoJS[algorithm.toUpperCase()]
+  if(typeof hash!=='function')throw new Error('不支持的哈希算法：'+algorithm)
+  return idjCryptoOutput(hash(input),options.out||'hex')
+}
+function idjAES(options={}){
+  const operation=String(options.op||'decrypt').toLowerCase(),modeName=String(options.mode||'cbc').toUpperCase(),mode=CryptoJS.mode[modeName],paddingName=String(options.padding||'pkcs7').toUpperCase().replace(/-/g,'_'),padding=paddingName==='NONE'||paddingName==='NOPADDING'?CryptoJS.pad.NoPadding:CryptoJS.pad[paddingName==='PKCS7'? 'Pkcs7':paddingName]
+  if(!mode||!padding)throw new Error('不支持的 AES 模式或填充方式')
+  const key=idjWordArray(options.key??'',options.keyEncoding||'utf8'),iv=modeName==='ECB'?undefined:idjWordArray(options.iv??'',options.ivEncoding||'utf8'),settings={mode,padding};if(iv)settings.iv=iv
+  const input=idjWordArray(options.data??'',options.in||'utf8')
+  if(operation==='encrypt')return idjCryptoOutput(CryptoJS.AES.encrypt(input,key,settings).ciphertext,options.out||'base64')
+  if(operation==='decrypt')return idjCryptoOutput(CryptoJS.AES.decrypt(CryptoJS.lib.CipherParams.create({ciphertext:input}),key,settings),options.out||'utf8')
+  throw new Error('AES op 必须是 encrypt 或 decrypt')
+}
+function idjGlobals(payload){
+  const manifest=payload?.idjManifest&&typeof payload.idjManifest==='object'?payload.idjManifest:{},permissions=manifest.permissions&&typeof manifest.permissions==='object'?manifest.permissions:{},httpHosts=Array.isArray(permissions.http)?permissions.http:[],namespace='idj1:'+String(manifest.id||payload.serviceID||payload.name||payload.entry||'default')
+  const toHeaders=raw=>{if(raw instanceof Headers){const value={};raw.forEach((v,k)=>value[k]=v);return value}const out={};for(const [key,value] of Object.entries(raw||{}))if(value!=null)out[String(key)]=String(value);return out}
+  async function request(options={}){
+    if(typeof options==='string')options={url:options};const url=String(options.url||options.uri||'')
+    if(!idjURLAllowed(url,httpHosts))throw Object.assign(new Error('E_PERMISSION: 请求域名不在插件声明的 HTTP 权限中'),{code:'E_PERMISSION'})
+    const method=String(options.method||'GET').toUpperCase(),headers=toHeaders(options.headers),body=options.body??options.data
+    if(!Object.keys(headers).some(key=>key.toLowerCase()==='cookie')){const cookie=cookieHeader(url);if(cookie)headers.Cookie=cookie}
+    let wireBody=body
+    if(wireBody instanceof URLSearchParams){wireBody=wireBody.toString();headers['Content-Type']??='application/x-www-form-urlencoded;charset=UTF-8'}
+    else if(wireBody&&typeof wireBody==='object'&&!(wireBody instanceof ArrayBuffer)&&!ArrayBuffer.isView(wireBody)){if(/application\/x-www-form-urlencoded/i.test(String(headers['Content-Type']||headers['content-type']||'')))wireBody=new URLSearchParams(wireBody).toString();else{wireBody=JSON.stringify(wireBody);headers['Content-Type']??='application/json'}}
+    const timeout=Math.min(120000,Math.max(1000,Number(options.timeout)||15000)),fetchOptions={method,headers,timeout,redirect:options.redirect===false||options.maxRedirects===0?'manual':'follow'}
+    if(!['GET','HEAD'].includes(method)&&wireBody!=null){if(wireBody instanceof ArrayBuffer||ArrayBuffer.isView(wireBody))fetchOptions.body=wireBody;else fetchOptions.body=String(wireBody)}
+    const response=await g.fetch(url,fetchOptions),finalURL=String(response.url||url)
+    if(!idjURLAllowed(finalURL,httpHosts))throw Object.assign(new Error('E_PERMISSION: 重定向目标不在插件声明的 HTTP 权限中'),{code:'E_PERMISSION'})
+    const responseHeaders=toHeaders(response.headers);acceptCookies(finalURL,responseHeaders);const responseBody=await response.text()
+    return {status:Number(response.status)||0,url:finalURL,headers:responseHeaders,body:responseBody}
+  }
+  const http={request,get:(url,options={})=>request({...options,url,method:'GET'}),post:(url,body,options={})=>request({...options,url,method:'POST',...(body===undefined?{}:{body})})}
+  const storagePermission=permissions.storage===true||permissions.storage===1
+  const requireStorage=()=>{if(!storagePermission)throw Object.assign(new Error('E_PERMISSION: 插件未声明安全存储权限'),{code:'E_PERMISSION'})}
+  const storage={get:key=>{requireStorage();return g.__hostStorage('get',namespace+':'+String(key||''))??null},set:(key,value)=>{requireStorage();return g.__hostStorage('set',namespace+':'+String(key||''),String(value??''))},remove:key=>{requireStorage();return g.__hostStorage('remove',namespace+':'+String(key||''))},delete:key=>{requireStorage();return g.__hostStorage('remove',namespace+':'+String(key||''))}}
+  const cryptoAPI={
+    md5:(value,options={})=>idjCryptoHash('MD5',value,options),sha1:(value,options={})=>idjCryptoHash('SHA1',value,options),sha256:(value,options={})=>idjCryptoHash('SHA256',value,options),
+    hmac:(algorithm,key,value,options={})=>{const name=String(algorithm||'sha256').toLowerCase(),hash=CryptoJS['Hmac'+name.toUpperCase()];if(typeof hash!=='function')throw new Error('不支持的 HMAC 算法：'+name);return idjCryptoOutput(hash(idjWordArray(value,options.in||'utf8'),idjWordArray(key,options.keyEncoding||'utf8')),options.out||'hex')},
+    aes:idjAES,randomHex:count=>{const size=Math.max(0,Math.min(65536,Number(count)||0));return crypto.randomBytes(size).toString('hex')}
+  }
+  const codec={
+    convert:(value,from='utf8',to='utf8')=>idjText(idjBytes(value,from),to),
+    base64Encode:(value,options={})=>idjBytes(value,options.from||'utf8').toString('base64'),
+    base64Decode:(value,options={})=>idjText(Buffer.from(String(value||'').replace(/\s+/g,''),'base64'),options.to||'utf8'),
+    gunzip:value=>idjText(ungzip(Buffer.from(String(value||'').replace(/\s+/g,''),'base64')),'utf8')
+  }
+  g.host={
+    http:{...http,allowed:value=>idjURLAllowed(value,httpHosts)},
+    storage,
+    url:{resolve:(value,base)=>new URL(String(value??''),base?String(base):undefined).toString(),encodeForm:value=>new URLSearchParams(Object.entries(value||{}).map(([key,item])=>[key,item==null?'':String(item)])).toString()},
+    codec,
+    crypto:cryptoAPI,
+    error:(code,message,extra)=>Object.assign(new Error(String(message||code||'插件错误')),{code:String(code||'PLUGIN_ERROR'),...(extra&&typeof extra==='object'?extra:{})}),
+    log:(...args)=>g.__hostLog(args.map(value=>{if(typeof value==='string')return value;try{return JSON.stringify(value)}catch{return String(value)}}).join(' ')),
+    version:'1.0.0',has:name=>['http','url','codec','crypto'].includes(String(name))||(String(name)==='storage'&&storagePermission)
+  }
+}
+
+function idjRows(value){return items(value).filter(row=>row&&typeof row==='object').map((row,index)=>{const id=String(row.id??row.itemId??row.vod_id??row.url??'');return {...row,id,name:cleanDisplayString(row.name||row.title||row.vod_name||row.dramaName||id||`影视内容 ${index+1}`),poster:cleanDisplayString(row.poster??row.cover??row.pic??row.vod_pic??row.image??''),remarks:cleanDisplayString(row.remarks??row.subtitle??row.status??row.episodeText??row.year??row.summary??row.vod_remarks??'')}})}
+function idjHome(value){value=result(value)||{};const categories=Array.isArray(value.categories)?value.categories:(Array.isArray(value.class)?value.class:(Array.isArray(value.tabs)?value.tabs:[]));return {...value,categories:categories.map((row,index)=>({id:String(row?.id??row?.type_id??row?.value??index),name:cleanDisplayString(row?.name??row?.title??row?.type_name??`分类 ${index+1}`)})),items:idjRows(value)}}
+function idjListing(value){value=result(value)||{};return {...value,items:idjRows(value)}}
+function idjOperationArgs(args={},operation=''){const value={...args},line=String(args.line??args.lineId??'');if(operation==='category')value.id=String(args.categoryId??args.id??'');if(operation==='search')value.keyword=String(args.keyword??args.wd??'');if(line){value.line=line;value.lineId=String(args.lineId??line)}return value}
+function idjEpisodeID(itemId,line,episode){return idjEpisodePrefix+encodeURIComponent(JSON.stringify({itemId:String(itemId||''),lineId:String(line?.id??''),episodeId:String(episode?.id??episode?.episodeId??episode?.url??episode?.playUrl??''),ref:episode?.ref??episode?.url??episode?.playUrl??episode?.id??''}))}
+function idjDetail(value,args){
+  value=result(value)||{};if(Array.isArray(value.list)&&value.list.length&&typeof value.list[0]==='object')value=value.list[0];const itemId=String(value.id??value.itemId??value.vod_id??args.id??args.itemId??'')
+  let rawLines=Array.isArray(value.lines)?value.lines:(Array.isArray(value.sources)?value.sources:(Array.isArray(value.groups)?value.groups:[]));if(!rawLines.length&&Array.isArray(value.episodes))rawLines=[{id:'default',name:'默认线路',episodes:value.episodes}]
+  const lines=rawLines.map((line,index)=>{const rows=Array.isArray(line?.episodes)?line.episodes:(Array.isArray(line?.list)?line.list:[]);const episodes=rows.map((raw,episodeIndex)=>{const episode=raw&&typeof raw==='object'?raw:{id:String(raw),name:String(raw)};const id=idjEpisodeID(itemId,line,episode);return {id,name:cleanDisplayString(episode.name??episode.title??episode.episode??episode.label??episode.id??`第 ${episodeIndex+1} 集`)}}).filter(row=>row.name);return {id:String(line?.id??index),name:cleanDisplayString(line?.name??line?.title??`线路 ${index+1}`),episodes}}).filter(line=>line.episodes.length)
+  const actors=Array.isArray(value.actors)?value.actors.join(' / '):String(value.actors??value.actor??value.vod_actor??''),genres=Array.isArray(value.genres)?value.genres.join(' / '):String(value.genres??value.category??value.vod_class??'')
+  return {...value,id:itemId,name:cleanDisplayString(value.name||value.title||value.vod_name||value.dramaName||itemId),poster:cleanDisplayString(value.poster??value.cover??value.image??value.vod_pic??''),description:cleanDisplayString(value.description??value.summary??value.content??value.vod_content??''),actor:actors,type:genres,lines}
+}
+async function idjPlay(args={}){
+  const encoded=String(args.id??args.episodeId??''),token=encoded.startsWith(idjEpisodePrefix)?encoded:String(args.episodeId||''),currentLine=String(args.lineId||args.line||'');let episode={itemId:'',lineId:currentLine,episodeId:encoded,ref:encoded}
+  if(token.startsWith(idjEpisodePrefix)){try{episode=JSON.parse(decodeURIComponent(token.slice(idjEpisodePrefix.length)))}catch{throw new Error('iDuanJu 分集引用格式无效')}}
+  if(typeof plugin.play!=='function')throw new Error('iDuanJu 插件未实现 play')
+  const originalID=String(episode.episodeId||episode.ref?.id||episode.ref?.url||episode.ref?.playUrl||''),lineID=currentLine||String(episode.lineId||'');const resultValue=result(await plugin.play({id:originalID,episodeId:originalID,itemId:String(episode.itemId||''),lineId:lineID,line:lineID,ref:episode.ref},{}))
+  if(typeof resultValue==='string')return {url:resultValue}
+  if(!resultValue||typeof resultValue!=='object')throw new Error('iDuanJu 插件未返回播放结果')
+  const streams=Array.isArray(resultValue.streams)?resultValue.streams.filter(row=>row&&typeof row==='object'&&typeof row.url==='string'&&row.url):[]
+  const first=streams[0],url=resultValue.url||resultValue.playUrl||first?.url||(Array.isArray(resultValue.sources)?resultValue.sources[0]?.url:'')||''
+  if(!url)throw new Error(resultValue.message||resultValue.error||'iDuanJu 插件没有返回播放 URL')
+  const headers=resultValue.headers||resultValue.header||first?.headers||first?.header||{}
+  const alternates=streams.slice(1).map((row,index)=>({name:String(row.name||row.quality||`线路 ${index+2}`),url:String(row.url),headers:row.headers||row.header||{},...(row.format?{format:row.format}:{})}))
+  const out={...resultValue,url:String(url),headers,...(first?.format&&!resultValue.format?{format:first.format}:{}),...(alternates.length?{alternates:[{name:String(first.name||first.quality||'线路 1'),url:String(first.url),headers:first.headers||first.header||{},...(first.format?{format:first.format}:{})},...alternates]}:{})}
+  delete out.streams;return out
+}
+
+function xpathSegments(expression){
+  let text=String(expression||'').trim().replace(/^\.\//,'/');if(!text)return []
+  const out=[];let index=0,axis=text.startsWith('//')?'descendant':'child';if(axis==='descendant')index=2;else if(text.startsWith('/'))index=1
+  let start=index,depth=0,quote=''
+  for(;index<=text.length;index++){const ch=text[index];if(quote){if(ch===quote)quote='';continue}if(ch==='"'||ch==="'"){quote=ch;continue}if(ch==='[')depth++;else if(ch===']')depth--;if(index===text.length||(ch==='/'&&depth===0)){const part=text.slice(start,index).trim();if(part)out.push({axis,part});if(ch==='/'){axis=text[index+1]==='/'?'descendant':'child';if(axis==='descendant')index++;start=index+1}}
+  }
+  return out
+}
+function xpathText(node){if(!node)return '';if(node.type==='text'||node.type==='script'||node.type==='style')return String(node.data||'');return (node.children||[]).map(xpathText).join('')}
+function xpathDescendants(node){const out=[],stack=[...(node?.children||[])].reverse();while(stack.length){const current=stack.pop();if(current.type==='tag')out.push(current);const children=current.children||[];for(let i=children.length-1;i>=0;i--)stack.push(children[i])}return out}
+function xpathPredicates(expression){const tag=expression.slice(0,expression.indexOf('[')>=0?expression.indexOf('['):expression.length).trim()||'*',predicates=[];let re=/\[([^\]]*)\]/g,match;while((match=re.exec(expression)))predicates.push(match[1].trim());return {tag,predicates}}
+function xpathMatches(node,step){
+  if(step==='*'||step==='node()')return true;if(!node||node.type!=='tag')return false;const {tag,predicates}=xpathPredicates(step);if(tag!=='*'&&String(node.name||'').toLowerCase()!==tag.toLowerCase())return false
+  for(const condition of predicates){let match;if(/^\d+$/.test(condition))continue
+    if((match=/^contains\(\s*@([\w:-]+)\s*,\s*(['"])(.*?)\2\s*\)$/i.exec(condition))){if(!String(node.attribs?.[match[1]]||'').includes(match[3]))return false;continue}
+    if((match=/^starts-with\(\s*@([\w:-]+)\s*,\s*(['"])(.*?)\2\s*\)$/i.exec(condition))){if(!String(node.attribs?.[match[1]]||'').startsWith(match[3]))return false;continue}
+    if((match=/^@([\w:-]+)\s*=\s*(['"])(.*?)\2$/.exec(condition))){if(String(node.attribs?.[match[1]]??'')!==match[3])return false;continue}
+    if((match=/^@([\w:-]+)$/.exec(condition))){if(node.attribs?.[match[1]]==null)return false;continue}
+    if((match=/^normalize-space\(@([\w:-]+)\)\s*=\s*(['"])(.*?)\2$/.exec(condition))){if(String(node.attribs?.[match[1]]||'').trim().replace(/\s+/g,' ')!==match[3])return false;continue}
+    if((match=/^contains\(\s*\.\s*,\s*(['"])(.*?)\1\s*\)$/i.exec(condition))){if(!xpathText(node).includes(match[2]))return false;continue}
+    return false
+  }
+  return true
+}
+function xpathSelect(root,expression){
+  let current=[root];const segments=xpathSegments(expression);if(!segments.length)return []
+  for(const segment of segments){const trimmed=segment.part.trim();if(trimmed.startsWith('@')){const attr=trimmed.slice(1);return current.map(node=>node?.attribs?.[attr]).filter(value=>value!=null)}if(trimmed==='text()')return current.map(xpathText).filter(value=>value!=null)
+    let candidates=[];for(const node of current){const pool=segment.axis==='descendant'?xpathDescendants(node):(node?.children||[]).filter(child=>child.type==='tag');for(const candidate of pool)if(xpathMatches(candidate,trimmed))candidates.push(candidate)}
+    const position=trimmed.match(/\[(\d+)\]$/);if(position)candidates=candidates.slice(Number(position[1])-1,Number(position[1]));current=candidates
+  }
+  return current
+}
+function xpathValue(root,expression){return xpathSelect(root,expression).map(value=>typeof value==='string'?value:xpathText(value).replace(/\s+/g,' ').trim()).filter(value=>String(value).trim()).map(String)}
+function iplayrDocument(html){const $=cheerio.load(String(html||''));return { $,root:$.root().get(0) }}
+function iplayrTemplate(template,values={}){return String(template||'').replace(/\{([A-Za-z][A-Za-z0-9_]*)\}/g,(_,key)=>String(values[key]??''))}
+function iplayrAbsolute(raw,base){const value=String(raw||'').trim();if(!value)return '';try{return new URL(value,String(base||'')).toString()}catch{return value}}
+function iplayrSafeRegex(pattern){const value=String(pattern||'');if(value.length>512||/\((?:\\.|[^()]){0,256}\)(?:\*|\+|\{\d)/.test(value))throw new Error('WeBox 规则正则过长或含不安全的重复分组');return new RegExp(value,'i')}
+function iplayrBase(rule){for(const category of rule.category||[]){try{return new URL(category.url0).origin}catch{}}return String(rule.referer||'')}
+async function iplayrFetch(url,rule){const response=await g.fetch(String(url),{method:'GET',timeout:45000,headers:{'User-Agent':rule.user_agent||'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',...(rule.referer?{Referer:rule.referer}:{})}});if(!response.ok)throw new Error('WeBox 站点返回 HTTP '+response.status);const text=await response.text();if(text.length>4*1024*1024)throw new Error('WeBox 页面超过 4 MB');return {html:text,url:String(response.url||url)}}
+function iplayrExtractRows(doc,rule,search=false){
+  const nodeExpr=search?(rule.search_vod_node||rule.vod_node):rule.vod_node,titleExpr=search?(rule.search_vod_title||rule.vod_title):rule.vod_title,linkExpr=search?(rule.search_vod_link_id||rule.vod_link_id):rule.vod_link_id,imageExpr=search?(rule.search_vod_image_id||rule.vod_image_id):rule.vod_image_id,imageURL=search?(rule.search_vod_image_url||rule.vod_image_url):rule.vod_image_url,linkURL=search?(rule.search_vod_link_url||rule.vod_link_url):rule.vod_link_url
+  const rows=xpathSelect(doc.root,nodeExpr),output=[]
+  for(const row of rows){const title=xpathValue(row,titleExpr)[0]||'',href=xpathValue(row,linkExpr)[0]||'',image=xpathValue(row,imageExpr)[0]||'';if(!title.trim()||!href.trim())continue
+    let imageID=image;const imageRegex=search?(rule.search_vod_image_regex||rule.vod_image_regex):rule.vod_image_regex;if(imageRegex){try{const match=iplayrSafeRegex(imageRegex).exec(imageID);if(match)imageID=match[1]||match[0]}catch{}}
+    const base=doc.url||iplayrBase(rule),id=iplayrAbsolute(iplayrTemplate(linkURL,{id:href}),base),posterID=iplayrTemplate(imageURL,{id:imageID}),poster=iplayrAbsolute(posterID,base)
+    const remarks=xpathValue(row,search?'':rule.vod_info)[0]||xpathValue(row,rule.vod_score)[0]||''
+    output.push({id,name:cleanDisplayString(title),poster,remarks:cleanDisplayString(remarks)})
+  }
+  return output
+}
+function createIPlayrPlugin(rule){
+  const categories=Array.isArray(rule.category)?rule.category:[],base=iplayrBase(rule)
+  async function listing(url,search=false){const page=await iplayrFetch(url,rule),doc=iplayrDocument(page.html);doc.url=page.url;const rows=iplayrExtractRows(doc,rule,search);const text=page.html.toLowerCase(),next=/下一页|下页|next\s*page|class=["'][^"']*next/i.test(text);return {items:rows,page:1,hasMore:next||rows.length>=12}}
+  function categoryByID(value){const id=String(value??'');let index=Number.parseInt(id.replace(/^cat[_-]?/i,''),10);if(Number.isInteger(index)&&index>=0&&index<categories.length)return {category:categories[index],index};const found=categories.findIndex(row=>row.title===id);if(found>=0)return {category:categories[found],index:found};return {category:categories[0],index:0}}
+  return {
+    async home(){if(!categories.length)return {categories:[],items:[],hasMore:false};const data=await listing(categories[0].url0);return {...data,categories:categories.map((row,index)=>({id:String(index),name:row.title}))}},
+    async category(args={}){const selected=categoryByID(args.categoryId),page=Math.max(1,Number(args.page)||1);if(!selected.category)return {items:[],hasMore:false};const template=page===1?selected.category.url0:(selected.category.url1||selected.category.url0),url=iplayrTemplate(template,{pg:page});const resultValue=await listing(url);return {...resultValue,page,categoryName:selected.category.title}},
+    async search(args={}){if(!rule.search_flag)return {items:[],hasMore:false};const page=Math.max(1,Number(args.page)||1);if(page>1&&!rule.search_url_other_page)return {items:[],page,hasMore:false};const keyword=encodeURIComponent(String(args.keyword||'')),template=page===1?rule.search_url_first_page:rule.search_url_other_page,url=iplayrTemplate(template,{wd:keyword,pg:page});const resultValue=await listing(url,true);return {...resultValue,page}},
+    async detail(args={}){const url=iplayrAbsolute(args.id||args.itemId,base),page=await iplayrFetch(url,rule),doc=iplayrDocument(page.html);doc.url=page.url;const $=doc.$,title=cleanDisplayString($('meta[property="og:title"]').attr('content')||$('title').first().text()||xpathValue(doc.root,rule.vod_title)[0]||args.name||url).replace(/\s*[-_|｜].*$/,'').trim(),poster=iplayrAbsolute($('meta[property="og:image"]').attr('content')||$('meta[name="twitter:image"]').attr('content')||$('img').first().attr('data-original')||$('img').first().attr('data-src')||$('img').first().attr('src')||'',page.url),description=cleanDisplayString($('meta[name="description"]').attr('content')||$('meta[property="og:description"]').attr('content')||xpathValue(doc.root,rule.playlist_info)[0]||'')
+      let groups=rule.playlist_flag?xpathSelect(doc.root,rule.playlist_group_node):[];if(!groups.length)groups=[doc.root]
+      const lines=groups.map((group,index)=>{const names=xpathValue(group,rule.playlist_title),links=xpathValue(group,rule.playlist_link_id),episodes=[];for(let i=0;i<Math.min(names.length,links.length,500);i++){const episodeURL=iplayrAbsolute(iplayrTemplate(rule.playlist_link_url,{id:links[i]}),page.url);if(episodeURL)episodes.push({id:episodeURL,name:cleanDisplayString(names[i])||`第 ${i+1} 集`})}return {id:String(index),name:`线路 ${index+1}`,episodes}}).filter(row=>row.episodes.length)
+      return {id:url,name:title||String(args.name||url),poster,description,lines}
+    },
+    async play(args={}){const raw=String(args.id||args.episodeId||'').trim();if(/^https?:\/\/[^\s]+\.(?:m3u8|mp4|m4v|mpd)(?:[?#].*)?$/i.test(raw))return {url:raw,parse:0,jx:0,format:/\.m3u8/i.test(raw)?'hls':undefined,headers:rule.referer?{Referer:rule.referer}:{}}
+      const pageURL=iplayrAbsolute(raw,base),page=await iplayrFetch(pageURL,rule);let stream='';const encoded=String(rule.play_regex||'');if(encoded){try{const pattern=Buffer.from(encoded,'base64').toString('utf8'),match=iplayrSafeRegex(pattern).exec(page.html.slice(0,1024*1024));if(match)stream=match[1]||match[0]}catch{}}
+      if(stream)stream=iplayrTemplate(rule.play_url||'{id}',{id:stream});if(!stream){const match=/(?:"(?:url|src|playUrl)"\s*:\s*"|<(?:source|video)[^>]+(?:src|data-src)=["'])(https?:[^"'<>\s]+?\.(?:m3u8|mp4|m4v|mpd)(?:\?[^"'<>\s]*)?)/i.exec(page.html);if(match)stream=match[1]||match[0]}
+      if(stream){const url=iplayrAbsolute(stream,page.url);return {url,parse:0,jx:0,format:/\.m3u8(?:[?#]|$)/i.test(url)?'hls':undefined,headers:rule.referer?{Referer:rule.referer}:{}}}
+      return {url:page.url,parse:1,jx:0,requiresWebPlayback:true,headers:rule.referer?{Referer:rule.referer}:{}}
+    }
+  }
+}
 async function load(payload){
-  config={...payload,api:payload.api||(isCatVodProtocol(payload.protocol)?'catvod':'standard')};files=new Set(g.__hostListPackageFiles());virtualFiles.clear();cookieJar.clear();netCache.clear();cache.clear();cacheStore.clear();inflight.clear();concurrencyGroups.clear();spiderRoutes=new Map();spiderPrefix='';modernCatVod=false
+  config={...payload,api:payload.api||(isCatVodProtocol(payload.protocol)?'catvod':'standard')};files=new Set(g.__hostListPackageFiles());virtualFiles.clear();cookieJar.clear();netCache.clear();cache.clear();cacheStore.clear();inflight.clear();concurrencyGroups.clear();spiderRoutes=new Map();spiderPrefix='';modernCatVod=false;hamoDefinedSpec=null
   if(!builtins['catvod-cat']&&typeof g.__cctvImport==='function')builtins['catvod-cat']=g.__cctvImport('assets://js/lib/cat.js')
   g.__cctvBuiltins=builtins;g.__cctvRequire=requireFile;g.__cctvActiveOptions=payload.options;g.__cctvActiveModuleType=payload.moduleType||'';g.__cctvActiveProtocol=payload.protocol||'';g.__JS_SPIDER__=null
   g.Buffer=Buffer;g.CryptoJS=CryptoJS;g.cheerio=cheerio;g.global=g;g.window=g;g.self=g
@@ -650,8 +838,14 @@ async function load(payload){
   g.local=isCatVodProtocol(payload.protocol)?{get:(key,fallback=null)=>g.__hostStorage('get',localScope+':'+String(key||''))??fallback,set:(key,value)=>g.__hostStorage('set',localScope+':'+String(key||''),String(value??'')),delete:key=>g.__hostStorage('remove',localScope+':'+String(key||''))}:{get:(namespace,key)=>g.__hostStorage('get',String(namespace||'')+':'+String(key||''))||'',set:(namespace,key,value)=>g.__hostStorage('set',String(namespace||'')+':'+String(key||''),String(value??'')),delete:(namespace,key)=>g.__hostStorage('remove',String(namespace||'')+':'+String(key||''))}
   weboxDefinedSpec=null;g.WeBox={define(spec){weboxDefinedSpec=spec;return spec}}
   if(payload.protocol==='hamo-source-v3')hamoGlobals(payload)
+  if(payload.protocol==='idj1')idjGlobals(payload)
   g.net=net;g.getProxy=()=>payload.proxyURL||'';g.getProxyUrl=proxyURL
   g.crypto={getRandomValues:array=>{const bytes=new Uint8Array(array.buffer,array.byteOffset,array.byteLength);bytes.set(crypto.randomBytes(bytes.length));return array},randomUUID:crypto.randomUUID}
+  if(payload.protocol==='iplayr-rule'){
+    let rule;try{rule=JSON.parse(read('rule.json'))}catch(error){throw new Error('WeBox iPlayr 规则文件无效：'+(error?.message||error))}
+    plugin=createIPlayrPlugin(rule,payload)
+    return {engine:'JavaScriptCore',protocol:'iplayr-rule',name:rule.title||payload.name||'WeBox iPlayr',capabilities:['home','category','search','detail','play']}
+  }
   const entry=find(normalize(payload.entry||'index.js'))
   const type=payload.moduleType||'esm'
   let module
@@ -706,16 +900,17 @@ const api={
   home:async(args)=>{
     if(config.protocol==='catvod-spider')return invokeSpider('home',args)
     if(config.protocol==='hamo-source-v3')return hamoHome(await plugin.home(args||{},{}))
+    if(config.protocol==='idj1')return idjHome(await plugin.home(args||{}))
     const value=typeof plugin.home==='function'?result(await plugin.home(config.api==='catvod'?true:args)):{}
     if(!items(value).length && (plugin.homeVod||plugin.homeVideo))return {...value,list:items(await (plugin.homeVod||plugin.homeVideo).call(plugin))}
     return value
   },
-  category:async(args)=>config.protocol==='catvod-spider'?invokeSpider('category',args):(config.protocol==='hamo-source-v3'?hamoListing(await plugin.category(args||{},{})):(config.api==='catvod'?plugin.category(String(args.categoryId||''),String(args.page||1),true,args.filters||{}):plugin.category(args))),
+  category:async(args)=>config.protocol==='catvod-spider'?invokeSpider('category',args):(config.protocol==='hamo-source-v3'?hamoListing(await plugin.category(args||{},{})):(config.protocol==='idj1'?idjListing(await plugin.category(idjOperationArgs(args||{},'category'))):(config.api==='catvod'?plugin.category(String(args.categoryId||''),String(args.page||1),true,args.filters||{}):plugin.category(args)))),
   catalog:async()=>{const fn=plugin.channels||plugin.catalog;const data=typeof fn==='function'?await fn.call(plugin):fn||[];return items(data).map(row=>({...row,id:String(row.id),ref:String(row.ref||row.id),name:String(row.name||row.id),logo:String(row.logo||'')}))},
   resolve:async({ref,...context})=>plugin.resolve({id:ref,ref,...context}),
-  search:async(args)=>config.protocol==='catvod-spider'?invokeSpider('search',args):(config.protocol==='hamo-source-v3'?hamoListing(await plugin.search(args||{},{})):(config.api==='catvod'?plugin.search(args.keyword||'',false,String(args.page||1)):plugin.search(args))),
-  detail:async(args)=>config.protocol==='catvod-spider'?invokeSpider('detail',args):(config.protocol==='hamo-source-v3'?hamoDetail(await plugin.detail({...args,itemId:String(args.id??args.itemId??'')},{}),args):(config.api==='catvod'?(modernCatVod?plugin.detail(String(args.id||'')):plugin.detail([args.id])):plugin.detail(args))),
-  play:async(args)=>config.protocol==='catvod-spider'?invokeSpider('play',args):(config.protocol==='hamo-source-v3'?hamoPlay(args||{}):(config.api==='catvod'?plugin.play(args.lineId||'',args.id,[]):plugin.play(args))),
+  search:async(args)=>config.protocol==='catvod-spider'?invokeSpider('search',args):(config.protocol==='hamo-source-v3'?hamoListing(await plugin.search(args||{},{})):(config.protocol==='idj1'?idjListing(await plugin.search(idjOperationArgs(args||{},'search'))):(config.api==='catvod'?plugin.search(args.keyword||'',false,String(args.page||1)):plugin.search(args)))),
+  detail:async(args)=>config.protocol==='catvod-spider'?invokeSpider('detail',args):(config.protocol==='hamo-source-v3'?hamoDetail(await plugin.detail({...args,itemId:String(args.id??args.itemId??'')},{}),args):(config.protocol==='idj1'?idjDetail(await plugin.detail(idjOperationArgs({...args,id:String(args?.id??args?.itemId??'')},'detail')),args):(config.api==='catvod'?(modernCatVod?plugin.detail(String(args.id||'')):plugin.detail([args.id])):plugin.detail(args)))),
+  play:async(args)=>config.protocol==='catvod-spider'?invokeSpider('play',args):(config.protocol==='hamo-source-v3'?hamoPlay(args||{}):(config.protocol==='idj1'?idjPlay(args||{}):(config.api==='catvod'?plugin.play(args.lineId||'',args.id,[]):plugin.play(args)))),
   epg:async(payload)=>typeof plugin.epg==='function'?plugin.epg(payload):[],
   proxy:async(payload)=>{const value=await plugin.proxy(payload);if(Array.isArray(value))return value;if(value&&typeof value==='object'){const code=value.code??value.statusCode??value.status,body=value.content??value.body;if(code!=null&&body!=null)return [code,value.headers||{},body]}return value},
   route:async(args)=>config.protocol==='catvod-spider'?invokeSpider('route',args):{statusCode:404,body:'Not Found'},
