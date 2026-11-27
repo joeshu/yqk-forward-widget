@@ -95,6 +95,7 @@ static void MediaFeedLoadPosterWithRetry(NSString *url, UIImageView *imageView, 
 @property(nonatomic,strong) UILabel *titleLabel;
 @property(nonatomic,strong) UILabel *subtitleLabel;
 @property(nonatomic,strong) UIButton *actionButton;
+@property(nonatomic,strong) UIActivityIndicatorView *spinner;
 @property(nonatomic,copy) dispatch_block_t onAction;
 - (void)configureSection:(NSDictionary *)section;
 @end
@@ -104,11 +105,12 @@ static void MediaFeedLoadPosterWithRetry(NSString *url, UIImageView *imageView, 
     self.titleLabel=[UILabel new];self.titleLabel.textColor=HostText();self.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];self.titleLabel.adjustsFontForContentSizeCategory=YES;self.titleLabel.numberOfLines=0;
     self.subtitleLabel=[UILabel new];self.subtitleLabel.textColor=HostSecondaryText();self.subtitleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];self.subtitleLabel.adjustsFontForContentSizeCategory=YES;self.subtitleLabel.numberOfLines=0;
     self.actionButton=[UIButton buttonWithType:UIButtonTypeSystem];HostStylePillButton(self.actionButton,NO);self.actionButton.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];self.actionButton.titleLabel.adjustsFontForContentSizeCategory=YES;[self.actionButton addTarget:self action:@selector(performAction) forControlEvents:UIControlEventTouchUpInside];HostInstallPressFeedback(self.actionButton);
-    UIStackView *stack=[[UIStackView alloc] initWithArrangedSubviews:@[self.titleLabel,self.subtitleLabel,self.actionButton]];stack.axis=UILayoutConstraintAxisVertical;stack.spacing=8;stack.translatesAutoresizingMaskIntoConstraints=NO;[self.contentView addSubview:stack];
+    self.spinner=[[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];self.spinner.hidesWhenStopped=YES;
+    UIStackView *stack=[[UIStackView alloc] initWithArrangedSubviews:@[self.spinner,self.titleLabel,self.subtitleLabel,self.actionButton]];stack.axis=UILayoutConstraintAxisVertical;stack.spacing=8;stack.translatesAutoresizingMaskIntoConstraints=NO;[self.contentView addSubview:stack];
     [NSLayoutConstraint activateConstraints:@[[stack.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:16],[stack.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-16],[stack.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:16],[stack.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-16],[self.actionButton.heightAnchor constraintGreaterThanOrEqualToConstant:44]]];
 }return self;}
-- (void)prepareForReuse {[super prepareForReuse];self.onAction=nil;}
-- (void)configureSection:(NSDictionary *)section {HostStyleGlassCard(self.contentView,18);self.titleLabel.textColor=HostText();self.subtitleLabel.textColor=HostSecondaryText();HostStylePillButton(self.actionButton,NO);self.actionButton.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];self.actionButton.titleLabel.adjustsFontForContentSizeCategory=YES;self.titleLabel.text=MediaFeedString(section[@"title"]);self.subtitleLabel.text=MediaFeedString(section[@"subtitle"]);self.subtitleLabel.hidden=!self.subtitleLabel.text.length;NSString *action=MediaFeedString(section[@"actionTitle"]);[self.actionButton setTitle:action forState:UIControlStateNormal];self.actionButton.hidden=!action.length;self.accessibilityIdentifier=MediaFeedString(section[@"id"]);}
+- (void)prepareForReuse {[super prepareForReuse];self.onAction=nil;[self.spinner stopAnimating];}
+- (void)configureSection:(NSDictionary *)section {HostStyleGlassCard(self.contentView,18);self.titleLabel.textColor=HostText();self.subtitleLabel.textColor=HostSecondaryText();HostStylePillButton(self.actionButton,NO);self.actionButton.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];self.actionButton.titleLabel.adjustsFontForContentSizeCategory=YES;self.titleLabel.text=MediaFeedString(section[@"title"]);self.subtitleLabel.text=MediaFeedString(section[@"subtitle"]);self.subtitleLabel.hidden=!self.subtitleLabel.text.length;NSString *action=MediaFeedString(section[@"actionTitle"]);[self.actionButton setTitle:action forState:UIControlStateNormal];self.actionButton.hidden=!action.length;if([section[@"loading"] boolValue])[self.spinner startAnimating];else[self.spinner stopAnimating];self.accessibilityIdentifier=MediaFeedString(section[@"id"]);}
 - (void)performAction {if(self.onAction)self.onAction();}
 @end
 
@@ -121,10 +123,47 @@ static void MediaFeedLoadPosterWithRetry(NSString *url, UIImageView *imageView, 
 
 
 @implementation MediaFeedHeader
-- (instancetype)initWithFrame:(CGRect)frame {if((self=[super initWithFrame:frame])){self.accentBar=[UIView new];self.accentBar.backgroundColor=HostAccent();self.accentBar.layer.cornerRadius=1.75;self.accentBar.layer.cornerCurve=kCACornerCurveContinuous;[self addSubview:self.accentBar];self.titleLabel=[UILabel new];self.titleLabel.textColor=HostText();self.titleLabel.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleHeadline] scaledFontForFont:[UIFont systemFontOfSize:17 weight:UIFontWeightSemibold]];self.titleLabel.adjustsFontForContentSizeCategory=YES;self.titleLabel.lineBreakMode=NSLineBreakByTruncatingTail;[self addSubview:self.titleLabel];self.actionButton=[UIButton buttonWithType:UIButtonTypeSystem];self.actionButton.titleLabel.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleSubheadline] scaledFontForFont:[UIFont systemFontOfSize:13.5 weight:UIFontWeightSemibold]];self.actionButton.tintColor=HostSecondaryText();self.actionButton.titleLabel.adjustsFontForContentSizeCategory=YES;[self.actionButton addTarget:self action:@selector(performAction) forControlEvents:UIControlEventTouchUpInside];[self addSubview:self.actionButton];}return self;}
+- (instancetype)initWithFrame:(CGRect)frame {
+    if((self=[super initWithFrame:frame])){
+        self.accentBar=[UIView new];
+        self.accentBar.backgroundColor=HostAccent();
+        self.accentBar.layer.cornerRadius=1.75;
+        self.accentBar.translatesAutoresizingMaskIntoConstraints=NO;
+        [self addSubview:self.accentBar];
+        self.titleLabel=[UILabel new];
+        self.titleLabel.textColor=HostText();
+        self.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];
+        self.titleLabel.adjustsFontForContentSizeCategory=YES;
+        self.titleLabel.numberOfLines=0;
+        self.titleLabel.accessibilityTraits=UIAccessibilityTraitHeader;
+        self.actionButton=[UIButton buttonWithType:UIButtonTypeSystem];
+        self.actionButton.titleLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];
+        self.actionButton.titleLabel.adjustsFontForContentSizeCategory=YES;
+        self.actionButton.tintColor=HostSecondaryText();
+        [self.actionButton setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+        [self.actionButton addTarget:self action:@selector(performAction) forControlEvents:UIControlEventTouchUpInside];
+        UIStackView *stack=[[UIStackView alloc] initWithArrangedSubviews:@[self.titleLabel,self.actionButton]];
+        stack.axis=UILayoutConstraintAxisHorizontal;
+        stack.alignment=UIStackViewAlignmentCenter;
+        stack.spacing=10;
+        stack.translatesAutoresizingMaskIntoConstraints=NO;
+        [self addSubview:stack];
+        [NSLayoutConstraint activateConstraints:@[
+            [self.accentBar.leadingAnchor constraintEqualToAnchor:self.leadingAnchor],
+            [self.accentBar.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
+            [self.accentBar.widthAnchor constraintEqualToConstant:3.5],
+            [self.accentBar.heightAnchor constraintEqualToConstant:16],
+            [stack.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:10],
+            [stack.trailingAnchor constraintEqualToAnchor:self.trailingAnchor],
+            [stack.topAnchor constraintEqualToAnchor:self.topAnchor constant:6],
+            [stack.bottomAnchor constraintEqualToAnchor:self.bottomAnchor constant:-6],
+            [self.actionButton.heightAnchor constraintGreaterThanOrEqualToConstant:44]
+        ]];
+    }
+    return self;
+}
 - (void)prepareForReuse {[super prepareForReuse];self.onAction=nil;self.titleLabel.text=nil;self.actionButton.hidden=YES;}
 - (void)performAction {if(self.onAction)self.onAction();}
-- (void)layoutSubviews {[super layoutSubviews];self.accentBar.backgroundColor=HostAccent();CGFloat width=CGRectGetWidth(self.bounds),height=CGRectGetHeight(self.bounds);self.accentBar.frame=CGRectMake(0,floor((height-16)/2),3.5,16);CGFloat actionWidth=self.actionButton.hidden?0:MAX(64,MIN(width*.4,[self.actionButton sizeThatFits:CGSizeMake(width*.4,height)].width+8));self.actionButton.frame=CGRectMake(width-actionWidth,0,actionWidth,MAX(44,height));self.titleLabel.frame=CGRectMake(10,0,MAX(0,width-actionWidth-18),height);}
 @end
 
 @interface MediaFeedHeroCell : UICollectionViewCell
@@ -151,9 +190,9 @@ static void MediaFeedLoadPosterWithRetry(NSString *url, UIImageView *imageView, 
 @implementation MediaFeedHeroCell
 - (instancetype)initWithFrame:(CGRect)frame {if((self=[super initWithFrame:frame])){
     self.clipsToBounds=YES;self.contentView.backgroundColor=HostBackground();self.poster=[UIImageView new];self.poster.clipsToBounds=YES;self.poster.contentMode=UIViewContentModeScaleAspectFill;[self.contentView addSubview:self.poster];
-    self.fade=[CAGradientLayer layer];self.fade.colors=@[(id)UIColor.clearColor.CGColor,(id)[UIColor colorWithWhite:0 alpha:.3].CGColor,(id)HostBackground().CGColor];self.fade.locations=@[@0,@.35,@1];[self.contentView.layer addSublayer:self.fade];
+    self.fade=[CAGradientLayer layer];self.fade.colors=@[(id)UIColor.clearColor.CGColor,(id)[UIColor colorWithWhite:0 alpha:.55].CGColor,(id)[UIColor colorWithWhite:0 alpha:.9].CGColor];self.fade.locations=@[@0,@.35,@1];[self.contentView.layer addSublayer:self.fade];
     self.heroBadgeLabel=[UILabel new];self.heroBadgeLabel.font=[UIFont systemFontOfSize:11 weight:UIFontWeightBold];self.heroBadgeLabel.textColor=HostOnAccent();self.heroBadgeLabel.backgroundColor=[HostAccent() colorWithAlphaComponent:0.88];self.heroBadgeLabel.textAlignment=NSTextAlignmentCenter;self.heroBadgeLabel.layer.cornerRadius=10;self.heroBadgeLabel.layer.cornerCurve=kCACornerCurveContinuous;self.heroBadgeLabel.clipsToBounds=YES;self.heroBadgeLabel.accessibilityIdentifier=@"media-hero-badge";[self.contentView addSubview:self.heroBadgeLabel];
-    self.playHintPill=[UILabel new];self.playHintPill.text=@"▶︎ 立即观看";self.playHintPill.font=[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];self.playHintPill.textColor=UIColor.whiteColor;self.playHintPill.backgroundColor=[UIColor colorWithWhite:1 alpha:0.18];self.playHintPill.textAlignment=NSTextAlignmentCenter;self.playHintPill.layer.cornerRadius=14;self.playHintPill.layer.cornerCurve=kCACornerCurveContinuous;self.playHintPill.layer.borderWidth=0.7;self.playHintPill.layer.borderColor=[UIColor colorWithWhite:1 alpha:0.28].CGColor;self.playHintPill.clipsToBounds=YES;self.playHintPill.accessibilityIdentifier=@"media-hero-play-pill";[self.contentView addSubview:self.playHintPill];
+    self.playHintPill=[UILabel new];self.playHintPill.text=@"查看详情";self.playHintPill.font=[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];self.playHintPill.textColor=UIColor.whiteColor;self.playHintPill.backgroundColor=[UIColor colorWithWhite:1 alpha:0.18];self.playHintPill.textAlignment=NSTextAlignmentCenter;self.playHintPill.layer.cornerRadius=14;self.playHintPill.layer.cornerCurve=kCACornerCurveContinuous;self.playHintPill.layer.borderWidth=0.7;self.playHintPill.layer.borderColor=[UIColor colorWithWhite:1 alpha:0.28].CGColor;self.playHintPill.clipsToBounds=YES;self.playHintPill.accessibilityIdentifier=@"media-hero-play-pill";[self.contentView addSubview:self.playHintPill];
     self.nameLabel=[UILabel new];self.nameLabel.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleTitle1] scaledFontForFont:[UIFont systemFontOfSize:27 weight:UIFontWeightBold]];self.nameLabel.adjustsFontForContentSizeCategory=YES;self.nameLabel.textColor=UIColor.whiteColor;self.nameLabel.numberOfLines=2;self.nameLabel.layer.shadowColor=UIColor.blackColor.CGColor;self.nameLabel.layer.shadowOpacity=0.58;self.nameLabel.layer.shadowRadius=6.0;self.nameLabel.layer.shadowOffset=CGSizeMake(0,2);[self.contentView addSubview:self.nameLabel];
     self.detailLabel=[UILabel new];self.detailLabel.font=[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];self.detailLabel.adjustsFontForContentSizeCategory=YES;self.detailLabel.textColor=[UIColor.whiteColor colorWithAlphaComponent:.86];self.detailLabel.numberOfLines=1;self.detailLabel.lineBreakMode=NSLineBreakByTruncatingTail;self.detailLabel.layer.shadowColor=UIColor.blackColor.CGColor;self.detailLabel.layer.shadowOpacity=0.48;self.detailLabel.layer.shadowRadius=4.0;self.detailLabel.layer.shadowOffset=CGSizeMake(0,1);[self.contentView addSubview:self.detailLabel];
     self.pages=[UIPageControl new];self.pages.currentPageIndicatorTintColor=HostAccent();self.pages.pageIndicatorTintColor=[UIColor.whiteColor colorWithAlphaComponent:.35];self.pages.hidesForSinglePage=YES;[self.pages addTarget:self action:@selector(pageChanged) forControlEvents:UIControlEventValueChanged];[self.contentView addSubview:self.pages];
@@ -185,7 +224,7 @@ static void MediaFeedLoadPosterWithRetry(NSString *url, UIImageView *imageView, 
 - (BOOL)accessibilityPrevious {if(self.items.count<2)return NO;self.page=(self.page+self.items.count-1)%self.items.count;[self displayCurrent:NO];UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,self.accessibilityLabel);return YES;}
 - (void)displayCurrent:(BOOL)animated {
     self.contentView.backgroundColor=HostBackground();
-    self.fade.colors=@[(id)UIColor.clearColor.CGColor,(id)[UIColor colorWithWhite:0 alpha:.3].CGColor,(id)HostBackground().CGColor];
+    self.fade.colors=@[(id)UIColor.clearColor.CGColor,(id)[UIColor colorWithWhite:0 alpha:.55].CGColor,(id)[UIColor colorWithWhite:0 alpha:.9].CGColor];
     self.heroBadgeLabel.textColor=HostOnAccent();
     self.heroBadgeLabel.backgroundColor=[HostAccent() colorWithAlphaComponent:0.88];
     self.pages.currentPageIndicatorTintColor=HostAccent();
@@ -230,7 +269,7 @@ static void MediaFeedLoadPosterWithRetry(NSString *url, UIImageView *imageView, 
     if([kind isEqual:@"hero"]){CGFloat titleHeight=ceil([[[UIFontMetrics metricsForTextStyle:UIFontTextStyleTitle1] scaledFontForFont:[UIFont systemFontOfSize:27 weight:UIFontWeightBold]] lineHeight])*2;CGFloat detailHeight=ceil([UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline].lineHeight);CGFloat textTop=[definition[@"heroTopInset"] respondsToSelector:@selector(doubleValue)]?[definition[@"heroTopInset"] doubleValue]:HostStatusBarSafeTop(self,self.safeAreaInsets.top)+100;CGFloat height=MAX(MAX(300,MIN(460,CGRectGetHeight(self.bounds)*.5)),textTop+titleHeight+detailHeight+72);NSCollectionLayoutSize *size=[NSCollectionLayoutSize sizeWithWidthDimension:[NSCollectionLayoutDimension fractionalWidthDimension:1] heightDimension:[NSCollectionLayoutDimension absoluteDimension:height]];NSCollectionLayoutItem *item=[NSCollectionLayoutItem itemWithLayoutSize:size];section=[NSCollectionLayoutSection sectionWithGroup:[NSCollectionLayoutGroup verticalGroupWithLayoutSize:size subitems:@[item]]];section.contentInsets=NSDirectionalEdgeInsetsMake(0,0,12,0);}
     else if([kind isEqual:@"status"]){NSCollectionLayoutSize *size=[NSCollectionLayoutSize sizeWithWidthDimension:[NSCollectionLayoutDimension fractionalWidthDimension:1] heightDimension:[NSCollectionLayoutDimension estimatedDimension:170]];NSCollectionLayoutItem *item=[NSCollectionLayoutItem itemWithLayoutSize:size];section=[NSCollectionLayoutSection sectionWithGroup:[NSCollectionLayoutGroup verticalGroupWithLayoutSize:size subitems:@[item]]];section.contentInsets=NSDirectionalEdgeInsetsMake(8,14,12,14);}
     else {
-        BOOL grid=[kind isEqual:@"grid"];NSInteger columns=large?2:([NSUserDefaults.standardUserDefaults integerForKey:@"cctv.mediaGridColumns.v1"]==4?4:3);CGFloat cardWidth=grid?floor((width-28-(columns-1)*10)/columns):floor((width-28)/2.5);if(large&&!grid)cardWidth=floor((width-28)/1.6);cardWidth=MAX(44,cardWidth);
+        BOOL grid=[kind isEqual:@"grid"];NSInteger preferred=[NSUserDefaults.standardUserDefaults integerForKey:@"cctv.mediaGridColumns.v1"];NSInteger columns=large?(width<500?1:2):(preferred>=2&&preferred<=4?preferred:3);CGFloat cardWidth=grid?floor((width-28-(columns-1)*10)/columns):floor((width-28)/2.5);if(large&&!grid)cardWidth=floor((width-28)/1.6);cardWidth=MAX(44,cardWidth);
         CGFloat title=ceil([UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline].lineHeight)*2,detail=ceil([UIFont preferredFontForTextStyle:UIFontTextStyleCaption1].lineHeight);CGFloat height=ceil(cardWidth*1.5)+title+detail+12;
         NSCollectionLayoutSize *itemSize=[NSCollectionLayoutSize sizeWithWidthDimension:grid?[NSCollectionLayoutDimension fractionalWidthDimension:1.0/columns]:[NSCollectionLayoutDimension absoluteDimension:cardWidth] heightDimension:[NSCollectionLayoutDimension absoluteDimension:height]];NSCollectionLayoutItem *item=[NSCollectionLayoutItem itemWithLayoutSize:itemSize];
         NSCollectionLayoutSize *groupSize=[NSCollectionLayoutSize sizeWithWidthDimension:grid?[NSCollectionLayoutDimension fractionalWidthDimension:1]:[NSCollectionLayoutDimension absoluteDimension:cardWidth] heightDimension:[NSCollectionLayoutDimension absoluteDimension:height]];
@@ -240,12 +279,36 @@ static void MediaFeedLoadPosterWithRetry(NSString *url, UIImageView *imageView, 
     return section;
 }
 - (void)reloadData {
+    NSArray<NSDictionary *> *previous=self.sections;
+    if(self.sectionsProvider){
+        NSMutableArray *valid=[NSMutableArray array];
+        for(id section in self.sectionsProvider())if([section isKindOfClass:NSDictionary.class])[valid addObject:section];
+        self.sections=valid.copy;
+    }
     self.renderSerial++;
-    // Pending visibility work belongs to the old render. It must not clear or
-    // replace the visible-category state of a newly selected source or category.
-    self.categoryNotificationScheduled=NO;self.visibleCategoryIDs=nil;
-    if(self.sectionsProvider){NSArray *sections=self.sectionsProvider();NSMutableArray *valid=[NSMutableArray array];for(id section in sections)if([section isKindOfClass:NSDictionary.class])[valid addObject:section];self.sections=valid;}
-    [self.collectionViewLayout invalidateLayout];[super reloadData];
+    self.categoryNotificationScheduled=NO;
+    self.visibleCategoryIDs=nil;
+    BOOL sameStructure=previous.count==self.sections.count&&self.numberOfSections==previous.count;
+    NSMutableIndexSet *changed=[NSMutableIndexSet indexSet];
+    for(NSUInteger index=0;sameStructure&&index<previous.count;index++){
+        NSDictionary *before=previous[index],*after=self.sections[index];
+        for(NSString *key in @[@"id",@"kind",@"sourceID",@"providerID"]){
+            if(![MediaFeedString(before[key]) isEqual:MediaFeedString(after[key])]){sameStructure=NO;break;}
+        }
+        if(![before isEqual:after])[changed addIndex:index];
+    }
+    [self.collectionViewLayout invalidateLayout];
+    if(sameStructure&&self.window&&!self.hasUncommittedUpdates){
+        if(changed.count)[super reloadSections:changed];
+        [self notifyVisibleCategories];
+        return;
+    }
+    [super reloadData];
+}
+- (void)reloadAppearance {
+    self.backgroundColor=HostBackground();
+    [self.collectionViewLayout invalidateLayout];
+    [super reloadData];
 }
 - (NSInteger)numberOfSectionsInCollectionView:(UICollectionView *)collectionView {return self.sections.count;}
 - (NSInteger)collectionView:(UICollectionView *)collectionView numberOfItemsInSection:(NSInteger)section {NSDictionary *definition=[self sectionAt:section];NSString *kind=MediaFeedString(definition[@"kind"]);if([kind isEqual:@"hero"]||[kind isEqual:@"status"])return 1;if([kind isEqual:@"skeleton"])return 6;return MediaFeedItems(definition).count;}
@@ -271,7 +334,7 @@ static void MediaFeedLoadPosterWithRetry(NSString *url, UIImageView *imageView, 
     if([kind isEqual:@"skeleton"])return [self dequeueReusableCellWithReuseIdentifier:@"feed.skeleton" forIndexPath:indexPath];
     MediaFeedPosterCell *cell=[self dequeueReusableCellWithReuseIdentifier:@"feed.poster" forIndexPath:indexPath];NSArray *items=MediaFeedItems(section);NSDictionary *item=indexPath.item<items.count&&[items[indexPath.item] isKindOfClass:NSDictionary.class]?items[indexPath.item]:@{};[cell configureItem:item];cell.accessibilityIdentifier=[NSString stringWithFormat:@"media-feed-item-%@-%ld",MediaFeedString(section[@"id"]),(long)indexPath.item];return cell;
 }
-- (UICollectionReusableView *)collectionView:(UICollectionView *)collectionView viewForSupplementaryElementOfKind:(NSString *)kind atIndexPath:(NSIndexPath *)indexPath {MediaFeedHeader *header=[self dequeueReusableSupplementaryViewOfKind:kind withReuseIdentifier:@"feed.header" forIndexPath:indexPath];NSDictionary *section=[self sectionAt:indexPath.section];header.titleLabel.textColor=HostText();header.actionButton.tintColor=HostSecondaryText();header.titleLabel.text=MediaFeedString(section[@"title"]);NSString *action=MediaFeedString(section[@"actionTitle"]);[header.actionButton setTitle:action forState:UIControlStateNormal];header.actionButton.hidden=!action.length;header.actionButton.accessibilityLabel=[NSString stringWithFormat:@"%@%@",action,header.titleLabel.text?:@""];__weak typeof(self) weakSelf=self;header.onAction=^{MediaFeedView *owner=weakSelf;if(owner.onSelectSection)owner.onSelectSection(section);};return header;}
+- (UICollectionReusableView *)collectionView:(UICollectionView *)collectionView viewForSupplementaryElementOfKind:(NSString *)kind atIndexPath:(NSIndexPath *)indexPath {MediaFeedHeader *header=[self dequeueReusableSupplementaryViewOfKind:kind withReuseIdentifier:@"feed.header" forIndexPath:indexPath];NSDictionary *section=[self sectionAt:indexPath.section];header.accentBar.backgroundColor=HostAccent();header.titleLabel.textColor=HostText();header.actionButton.tintColor=HostSecondaryText();header.titleLabel.text=MediaFeedString(section[@"title"]);NSString *action=MediaFeedString(section[@"actionTitle"]);[header.actionButton setTitle:action forState:UIControlStateNormal];header.actionButton.hidden=!action.length;header.actionButton.accessibilityLabel=[NSString stringWithFormat:@"%@%@",action,header.titleLabel.text?:@""];__weak typeof(self) weakSelf=self;header.onAction=^{MediaFeedView *owner=weakSelf;if(owner.onSelectSection)owner.onSelectSection(section);};return header;}
 - (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:(NSIndexPath *)indexPath {NSDictionary *section=[self sectionAt:indexPath.section];NSString *kind=MediaFeedString(section[@"kind"]);if([@[@"hero",@"status",@"skeleton"] containsObject:kind])return;NSArray *items=MediaFeedItems(section);if(indexPath.item<items.count&&self.onSelectItem)self.onSelectItem(items[indexPath.item],section);}
 - (UIContextMenuConfiguration *)collectionView:(UICollectionView *)collectionView contextMenuConfigurationForItemAtIndexPath:(NSIndexPath *)indexPath point:(CGPoint)point {
     NSDictionary *section=[self sectionAt:indexPath.section];NSString *kind=MediaFeedString(section[@"kind"]);

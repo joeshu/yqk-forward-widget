@@ -50,6 +50,7 @@ extern BOOL LiveCatalogRunSmokeChecks(void);
 extern BOOL PlaybackGestureRunSmokeChecks(void);
 extern void ImportSnapshotRunSmokeChecksAsync(void (^completion)(BOOL passed));
 extern BOOL CicadaBudgetRunSmokeChecks(void);
+extern BOOL MediaPageReviewRunSmokeChecks(void);
 @interface ResourceImportWorkflowViewController (SmokeImport)
 - (NSMutableDictionary *)candidateForData:(NSData *)data file:(NSURL *)file origin:(NSString *)origin companions:(NSDictionary *)companions hint:(NSString *)hint;
 - (void)saveSelected;
@@ -451,6 +452,7 @@ static void next(NSArray *steps, NSUInteger index) {
       check(LiveCatalogRunSmokeChecks(),@"live catchup identity, disabled sources and catalog sizing");
       check(PlaybackGestureRunSmokeChecks(),@"live volume displacement is independent of gesture event frequency");
       check(CicadaBudgetRunSmokeChecks(),@"Cicada first-frame budget excludes paused time");
+      check(MediaPageReviewRunSmokeChecks(),@"media page continuation, seasonal episodes and selection state");
       check([CNPlayerCrashGuard install], @"CNPlayer thumbnail exception guard installs");
       check([CNPlayer smokeCicadaLicenseOverrideCount]==0,@"SDK setup preserves the Cicada core's built-in license endpoint without a host override");
       UIImage *guardedThumbnail=[[NSClassFromString(@"IJKFFMoviePlayerController") new]
