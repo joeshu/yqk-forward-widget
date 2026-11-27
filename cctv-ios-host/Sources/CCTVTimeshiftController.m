@@ -93,6 +93,10 @@ static NSString *const CCTVTimeshiftErrorDomain = @"CCTVHostTimeshift";
 #pragma mark - Seek（防抖 + 版权预检 + 一次重试）
 
 - (void)requestSeekToStart:(NSTimeInterval)start end:(NSTimeInterval)end channelID:(NSString *)channelID completion:(void (^)(BOOL, NSError *))completion {
+    if (!NSThread.isMainThread) {
+        dispatch_async(dispatch_get_main_queue(), ^{ [self requestSeekToStart:start end:end channelID:channelID completion:completion]; });
+        return;
+    }
     // 范围校验与 NativeTimeshiftSession 一致，失败立即返回（不等防抖）。
     NSTimeInterval now = NSDate.date.timeIntervalSince1970;
     if (!isfinite(start) || !isfinite(end) || !isfinite(now) || start <= 0 || start >= now || end < 0 || (end != 0 && (end <= start || end > now))) {
@@ -214,6 +218,7 @@ static NSString *const CCTVTimeshiftErrorDomain = @"CCTVHostTimeshift";
 }
 
 - (void)issueSeekToStart:(NSTimeInterval)start end:(NSTimeInterval)end channelID:(NSString *)channelID completion:(void (^)(BOOL, NSError *))completion {
+    self.cancelledByUs = NO;
     self.seekAttempts += 1;
     [self setState:CCTVTimeshiftStateSeeking];
     self.seekIssuedAt = NSProcessInfo.processInfo.systemUptime;
@@ -244,7 +249,7 @@ static NSString *const CCTVTimeshiftErrorDomain = @"CCTVHostTimeshift";
         } else if (self.state == CCTVTimeshiftStateSeeking) {
             NSUInteger settleGen = self.generation;
             __weak typeof(self) weakSelf = self;
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.65 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                 CCTVTimeshiftController *owner = weakSelf;
                 if (owner && settleGen == owner.generation && owner.state == CCTVTimeshiftStateSeeking) {
                     [owner recordSeekFirstFrame];
@@ -252,7 +257,7 @@ static NSString *const CCTVTimeshiftErrorDomain = @"CCTVHostTimeshift";
             });
         }
         // 首帧可能已先于本回调到达（已转 PlayingReplay），接受仍要回调宿主；
-        // 首帧尚未确认时留待 SeekSucceed / FirstRender 或 0.65s 静默确认兜底转态。
+        // 首帧尚未确认时留待 SeekSucceed / FirstRender 或 1.5s 静默确认兜底转态。
         if (completion) completion(YES, nil);
         return;
     }
@@ -272,6 +277,8 @@ static NSString *const CCTVTimeshiftErrorDomain = @"CCTVHostTimeshift";
 #pragma mark - 返回直播
 
 - (void)returnToLive {
+    self.generation++;
+    NSUInteger returnGen = self.generation;
     self.cancelledByUs = YES;
     [self.session cancel];
     self.pendingCompletion = nil;
@@ -281,7 +288,15 @@ static NSString *const CCTVTimeshiftErrorDomain = @"CCTVHostTimeshift";
         // SDK 不支持 backToLive：宿主整台重播（重新起播，不经过时移接口）。
         [self setState:CCTVTimeshiftStateFailed];
         if (self.onReturnToLiveFallback) self.onReturnToLiveFallback();
+        return;
     }
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(4.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        CCTVTimeshiftController *owner = weakSelf;
+        if (!owner || returnGen != owner.generation || owner.state != CCTVTimeshiftStateReturningToLive) return;
+        [owner setState:CCTVTimeshiftStateFailed];
+        if (owner.onReturnToLiveFallback) owner.onReturnToLiveFallback();
+    });
 }
 
 - (void)noteReturnedToLive {

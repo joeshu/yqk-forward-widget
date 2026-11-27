@@ -350,6 +350,7 @@
     if (self.avPlayer) {
         [NSNotificationCenter.defaultCenter removeObserver:self name:AVPlayerItemFailedToPlayToEndTimeNotification object:self.avPlayer.currentItem];
         [NSNotificationCenter.defaultCenter removeObserver:self name:AVPlayerItemPlaybackStalledNotification object:self.avPlayer.currentItem];
+        [NSNotificationCenter.defaultCenter removeObserver:self name:AVPlayerItemDidPlayToEndTimeNotification object:self.avPlayer.currentItem];
         [self.avPlayer pause];
         AVPlayerItem *previousItem=self.avPlayer.currentItem;
         [self guardedRemoveObserverFrom:previousItem keyPath:@"status" context:kAVItemStatusContext];
@@ -599,7 +600,7 @@
 - (void)cicadaAdapterDidShowFirstFrame:(id)adapter {
     if(adapter!=self.remoteAdapter)return;self.firstRender=YES;self.remotePlaybackFailed=NO;self.firstFrameSeconds=CACurrentMediaTime()-self.playStartedAt;
     [RuntimeDiagnostics.shared recordEvent:@"playback_first_frame_ready" category:@"playback" fields:@{@"player":@"CicadaPlayer",@"playback_attempt_id":self.currentRemotePlaybackAttemptID?:@"",@"correlation_id":self.currentPlaybackTraceID?:@"",@"elapsed_ms":@(MAX(0,self.firstFrameSeconds*1000))}];
-    [self.spinner stopAnimating];self.titleLabel.text=self.channelName;[self recordStartupStage:@"frame"];[self endPlaybackPriority];[self updateNowPlaying];[self startLiveQualityBadgeTimer];
+    [self.spinner stopAnimating];if(self.remoteCatchupActive){self.titleLabel.text=[NSString stringWithFormat:@"%@ · 回看",self.channelName?:@"频道"];self.titleLabel.hidden=NO;self.infoLabel.text=self.activeCatchupProgramTitle.length?[NSString stringWithFormat:@"回看中 · %@（点更多可返回直播）",self.activeCatchupProgramTitle]:@"回看中 · 点更多可返回直播";self.infoLabel.hidden=NO;self.playerTopScrim.hidden=NO;}else{self.titleLabel.text=self.channelName;}[self recordStartupStage:@"frame"];[self endPlaybackPriority];[self updateNowPlaying];[self startLiveQualityBadgeTimer];
 }
 - (void)cicadaAdapter:(id)adapter didUpdateVideoSize:(CGSize)size rotation:(NSInteger)rotation {
     (void)rotation;
@@ -614,19 +615,13 @@
 }
 - (void)cicadaAdapter:(id)adapter didFailWithError:(NSError *)error {
     if(adapter!=self.remoteAdapter)return;[RuntimeDiagnostics.shared recordEvent:@"playback_failed" category:@"playback" fields:@{@"player":@"CicadaPlayer",@"playback_attempt_id":self.currentRemotePlaybackAttemptID?:@"",@"error_domain":error.domain?:@"",@"error_code":@(error.code)}];[HostPerfMetrics.shared recordPlaybackAttemptFailed:self.currentRemotePlaybackAttemptID generation:self.playbackGeneration engine:@"cicada" stage:@"playback_failed"];self.remotePlaybackFailed=YES;self.remotePlaybackWanted=NO;[self.spinner stopAnimating];
-    self.titleLabel.hidden=NO;self.titleLabel.text=@"播放失败 · 可重试或切换线路";self.infoLabel.hidden=NO;self.infoLabel.text=error.localizedDescription;self.playPauseBtn.enabled=YES;[self.playPauseBtn setTitle:@"重试" forState:UIControlStateNormal];
+    self.titleLabel.hidden=NO;self.titleLabel.text=self.remoteCatchupActive?@"回看源加载失败 · 可重试或返回直播":@"播放失败 · 可重试或切换线路";self.infoLabel.hidden=NO;self.infoLabel.text=error.localizedDescription;self.playPauseBtn.enabled=YES;[self.playPauseBtn setTitle:@"重试" forState:UIControlStateNormal];
     self.remoteAdapter.delegate=nil;[self.remoteAdapter destroy];self.remoteAdapter=nil;[self setLiveOverlayHidden:NO];[self endPlaybackPriority];
-    if(self.remoteRetryCount==0&&CCTVRemotePlaybackErrorCanRetrySameURL(error)){
-        self.remoteRetryCount++;
-        NSDictionary *retry=@{@"id":self.channelID?:@"",@"name":self.channelName?:@"直播",
-                              @"remoteURL":self.currentRemoteURL?:@"",@"headers":self.currentRemoteHeaders?:@{},
-                              @"nativePlainRoute":@(self.nativePlainRouteActive)};
-        [self startRemoteChannel:retry];return;
-    }
-    NSDictionary *alternate=[self nextUntriedAlternateChannel];
+    if(self.remoteRetryCount==0&&CCTVRemotePlaybackErrorCanRetrySameURL(error)){self.remoteRetryCount++;[self startRemoteChannel:@{@"id":self.channelID?:@"",@"name":self.channelName?:@"直播",@"remoteURL":self.currentRemoteURL?:@"",@"headers":self.currentRemoteHeaders?:@{},@"nativePlainRoute":@(self.nativePlainRouteActive),@"catchupReplay":@(self.remoteCatchupActive)}];return;}
+    NSDictionary *alternate=self.remoteCatchupActive?[self nextUntriedAlternateCatchupChannel]:[self nextUntriedAlternateChannel];
     if(alternate)[self startRemoteChannel:alternate];
 }
-- (void)cicadaAdapterDidComplete:(id)adapter {if(adapter!=self.remoteAdapter)return;self.remotePlaybackWanted=NO;[self.playPauseBtn setTitle:@"重播" forState:UIControlStateNormal];self.infoLabel.text=@"播放已结束 · 可重新连接";[self setLiveOverlayHidden:NO];[self updateNowPlaying];}
+- (void)cicadaAdapterDidComplete:(id)adapter {if(adapter!=self.remoteAdapter)return;self.remotePlaybackWanted=NO;[self.playPauseBtn setTitle:@"重播" forState:UIControlStateNormal];self.titleLabel.hidden=NO;self.infoLabel.hidden=NO;self.infoLabel.text=self.remoteCatchupActive?@"本段回看已播完 · 可重播或点更多返回实时直播":@"播放已结束 · 可重新连接";[self setLiveOverlayHidden:NO];[self updateNowPlaying];}
 - (void)startRemoteURL:(NSString *)url generation:(NSUInteger)generation {
     if(generation!=self.playbackGeneration)return;[[PlaybackCoordinator shared] acquireSession:(id<PlaybackSession>)self];
     NSDictionary *headers=self.nativePlainRouteActive?@{@"User-Agent":@"qqlive",@"Referer":@"https://live.cctv.cn/"}:(self.currentRemoteHeaders?:@{});
@@ -657,6 +652,7 @@
     [self.avLayer addObserver:self forKeyPath:@"readyForDisplay" options:NSKeyValueObservingOptionInitial|NSKeyValueObservingOptionNew context:kAVLayerFrameContext];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(avItemFailed:) name:AVPlayerItemFailedToPlayToEndTimeNotification object:item];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(avItemStalled:) name:AVPlayerItemPlaybackStalledNotification object:item];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(avItemDidPlayToEnd:) name:AVPlayerItemDidPlayToEndTimeNotification object:item];
     if(generation!=self.playbackGeneration || item!=self.avPlayer.currentItem)return;[self startRemoteProgressWatchdogForItem:item generation:generation];[self recordStartupStage:@"prepareCall"];
     if(@available(iOS 10.0,*))[self.avPlayer playImmediatelyAtRate:1.0];
     else [self.avPlayer play];
@@ -714,7 +710,7 @@
     NSString *safeReason=[HostLogRedactor redactText:error.localizedDescription?:@"未知错误"];NSDictionary *failedService=[self localServiceForURL:[NSURL URLWithString:self.currentRemoteURL?:@""]];if(failedService)[self logPluginLine:[NSString stringWithFormat:@"播放器请求失败 · %@",safeReason] identifier:failedService[@"id"] name:failedService[@"name"]];[self log:@"订阅播放失败 %@",safeReason];
     if(retrySameURL){
         self.remoteRetryCount++;NSUInteger generation=self.playbackGeneration;NSString *url=self.currentRemoteURL?:@"";
-        NSDictionary *retry=@{@"id":self.channelID?:url,@"name":self.channelName?:url,@"remoteURL":url,@"nativePlainRoute":@(self.nativePlainRouteActive),@"headers":self.currentRemoteHeaders?:@{}};
+        NSDictionary *retry=@{@"id":self.channelID?:url,@"name":self.channelName?:url,@"remoteURL":url,@"nativePlainRoute":@(self.nativePlainRouteActive),@"headers":self.currentRemoteHeaders?:@{},@"catchupReplay":@(self.remoteCatchupActive)};
         [self log:@"同源自动恢复 1/1，保留一次短重试"];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(0.8*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
             if(generation!=self.playbackGeneration || item!=self.avPlayer.currentItem || !self.remotePlaybackWanted || ![url isEqualToString:self.currentRemoteURL])return;
@@ -731,6 +727,8 @@
     NSError *e = n.userInfo[AVPlayerItemFailedToPlayToEndTimeErrorKey];
     [self recoverRemoteFailureForItem:n.object error:e];
 }
+
+- (void)avItemDidPlayToEnd:(NSNotification *)n {if(!NSThread.isMainThread){dispatch_async(dispatch_get_main_queue(),^{[self avItemDidPlayToEnd:n];});return;}if(n.object!=self.avPlayer.currentItem)return;self.remotePlaybackWanted=NO;[self.spinner stopAnimating];[self.playPauseBtn setTitle:@"重播" forState:UIControlStateNormal];self.playPauseBtn.enabled=YES;self.titleLabel.hidden=NO;self.infoLabel.hidden=NO;self.playerTopScrim.hidden=NO;self.titleLabel.text=self.remoteCatchupActive?[NSString stringWithFormat:@"%@ · 回看已播完",self.channelName?:@"频道"]:[NSString stringWithFormat:@"%@ · 播放已结束",self.channelName?:@"频道"];self.infoLabel.text=self.remoteCatchupActive?@"本段回看已播完 · 可重播或点更多返回实时直播":@"播放已结束 · 可重新连接";[self setLiveOverlayHidden:NO];[self updateNowPlaying];}
 
 - (NSDictionary *)nextUntriedAlternateChannel {
     // SDK 播放失败耗尽重试后也可复用：按同名找一条未试过、且订阅源未被禁用的远端地址。
@@ -752,17 +750,17 @@
 }
 - (void)tryAlternateSource {
     if(!self.remotePlaybackWanted)return;
-    NSDictionary *alternate=[self nextUntriedAlternateChannel];
+    NSDictionary *alternate=self.remoteCatchupActive?[self nextUntriedAlternateCatchupChannel]:[self nextUntriedAlternateChannel];
     if(alternate){
         self.remoteRetryCount=0;self.remoteFailureRecoveryPending=NO;
-        [self log:@"换源重试 %lu/4",(unsigned long)self.remoteAttemptedURLs.count+1];
+        [self log:self.remoteCatchupActive?@"回看换源重试 %lu/4":@"换源重试 %lu/4",(unsigned long)self.remoteAttemptedURLs.count+1];
         [self startRemoteChannel:alternate];
         return;
     }
     self.remotePlaybackWanted=NO;self.remotePlaybackFailed=YES;[self.avPlayer pause];[self.spinner stopAnimating];[self.playPauseBtn setTitle:@"重试" forState:UIControlStateNormal];self.playPauseBtn.enabled=YES;
     self.titleLabel.hidden=NO;self.infoLabel.hidden=NO;
-    self.titleLabel.text=[NSString stringWithFormat:@"%@ · 播放失败",self.channelName?:@"频道"];
-    self.infoLabel.text=self.nativePlainRouteActive?@"所选线路播放失败 · 点按“重试”或在线路面板换线":@"自动换源已结束 · 点按“重试”再试一次";
+    self.titleLabel.text=self.remoteCatchupActive?[NSString stringWithFormat:@"%@ · 回看失败",self.channelName?:@"频道"]:[NSString stringWithFormat:@"%@ · 播放失败",self.channelName?:@"频道"];
+    self.infoLabel.text=self.remoteCatchupActive?@"回看源加载失败 · 点按“重试”或点更多返回实时直播":(self.nativePlainRouteActive?@"所选线路播放失败 · 点按“重试”或在线路面板换线":@"自动换源已结束 · 点按“重试”再试一次");
 }
 
 - (void)observeValueForKeyPath:(NSString *)kp ofObject:(id)obj change:(NSDictionary *)change context:(void *)context {
@@ -1252,7 +1250,9 @@
     NSTimeInterval now = NSDate.date.timeIntervalSince1970;
     NSTimeInterval currentAnchor = now;
     if (self.remoteCatchupActive && self.activeCatchupStart > 0) {
-        currentAnchor = self.activeCatchupStart;
+        double elapsed = self.remoteAdapter ? self.remoteAdapter.currentPosition : (self.avPlayer ? CMTimeGetSeconds(self.avPlayer.currentTime) : 0);
+        if (!isfinite(elapsed) || elapsed < 0) elapsed = 0;
+        currentAnchor = MIN(now, self.activeCatchupStart + elapsed);
     } else if (self.nativeTimeShiftActive && (self.activeCatchupStart > 0 || self.timeshiftController.seekStart > 0)) {
         currentAnchor = self.activeCatchupStart > 0 ? self.activeCatchupStart : self.timeshiftController.seekStart;
     }

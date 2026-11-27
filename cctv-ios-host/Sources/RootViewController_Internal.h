@@ -824,6 +824,8 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 - (void)recoverRemoteFailureForItem:(AVPlayerItem *)item error:(NSError *)error;
 - (void)avItemFailed:(NSNotification *)n;
 - (NSDictionary *)nextUntriedAlternateChannel;
+- (nullable NSDictionary *)nextUntriedAlternateCatchupChannel;
+- (void)avItemDidPlayToEnd:(NSNotification *)n;
 - (void)tryAlternateSource;
 - (void)observeValueForKeyPath:(NSString *)kp ofObject:(id)obj change:(NSDictionary *)change context:(void *)context;
 - (void)showNativeRouteError:(NSError *)error channel:(NSDictionary *)channel;

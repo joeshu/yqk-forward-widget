@@ -31,17 +31,21 @@
             dispatch_async(dispatch_get_main_queue(),^{
                 NativeTimeshiftSession *owner=weakSelf;
                 if(!owner || generation!=owner.generation || delivered)return;
-                delivered=YES;completion(allowed,nil);
+                delivered=YES;if(completion)completion(allowed,nil);
             });
         }];
         // SDK 回调可能永不触发：10 秒后以超时失败交付，避免调用方永久挂起。
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(10*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
             NativeTimeshiftSession *owner=weakSelf;
             if(!owner || generation!=owner.generation || delivered)return;
-            delivered=YES;completion(NO,[NSError errorWithDomain:@"CCTVHostTimeshift" code:CCTVHostTimeshiftErrorTimeout userInfo:@{NSLocalizedDescriptionKey:@"回看定位超时，未收到播放器回调"}]);
+            delivered=YES;if(completion)completion(NO,[NSError errorWithDomain:@"CCTVHostTimeshift" code:CCTVHostTimeshiftErrorTimeout userInfo:@{NSLocalizedDescriptionKey:@"回看定位超时，未收到播放器回调"}]);
         });
         return YES;
-    } @catch(NSException *exception){NSLog(@"[CCTVHost] CNPlayer timeshift seek raised %@: %@",exception.name,exception.reason);return NO;}
+    } @catch(NSException *exception){
+        NSLog(@"[CCTVHost] CNPlayer timeshift seek raised %@: %@",exception.name,exception.reason);
+        if(error)*error=[NSError errorWithDomain:@"CCTVHostTimeshift" code:CCTVHostTimeshiftErrorUnsupportedPlayer userInfo:@{NSLocalizedDescriptionKey:@"播放器时移定位异常，请重试或返回直播"}];
+        return NO;
+    }
 }
 - (BOOL)backToLive {
     [self cancel];

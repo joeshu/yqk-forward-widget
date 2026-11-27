@@ -72,8 +72,8 @@ static NSURL *M3UNormalizedLoopbackURL(NSURL *url, NSURL *baseURL) {
 @implementation M3UChannel
 - (NSURL *)catchupURLForStart:(NSDate *)start end:(NSDate *)end {
     NSDate *now=[NSDate date];
-    if(!self.catchupSource.length||!start||!end||[start timeIntervalSinceDate:now]>60)return nil;
-    NSDate *effectiveEnd=([end timeIntervalSinceDate:now]>0 && [start timeIntervalSinceDate:now]<-1)?now:end;
+    if(!self.catchupSource.length||!start||[start timeIntervalSinceDate:now]>60)return nil;
+    NSDate *effectiveEnd=(!end || ([end timeIntervalSinceDate:now]>0 && [start timeIntervalSinceDate:now]<-1))?now:end;
     if([effectiveEnd timeIntervalSinceDate:start]<=0)return nil;
     if(self.catchupDays>0&&[start timeIntervalSinceNow]<-self.catchupDays*86400)return nil;
     NSTimeInterval shift=self.tvgShift*3600;
@@ -129,6 +129,7 @@ static NSURL *M3UNormalizedLoopbackURL(NSURL *url, NSURL *baseURL) {
     NSString *mode=self.catchupMode.lowercaseString?:@"default";
     if([mode isEqual:@"append"]||[mode isEqual:@"shift"]||[mode isEqual:@"timeshift"]||[mode isEqual:@"flussonic"]){
         if([self.url containsString:@"?"]&&[address hasPrefix:@"?"])address=[self.url stringByAppendingString:[@"&" stringByAppendingString:[address substringFromIndex:1]]];
+        else if(![address hasPrefix:@"?"]&&![address hasPrefix:@"&"]&&![address hasPrefix:@"/"]&&![address hasPrefix:@"http://"]&&![address hasPrefix:@"https://"]&&[address containsString:@"="])address=[self.url stringByAppendingFormat:@"%@%@",[self.url containsString:@"?"]?@"&":@"?",address];
         else address=[self.url stringByAppendingString:address];
     }
     NSURL *url=[NSURL URLWithString:address relativeToURL:[NSURL URLWithString:self.url]].absoluteURL;

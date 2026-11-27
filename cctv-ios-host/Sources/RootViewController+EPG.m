@@ -222,6 +222,9 @@ static const NSUInteger CCTVOfficialEPGMaximumBytes = 2 * 1024 * 1024;
     replay[@"headers"]=MediaPlaybackHeadersScopedToURL(originHeaders,[NSURL URLWithString:originURL],url);
     replay[@"catchupReplay"]=@YES;
     NSString *progTitle=[program[@"title"] isKindOfClass:NSString.class]&&[program[@"title"] length]?program[@"title"]:@"节目回看";
+    [self.timeshiftController cancel];
+    self.nativeTimeShiftActive=NO;
+    self.nativeTransitionKind=nil;
     self.activeCatchupLiveChannel=liveBase;
     self.remoteCatchupActive=YES;
     self.activeCatchupProgramTitle=progTitle;
@@ -236,6 +239,33 @@ static const NSUInteger CCTVOfficialEPGMaximumBytes = 2 * 1024 * 1024;
     self.playerTopScrim.hidden=NO;
     [self log:@"已开启订阅回看：%@ · %@",self.channelName?:@"",progTitle];
     return YES;
+}
+- (nullable NSDictionary *)nextUntriedAlternateCatchupChannel {
+    if(!self.remoteCatchupActive || self.activeCatchupStart<=0 || self.remoteAttemptedURLs.count>=4)return nil;
+    NSSet *disabled=[NSSet setWithArray:[NSUserDefaults.standardUserDefaults arrayForKey:@"disabledSubscriptions"]?:@[]];
+    NSDictionary *baseChannel=self.activeCatchupLiveChannel ?: [self channelWithID:self.channelID] ?: @{@"id":self.channelID?:@""};
+    NSString *activeCanonical=CCTVRouteGroupKey(baseChannel);
+    NSTimeInterval endTime=self.activeCatchupEnd>self.activeCatchupStart?self.activeCatchupEnd:NSDate.date.timeIntervalSince1970;
+    for (NSDictionary *channel in self.allChannels) {
+        NSString *candCanonical=CCTVRouteGroupKey(channel);
+        if(!activeCanonical.length||![activeCanonical isEqualToString:candCanonical])continue;
+        if(![channel[@"catchupSource"] isKindOfClass:NSString.class]||![channel[@"catchupSource"] length])continue;
+        NSMutableSet *owners=[NSMutableSet setWithArray:CCTVStringArrayValue(channel[@"subscriptionSources"])];[owners minusSet:disabled];
+        if(!owners.count)continue;
+        M3UChannel *catchup=[M3UChannel new];
+        catchup.url=channel[@"remoteURL"];catchup.catchupSource=channel[@"catchupSource"];
+        catchup.catchupMode=channel[@"catchupMode"]?:@"default";catchup.catchupDays=[channel[@"catchupDays"] doubleValue];catchup.tvgShift=[channel[@"tvgShift"] doubleValue];
+        NSURL *replayURL=[catchup catchupURLForStart:[NSDate dateWithTimeIntervalSince1970:self.activeCatchupStart] end:[NSDate dateWithTimeIntervalSince1970:endTime]];
+        NSString *key=[self stableURLKey:replayURL.absoluteString];
+        if(!key.length||[self.remoteAttemptedURLs containsObject:key])continue;
+        NSMutableDictionary *replay=[channel mutableCopy];
+        replay[@"remoteURL"]=replayURL.absoluteString;
+        NSDictionary *originHeaders=[channel[@"headers"] isKindOfClass:NSDictionary.class]?channel[@"headers"]:nil;
+        replay[@"headers"]=MediaPlaybackHeadersScopedToURL(originHeaders,[NSURL URLWithString:channel[@"remoteURL"]?:@""],replayURL);
+        replay[@"catchupReplay"]=@YES;
+        return replay.copy;
+    }
+    return nil;
 }
 - (EPGViewController *)epgPageForChannel:(NSString *)cid name:(NSString *)name {
     NSDictionary *channel=[self channelWithID:cid]?:@{@"id":cid?:@"",@"name":name?:@"节目单"};
@@ -277,7 +307,10 @@ static const NSUInteger CCTVOfficialEPGMaximumBytes = 2 * 1024 * 1024;
         __weak typeof(self) weakSelf=self;
         page.onReplay=^(NSDictionary *program){
             RootViewController *owner=weakSelf;if(!owner)return;
-            double start=[program[@"start"] doubleValue],end=[program[@"end"] doubleValue];
+            owner.livePlaybackSuspendedForNavigation=NO;owner.nativeUserPaused=NO;owner.liveMiniPlayerBar.hidden=YES;
+            NSTimeInterval now=NSDate.date.timeIntervalSince1970;
+            double start=[program[@"start"] doubleValue],rawEnd=[program[@"end"] doubleValue];
+            double end=([program[@"liveRestart"] boolValue]||rawEnd<=0||rawEnd>now)?now:rawEnd;
             NSURL *url=[catchup catchupURLForStart:[NSDate dateWithTimeIntervalSince1970:start] end:[NSDate dateWithTimeIntervalSince1970:end]];
             if(!url)return;
             [owner.navigationController popToViewController:owner animated:YES];
