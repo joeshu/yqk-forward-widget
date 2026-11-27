@@ -13,9 +13,8 @@ xcrun --sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -isysroo
   -framework Foundation -framework UIKit -framework QuartzCore -framework CoreMedia -framework AVFoundation -framework AVKit \
   -o "$APP/CCTVMPVSmoke" 2>&1 | tee "$OUT/compile.log"
 python3 - "$APP" <<'PY'
-import base64, pathlib, plistlib, sys
+import pathlib, plistlib, sys
 app = pathlib.Path(sys.argv[1])
-(app / 'fixture.mp4').write_bytes(base64.b64decode(pathlib.Path('Tests/UISmoke/video_fixture.b64').read_text()))
 info = dict(CFBundleIdentifier='com.example.cctvhost.mpvsmoke', CFBundleExecutable='CCTVMPVSmoke',
             CFBundleName='CCTV MPV Smoke', CFBundlePackageType='APPL', CFBundleVersion='1',
             CFBundleShortVersionString='1.0', MinimumOSVersion='17.0', UIDeviceFamily=[1,2],
@@ -23,6 +22,7 @@ info = dict(CFBundleIdentifier='com.example.cctvhost.mpvsmoke', CFBundleExecutab
                 'UIInterfaceOrientationLandscapeLeft','UIInterfaceOrientationLandscapeRight'])
 (app / 'Info.plist').write_bytes(plistlib.dumps(info))
 PY
+cp Tests/MPVSmoke/video_fixture.mp4 "$APP/fixture.mp4"
 codesign --force --sign - "$APP/Frameworks/CCTVMPVCore.framework"
 codesign --force --sign - "$APP"
 SIM=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(v["udid"] for k,vs in d["devices"].items() if "iOS" in k for v in vs if v["name"]=="iPhone 16"))')

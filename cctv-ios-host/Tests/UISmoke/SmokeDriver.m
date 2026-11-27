@@ -426,7 +426,10 @@ static void next(NSArray *steps, NSUInteger index) {
               ((dispatch_block_t)step[@"run"])();
           }else ((dispatch_block_t)step)();
       } @catch (NSException *e) {
-          [failures addObject:e.reason ?: e.name];
+          NSString *stack=[e.callStackSymbols componentsJoinedByString:@"\n"];
+          NSString *failure=[NSString stringWithFormat:@"smoke step %lu: %@\n%@",(unsigned long)index,e.reason?:e.name,stack];
+          [failures addObject:failure];
+          NSLog(@"[SmokeException] %@",failure);
       }
       next(steps, index + 1);
     });

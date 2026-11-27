@@ -69,7 +69,7 @@
 }
 - (void)cicadaAdapterDidComplete:(id)adapter {
     if(adapter!=self.adapter||self.finished)return;
-    [self.adapter seekToTime:0 completion:^(BOOL ok){if(ok)[self.adapter start];else [self finish:@"fixture loop failed"]; }];
+    [self finish:@"fixture ended before fullscreen smoke completed"];
 }
 - (void)enterFullscreen {
     if(self.finished)return;
