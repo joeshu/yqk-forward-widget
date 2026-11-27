@@ -51,6 +51,8 @@ g.fetch = (input, options = {}) => new Promise((resolve, reject) => {
   if(typeof headers.entries==='function')headers=Object.fromEntries(headers.entries())
   const body=options.body
   const request={method:String(options.method||'GET').toUpperCase(),headers}
+  if(Number.isFinite(Number(options.timeout))&&Number(options.timeout)>0)request.timeout=Number(options.timeout)
+  if(options.redirect==='manual'||options.redirect==='error')request.redirect=options.redirect
   if(body!=null){if(typeof body==='string')request.body=body;else if(body instanceof ArrayBuffer||ArrayBuffer.isView(body))request.bodyBase64=Buffer.from(body instanceof ArrayBuffer?new Uint8Array(body):new Uint8Array(body.buffer,body.byteOffset,body.byteLength)).toString('base64');else request.body=String(body)}
   key = g.__hostFetch(String(input), JSON.stringify(request), result => {
     if (settled) return

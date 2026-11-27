@@ -2476,7 +2476,7 @@ NSTimeInterval shelfAge=[[MediaMetadataCache shared] ageOfResultForSource:self.s
         NSDictionary *live=choice[@"live"];if(live){if(owner.onSubscribeCatalogLive)owner.onSubscribeCatalogLive(live,catalogID);else if(owner.onOpenTVBoxCatalog)owner.onOpenTVBoxCatalog(catalogID);return;}
         NSDictionary *site=choice[@"site"];if(!site)return;if(![site[@"supported"] boolValue]){[owner showMessage:site[@"status"]?:@"此站点类型暂不支持 iOS 加载" loading:NO];return;}NSDictionary *source=choice[@"source"]?:[owner sourceForCatalogSite:site catalog:catalog];NSString *apiKind=site[@"apiKind"]?:@"";
         if(source){owner.deferAutomaticLoading=NO;owner.homeLoadDeferred=NO;owner.pendingProviderPickerAfterLoad=NO;owner.nextHomeLoadTrigger=@"catalog_site_selection";[NSUserDefaults.standardUserDefaults setObject:source[@"id"]?:@"" forKey:@"selectedMediaSource"];if([source[@"id"] isEqual:owner.source[@"id"]]&&owner.client&&!owner.sourceInvalidated){owner.provider=nil;[owner loadHome];}else[owner activate:source keepingHome:owner.homeMode];return;}
-        if([apiKind isEqual:@"script"]&&owner.onImportCatalogSite){owner.deferAutomaticLoading=NO;owner.homeLoadDeferred=NO;owner.onImportCatalogSite(site,catalogID);return;}
+        if([@[@"script",@"idj-plugin",@"iplayr-rule"] containsObject:apiKind]&&owner.onImportCatalogSite){owner.deferAutomaticLoading=NO;owner.homeLoadDeferred=NO;owner.onImportCatalogSite(site,catalogID);return;}
         [owner showMessage:@"此站点暂不能在 iOS 上加载" loading:NO];
     };
     [self presentPicker:picker];

@@ -4,6 +4,7 @@
 #import "HostRedirectHeaders.h"
 #import "HostSecureStore.h"
 #import <JavaScriptCore/JavaScriptCore.h>
+#import <arpa/inet.h>
 #import <Security/Security.h>
 #import <TargetConditionals.h>
 #if TARGET_OS_IOS
@@ -41,6 +42,8 @@ static NSTimeInterval const JSIdleEvictionSeconds = 120.0;
 @property(nonatomic, copy) NSString *activeModuleType;
 @property(nonatomic, copy) NSString *activeProtocol;
 @property(nonatomic, strong) id activeOptions;
+@property(nonatomic, copy) NSArray<NSString *> *idjHTTPHosts;
+@property(nonatomic) BOOL idjStorageAllowed;
 - (NSString *)packageFile:(NSString *)name;
 -  (NSString *)encodedError:(NSString *)message;
 @end
@@ -99,7 +102,7 @@ static NSTimeInterval const JSIdleEvictionSeconds = 120.0;
 }
 - (void)log:(NSString *)text { @autoreleasepool { if(!text.length||[text isEqualToString:@"init_test_start"]||[text isEqualToString:@"init_test_end"]||([text hasPrefix:@"{"]&&([text containsString:@"\"_codec\""]||[text containsString:@"\"_cache\""])))return; if(text.length>4096)text=[text substringToIndex:4096];if(self.logHandler)self.logHandler(text); } }
 - (BOOL)allowedURL:(NSURL *)url {
-    if(self.genericMode)return [@[@"http",@"https"] containsObject:url.scheme.lowercaseString] && url.host.length && !url.user.length && !url.password.length;
+    if(self.genericMode){BOOL basic=[@[@"http",@"https"] containsObject:url.scheme.lowercaseString]&&url.host.length&&!url.user.length&&!url.password.length;if(!basic)return NO;if(![self.activeProtocol isEqual:@"idj1"])return YES;NSString *host=url.host.lowercaseString;while([host hasSuffix:@"."])host=[host substringToIndex:host.length-1];if(!host.length||[host isEqual:@"localhost"]||[host hasSuffix:@".localhost"]||[host hasSuffix:@".local"])return NO;struct in_addr ipv4;struct in6_addr ipv6;if(inet_aton(host.UTF8String,&ipv4)==1||inet_pton(AF_INET,host.UTF8String,&ipv4)==1||inet_pton(AF_INET6,host.UTF8String,&ipv6)==1)return NO;for(NSString *raw in self.idjHTTPHosts?:@[]){NSString *root=[raw lowercaseString];if([root hasPrefix:@"*."]){root=[root substringFromIndex:2];if([host hasSuffix:[@"." stringByAppendingString:root]]&&host.length>root.length+1)return YES;}else if([host isEqual:root])return YES;}return NO;}
     if(![url.scheme.lowercaseString isEqualToString:@"https"] || url.user.length || url.password.length)return NO;
     NSString *host=url.host.lowercaseString;
     for(NSString *root in @[@"cctv.cn",@"cctv.com",@"yangshipin.cn"])
@@ -120,7 +123,7 @@ static NSTimeInterval const JSIdleEvictionSeconds = 120.0;
     NSNumber *key=@(++self.sequence);
     if(url.length>8192 || options.length>2*1024*1024){[callback callWithArguments:@[@{@"error":@"JS 请求参数超过限制"}]];return key;}
     NSURL *target=[NSURL URLWithString:url];
-    if(![self allowedURL:target] || self.requests.count>=24){[callback callWithArguments:@[@{@"error":@"JS 网络地址不受支持或并发已满"}]];return key;}
+    BOOL targetAllowed=[self allowedURL:target];if(!targetAllowed || self.requests.count>=24){NSString *message=[self.activeProtocol isEqual:@"idj1"]&&!targetAllowed?@"E_PERMISSION: 此域名不在插件声明的网络权限中":@"JS 网络地址不受支持或并发已满";[callback callWithArguments:@[@{@"error":message}]];return key;}
     NSData *bytes=[options dataUsingEncoding:NSUTF8StringEncoding];NSDictionary *opts=bytes?[NSJSONSerialization JSONObjectWithData:bytes options:0 error:NULL]:nil;
     if(![opts isKindOfClass:NSDictionary.class])opts=@{};
     NSString *method=[opts[@"method"] isKindOfClass:NSString.class]?[opts[@"method"] uppercaseString]:@"GET";
@@ -168,8 +171,9 @@ static NSTimeInterval const JSIdleEvictionSeconds = 120.0;
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
     NSNumber *key=[self keyForTask:task];if(!key)return;
     NSMutableDictionary *record=self.requests[key];
+    if([record[@"idjPermissionRejected"] boolValue]){[self fetchFinished:key error:@"E_PERMISSION: 重定向目标不在插件声明的网络权限中"];return;}
     NSString *origURL=[record[@"originalURL"] isKindOfClass:NSString.class]?record[@"originalURL"]:@"";
-    if(error && self.genericMode && self.session && self.hostFetchURL.length && self.hostFetchToken.length && ![record[@"retriedHostFetch"] boolValue] && ![record[@"aborted"] boolValue] && [origURL.lowercaseString hasPrefix:@"https://"]){
+    if(error && self.genericMode && ![self.activeProtocol isEqual:@"idj1"] && self.session && self.hostFetchURL.length && self.hostFetchToken.length && ![record[@"retriedHostFetch"] boolValue] && ![record[@"aborted"] boolValue] && [origURL.lowercaseString hasPrefix:@"https://"]){
         NSURL *bridgeURL=[NSURL URLWithString:self.hostFetchURL];
         if(bridgeURL){
             record[@"retriedHostFetch"]=@YES;
@@ -211,6 +215,7 @@ static NSTimeInterval const JSIdleEvictionSeconds = 120.0;
     // filtering alone cannot make such a cross-origin redirect safe.
     if(!trusted && (![@[@"GET",@"HEAD"] containsObject:method] || redirect.HTTPBody.length || redirect.HTTPBodyStream))allowed=NO;
     redirect.allHTTPHeaderFields=HostRedirectHeaders(request.allHTTPHeaderFields?:@{},response.URL,request.URL);
+    if(!allowed&&[self.activeProtocol isEqual:@"idj1"]){NSNumber *key=[self keyForTask:task];if(key)self.requests[key][@"idjPermissionRejected"]=@YES;}
     completion(allowed?redirect:nil);
 }
 - (NSString *)initializeContext {
@@ -272,7 +277,7 @@ static NSTimeInterval const JSIdleEvictionSeconds = 120.0;
         return text;
     };
     self.context[@"__hostFetchSync"]=^NSDictionary *(NSString *url,NSString *raw){
-        JSPluginRuntime *s=weak;if(!s.genericMode || s.stopRequested || url.length>8192 || raw.length>2*1024*1024)return @{@"error":@"JS 同步请求不可用或参数过大"};
+        JSPluginRuntime *s=weak;if(!s.genericMode || s.stopRequested || url.length>8192 || raw.length>2*1024*1024)return @{@"error":@"JS 同步请求不可用或参数过大"};if([s.activeProtocol isEqual:@"idj1"])return @{@"error":@"E_PERMISSION: iDuanJu 插件不支持同步网络请求"};
         NSURL *target=[NSURL URLWithString:url];if(![s allowedURL:target])return @{@"error":@"不支持的 JS 请求地址"};
         id options=[NSJSONSerialization JSONObjectWithData:[raw dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL];if(![options isKindOfClass:NSDictionary.class])options=@{};
         NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:target];request.timeoutInterval=10;
@@ -287,7 +292,7 @@ static NSTimeInterval const JSIdleEvictionSeconds = 120.0;
         NSDictionary *reply=[operation performRequest:request];@synchronized(s.syncRequests){[s.syncRequests removeObject:operation];}return reply;
     };
     self.context[@"__hostStorage"]=^NSString *(NSString *action,NSString *key,NSString *value){
-        JSPluginRuntime *s=weak;if(!s.packageRoot.length || key.length>1024 || value.length>65536)return nil;
+        JSPluginRuntime *s=weak;if([s.activeProtocol isEqual:@"idj1"]&&!s.idjStorageAllowed){JSContext.currentContext.exception=[JSValue valueWithNewErrorFromMessage:@"E_PERMISSION: 插件未声明 storage 权限" inContext:JSContext.currentContext];return nil;}if(!s.packageRoot.length || key.length>1024 || value.length>65536)return nil;
         NSArray *parts=s.packageRoot.pathComponents;NSUInteger index=[parts indexOfObject:@"Services"];
         NSString *identifier=index!=NSNotFound && index+1<parts.count?parts[index+1]:s.packageRoot.lastPathComponent;
         NSString *name=[@"CCTVJSStorage:" stringByAppendingString:identifier];NSUserDefaults *defaults=NSUserDefaults.standardUserDefaults;
@@ -657,7 +662,7 @@ static NSTimeInterval const JSIdleEvictionSeconds = 120.0;
     // resolve 的结算结果）。在途调用方由下面 finishCall 的 ok:false
     // 统一唤醒，fetch 记录直接丢弃即可。
     [self.requests removeAllObjects];[self.timers removeAllObjects];self.context=nil;self.unresponsive=NO;
-    self.packageRoot=nil;self.genericMode=NO;self.hostFetchURL=nil;self.hostFetchToken=nil;self.activeModuleType=nil;self.activeProtocol=nil;self.activeOptions=nil;
+    self.packageRoot=nil;self.genericMode=NO;self.hostFetchURL=nil;self.hostFetchToken=nil;self.activeModuleType=nil;self.activeProtocol=nil;self.activeOptions=nil;self.idjHTTPHosts=nil;self.idjStorageAllowed=NO;
     for(NSString *key in self.calls.allKeys)[self finishCall:key answer:@"{\"ok\":false,\"error\":\"JS 服务已停止\"}"];
 }
 - (NSString *)callOperation:(NSString *)operation json:(NSString *)json timeout:(NSTimeInterval)timeout error:(NSError **)error {
@@ -715,7 +720,10 @@ static NSTimeInterval const JSIdleEvictionSeconds = 120.0;
             self.activeModuleType=[payload[@"moduleType"] isKindOfClass:NSString.class]?payload[@"moduleType"]:@"";
             self.activeProtocol=[payload[@"protocol"] isKindOfClass:NSString.class]?payload[@"protocol"]:@"";
             self.activeOptions=payload[@"options"];
-            NSString *failure=[self initializeContext];if(failure){[self dispose];answer=[self encodedError:failure];dispatch_semaphore_signal(done);return;}self.activeSession=session;
+            self.idjHTTPHosts=@[];
+            self.idjStorageAllowed=NO;
+            if([self.activeProtocol isEqual:@"idj1"]){NSDictionary *idj=[payload[@"idjManifest"] isKindOfClass:NSDictionary.class]?payload[@"idjManifest"]:@{};NSDictionary *permissions=[idj[@"permissions"] isKindOfClass:NSDictionary.class]?idj[@"permissions"]:@{};NSArray *rawHosts=[permissions[@"http"] isKindOfClass:NSArray.class]?permissions[@"http"]:@[];NSMutableOrderedSet *hosts=[NSMutableOrderedSet orderedSet];for(id value in rawHosts)if([value isKindOfClass:NSString.class]&&[value length]<=255&&[value length]){NSString *host=[value lowercaseString];BOOL wildcard=[host hasPrefix:@"*."];NSString *domain=wildcard?[host substringFromIndex:2]:host;if([domain rangeOfString:@"/"].location==NSNotFound&&[domain rangeOfString:@"*"].location==NSNotFound&&[domain containsString:@"."])[hosts addObject:host];}self.idjHTTPHosts=hosts.array.copy;self.idjStorageAllowed=[permissions[@"storage"] respondsToSelector:@selector(boolValue)]&&[permissions[@"storage"] boolValue];}
+            NSString *failure=[self.activeProtocol isEqual:@"idj1"]&&!self.idjHTTPHosts.count?@"iDuanJu 插件缺少有效的 HTTP 域名权限声明":nil;if(!failure)failure=[self initializeContext];if(failure){[self dispose];answer=[self encodedError:failure];dispatch_semaphore_signal(done);return;}self.activeSession=session;
         }
         if([operation isEqualToString:@"start"] && self.context){
             self.activeModuleType=[payload[@"moduleType"] isKindOfClass:NSString.class]?payload[@"moduleType"]:(self.activeModuleType?:@"");
@@ -758,7 +766,8 @@ static NSTimeInterval const JSIdleEvictionSeconds = 120.0;
     NSString *path=[NSURL fileURLWithPath:[self.packageRoot stringByAppendingPathComponent:name]].URLByResolvingSymlinksInPath.path;
     if(![path hasPrefix:[self.packageRoot stringByAppendingString:@"/"]])return nil;
     NSDictionary *attributes=[NSFileManager.defaultManager attributesOfItemAtPath:path error:NULL];
-    return [attributes[NSFileType] isEqual:NSFileTypeRegular] && attributes.fileSize<=8*1024*1024?path:nil;
+    NSUInteger fileLimit=[@[@"js",@"hjs",@"mjs",@"cjs"] containsObject:name.pathExtension.lowercaseString]?16*1024*1024:8*1024*1024;
+    return [attributes[NSFileType] isEqual:NSFileTypeRegular] && attributes.fileSize<=fileLimit?path:nil;
 }
 - (NSString *)encodedError:(NSString *)message {NSData *data=[NSJSONSerialization dataWithJSONObject:@{@"ok":@NO,@"error":message?:@"JS 错误"} options:0 error:NULL];return [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];}
 @end

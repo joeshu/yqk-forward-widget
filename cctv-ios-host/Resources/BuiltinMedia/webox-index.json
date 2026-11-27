@@ -1,1 +1,67 @@
-{"name":"WeBox 官方影视源合集","version":"1.1.0","url":"https://ddgksf2013.top/webox/index.json","sources":[{"id":"com.4kvm.webox","name":"4k影视","version":"1.1.0","api":"1.1","url":"https://ddgksf2013.top/webox/4k影视.webox.js","bundleFile":"webox-4kvm"},{"id":"HStream","name":"HStream","version":"1.1.0","api":"1.1","url":"https://ddgksf2013.top/webox/HStream.webox.js","bundleFile":"webox-hstream"},{"id":"dev.webox.native.guazi","name":"瓜子","version":"1.0.3","api":"1.1","url":"https://ddgksf2013.top/webox/瓜子.webox.js","bundleFile":"webox-guazi"},{"id":"rou.video.source","name":"肉視頻","version":"1.1.0","api":"1.1","url":"https://ddgksf2013.top/webox/肉.webox.js","bundleFile":"webox-rou"},{"id":"com.wufazhuce.one","name":"ONE · 一个","version":"1.1.0","api":"1.1","url":"https://ddgksf2013.top/webox/one一个.webox.js","bundleFile":"webox-one"}],"sites":[{"key":"webox-4kvm","id":"com.4kvm.webox","name":"4k影视","version":"1.1.0","type":3,"api":"https://ddgksf2013.top/webox/4k%E5%BD%B1%E8%A7%86.webox.js","url":"https://ddgksf2013.top/webox/4k影视.webox.js"},{"key":"webox-hstream","id":"HStream","name":"HStream","version":"1.1.0","type":3,"api":"https://ddgksf2013.top/webox/HStream.webox.js","url":"https://ddgksf2013.top/webox/HStream.webox.js"},{"key":"webox-guazi","id":"dev.webox.native.guazi","name":"瓜子","version":"1.0.3","type":3,"api":"https://ddgksf2013.top/webox/%E7%93%9C%E5%AD%90.webox.js","url":"https://ddgksf2013.top/webox/瓜子.webox.js"},{"key":"webox-rou","id":"rou.video.source","name":"肉視頻","version":"1.1.0","type":3,"api":"https://ddgksf2013.top/webox/%E8%82%89.webox.js","url":"https://ddgksf2013.top/webox/肉.webox.js"},{"key":"webox-one","id":"com.wufazhuce.one","name":"ONE · 一个","version":"1.1.0","type":3,"api":"https://ddgksf2013.top/webox/one%E4%B8%80%E4%B8%AA.webox.js","url":"https://ddgksf2013.top/webox/one一个.webox.js"}]}
+{
+  "name": "WeBox",
+  "version": 1,
+  "author": "ddgksf2013",
+  "sources": [
+    {
+      "name": "libvio",
+      "type": "json",
+      "url": "https://raw.githubusercontent.com/m3u8playlist/dp/refs/heads/master/iplayr/libvio2.json",
+      "logo": "https://ddgksf2013.top/icon/libvio.png"
+    },
+    {
+      "name": "欧乐影视",
+      "type": "json",
+      "url": "https://raw.githubusercontent.com/m3u8playlist/dp/master/iplayr/olevod.json",
+      "logo": "https://ddgksf2013.top/icon/ole.png"
+    },
+    {
+      "name": "独播库",
+      "type": "json",
+      "url": "https://raw.githubusercontent.com/m3u8playlist/dp/master/iplayr/dbk.json",
+      "logo": "https://ddgksf2013.top/icon/dbku.png"
+    },
+    {
+      "name": "厂长",
+      "type": "js",
+      "url": "https://ddgksf2013.top/webox/scripts/cz.webox.js",
+      "logo": "https://ddgksf2013.top/icon/cz.png"
+    },
+    {
+      "name": "瓜子",
+      "type": "js",
+      "url": "https://ddgksf2013.top/webox/scripts/guazi.webox.js",
+      "logo": "https://ddgksf2013.top/icon/cz.png"
+    },
+    {
+      "name": "电影天堂",
+      "type": "vod",
+      "url": "https://caiji.dyttzyapi.com/api.php/provide/vod",
+      "logo": "https://ddgksf2013.top/icon/dytt.png"
+    },
+    {
+      "name": "量子资源",
+      "type": "xml",
+      "url": "https://cj.lziapi.com/api.php/provide/vod/at/xml",
+      "logo": "https://ddgksf2013.top/icon/lzi.png"
+    },
+    {
+      "name": "非凡资源",
+      "type": "vod",
+      "url": "https://cj.ffzyapi.com/api.php/provide/vod/from/ffm3u8",
+      "logo": "https://ddgksf2013.top/icon/ffzy.png"
+    },
+    {
+      "name": "无水印资源",
+      "type": "vod",
+      "url": "https://api.wsyzy.net/api.php/provide/vod",
+      "logo": "https://ddgksf2013.top/icon/wsy.png"
+    },
+    {
+      "name": "暴风资源",
+      "type": "vod",
+      "url": "https://apibfzy.com/api.php/provide/vod",
+      "logo": "https://bfzy.tv/favicon.ico"
+    }
+  ]
+}

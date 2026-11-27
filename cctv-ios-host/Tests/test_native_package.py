@@ -1,3 +1,4 @@
+import base64
 import json
 import hashlib
 import http.server
@@ -66,6 +67,54 @@ class NativePackageTests(unittest.TestCase):
         self.assertFalse(result['ok'])
         self.assertIn('加密模块', result['error'])
         self.assertIn('授权', result['error'])
+
+    def test_idj_plugin_integrity_permissions_and_metadata_are_validated(self):
+        source = 'export default {home(){return {items:[]}}};\n'
+        integrity = 'sha256-' + base64.b64encode(hashlib.sha256(source.encode('utf-8')).digest()).decode()
+        manifest = {
+            'schema': 1, 'id': 'com.fixture.idj', 'name': 'Fixture IDJ', 'version': '1.0.0',
+            'type': 'video', 'adult': True, 'entry': 'main.js', 'integrity': integrity,
+            'permissions': {'http': ['fixture.example.test'], 'media': ['media.example.test'],
+                            'storage': False, 'cloudflare': False, 'login': False},
+            'capabilities': ['home', 'category', 'search', 'detail', 'play'],
+        }
+        package = self.folder / 'fixture.idjplugin'
+        package.write_text(json.dumps({'manifest': manifest, 'files': {'main.js': source}}), encoding='utf-8')
+        result = self.inspect_with_runtime_hint(package, 'idj-plugin')
+        self.assertTrue(result['ok'], result)
+        self.assertEqual((result['engine'], result['protocol']), ('javascript', 'idj1'))
+        self.assertTrue(result['vodCapable'])
+        self.assertEqual(result['idjManifest']['id'], manifest['id'])
+        self.assertTrue(result['idjManifest']['adult'])
+        self.assertEqual(result['idjManifest']['permissions']['http'], ['fixture.example.test'])
+
+        manifest['integrity'] = 'sha256-' + base64.b64encode(b'not a source hash').decode()
+        package.write_text(json.dumps({'manifest': manifest, 'files': {'main.js': source}}), encoding='utf-8')
+        rejected = self.inspect_with_runtime_hint(package, 'idj-plugin')
+        self.assertFalse(rejected['ok'])
+        self.assertIn('SHA-256', rejected['error'])
+
+    def test_iplayr_json_requires_rule_adapter_and_validates_rule_schema(self):
+        rule = {
+            'title': 'Fixture iPlayr',
+            'category': [{'title': '电影', 'url0': 'https://fixture.example.test/movie.html',
+                          'url1': 'https://fixture.example.test/movie/{pg}.html'}],
+            'vod_node': '//div[@class="items"]//a', 'vod_title': '//a',
+            'vod_link_id': '//a/@href', 'playlist_group_node': '//div[@class="playlist"]',
+            'playlist_title': '//a', 'playlist_link_id': '//a/@href',
+            'search_flag': True, 'search_url_first_page': 'https://fixture.example.test/search/{wd}.html',
+        }
+        file = self.folder / 'fixture.json'
+        file.write_text(json.dumps(rule), encoding='utf-8')
+        rejected = self.inspect(file)
+        self.assertFalse(rejected['ok'])
+        self.assertIn('WeBox iPlayr', rejected['error'])
+
+        result = self.inspect_with_runtime_hint(file, 'iplayr-rule')
+        self.assertTrue(result['ok'], result)
+        self.assertEqual((result['engine'], result['protocol']), ('javascript', 'iplayr-rule'))
+        self.assertEqual(result['name'], 'Fixture iPlayr')
+        self.assertTrue(result['vodCapable'])
 
     def archive(self, entries):
         file = self.folder / 'fixture.zip'

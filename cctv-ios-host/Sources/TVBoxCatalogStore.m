@@ -920,7 +920,7 @@ static void TVBoxNotifyAdaptationMonitorCatalog(NSString *name, NSString *source
         }
         if (![value isKindOfClass:NSDictionary.class]) continue;
         NSString *key=TVBoxString(value[@"key"] ?: value[@"id"],256), *name=TVBoxString(value[@"name"] ?: value[@"title"],256);
-        NSString *rawApiField=TVBoxString(value[@"api"],8192);NSString *altUrlField=TVBoxString(value[@"url"] ?: value[@"script"] ?: value[@"scriptUrl"] ?: value[@"sourceUrl"] ?: value[@"entry"] ?: value[@"endpoint"] ?: value[@"file"] ?: value[@"path"] ?: value[@"downloadUrl"] ?: value[@"src"],8192);if(altUrlField.length&&(!rawApiField.length||[rawApiField rangeOfString:@"^\\d+(?:\\.\\d+)*$" options:NSRegularExpressionSearch].location!=NSNotFound))rawApiField=altUrlField;NSString *api=rawApiField;
+        NSString *rawApiField=TVBoxString(value[@"api"],8192);NSString *altUrlField=TVBoxString(value[@"url"] ?: value[@"script"] ?: value[@"scriptUrl"] ?: value[@"sourceUrl"] ?: value[@"entry"] ?: value[@"endpoint"] ?: value[@"file"] ?: value[@"path"] ?: value[@"downloadUrl"] ?: value[@"src"] ?: value[@"manifest"],8192);if(altUrlField.length&&(!rawApiField.length||[rawApiField rangeOfString:@"^\\d+(?:\\.\\d+)*$" options:NSRegularExpressionSearch].location!=NSNotFound))rawApiField=altUrlField;NSString *api=rawApiField;
         if(!key.length)key=[NSString stringWithFormat:@"site-%lu",(unsigned long)siteIndex];
         if(!name.length && api.length){
             NSString *inferred=[[api.lastPathComponent stringByRemovingPercentEncoding]?:api.lastPathComponent stringByDeletingPathExtension];
@@ -963,22 +963,27 @@ static void TVBoxNotifyAdaptationMonitorCatalog(NSString *name, NSString *source
         apiParts=TVBoxURLComponents(api?:@"");
         NSString *path=apiParts.path.lowercaseString;
         if ([path hasSuffix:@".md5"]) path=[path stringByDeletingPathExtension];
-        NSString *siteType=TVBoxString(value[@"type"],32)?:@"";BOOL scriptFile=[@[@"js",@"hjs",@"mjs",@"cjs",@"py",@"zip"] containsObject:path.pathExtension.lowercaseString];BOOL jarFile=[path.pathExtension.lowercaseString isEqual:@"jar"];BOOL jarSpiderClass=MediaJARClass(api).length>0;BOOL apiKindDouban=[siteType isEqual:@"3"]&&[api.lowercaseString isEqual:@"csp_doudou"];if([siteType isEqual:@"3"]&&[api.lowercaseString isEqual:@"csp_douban"])apiKindDouban=YES;BOOL apiKindJARBridge=[siteType isEqual:@"3"]&&!apiKindDouban&&(TVBoxSupportedJARClass(api)||[MediaJARClass(api) hasPrefix:@"com.github.catvod.spider."]);
-        BOOL apiKindMacCMS=!scriptFile&&!jarFile&&TVBoxWebURL(api)&&[siteType isEqual:@"0"];
+        NSString *siteType=TVBoxString(value[@"type"],32)?:@"";BOOL scriptFile=[@[@"js",@"hjs",@"mjs",@"cjs",@"py",@"zip"] containsObject:path.pathExtension.lowercaseString];BOOL idjFile=[path.pathExtension.lowercaseString isEqual:@"idjplugin"];BOOL iPlayrFile=[path.pathExtension.lowercaseString isEqual:@"json"]&&[siteType.lowercaseString isEqual:@"json"];BOOL jarFile=[path.pathExtension.lowercaseString isEqual:@"jar"];BOOL jarSpiderClass=MediaJARClass(api).length>0;BOOL apiKindDouban=[siteType isEqual:@"3"]&&[api.lowercaseString isEqual:@"csp_doudou"];if([siteType isEqual:@"3"]&&[api.lowercaseString isEqual:@"csp_douban"])apiKindDouban=YES;BOOL apiKindJARBridge=[siteType isEqual:@"3"]&&!apiKindDouban&&(TVBoxSupportedJARClass(api)||[MediaJARClass(api) hasPrefix:@"com.github.catvod.spider."]);
+        BOOL apiKindMacCMS=!scriptFile&&!idjFile&&!iPlayrFile&&!jarFile&&TVBoxWebURL(api)&&[@[@"0",@"vod",@"xml"] containsObject:siteType.lowercaseString];
         BOOL apiKindTVBox=!scriptFile&&!jarFile&&TVBoxWebURL(api)&&([siteType isEqual:@"1"]||[siteType isEqual:@"4"]);
         BOOL direct=TVBoxWebURL(api)&&scriptFile;
-        BOOL supported=direct||apiKindTVBox||apiKindMacCMS||apiKindDouban||apiKindJARBridge;
+        BOOL supported=direct||idjFile||iPlayrFile||apiKindTVBox||apiKindMacCMS||apiKindDouban||apiKindJARBridge;
         NSString *reason=@"站点地址无效；保留在合集中";
         if(apiKindDouban)reason=@"豆瓣影视索引 · iOS 原生适配 · 影片需跨点播源搜索播放";
-        else if(apiKindMacCMS)reason=@"TVBox type 0 · MacCMS JSON/XML API · 选中后请求";
+        else if(idjFile)reason=[value[@"adult"] boolValue]?@"魔蚁 iDuanJu 插件 · 🔞 成人内容 · 按需导入并校验 SHA-256":@"魔蚁 iDuanJu 插件 · 按需导入并校验 SHA-256";
+        else if(iPlayrFile)reason=@"WeBox iPlayr XPath 规则 · 按需下载并适配";
+        else if(apiKindMacCMS)reason=[siteType.lowercaseString isEqual:@"xml"]?@"WeBox CMS XML API · 原生 MacCMS 适配 · 选中后请求":@"MacCMS JSON API · 原生适配 · 选中后请求";
         else if(apiKindTVBox)reason=[NSString stringWithFormat:@"TVBox type %@ JSON API · 选中后请求，尚未验证",siteType];
         else if(direct)reason=@"可导入 · 将由现有脚本适配器检查";
         else if(apiKindJARBridge)reason=@"站点接口适配 · 待读取验证";
         else if([siteType isEqual:@"0"])reason=@"TVBox type 0 为 JS 爬虫，需脚本文件地址；iOS 不支持此地址形式";
         else if([siteType isEqual:@"3"])reason=(jarFile||jarSpiderClass)?@"需要 Android/JAR 运行时；iOS 不支持":@"脚本地址无法识别；保留在合集中";
         else if([apiParts.scheme.lowercaseString isEqual:@"http"]||[apiParts.scheme.lowercaseString isEqual:@"https"])reason=@"此脚本类型需 Android/JAR 运行时；iOS 不支持";
-        NSString *apiKind=apiKindDouban?@"douban-index":(apiKindMacCMS?@"maccms-api":(apiKindTVBox?@"tvbox-api":(direct?@"script":(apiKindJARBridge?@"jar-bridge":@"unsupported"))));
+        NSString *apiKind=idjFile?@"idj-plugin":(iPlayrFile?@"iplayr-rule":(apiKindDouban?@"douban-index":(apiKindMacCMS?@"maccms-api":(apiKindTVBox?@"tvbox-api":(direct?@"script":(apiKindJARBridge?@"jar-bridge":@"unsupported"))))));
         NSMutableDictionary *site=[@{@"key":key,@"name":name,@"api":api?:@"",@"ext":ext?:@"",@"type":siteType,@"supported":@(supported),@"status":reason,@"apiKind":apiKind,@"sourceIndex":@(siteIndex-1)} mutableCopy];
+        if([value[@"adult"] isKindOfClass:NSNumber.class])site[@"adult"]=@([value[@"adult"] boolValue]);
+        if([value[@"version"] isKindOfClass:NSString.class]&&[value[@"version"] length]<=128)site[@"pluginVersion"]=value[@"version"];
+        if([value[@"description"] isKindOfClass:NSString.class]&&[value[@"description"] length]<=4096)site[@"description"]=value[@"description"];
         if([value[@"jar"] isKindOfClass:NSString.class]&&[value[@"jar"] length]<=8192)site[@"jar"]=value[@"jar"];
         if(safeHeaders.count)site[@"header"]=safeHeaders;
         if([value[@"playUrl"] isKindOfClass:NSString.class]&&[value[@"playUrl"] length]<=4096)site[@"playUrl"]=value[@"playUrl"];
@@ -1122,7 +1127,7 @@ static NSArray<NSDictionary *> *gCachedCatalogs = nil;
             NSURLComponents *siteParts=TVBoxURLComponents(api);
             NSString *sitePath=siteParts.path.lowercaseString?:@"";
             if([sitePath hasSuffix:@".md5"])sitePath=[sitePath stringByDeletingPathExtension];
-            BOOL isScriptURL=TVBoxWebURL(api)&&[@[@"js",@"hjs",@"mjs",@"cjs",@"py",@"zip"] containsObject:sitePath.pathExtension.lowercaseString];
+            BOOL isScriptURL=TVBoxWebURL(api)&&[@[@"js",@"hjs",@"mjs",@"cjs",@"py",@"zip"] containsObject:sitePath.pathExtension.lowercaseString];BOOL isIDJURL=TVBoxWebURL(api)&&[sitePath.pathExtension.lowercaseString isEqual:@"idjplugin"];BOOL isIPlayrURL=TVBoxWebURL(api)&&[siteType.lowercaseString isEqual:@"json"]&&[sitePath.pathExtension.lowercaseString isEqual:@"json"];BOOL isMacCMSURL=TVBoxWebURL(api)&&[@[@"0",@"vod",@"xml"] containsObject:siteType.lowercaseString];
             BOOL isDoubanClass=[siteType isEqual:@"3"]&&([api.lowercaseString isEqual:@"csp_doudou"]||[api.lowercaseString isEqual:@"csp_douban"]);
             if(isDoubanClass&&(![site[@"supported"] boolValue]||![site[@"apiKind"] isEqual:@"douban-index"])){
                 NSMutableDictionary *mSite=[site mutableCopy];
@@ -1138,6 +1143,12 @@ static NSArray<NSDictionary *> *gCachedCatalogs = nil;
                 mSite[@"status"]=@"站点接口适配 · 待读取验证";
                 [updatedSites addObject:mSite.copy];
                 catChanged=YES;upgraded=YES;
+            }else if(isIDJURL&&(![site[@"supported"] boolValue]||![site[@"apiKind"] isEqual:@"idj-plugin"])){
+                NSMutableDictionary *mSite=[site mutableCopy];mSite[@"supported"]=@YES;mSite[@"apiKind"]=@"idj-plugin";mSite[@"status"]=[site[@"adult"] boolValue]?@"魔蚁 iDuanJu 插件 · 🔞 成人内容 · 按需导入并校验 SHA-256":@"魔蚁 iDuanJu 插件 · 按需导入并校验 SHA-256";[updatedSites addObject:mSite.copy];catChanged=YES;upgraded=YES;
+            }else if(isIPlayrURL&&(![site[@"supported"] boolValue]||![site[@"apiKind"] isEqual:@"iplayr-rule"])){
+                NSMutableDictionary *mSite=[site mutableCopy];mSite[@"supported"]=@YES;mSite[@"apiKind"]=@"iplayr-rule";mSite[@"status"]=@"WeBox iPlayr XPath 规则 · 按需下载并适配";[updatedSites addObject:mSite.copy];catChanged=YES;upgraded=YES;
+            }else if(isMacCMSURL&&(![site[@"supported"] boolValue]||![site[@"apiKind"] isEqual:@"maccms-api"])){
+                NSMutableDictionary *mSite=[site mutableCopy];mSite[@"supported"]=@YES;mSite[@"apiKind"]=@"maccms-api";mSite[@"status"]=[siteType.lowercaseString isEqual:@"xml"]?@"WeBox CMS XML API · 原生 MacCMS 适配 · 选中后请求":@"MacCMS JSON API · 原生适配 · 选中后请求";[updatedSites addObject:mSite.copy];catChanged=YES;upgraded=YES;
             }else if(isScriptURL&&(![site[@"supported"] boolValue]||![site[@"apiKind"] isEqual:@"script"])){
                 NSMutableDictionary *mSite=[site mutableCopy];
                 mSite[@"supported"]=@YES;
