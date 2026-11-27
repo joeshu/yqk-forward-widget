@@ -230,7 +230,7 @@ class TestMediaHomeCacheAgeContracts(unittest.TestCase):
         self.assertIn('正在更新 · 暂用缓存结果%@', BROWSER)
         self.assertIn('正在校验 · 显示上次结果%@', BROWSER)
         self.assertIn('内容接口失败 · 当前仍显示缓存内容%@', BROWSER)
-        self.assertIn('显示缓存结果 · 更新失败：%@%@', BROWSER)
+        self.assertIn('保留已加载影片 · 更新失败：%@%@', BROWSER)
 
     def test_expired_home_cache_gets_a_top_marker_with_retry(self):
         self.assertIn('@"id":@"cache-expired"', BROWSER)

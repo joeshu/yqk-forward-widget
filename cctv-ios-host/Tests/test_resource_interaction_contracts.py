@@ -382,7 +382,7 @@ class ResourceInteractionContracts(unittest.TestCase):
         self.assertIn('section==1?2:self.sources.count', configuration)
         self.assertIn('indexPath.row==0?3:4 forKey:MediaBrowserGridColumnsDefaultsKey', configuration)
         self.assertIn('cctv.mediaGridColumns.v1', self.feed)
-        self.assertIn('large?2:', self.feed)
+        self.assertIn('large?(width<500?1:2)', self.feed)
         self.assertIn('- (UIViewController *)mediaDisplaySettingsViewController', self.browser)
         self.assertIn('onMediaDisplaySettings', self.root)
         self.assertIn('mediaDisplaySettingsViewController', self.root)

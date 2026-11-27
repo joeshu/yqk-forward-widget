@@ -408,6 +408,10 @@ jobs:
             device: iPhone 16
             content_size: accessibility-xxxl
             appearance: dark
+          - id: iphone-16-standard-light
+            device: iPhone 16
+            content_size: large
+            appearance: light
     env:
       CCTV_UI_DEVICE_NAME: ${{ matrix.device }}
       CCTV_UI_CONTENT_SIZE: ${{ matrix.content_size }}

@@ -1646,6 +1646,8 @@ typedef NS_ENUM(NSInteger, MediaContentMode) { MediaContentModeFeatured, MediaCo
 @property(nonatomic) NSInteger widgetSeason;
 @property(nonatomic) NSInteger page;
 @property(nonatomic) BOOL hasMore;
+@property(nonatomic) NSInteger failedListingPage;
+@property(nonatomic) BOOL listingFailed;
 @property(nonatomic) BOOL loading;
 @property(nonatomic) BOOL homeStatusLoading;
 @property(nonatomic) NSUInteger generation;
@@ -1783,8 +1785,16 @@ typedef NS_ENUM(NSInteger, MediaContentMode) { MediaContentModeFeatured, MediaCo
         if(self.categoryParentID.length){listingSection[@"action"]=@"folder-up";listingSection[@"actionTitle"]=@"上一级";}
         [sections addObject:listingSection];
         if(self.loading&&!self.items.count)[sections addObject:@{@"id":@"loading",@"kind":@"skeleton",@"items":@[]}];
-        if(!self.loading&&!self.items.count)[sections addObject:@{@"id":@"empty",@"kind":@"status",@"title":@"暂无影片",@"subtitle":self.status.text.length?self.status.text:@"试试其他分类或筛选条件",@"actionTitle":@"重试",@"action":@"retry"}];
-        else if(!self.loading&&self.status.text.length)[sections addObject:@{@"id":@"query-status",@"kind":@"status",@"title":self.status.text,@"actionTitle":@"重试",@"action":@"retry"}];
+        if(self.loading&&self.items.count){
+            [sections addObject:@{@"id":@"query-status",@"kind":@"status",@"title":@"正在加载影片…",@"loading":@YES}];
+        }else if(!self.loading&&!self.items.count){
+            [sections addObject:@{@"id":@"empty",@"kind":@"status",@"title":self.listingFailed?@"加载失败":@"暂无影片",@"subtitle":self.status.text.length?self.status.text:@"试试其他分类或筛选条件",@"actionTitle":@"重试",@"action":@"retry"}];
+        }else if(!self.loading&&(self.hasMore||self.status.text.length)){
+            NSString *action=self.failedListingPage>0?@"retry-page":(self.hasMore?@"load-more":(self.listingFailed?@"retry":@""));
+            NSString *actionTitle=self.failedListingPage>0?@"重试本页":(self.hasMore?@"加载更多":(self.listingFailed?@"重试":@""));
+            NSString *title=self.status.text.length?self.status.text:@"继续浏览影片";
+            [sections addObject:@{@"id":@"query-status",@"kind":@"status",@"title":title,@"actionTitle":actionTitle,@"action":action}];
+        }
         return [self scopeFeedSections:sections];
     }
     NSSet *enabled=MediaHomeEnabledModules();NSString *provider=@"";NSDictionary *home=[self cachedHomeResultForSelectedProvider:&provider];NSArray *raw=MediaBrowserDictionaryRows(home[@"items"],NULL);NSMutableArray *recommendations=[NSMutableArray array];NSMutableSet *seen=[NSMutableSet set];
@@ -1882,7 +1892,7 @@ NSTimeInterval shelfAge=[[MediaMetadataCache shared] ageOfResultForSource:self.s
     if(![section[@"sourceID"] isEqual:([self.source[@"id"] description]?:@"")]||![section[@"providerID"] isEqual:self.provider?:@""])return;
     NSString *category=section[@"categoryID"];if(category.length){[self selectMediaCategory:category];return;}NSString *action=section[@"action"];
     if([action isEqual:@"folder-up"]){NSString *parent=self.categoryParentID;if(parent.length){self.categoryDisplayName=self.categoryParentName;self.categoryParentID=nil;self.categoryParentName=nil;[self selectMediaCategory:parent];}return;}
-    if([action isEqual:@"display-settings"])[self openHomeConfiguration];else if([action isEqual:@"history"])[self openHistory];else if([action isEqual:@"filters"])[self chooseFilters];else if([action isEqual:@"search"])[self openGlobalSearch];else if([action isEqual:@"resources"])[self performHomeStatusAction];else if([action isEqual:@"retry"])[self refreshMediaContent];
+    if([action isEqual:@"display-settings"])[self openHomeConfiguration];else if([action isEqual:@"history"])[self openHistory];else if([action isEqual:@"filters"])[self chooseFilters];else if([action isEqual:@"search"])[self openGlobalSearch];else if([action isEqual:@"resources"])[self performHomeStatusAction];else if([action isEqual:@"retry-page"]||[action isEqual:@"load-more"])[self loadMore];else if([action isEqual:@"retry"])[self refreshMediaContent];
 }
 - (void)cancelHomeShelfLoads {
     for(MediaAPIClient *shelfClient in self.homeShelfClients.allValues.copy)[shelfClient cancel];
@@ -1971,8 +1981,7 @@ NSTimeInterval shelfAge=[[MediaMetadataCache shared] ageOfResultForSource:self.s
         HostRefreshAppearanceLayers(self.view.window);
     }
     if(previousTraitCollection && ![previousTraitCollection.preferredContentSizeCategory isEqualToString:self.traitCollection.preferredContentSizeCategory]){
-        [self.grid.collectionViewLayout invalidateLayout];
-        [self.grid reloadData];
+        for(UIButton *button in self.categories.arrangedSubviews)MediaBrowserApplyScaledPillFont(button);
         [self updateHomeGridLayout];
     }
 }
@@ -1990,7 +1999,7 @@ NSTimeInterval shelfAge=[[MediaMetadataCache shared] ageOfResultForSource:self.s
     feed.onSelectSection=^(NSDictionary *section){[weakSelf selectFeedSection:section];};
     feed.onScroll=^(UIScrollView *scroll){[weakSelf scrollViewDidScroll:scroll];};
     feed.onScrollEnd=^(UIScrollView *scroll){MediaBrowserViewController *owner=weakSelf;if(owner&&owner.homeMode)[owner saveHomeScrollOffset];};
-    feed.onNearEnd=^{MediaBrowserViewController *owner=weakSelf;if(owner&&!owner.homeMode)[owner loadMore];};
+    feed.onNearEnd=^{MediaBrowserViewController *owner=weakSelf;if(owner&&!owner.homeMode&&owner.failedListingPage==0)[owner loadMore];};
     feed.onVisibleCategories=^(NSArray *identifiers){MediaBrowserViewController *owner=weakSelf;if(!owner)return;owner.visibleCategoryIDs=[NSSet setWithArray:identifiers];[owner loadVisibleHomeShelves];};
     UIRefreshControl *refresh=[UIRefreshControl new];refresh.tintColor=HostAccent();[refresh addTarget:self action:@selector(refreshMediaContent) forControlEvents:UIControlEventValueChanged];feed.refreshControl=refresh;
     self.homeTopImmersiveScrim=[UIView new];self.homeTopImmersiveScrim.userInteractionEnabled=NO;self.homeTopImmersiveScrim.backgroundColor=UIColor.clearColor;self.homeTopImmersiveScrim.alpha=0.0;self.homeTopImmersiveScrim.hidden=YES;self.homeTopGlassBlurView=[[UIVisualEffectView alloc] initWithEffect:HostGlassBlur()];HostRegisterGlassEffectView(self.homeTopGlassBlurView);self.homeTopGlassBlurView.userInteractionEnabled=NO;self.homeTopGlassBlurView.alpha=0.0;self.homeTopGlassBlurView.hidden=YES;[self.homeTopImmersiveScrim addSubview:self.homeTopGlassBlurView];self.homeTopImmersiveGradient=[CAGradientLayer layer];self.homeTopImmersiveGradient.locations=@[@0,@0.68,@1];self.homeTopImmersiveGradient.opacity=0.0f;[self.homeTopImmersiveScrim.layer addSublayer:self.homeTopImmersiveGradient];[self.view addSubview:self.homeTopImmersiveScrim];
@@ -2084,7 +2093,7 @@ NSTimeInterval shelfAge=[[MediaMetadataCache shared] ageOfResultForSource:self.s
 - (void)toggleHomeBrowse {[self showHome:YES];}
 - (void)notifyDisplayModeChanged {if(self.onDisplayModeChanged)self.onDisplayModeChanged(self.homeMode);}
 - (void)showHome:(BOOL)animated {
-    if(!self.homeMode){[self saveCategorySession];self.generation++;[self.client cancel];self.loading=NO;self.activeMediaOperation=nil;}self.pendingRestorePage=0;self.pendingRestoreOffset=nil;self.status.text=@"";self.homeStatusLoading=NO;self.homeMode=YES;self.categoryDisplayName=nil;self.categoryParentID=nil;self.categoryParentName=nil;[self.grid.refreshControl endRefreshing];self.category=nil;self.keyword=@"";self.selectedFilters=[NSMutableDictionary dictionary];self.title=@"";self.navigationItem.largeTitleDisplayMode=UINavigationItemLargeTitleDisplayModeNever;[self setBrowseControlsHidden:YES];[self updateCategorySelection];[self notifyDisplayModeChanged];
+    if(!self.homeMode){[self saveCategorySession];self.generation++;[self.client cancel];self.loading=NO;self.activeMediaOperation=nil;}self.pendingRestorePage=0;self.pendingRestoreOffset=nil;self.status.text=@"";self.homeStatusLoading=NO;self.homeMode=YES;self.failedListingPage=0;self.listingFailed=NO;self.categoryDisplayName=nil;self.categoryParentID=nil;self.categoryParentName=nil;[self.grid.refreshControl endRefreshing];self.category=nil;self.keyword=@"";self.selectedFilters=[NSMutableDictionary dictionary];self.title=@"";self.navigationItem.largeTitleDisplayMode=UINavigationItemLargeTitleDisplayModeNever;[self setBrowseControlsHidden:YES];[self updateCategorySelection];[self notifyDisplayModeChanged];
     self.pendingHomeOffsetRestore=[NSUserDefaults.standardUserDefaults objectForKey:[self homeScrollOffsetKeyForSource:self.source]];[self restoreHomeScrollOffsetIfNeeded];
     [self refreshHomeModules];
     if(animated)[UIView transitionWithView:self.homeScroll duration:0.18 options:UIViewAnimationOptionTransitionCrossDissolve animations:nil completion:nil];
@@ -2742,7 +2751,7 @@ NSTimeInterval shelfAge=[[MediaMetadataCache shared] ageOfResultForSource:self.s
     UIButton *featured=[UIButton buttonWithType:UIButtonTypeSystem];featured.accessibilityIdentifier=@"__featured__";featured.accessibilityLabel=@"精选首页";featured.accessibilityHint=@"查看精选推荐影视";featured.titleLabel.font=[UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];featured.contentEdgeInsets=UIEdgeInsetsMake(7,14,7,14);[featured setTitle:@"精选" forState:UIControlStateNormal];[featured addTarget:self action:@selector(selectCategory:) forControlEvents:UIControlEventTouchUpInside];[self.categories addArrangedSubview:featured];
     for(NSDictionary *category in validCategories){UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];[button setTitle:category[@"name"] forState:UIControlStateNormal];button.titleLabel.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleSubheadline] scaledFontForFont:[UIFont systemFontOfSize:15] maximumPointSize:20];button.titleLabel.adjustsFontForContentSizeCategory=NO;button.contentEdgeInsets=UIEdgeInsetsMake(7,14,7,14);button.accessibilityIdentifier=[category[@"id"] description];button.accessibilityLabel=[NSString stringWithFormat:@"影视分类：%@",category[@"name"]];[button addTarget:self action:@selector(selectCategory:) forControlEvents:UIControlEventTouchUpInside];[self.categories addArrangedSubview:button];}
     BOOL hasCategories=self.categories.arrangedSubviews.count>0&&[MediaHomeEnabledModules() containsObject:@"catalog"];self.categoryScrollHeightConstraint.constant=hasCategories?44:0;self.categoryScroll.hidden=!hasCategories;
-    for(UIButton *button in self.categories.arrangedSubviews){BOOL selected=[button.accessibilityIdentifier isEqual:@"__featured__"]?!self.category.length:[button.accessibilityIdentifier isEqual:self.category];[button.heightAnchor constraintEqualToConstant:34].active=YES;HostStylePillButton(button,selected);MediaBrowserApplyScaledPillFont(button);button.layer.cornerRadius=17;[button setTitleColor:selected?HostOnAccent():HostSecondaryText() forState:UIControlStateNormal];if(selected){button.backgroundColor=HostAccent();HostSetLayerBorderColor(button,HostAccent());}button.accessibilityTraits=UIAccessibilityTraitButton|(selected?UIAccessibilityTraitSelected:0);}
+    for(UIButton *button in self.categories.arrangedSubviews){BOOL selected=[button.accessibilityIdentifier isEqual:@"__featured__"]?!self.category.length:[button.accessibilityIdentifier isEqual:self.category];[button.heightAnchor constraintGreaterThanOrEqualToConstant:44].active=YES;HostStylePillButton(button,selected);MediaBrowserApplyScaledPillFont(button);button.layer.cornerRadius=17;[button setTitleColor:selected?HostOnAccent():HostSecondaryText() forState:UIControlStateNormal];if(selected){button.backgroundColor=HostAccent();HostSetLayerBorderColor(button,HostAccent());}button.accessibilityTraits=UIAccessibilityTraitButton|(selected?UIAccessibilityTraitSelected:0);}
     NSMutableArray<NSString *> *prefetchPosters=[NSMutableArray arrayWithCapacity:6];
     for(NSDictionary *row in self.items){if(prefetchPosters.count>=6)break;NSString *p=[row[@"poster"] isKindOfClass:NSString.class]?row[@"poster"]:([row[@"vod_pic"] isKindOfClass:NSString.class]?row[@"vod_pic"]:@"");if(p.length)[prefetchPosters addObject:p];}
     if(prefetchPosters.count)[HostImageLoader.shared prefetchPosterURLs:prefetchPosters];
@@ -2758,10 +2767,15 @@ NSTimeInterval shelfAge=[[MediaMetadataCache shared] ageOfResultForSource:self.s
     NSUInteger generation=++self.searchGeneration;__weak typeof(self) weakSelf=self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,350*NSEC_PER_MSEC),dispatch_get_main_queue(),^{MediaBrowserViewController *owner=weakSelf;if(!owner || owner.searchGeneration!=generation || !owner.source)return;owner.generation++;[owner.client cancel];owner.loading=NO;owner.activeMediaOperation=nil;owner.page=1;if(keyword.length)[owner loadListing:NO];else if(owner.category.length)[owner loadListing:NO];else if(!owner.homeMode || previousKeyword.length){owner.nextHomeLoadTrigger=@"search_reset";[owner loadHome];}});
 }
-- (void)loadMore {if(!self.loading && self.hasMore){self.page++;[self loadListing:YES];}}
+- (void)loadMore {
+    if(self.loading||(!self.hasMore&&self.failedListingPage<=0))return;
+    self.page=self.failedListingPage>0?self.failedListingPage:self.page+1;
+    [self loadListing:YES];
+}
 - (void)loadListing:(BOOL)append {
     if(!self.source)return;if(!self.client){[self activate:self.source keepingHome:NO];return;}if(!self.keyword.length && !self.category.length){self.nextHomeLoadTrigger=@"listing_reset";[self loadHome];return;}if(!append&&!self.pendingRestoreOffset)[self.grid setContentOffset:CGPointMake(0,-self.grid.adjustedContentInset.top) animated:NO];NSUInteger generation=self.generation;NSString *requestedSourceID=[[self.source[@"id"] description] copy]?:@"";NSString *requestedProvider=[self.provider copy]?:@"";self.loading=YES;[self updateSelectionControls];NSString *operation=self.keyword.length?@"search":@"category";NSString *requestedKeyword=self.keyword?:@"",*requestedCategory=self.category?:@"";
     self.readinessStageLabel.text=self.keyword.length?@"资源运行中 · 正在搜索影视内容":@"资源运行中 · 正在加载分类内容";
+    if(!append)self.failedListingPage=0;self.listingFailed=NO;
     self.activeMediaOperation=operation;self.activeMediaRequestAppend=append;NSInteger requestedPage=self.page;
     NSMutableDictionary *args=[[self arguments:@{@"page":@(self.page)}] mutableCopy];if(self.keyword.length)args[@"keyword"]=self.keyword;else args[@"categoryId"]=self.category?:@"";
     NSInteger episode=self.widgetEpisode,season=self.widgetSeason;if([self.source[@"protocol"] isEqual:@"widget-extractor"]){args[@"episode"]=@(MAX(1,episode));args[@"season"]=@(MAX(1,season));}
@@ -2774,7 +2788,8 @@ NSTimeInterval shelfAge=[[MediaMetadataCache shared] ageOfResultForSource:self.s
         MediaBrowserViewController *owner=weakSelf;if(!owner)return;if(owner.generation!=generation||![[owner.source[@"id"] description] isEqual:requestedSourceID]||![(owner.provider?:@"") isEqual:requestedProvider]){[RuntimeDiagnostics.shared recordEvent:@"media_listing_response_discarded" category:@"media_api" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"",@"service_id":requestedSourceID,@"provider_id":requestedProvider,@"operation":operation,@"request_generation":@(generation),@"current_generation":@(owner.generation),@"reason":owner.generation!=generation?@"superseded_generation":(![[owner.source[@"id"] description] isEqual:requestedSourceID]?@"source_changed":@"provider_changed")}];return;}if([owner.activeMediaOperation isEqualToString:operation])owner.activeMediaOperation=nil;owner.activeMediaRequestAppend=NO;owner.loading=NO;[owner updateSelectionControls];owner.moreButton.enabled=YES;MediaSearchResultKind resultKind=MediaSearchClassifyResult(result,error);BOOL validResultShape=(resultKind==MediaSearchResultKindValid);[MediaSourceHealthStore.shared recordSourceID:requestedSourceID success:error==nil&&validResultShape elapsed:MAX(0,CACurrentMediaTime()-requestStartedAt)];
         if(episode!=owner.widgetEpisode || season!=owner.widgetSeason || ![requestedKeyword isEqualToString:owner.keyword?:@""] || (!requestedKeyword.length && (![requestedCategory isEqualToString:owner.category?:@""] || ![requestedFilters isEqual:owner.selectedFilters?:@{}]))){[RuntimeDiagnostics.shared recordEvent:@"media_listing_response_discarded" category:@"media_api" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"",@"service_id":requestedSourceID,@"operation":operation,@"request_generation":@(generation),@"requested_page":@(requestedPage),@"current_page":@(owner.page),@"reason":@"search_category_or_filter_changed"}];owner.page=1;[owner loadListing:NO];return;}
         NSInteger elapsedMS=(NSInteger)(MAX(0,CACurrentMediaTime()-requestStartedAt)*1000);
-        if(resultKind!=MediaSearchResultKindValid){NSString *message=resultKind==MediaSearchResultKindFailed?(error.localizedDescription?:@"请求失败"):MediaSearchMalformedMessage(result);[RuntimeDiagnostics.shared recordEvent:@"media_listing_failed" category:@"media_api" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"",@"service_id":requestedSourceID,@"provider_id":requestedProvider,@"operation":operation,@"page":@(requestedPage),@"append":@(append),@"elapsed_ms":@(elapsedMS),@"retained_cached_items":@(owner.items.count),@"failure_stage":resultKind==MediaSearchResultKindFailed?@"request_error":@"invalid_result_shape",@"error_domain":error.domain?:@"",@"error_code":@(error.code),@"error_message":message}];owner.readinessStageLabel.text=owner.items.count?@"更新失败 · 当前仍显示可用影视内容":@"影视内容接口读取失败";owner.pendingRestorePage=0;owner.pendingRestoreOffset=nil;[owner updateHomeGridLayout];if(append)owner.page=MAX(1,owner.page-1);NSTimeInterval listingFailedAge=[[MediaMetadataCache shared] ageOfResultForSource:owner.source operation:operation arguments:args];NSString *listingFailedAgeSuffix=MediaBrowserCacheAgeText(listingFailedAge).length?[NSString stringWithFormat:@"（缓存%@）",MediaBrowserCacheAgeText(listingFailedAge)]:@"";[owner showMessage:owner.items.count?[NSString stringWithFormat:@"显示缓存结果 · 更新失败：%@%@",message,listingFailedAgeSuffix]:message loading:NO];return;}
+        if(resultKind!=MediaSearchResultKindValid){owner.listingFailed=YES;if(append)owner.failedListingPage=requestedPage;NSString *message=resultKind==MediaSearchResultKindFailed?(error.localizedDescription?:@"请求失败"):MediaSearchMalformedMessage(result);[RuntimeDiagnostics.shared recordEvent:@"media_listing_failed" category:@"media_api" fields:@{@"correlation_id":owner.diagnosticTraceID?:@"",@"service_id":requestedSourceID,@"provider_id":requestedProvider,@"operation":operation,@"page":@(requestedPage),@"append":@(append),@"elapsed_ms":@(elapsedMS),@"retained_cached_items":@(owner.items.count),@"failure_stage":resultKind==MediaSearchResultKindFailed?@"request_error":@"invalid_result_shape",@"error_domain":error.domain?:@"",@"error_code":@(error.code),@"error_message":message}];owner.readinessStageLabel.text=owner.items.count?@"更新失败 · 当前仍显示可用影视内容":@"影视内容接口读取失败";owner.pendingRestorePage=0;owner.pendingRestoreOffset=nil;[owner updateHomeGridLayout];if(append)owner.page=MAX(1,requestedPage-1);NSTimeInterval listingFailedAge=[[MediaMetadataCache shared] ageOfResultForSource:owner.source operation:operation arguments:args];NSString *listingFailedAgeSuffix=MediaBrowserCacheAgeText(listingFailedAge).length?[NSString stringWithFormat:@"（缓存%@）",MediaBrowserCacheAgeText(listingFailedAge)]:@"";[owner showMessage:owner.items.count?[NSString stringWithFormat:@"保留已加载影片 · 更新失败：%@%@",message,listingFailedAgeSuffix]:message loading:NO];return;}
+        owner.failedListingPage=0;owner.listingFailed=NO;
         NSUInteger discardedRows=0;NSArray *incoming=MediaBrowserDictionaryRows(result[@"items"],&discardedRows);NSMutableDictionary *normalized=[result mutableCopy];normalized[@"items"]=incoming;if(![normalized[@"hasMore"] isKindOfClass:NSNumber.class])normalized[@"hasMore"]=@(MediaBrowserBoolean(normalized[@"hasMore"]));
         if(!append)[[MediaMetadataCache shared] storeResult:normalized forSource:owner.source operation:operation arguments:args];
         NSMutableArray *all=append?[owner.items mutableCopy]:[NSMutableArray array];NSMutableSet<NSString *> *identities=[NSMutableSet set];for(id rawItem in all)if([rawItem isKindOfClass:NSDictionary.class]){NSString *identity=MediaBrowserItemIdentity(rawItem);if(identity.length)[identities addObject:identity];}NSUInteger appendedCount=0;for(NSDictionary *item in incoming){NSString *identity=MediaBrowserItemIdentity(item);if(!identity.length||![identities containsObject:identity]){[all addObject:item];appendedCount++;if(identity.length)[identities addObject:identity];}}
@@ -2799,7 +2814,7 @@ NSTimeInterval shelfAge=[[MediaMetadataCache shared] ageOfResultForSource:self.s
         [button setTitleColor:selected?HostOnAccent():HostSecondaryText() forState:UIControlStateNormal];
         if(selected){button.backgroundColor=HostAccent();HostSetLayerBorderColor(button,HostAccent());}
     }
-    [self.grid reloadData];
+    [(MediaFeedView *)self.grid reloadAppearance];
 }
 
 @end

@@ -8,6 +8,7 @@
 #import "MediaSourceHealthStore.h"
 #import "HostImageLoader.h"
 #import "MediaSearchResults.h"
+#import "MediaMetadataCache.h"
 #import "HostMemoryBudgetCoordinator.h"
 #import <math.h>
 
@@ -75,7 +76,7 @@ static NSDictionary *MediaSearchPageState(NSString *name, NSArray *items, NSDict
         [NSLayoutConstraint activateConstraints:@[[self.poster.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:16],[self.poster.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:12],[self.poster.widthAnchor constraintEqualToConstant:66],[self.poster.heightAnchor constraintEqualToConstant:96],[self.poster.bottomAnchor constraintLessThanOrEqualToAnchor:self.contentView.bottomAnchor constant:-12],[text.leadingAnchor constraintEqualToAnchor:self.poster.trailingAnchor constant:14],[text.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-12],[text.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:12],[text.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-12]]];
     }return self;
 }
-- (void)prepareForReuse {[super prepareForReuse];self.transform=CGAffineTransformIdentity;self.poster.image=nil;self.poster.accessibilityIdentifier=nil;self.searchEntry=nil;}
+- (void)prepareForReuse {[super prepareForReuse];self.transform=CGAffineTransformIdentity;self.poster.image=nil;self.poster.accessibilityIdentifier=nil;self.searchEntry=nil;self.accessibilityLabel=nil;}
 - (void)setHighlighted:(BOOL)highlighted animated:(BOOL)animated {
     [super setHighlighted:highlighted animated:animated];
     if(UIAccessibilityIsReduceMotionEnabled())return;
@@ -160,7 +161,7 @@ static NSDictionary *MediaSearchPageState(NSString *name, NSArray *items, NSDict
     self.tableView.backgroundColor = HostBackground();
     self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
     self.tableView.rowHeight = UITableViewAutomaticDimension;
-    self.tableView.estimatedRowHeight = 74;
+    self.tableView.estimatedRowHeight = 120;
     self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
     self.tableView.tableFooterView = [UIView new];
     self.rows = [NSMutableArray array];
@@ -633,7 +634,7 @@ static NSDictionary *MediaSearchPageState(NSString *name, NSArray *items, NSDict
         }
         NSTimeInterval age = cachedEntry ? (CACurrentMediaTime() - [cachedEntry[@"at"] doubleValue]) : DBL_MAX;
         NSArray *cachedProviders = [cachedEntry[@"providers"] isKindOfClass:NSArray.class] ? cachedEntry[@"providers"] : nil;
-        if (cachedProviders.count && age >= 0 && age < MediaGlobalSearchProviderCacheTTL) {
+        if ([cachedEntry[@"fingerprint"] isEqual:MediaSourceConnectionFingerprint(job.source)] && cachedProviders.count && age >= 0 && age < MediaGlobalSearchProviderCacheTTL) {
             [self applyProviders:cachedProviders toJob:job];
             return;
         }
@@ -653,7 +654,7 @@ static NSDictionary *MediaSearchPageState(NSString *name, NSArray *items, NSDict
             NSArray *single = @[@{@"id":@"", @"name":job.source[@"name"]?:@"默认站点"}];
             if (sourceID.length) {
                 @synchronized(MediaGlobalSearchProviderCache()) {
-                    MediaGlobalSearchProviderCache()[sourceID] = @{@"providers":single, @"at":@(CACurrentMediaTime())};
+                    MediaGlobalSearchProviderCache()[sourceID] = @{@"providers":single, @"at":@(CACurrentMediaTime()), @"fingerprint":MediaSourceConnectionFingerprint(job.source)};
                 }
             }
             [owner applyProviders:single toJob:job];
@@ -674,7 +675,7 @@ static NSDictionary *MediaSearchPageState(NSString *name, NSArray *items, NSDict
             if (!valid.count) { [page finishJob:job error:[NSError errorWithDomain:@"CCTVHostSearch" code:3 userInfo:@{NSLocalizedDescriptionKey:@"资源没有可搜索的影视站点。"}]]; return; }
             if (sourceID.length) {
                 @synchronized(MediaGlobalSearchProviderCache()) {
-                    MediaGlobalSearchProviderCache()[sourceID] = @{@"providers":[valid copy], @"at":@(CACurrentMediaTime())};
+                    MediaGlobalSearchProviderCache()[sourceID] = @{@"providers":[valid copy], @"at":@(CACurrentMediaTime()), @"fingerprint":MediaSourceConnectionFingerprint(job.source)};
                 }
             }
             [page applyProviders:valid toJob:job];

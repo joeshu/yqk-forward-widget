@@ -38,7 +38,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         args = json.loads(self.rfile.read(int(self.headers.get('Content-Length', 0))) or b'{}')
         operation = self.path.rsplit('/', 1)[-1]
-        print(f"{time.monotonic():.3f} POST {operation} request_id={self.headers.get('X-CCTVHost-Request-ID', '')}", flush=True)
+        request_detail = f" id={args.get('id', '')!r} line_id={args.get('lineId', '')!r}" if operation == 'play' else ''
+        print(f"{time.monotonic():.3f} POST {operation}{request_detail} request_id={self.headers.get('X-CCTVHost-Request-ID', '')}", flush=True)
         base = f'http://127.0.0.1:{self.server.server_port}'
         card = lambda value: {'id': value, 'name': '测试电影 ' + value, 'poster': base + '/poster.png', 'remarks': 'HD'}
         if operation == 'capabilities':

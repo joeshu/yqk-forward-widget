@@ -1,0 +1,141 @@
+#import <UIKit/UIKit.h>
+#import "MediaAPIClient.h"
+#import "MediaBrowserViewController.h"
+#import "MediaEpisodeSelectionViewController.h"
+#import "MediaEpisodeLayout.h"
+#import "MediaFeedView.h"
+
+@interface MediaBrowserViewController (MediaPageReviewChecks)
+- (void)loadMore;
+- (NSArray<NSDictionary *> *)mediaFeedSections;
+@end
+@interface MediaEpisodeSelectionViewController (MediaPageReviewChecks)
+- (NSArray *)lines;
+- (NSArray *)episodesForLine:(NSInteger)index;
+- (void)rebuildSelection;
+- (void)toggleEpisodeOrder;
+@end
+
+@interface MediaPageReviewClient : MediaAPIClient
+@property(nonatomic,copy) NSDictionary *lastArguments;
+@property(nonatomic,copy) void (^pendingReply)(id result,NSError *error);
+@end
+@implementation MediaPageReviewClient
+- (void)call:(NSString *)operation arguments:(NSDictionary *)arguments correlationID:(NSString *)correlationID completion:(void (^)(id,NSError *))completion {
+    self.lastArguments=arguments;
+    self.pendingReply=completion;
+}
+- (void)cancel {self.pendingReply=nil;}
+@end
+
+static BOOL MediaPageCheck(BOOL passed,NSString *message) {
+    NSLog(@"[MediaPageReview] %@ %@",passed?@"PASS":@"FAIL",message);
+    return passed;
+}
+
+BOOL MediaPageReviewRunSmokeChecks(void) {
+    BOOL passed=YES;
+    NSMutableArray *episodes=[NSMutableArray array];
+    for(NSUInteger index=0;index<100;index++){
+        [episodes addObject:@{@"id":[NSString stringWithFormat:@"episode-%lu",(unsigned long)index],
+                              @"name":[NSString stringWithFormat:@"第 %lu 集",(unsigned long)index+1]}];
+    }
+    MediaEpisodeSelectionViewController *picker=[MediaEpisodeSelectionViewController new];
+    picker.item=@{@"id":@"movie",@"name":@"选集回归"};
+    picker.source=@{@"id":@"review",@"port":@18780};
+    picker.detail=@{@"name":@"选集回归",@"lines":@[@{@"id":@"main",@"episodes":episodes}]};
+    picker.selectedEpisodeIndex=79;
+    [picker loadViewIfNeeded];
+    UIStackView *quick=[picker valueForKey:@"quickEpisodeStack"];
+    BOOL foundSelected=NO;
+    for(UIButton *button in quick.arrangedSubviews){
+        if(!button.hidden&&button.tag==79)foundSelected=(button.accessibilityTraits&UIAccessibilityTraitSelected)!=0;
+    }
+    passed&=MediaPageCheck(foundSelected&&quick.arrangedSubviews.count==24,@"quick episodes include and announce episode 80");
+    NSArray<UIButton *> *buttons=[picker valueForKey:@"episodeButtons"];
+    BOOL gridSelected=NO;
+    for(UIButton *button in buttons)if(button.tag==79)gridSelected=(button.accessibilityTraits&UIAccessibilityTraitSelected)!=0;
+    passed&=MediaPageCheck(gridSelected,@"standalone selector marks its chosen episode");
+    [picker toggleEpisodeOrder];
+    foundSelected=NO;
+    for(UIButton *button in quick.arrangedSubviews)if(!button.hidden&&button.tag==79)foundSelected=YES;
+    passed&=MediaPageCheck(foundSelected,@"reverse order keeps the chosen episode in the quick window");
+    picker.detail=@{@"lines":@[@{@"id":@"shared-route",@"episodes":episodes}],
+                    @"seasons":@[@{@"id":@"season-two",@"episodes":@[@{@"id":@"s2e1",@"name":@"第二季第一集"}]}]};
+    picker.selectedEpisodeIndex=0;
+    [picker rebuildSelection];
+    NSArray *seasonEpisodes=[picker episodesForLine:0];
+    passed&=MediaPageCheck(picker.lines.count==1&&[[seasonEpisodes.firstObject[@"id"] description] isEqual:@"episode-0"],@"shared playback routes keep their own episode mapping");
+    picker.detail=@{@"lines":@[@{@"id":@"shared-route"}],
+                    @"seasons":@[@{@"id":@"season-two",@"episodes":@[@{@"id":@"s2e1",@"name":@"第二季第一集"}]}]};
+    [picker rebuildSelection];
+    NSArray *seasonFallbackEpisodes=[picker episodesForLine:0];
+    passed&=MediaPageCheck(picker.lines.count==1&&[[seasonFallbackEpisodes.firstObject[@"id"] description] isEqual:@"s2e1"],@"season episodes fill routes that omit their own episode list");
+    MediaEpisodeSelectionViewController *emptySeasonPicker=[MediaEpisodeSelectionViewController new];
+    emptySeasonPicker.item=@{@"id":@"empty-season-movie",@"name":@"空线路季"};
+    emptySeasonPicker.source=@{@"id":@"review",@"port":@18780};
+    emptySeasonPicker.detail=@{@"lines":@[@{@"id":@"other-season-route",@"episodes":episodes}],
+                               @"seasons":@[@{@"id":@"empty-season",@"lines":@[],@"episodes":@[@{@"id":@"s1e1",@"name":@"第一季第一集"}]}]};
+    [emptySeasonPicker loadViewIfNeeded];
+    NSArray *emptySeasonEpisodes=[emptySeasonPicker episodesForLine:0];
+    passed&=MediaPageCheck(!emptySeasonPicker.lines.count&&[[emptySeasonEpisodes.firstObject[@"id"] description] isEqual:@"s1e1"],@"explicitly empty season routes do not inherit another season's routes");
+    NSDictionary *sharedRouteDetail=@{@"lines":@[@{@"id":@"main-route",@"episodes":@[@{@"id":@"main-episode"}]},@{@"id":@"backup-route",@"episodes":@[@{@"id":@"second"}]}],
+                                      @"seasons":@[@{@"id":@"season-one",@"episodes":@[@{@"id":@"season-episode"}]}]};
+    MediaEpisodeSelectionViewController *firstRoutePicker=[MediaEpisodeSelectionViewController new];
+    firstRoutePicker.source=@{@"id":@"review",@"port":@18780};firstRoutePicker.detail=sharedRouteDetail;[firstRoutePicker loadViewIfNeeded];
+    MediaEpisodeSelectionViewController *reopenedRoutePicker=[MediaEpisodeSelectionViewController new];
+    reopenedRoutePicker.source=firstRoutePicker.source;reopenedRoutePicker.detail=firstRoutePicker.detail;reopenedRoutePicker.selectedLineIndex=1;[reopenedRoutePicker loadViewIfNeeded];
+    NSArray *reopenedBackupEpisodes=[reopenedRoutePicker episodesForLine:1];
+    passed&=MediaPageCheck(reopenedRoutePicker.lines.count==2&&reopenedRoutePicker.selectedLineIndex==1&&[[reopenedBackupEpisodes.firstObject[@"id"] description] isEqual:@"second"],@"reopened selector preserves shared routes and the selected backup line");
+    [picker setValue:@"pending" forKey:@"inFlightEpisodeSignature"];
+    [picker rebuildSelection];
+    passed&=MediaPageCheck(!((UIButton *)[picker valueForKey:@"continueButton"]).enabled,@"layout changes preserve the pending playback action");
+
+    MediaBrowserViewController *browser=[MediaBrowserViewController new];
+    browser.deferAutomaticLoading=YES;
+    browser.sourcesProvider=^NSArray *{return @[];};
+    browser.catalogsProvider=^NSArray *{return @[];};
+    [browser loadViewIfNeeded];
+    MediaPageReviewClient *client=[[MediaPageReviewClient alloc] initWithPort:18780];
+    [browser setValuesForKeysWithDictionary:@{@"client":client,@"source":@{@"id":@"review",@"port":@18780},
+        @"homeMode":@NO,@"category":@"drama",@"page":@1,@"hasMore":@YES,
+        @"items":@[@{@"id":@"first",@"name":@"第一页"}]}];
+    [browser loadMore];
+    void (^reply)(id,NSError *)=client.pendingReply;
+    client.pendingReply=nil;
+    passed&=MediaPageCheck(reply!=nil&&[client.lastArguments[@"page"] integerValue]==2,@"continuation requests page 2");
+    if(reply)reply(nil,[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorTimedOut userInfo:nil]);
+    NSDictionary *footer=browser.mediaFeedSections.lastObject;
+    passed&=MediaPageCheck([footer[@"action"] isEqual:@"retry-page"]&&[[browser valueForKey:@"items"] count]==1,@"failed continuation retains page 1 and offers page retry");
+    [browser loadMore];
+    passed&=MediaPageCheck([client.lastArguments[@"page"] integerValue]==2,@"retry requests the failed page again");
+    reply=client.pendingReply;client.pendingReply=nil;
+    if(reply)reply(@{@"items":@[@{@"id":@"second",@"name":@"第二页"}],@"hasMore":@NO},nil);
+    passed&=MediaPageCheck([[browser valueForKey:@"items"] count]==2&&[[browser valueForKey:@"failedListingPage"] integerValue]==0,@"successful retry merges results and clears failure state");
+    [browser setValue:@YES forKey:@"hasMore"];
+    footer=browser.mediaFeedSections.lastObject;
+    passed&=MediaPageCheck([footer[@"action"] isEqual:@"load-more"],@"continuation is accessible without a scroll gesture");
+
+    UIWindow *window=[[UIWindow alloc] initWithFrame:CGRectMake(0,0,390,844)];
+    window.windowLevel=UIWindowLevelNormal-1;
+    window.rootViewController=[UIViewController new];
+    window.hidden=NO;
+    MediaFeedView *feed=[[MediaFeedView alloc] initWithFrame:window.bounds];
+    [window.rootViewController.view addSubview:feed];
+    NSArray *heroItems=@[@{@"id":@"one",@"name":@"影片一"},@{@"id":@"two",@"name":@"影片二"}];
+    __block NSString *status=@"加载中";
+    feed.sectionsProvider=^NSArray *{
+        return @[@{@"id":@"hero",@"kind":@"hero",@"items":heroItems},
+                 @{@"id":@"status",@"kind":@"status",@"title":status}];
+    };
+    [feed reloadData];[feed layoutIfNeeded];
+    NSIndexPath *heroPath=[NSIndexPath indexPathForItem:0 inSection:0];
+    UICollectionViewCell *hero=[feed cellForItemAtIndexPath:heroPath];
+    [hero setValue:@1 forKey:@"page"];
+    status=@"更新完成";
+    [feed reloadData];[feed layoutIfNeeded];
+    UICollectionViewCell *updatedHero=[feed cellForItemAtIndexPath:heroPath];
+    passed&=MediaPageCheck(hero!=nil&&hero==updatedHero&&[[updatedHero valueForKey:@"page"] integerValue]==1,@"updating a status section preserves the current banner and its page");
+    window.hidden=YES;
+    return passed;
+}

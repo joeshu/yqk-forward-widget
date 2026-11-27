@@ -5,6 +5,7 @@
 #import "MediaEpisodeLayout.h"
 #import "RuntimeDiagnostics.h"
 #import "TVBoxCatalogStore.h"
+#import <math.h>
 
 static UIColor *MediaSelectionBackground(void) { return HostBackground(); }
 static UIColor *MediaSelectionSurface(void) { return [UIColor colorWithWhite:1 alpha:0.075]; }
@@ -17,7 +18,7 @@ static NSArray<NSDictionary *> *MediaEpisodeSelectionLines(id value) {
     NSArray *rows=MediaEpisodeSelectionDictionaryRows(value);NSMutableArray *lines=[NSMutableArray arrayWithCapacity:rows.count];for(NSDictionary *rawLine in rows){NSMutableDictionary *line=[rawLine mutableCopy];line[@"episodes"]=MediaEpisodeSelectionDictionaryRows(line[@"episodes"]);[lines addObject:line];}return lines;
 }
 static NSDictionary *MediaEpisodeSelectionSanitizedDetail(id value) {
-    if(![value isKindOfClass:NSDictionary.class])return nil;NSMutableDictionary *detail=[value mutableCopy];detail[@"lines"]=MediaEpisodeSelectionLines(detail[@"lines"]);id rawSeasons=detail[@"seasons"]?:detail[@"seasonList"]?:detail[@"season_list"];if([rawSeasons isKindOfClass:NSArray.class]){NSMutableArray *seasons=[NSMutableArray array];for(NSDictionary *rawSeason in MediaEpisodeSelectionDictionaryRows(rawSeasons)){NSMutableDictionary *season=[rawSeason mutableCopy];season[@"lines"]=MediaEpisodeSelectionLines(season[@"lines"]);season[@"episodes"]=MediaEpisodeSelectionDictionaryRows(season[@"episodes"]);[seasons addObject:season];}detail[@"seasons"]=seasons;}return detail;
+    if(![value isKindOfClass:NSDictionary.class])return nil;NSMutableDictionary *detail=[value mutableCopy];detail[@"lines"]=MediaEpisodeSelectionLines(detail[@"lines"]);id rawSeasons=detail[@"seasons"]?:detail[@"seasonList"]?:detail[@"season_list"];if([rawSeasons isKindOfClass:NSArray.class]){NSMutableArray *seasons=[NSMutableArray array];for(NSDictionary *rawSeason in MediaEpisodeSelectionDictionaryRows(rawSeasons)){NSMutableDictionary *season=[rawSeason mutableCopy];id priorOwnLines=rawSeason[@"__mediaHasOwnLines"];BOOL hasOwnLines=[priorOwnLines respondsToSelector:@selector(boolValue)]?[priorOwnLines boolValue]:[rawSeason[@"lines"] isKindOfClass:NSArray.class];season[@"__mediaHasOwnLines"]=@(hasOwnLines);season[@"lines"]=MediaEpisodeSelectionLines(season[@"lines"]);season[@"episodes"]=MediaEpisodeSelectionDictionaryRows(season[@"episodes"]);[seasons addObject:season];}detail[@"seasons"]=seasons;}return detail;
 }
 static void MediaEpisodeSelectionLoadPoster(NSString *url, UIImageView *view, NSUInteger retriesRemaining);
 static void MediaEpisodeSelectionLoadPoster(NSString *url, UIImageView *view, NSUInteger retriesRemaining) {
@@ -48,6 +49,9 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
 @property(nonatomic,strong) UIScrollView *scrollView;
 @property(nonatomic,strong) UIStackView *contentStack;
 @property(nonatomic,strong) UIStackView *routeButtons;
+@property(nonatomic,strong) NSLayoutConstraint *routeScrollHeightConstraint;
+@property(nonatomic,strong) NSLayoutConstraint *quickScrollHeightConstraint;
+@property(nonatomic,strong) UIStackView *pagingStack;
 @property(nonatomic,strong) UIStackView *seasonButtons;
 @property(nonatomic,strong) UIStackView *seasonSectionStack;
 @property(nonatomic,strong) UIStackView *seasonHeadingStack;
@@ -113,7 +117,11 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
 }
 - (NSArray *)lines {
     NSArray *seasonLines=[self.currentSeason[@"lines"] isKindOfClass:NSArray.class]?self.currentSeason[@"lines"]:@[];
-    return seasonLines.count?seasonLines:([self.detail[@"lines"] isKindOfClass:NSArray.class]?self.detail[@"lines"]:@[]);
+    if([self.currentSeason[@"__mediaHasOwnLines"] boolValue])return seasonLines;
+    // Some sources share playback routes across seasons. Keep those routes
+    // available; each route's own episode list remains the best mapping for
+    // that route, with the season list used when a route has no episodes.
+    return [self.detail[@"lines"] isKindOfClass:NSArray.class]?self.detail[@"lines"]:@[];
 }
 - (NSArray *)episodesForLine:(NSInteger)index {
     NSArray *lines=self.lines;
@@ -269,18 +277,18 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
 
     UIStackView *routeSection=[UIStackView new];routeSection.axis=UILayoutConstraintAxisVertical;routeSection.spacing=8;[self.contentStack addArrangedSubview:routeSection];
     UIStackView *routeHeading=[UIStackView new];routeHeading.axis=UILayoutConstraintAxisHorizontal;routeHeading.alignment=UIStackViewAlignmentCenter;UILabel *routeTitle=[self label:@"播放线路" size:16 weight:UIFontWeightBold color:UIColor.whiteColor];[routeHeading addArrangedSubview:routeTitle];UIView *routeSpacer=[UIView new];[routeHeading addArrangedSubview:routeSpacer];UILabel *routeHint=[self label:@"选择稳定线路" size:11 weight:UIFontWeightMedium color:MediaSelectionMuted()];[routeHeading addArrangedSubview:routeHint];[routeSection addArrangedSubview:routeHeading];
-    UIScrollView *routeScroll=[UIScrollView new];routeScroll.translatesAutoresizingMaskIntoConstraints=NO;routeScroll.showsHorizontalScrollIndicator=NO;routeScroll.accessibilityIdentifier=@"media-episode-route-scroll";[routeSection addArrangedSubview:routeScroll];self.routeButtons=[UIStackView new];self.routeButtons.translatesAutoresizingMaskIntoConstraints=NO;self.routeButtons.axis=UILayoutConstraintAxisHorizontal;self.routeButtons.alignment=UIStackViewAlignmentCenter;self.routeButtons.spacing=8;[routeScroll addSubview:self.routeButtons];[NSLayoutConstraint activateConstraints:@[[routeScroll.heightAnchor constraintEqualToConstant:44],[self.routeButtons.leadingAnchor constraintEqualToAnchor:routeScroll.contentLayoutGuide.leadingAnchor],[self.routeButtons.trailingAnchor constraintEqualToAnchor:routeScroll.contentLayoutGuide.trailingAnchor],[self.routeButtons.topAnchor constraintEqualToAnchor:routeScroll.contentLayoutGuide.topAnchor],[self.routeButtons.bottomAnchor constraintEqualToAnchor:routeScroll.contentLayoutGuide.bottomAnchor],[self.routeButtons.heightAnchor constraintEqualToAnchor:routeScroll.frameLayoutGuide.heightAnchor]]];
+    UIScrollView *routeScroll=[UIScrollView new];routeScroll.translatesAutoresizingMaskIntoConstraints=NO;routeScroll.showsHorizontalScrollIndicator=NO;routeScroll.accessibilityIdentifier=@"media-episode-route-scroll";[routeSection addArrangedSubview:routeScroll];self.routeButtons=[UIStackView new];self.routeButtons.translatesAutoresizingMaskIntoConstraints=NO;self.routeButtons.axis=UILayoutConstraintAxisHorizontal;self.routeButtons.alignment=UIStackViewAlignmentCenter;self.routeButtons.spacing=8;[routeScroll addSubview:self.routeButtons];[NSLayoutConstraint activateConstraints:@[(self.routeScrollHeightConstraint=[routeScroll.heightAnchor constraintEqualToConstant:44]),[self.routeButtons.leadingAnchor constraintEqualToAnchor:routeScroll.contentLayoutGuide.leadingAnchor],[self.routeButtons.trailingAnchor constraintEqualToAnchor:routeScroll.contentLayoutGuide.trailingAnchor],[self.routeButtons.topAnchor constraintEqualToAnchor:routeScroll.contentLayoutGuide.topAnchor],[self.routeButtons.bottomAnchor constraintEqualToAnchor:routeScroll.contentLayoutGuide.bottomAnchor],[self.routeButtons.heightAnchor constraintEqualToAnchor:routeScroll.frameLayoutGuide.heightAnchor]]];
 
     UIView *episodeCard=[UIView new];episodeCard.translatesAutoresizingMaskIntoConstraints=NO;episodeCard.backgroundColor=[UIColor colorWithRed:.075 green:.080 blue:.104 alpha:.94];episodeCard.layer.cornerRadius=17;episodeCard.layer.cornerCurve=kCACornerCurveContinuous;episodeCard.layer.borderWidth=.7;episodeCard.layer.borderColor=[UIColor colorWithWhite:1 alpha:.09].CGColor;episodeCard.clipsToBounds=YES;episodeCard.accessibilityIdentifier=@"media-episode-card";[self.contentStack addArrangedSubview:episodeCard];
     UIStackView *episodeCardStack=[UIStackView new];episodeCardStack.translatesAutoresizingMaskIntoConstraints=NO;episodeCardStack.axis=UILayoutConstraintAxisVertical;episodeCardStack.spacing=0;[episodeCard addSubview:episodeCardStack];[NSLayoutConstraint activateConstraints:@[[episodeCardStack.leadingAnchor constraintEqualToAnchor:episodeCard.leadingAnchor constant:12],[episodeCardStack.trailingAnchor constraintEqualToAnchor:episodeCard.trailingAnchor constant:-12],[episodeCardStack.topAnchor constraintEqualToAnchor:episodeCard.topAnchor constant:4],[episodeCardStack.bottomAnchor constraintEqualToAnchor:episodeCard.bottomAnchor constant:-8]]];
     self.quickEpisodeScroll=[UIScrollView new];self.quickEpisodeScroll.translatesAutoresizingMaskIntoConstraints=NO;self.quickEpisodeScroll.showsHorizontalScrollIndicator=NO;self.quickEpisodeScroll.accessibilityIdentifier=@"media-episode-quick-scroll";[episodeCardStack addArrangedSubview:self.quickEpisodeScroll];
     self.quickEpisodeStack=[UIStackView new];self.quickEpisodeStack.translatesAutoresizingMaskIntoConstraints=NO;self.quickEpisodeStack.axis=UILayoutConstraintAxisHorizontal;self.quickEpisodeStack.alignment=UIStackViewAlignmentCenter;self.quickEpisodeStack.spacing=8;[self.quickEpisodeScroll addSubview:self.quickEpisodeStack];
-    [NSLayoutConstraint activateConstraints:@[[self.quickEpisodeScroll.heightAnchor constraintEqualToConstant:44],[self.quickEpisodeStack.leadingAnchor constraintEqualToAnchor:self.quickEpisodeScroll.contentLayoutGuide.leadingAnchor],[self.quickEpisodeStack.trailingAnchor constraintEqualToAnchor:self.quickEpisodeScroll.contentLayoutGuide.trailingAnchor],[self.quickEpisodeStack.topAnchor constraintEqualToAnchor:self.quickEpisodeScroll.contentLayoutGuide.topAnchor],[self.quickEpisodeStack.bottomAnchor constraintEqualToAnchor:self.quickEpisodeScroll.contentLayoutGuide.bottomAnchor],[self.quickEpisodeStack.heightAnchor constraintEqualToAnchor:self.quickEpisodeScroll.frameLayoutGuide.heightAnchor]]];
-    self.episodeDisclosureButton=[UIButton buttonWithType:UIButtonTypeSystem];self.episodeDisclosureButton.translatesAutoresizingMaskIntoConstraints=NO;self.episodeDisclosureButton.accessibilityIdentifier=@"media-episode-disclosure";self.episodeDisclosureButton.accessibilityHint=@"展开或收起可播放分集";self.episodeDisclosureButton.contentHorizontalAlignment=UIControlContentHorizontalAlignmentFill;[self.episodeDisclosureButton addTarget:self action:@selector(toggleEpisodeGrid) forControlEvents:UIControlEventTouchUpInside];HostInstallPressFeedback(self.episodeDisclosureButton);[episodeCardStack addArrangedSubview:self.episodeDisclosureButton];[self.episodeDisclosureButton.heightAnchor constraintEqualToConstant:50].active=YES;
-    UIStackView *disclosureRow=[UIStackView new];disclosureRow.translatesAutoresizingMaskIntoConstraints=NO;disclosureRow.axis=UILayoutConstraintAxisHorizontal;disclosureRow.alignment=UIStackViewAlignmentCenter;disclosureRow.spacing=9;disclosureRow.userInteractionEnabled=NO;[self.episodeDisclosureButton addSubview:disclosureRow];UIImageView *gridIcon=[[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"square.grid.2x2.fill"]];gridIcon.tintColor=HostAccent();[disclosureRow addArrangedSubview:gridIcon];[gridIcon.widthAnchor constraintEqualToConstant:19].active=YES;UILabel *episodeHeading=[self label:@"选集" size:15 weight:UIFontWeightBold color:UIColor.whiteColor];[disclosureRow addArrangedSubview:episodeHeading];self.episodeCountLabel=[self label:@"" size:12 weight:UIFontWeightMedium color:MediaSelectionMuted()];[disclosureRow addArrangedSubview:self.episodeCountLabel];UIView *disclosureSpacer=[UIView new];[disclosureRow addArrangedSubview:disclosureSpacer];self.episodeDisclosureLabel=[self label:@"展开" size:12 weight:UIFontWeightSemibold color:MediaSelectionMuted()];[disclosureRow addArrangedSubview:self.episodeDisclosureLabel];self.episodeDisclosureIcon=[[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"chevron.down"]];self.episodeDisclosureIcon.tintColor=MediaSelectionMuted();[disclosureRow addArrangedSubview:self.episodeDisclosureIcon];[self.episodeDisclosureIcon.widthAnchor constraintEqualToConstant:14].active=YES;[NSLayoutConstraint activateConstraints:@[[disclosureRow.leadingAnchor constraintEqualToAnchor:self.episodeDisclosureButton.leadingAnchor],[disclosureRow.trailingAnchor constraintEqualToAnchor:self.episodeDisclosureButton.trailingAnchor],[disclosureRow.topAnchor constraintEqualToAnchor:self.episodeDisclosureButton.topAnchor],[disclosureRow.bottomAnchor constraintEqualToAnchor:self.episodeDisclosureButton.bottomAnchor]]];
+    [NSLayoutConstraint activateConstraints:@[(self.quickScrollHeightConstraint=[self.quickEpisodeScroll.heightAnchor constraintEqualToConstant:44]),[self.quickEpisodeStack.leadingAnchor constraintEqualToAnchor:self.quickEpisodeScroll.contentLayoutGuide.leadingAnchor],[self.quickEpisodeStack.trailingAnchor constraintEqualToAnchor:self.quickEpisodeScroll.contentLayoutGuide.trailingAnchor],[self.quickEpisodeStack.topAnchor constraintEqualToAnchor:self.quickEpisodeScroll.contentLayoutGuide.topAnchor],[self.quickEpisodeStack.bottomAnchor constraintEqualToAnchor:self.quickEpisodeScroll.contentLayoutGuide.bottomAnchor],[self.quickEpisodeStack.heightAnchor constraintEqualToAnchor:self.quickEpisodeScroll.frameLayoutGuide.heightAnchor]]];
+    self.episodeDisclosureButton=[UIButton buttonWithType:UIButtonTypeSystem];self.episodeDisclosureButton.translatesAutoresizingMaskIntoConstraints=NO;self.episodeDisclosureButton.accessibilityIdentifier=@"media-episode-disclosure";self.episodeDisclosureButton.accessibilityHint=@"展开或收起可播放分集";self.episodeDisclosureButton.contentHorizontalAlignment=UIControlContentHorizontalAlignmentFill;[self.episodeDisclosureButton addTarget:self action:@selector(toggleEpisodeGrid) forControlEvents:UIControlEventTouchUpInside];HostInstallPressFeedback(self.episodeDisclosureButton);[episodeCardStack addArrangedSubview:self.episodeDisclosureButton];[self.episodeDisclosureButton.heightAnchor constraintGreaterThanOrEqualToConstant:50].active=YES;
+    UIStackView *disclosureRow=[UIStackView new];disclosureRow.translatesAutoresizingMaskIntoConstraints=NO;disclosureRow.axis=UILayoutConstraintAxisHorizontal;disclosureRow.alignment=UIStackViewAlignmentCenter;disclosureRow.spacing=9;disclosureRow.userInteractionEnabled=NO;[self.episodeDisclosureButton addSubview:disclosureRow];UIImageView *gridIcon=[[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"square.grid.2x2.fill"]];gridIcon.tintColor=HostAccent();[disclosureRow addArrangedSubview:gridIcon];[gridIcon.widthAnchor constraintEqualToConstant:19].active=YES;UILabel *episodeHeading=[self label:@"选集" size:15 weight:UIFontWeightBold color:UIColor.whiteColor];[disclosureRow addArrangedSubview:episodeHeading];self.episodeCountLabel=[self label:@"" size:12 weight:UIFontWeightMedium color:MediaSelectionMuted()];self.episodeCountLabel.numberOfLines=0;[disclosureRow addArrangedSubview:self.episodeCountLabel];UIView *disclosureSpacer=[UIView new];[disclosureRow addArrangedSubview:disclosureSpacer];self.episodeDisclosureLabel=[self label:@"展开" size:12 weight:UIFontWeightSemibold color:MediaSelectionMuted()];[disclosureRow addArrangedSubview:self.episodeDisclosureLabel];self.episodeDisclosureIcon=[[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"chevron.down"]];self.episodeDisclosureIcon.tintColor=MediaSelectionMuted();[disclosureRow addArrangedSubview:self.episodeDisclosureIcon];[self.episodeDisclosureIcon.widthAnchor constraintEqualToConstant:14].active=YES;[NSLayoutConstraint activateConstraints:@[[disclosureRow.leadingAnchor constraintEqualToAnchor:self.episodeDisclosureButton.leadingAnchor],[disclosureRow.trailingAnchor constraintEqualToAnchor:self.episodeDisclosureButton.trailingAnchor],[disclosureRow.topAnchor constraintEqualToAnchor:self.episodeDisclosureButton.topAnchor],[disclosureRow.bottomAnchor constraintEqualToAnchor:self.episodeDisclosureButton.bottomAnchor]]];
     self.episodeDetails=[UIStackView new];self.episodeDetails.axis=UILayoutConstraintAxisVertical;self.episodeDetails.spacing=9;self.episodeDetails.hidden=YES;[episodeCardStack addArrangedSubview:self.episodeDetails];
-    self.pageLabel=[self label:@"" size:11 weight:UIFontWeightMedium color:MediaSelectionMuted()];self.pageLabel.numberOfLines=1;self.pageLabel.textAlignment=NSTextAlignmentCenter;self.pageLabel.accessibilityIdentifier=@"media-episode-page-label";[self.episodeDetails addArrangedSubview:self.pageLabel];
-    UIStackView *paging=[UIStackView new];paging.axis=UILayoutConstraintAxisHorizontal;paging.alignment=UIStackViewAlignmentCenter;paging.distribution=UIStackViewDistributionFillEqually;paging.spacing=7;self.styleButton=[UIButton buttonWithType:UIButtonTypeSystem];self.reverseButton=[UIButton buttonWithType:UIButtonTypeSystem];self.previousButton=[UIButton buttonWithType:UIButtonTypeSystem];self.nextButton=[UIButton buttonWithType:UIButtonTypeSystem];self.styleButton.accessibilityIdentifier=@"media-episode-style";self.reverseButton.accessibilityIdentifier=@"media-episode-reverse";self.previousButton.accessibilityIdentifier=@"media-episode-previous";self.nextButton.accessibilityIdentifier=@"media-episode-next";[self.styleButton addTarget:self action:@selector(cycleEpisodeLayoutStyle) forControlEvents:UIControlEventTouchUpInside];if(@available(iOS 14.0,*)){self.styleButton.menu=[self buildEpisodeStyleMenu];self.styleButton.showsMenuAsPrimaryAction=NO;}[self.reverseButton addTarget:self action:@selector(toggleEpisodeOrder) forControlEvents:UIControlEventTouchUpInside];[self.previousButton addTarget:self action:@selector(previousPage) forControlEvents:UIControlEventTouchUpInside];[self.nextButton addTarget:self action:@selector(nextPage) forControlEvents:UIControlEventTouchUpInside];for(UIButton *button in @[self.styleButton,self.reverseButton,self.previousButton,self.nextButton]){button.backgroundColor=[UIColor colorWithWhite:1 alpha:.08];button.layer.cornerRadius=11;button.layer.cornerCurve=kCACornerCurveContinuous;button.titleLabel.font=[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];MediaEpisodeApplyScaledPillFont(button);[button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];[button setTitleColor:MediaSelectionMuted() forState:UIControlStateDisabled];button.contentEdgeInsets=UIEdgeInsetsMake(8,7,8,7);HostInstallPressFeedback(button);[paging addArrangedSubview:button];}[self.episodeDetails addArrangedSubview:paging];[paging.heightAnchor constraintGreaterThanOrEqualToConstant:44].active=YES;
+    self.pageLabel=[self label:@"" size:11 weight:UIFontWeightMedium color:MediaSelectionMuted()];self.pageLabel.numberOfLines=0;self.pageLabel.textAlignment=NSTextAlignmentCenter;self.pageLabel.accessibilityIdentifier=@"media-episode-page-label";[self.episodeDetails addArrangedSubview:self.pageLabel];
+    UIStackView *paging=[UIStackView new];self.pagingStack=paging;paging.axis=UILayoutConstraintAxisHorizontal;paging.alignment=UIStackViewAlignmentCenter;paging.distribution=UIStackViewDistributionFillEqually;paging.spacing=7;self.styleButton=[UIButton buttonWithType:UIButtonTypeSystem];self.reverseButton=[UIButton buttonWithType:UIButtonTypeSystem];self.previousButton=[UIButton buttonWithType:UIButtonTypeSystem];self.nextButton=[UIButton buttonWithType:UIButtonTypeSystem];self.styleButton.accessibilityIdentifier=@"media-episode-style";self.reverseButton.accessibilityIdentifier=@"media-episode-reverse";self.previousButton.accessibilityIdentifier=@"media-episode-previous";self.nextButton.accessibilityIdentifier=@"media-episode-next";[self.styleButton addTarget:self action:@selector(cycleEpisodeLayoutStyle) forControlEvents:UIControlEventTouchUpInside];if(@available(iOS 14.0,*)){self.styleButton.menu=[self buildEpisodeStyleMenu];self.styleButton.showsMenuAsPrimaryAction=NO;}[self.reverseButton addTarget:self action:@selector(toggleEpisodeOrder) forControlEvents:UIControlEventTouchUpInside];[self.previousButton addTarget:self action:@selector(previousPage) forControlEvents:UIControlEventTouchUpInside];[self.nextButton addTarget:self action:@selector(nextPage) forControlEvents:UIControlEventTouchUpInside];for(UIButton *button in @[self.styleButton,self.reverseButton,self.previousButton,self.nextButton]){button.backgroundColor=[UIColor colorWithWhite:1 alpha:.08];button.layer.cornerRadius=11;button.layer.cornerCurve=kCACornerCurveContinuous;button.titleLabel.font=[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];MediaEpisodeApplyScaledPillFont(button);[button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];[button setTitleColor:MediaSelectionMuted() forState:UIControlStateDisabled];button.contentEdgeInsets=UIEdgeInsetsMake(8,7,8,7);HostInstallPressFeedback(button);[paging addArrangedSubview:button];}[self.episodeDetails addArrangedSubview:paging];[paging.heightAnchor constraintGreaterThanOrEqualToConstant:44].active=YES;
     self.episodeGrid=[UIStackView new];self.episodeGrid.axis=UILayoutConstraintAxisVertical;self.episodeGrid.spacing=7;self.episodeGrid.distribution=UIStackViewDistributionFillEqually;self.episodeGrid.accessibilityIdentifier=@"media-episode-grid";[self.episodeDetails addArrangedSubview:self.episodeGrid];
     self.statusLabel=[self label:@"" size:12 weight:UIFontWeightMedium color:MediaSelectionMuted()];self.statusLabel.numberOfLines=0;self.statusLabel.hidden=YES;self.statusLabel.accessibilityIdentifier=@"media-episode-status";[self.contentStack addArrangedSubview:self.statusLabel];
     [self updateDescription];
@@ -338,7 +346,7 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
     }];
 }
 - (void)buildSeasons {
-    NSArray *seasons=self.seasonCollections;BOOL hasSeasons=seasons.count>1;self.seasonHeadingStack.hidden=!hasSeasons;self.seasonCountLabel.text=hasSeasons?[NSString stringWithFormat:@"共 %lu 季 · 快速切季",(unsigned long)seasons.count]:@"";self.seasonSectionStack.spacing=hasSeasons?7:0;self.seasonScrollHeightConstraint.constant=hasSeasons?46:0;self.seasonScrollView.accessibilityElementsHidden=!hasSeasons;self.seasonScrollView.userInteractionEnabled=hasSeasons;
+    NSArray *seasons=self.seasonCollections;BOOL hasSeasons=seasons.count>1;self.seasonHeadingStack.hidden=!hasSeasons;self.seasonCountLabel.text=hasSeasons?[NSString stringWithFormat:@"共 %lu 季 · 快速切季",(unsigned long)seasons.count]:@"";self.seasonSectionStack.spacing=hasSeasons?7:0;self.seasonScrollHeightConstraint.constant=hasSeasons?MAX(46,self.routeScrollHeightConstraint.constant):0;self.seasonScrollView.accessibilityElementsHidden=!hasSeasons;self.seasonScrollView.userInteractionEnabled=hasSeasons;
     for(UIView *view in self.seasonButtons.arrangedSubviews.copy){[self.seasonButtons removeArrangedSubview:view];[view removeFromSuperview];}
     for(NSUInteger index=0;index<seasons.count;index++){
         NSDictionary *season=[seasons[index] isKindOfClass:NSDictionary.class]?seasons[index]:@{};NSString *name=[season[@"name"] isKindOfClass:NSString.class]?season[@"name"]:[season[@"title"] isKindOfClass:NSString.class]?season[@"title"]:[NSString stringWithFormat:@"第 %lu 季",(unsigned long)index+1];
@@ -346,19 +354,25 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
     }
 }
 - (void)rebuildSelection {
-    if(self.selectedSeasonIndex>=self.seasonCollections.count)self.selectedSeasonIndex=0;
-    if(self.selectedLineIndex>=self.lines.count)self.selectedLineIndex=0;
+    if(self.selectedSeasonIndex<0||self.selectedSeasonIndex>=self.seasonCollections.count)self.selectedSeasonIndex=0;
+    if(self.selectedLineIndex<0||self.selectedLineIndex>=self.lines.count)self.selectedLineIndex=0;
+    UIFont *chipFont=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleSubheadline] scaledFontForFont:[UIFont systemFontOfSize:14 weight:UIFontWeightSemibold]];
+    CGFloat chipHeight=MAX(44,ceil(chipFont.lineHeight)+16);
+    self.routeScrollHeightConstraint.constant=chipHeight;
+    self.quickScrollHeightConstraint.constant=chipHeight;
+    self.pagingStack.axis=UIContentSizeCategoryIsAccessibilityCategory(self.traitCollection.preferredContentSizeCategory)?UILayoutConstraintAxisVertical:UILayoutConstraintAxisHorizontal;
+    self.pagingStack.alignment=UIStackViewAlignmentFill;
     [self rebuildHeroBadges];[self buildSeasons];
     for(UIView *button in self.routeButtons.arrangedSubviews.copy){[self.routeButtons removeArrangedSubview:button];[button removeFromSuperview];}
     for(NSUInteger index=0;index<self.lines.count;index++){
         NSDictionary *line=[self.lines[index] isKindOfClass:NSDictionary.class]?self.lines[index]:@{};NSString *name=[line[@"name"] isKindOfClass:NSString.class]?line[@"name"]:[NSString stringWithFormat:@"线路 %lu",(unsigned long)index+1];
         UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];button.translatesAutoresizingMaskIntoConstraints=NO;button.tag=index;button.accessibilityIdentifier=[NSString stringWithFormat:@"media-episode-route-%lu",(unsigned long)index];[button setTitle:name forState:UIControlStateNormal];button.titleLabel.font=[UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];MediaEpisodeApplyScaledPillFont(button);button.contentEdgeInsets=UIEdgeInsetsMake(8,13,8,13);button.layer.cornerRadius=15;button.layer.cornerCurve=kCACornerCurveContinuous;BOOL selected=index==(NSUInteger)self.selectedLineIndex;button.backgroundColor=selected?HostAccent():[UIColor colorWithWhite:1 alpha:.10];[button setTitleColor:selected?UIColor.whiteColor:MediaSelectionMuted() forState:UIControlStateNormal];button.accessibilityLabel=[NSString stringWithFormat:@"%@",name];button.accessibilityHint=@"切换到此播放线路";button.accessibilityTraits=UIAccessibilityTraitButton|(selected?UIAccessibilityTraitSelected:0);[button addTarget:self action:@selector(selectRoute:) forControlEvents:UIControlEventTouchUpInside];HostInstallPressFeedback(button);[self.routeButtons addArrangedSubview:button];
     }
-    NSArray *episodes=[self episodesForLine:self.selectedLineIndex];if(self.selectedEpisodeIndex>=episodes.count)self.selectedEpisodeIndex=0;NSUInteger pages=MAX(1,(episodes.count+CCTVEpisodesPerGroup-1)/CCTVEpisodesPerGroup);self.page=MIN(MAX(0,self.page),(NSInteger)pages-1);NSUInteger start=(NSUInteger)self.page*CCTVEpisodesPerGroup,end=MIN(start+CCTVEpisodesPerGroup,episodes.count);
+    NSArray *episodes=[self episodesForLine:self.selectedLineIndex];if(self.selectedEpisodeIndex<0||self.selectedEpisodeIndex>=episodes.count)self.selectedEpisodeIndex=0;NSUInteger pages=MAX(1,(episodes.count+CCTVEpisodesPerGroup-1)/CCTVEpisodesPerGroup);self.page=MIN(MAX(0,self.page),(NSInteger)pages-1);NSUInteger start=(NSUInteger)self.page*CCTVEpisodesPerGroup,end=MIN(start+CCTVEpisodesPerGroup,episodes.count);
     NSUInteger firstSource=end>start?CCTVEpisodeSourceIndex(start,episodes.count,self.episodeOrderReversed):0,lastSource=end>start?CCTVEpisodeSourceIndex(end-1,episodes.count,self.episodeOrderReversed):0;
     self.pageLabel.text=episodes.count?[NSString stringWithFormat:@"第 %ld/%lu 组 · 第 %lu–%lu 集 · %@",(long)self.page+1,(unsigned long)pages,(unsigned long)firstSource+1,(unsigned long)lastSource+1,self.episodeOrderReversed?@"倒序":@"正序"]:@"当前线路没有可选分集";
     self.episodeCountLabel.text=episodes.count?[NSString stringWithFormat:@"· %lu 集 · 当前第 %lu 集",(unsigned long)episodes.count,(unsigned long)self.selectedEpisodeIndex+1]:@"· 暂无分集";
-    if(!self.lines.count&&!episodes.count)self.statusLabel.text=@"此影片没有可用分集，请返回详情页重新加载或更换来源。";else if(!episodes.count)self.statusLabel.text=@"当前线路没有可选分集，请切换其他线路。";else self.statusLabel.text=@"";
+    if(!self.lines.count&&!episodes.count)self.statusLabel.text=@"此影片没有可用分集，请返回详情页重新加载或更换来源。";else if(!episodes.count)self.statusLabel.text=@"当前线路没有可选分集，请切换其他线路。";else if(!self.inFlightEpisodeSignature.length)self.statusLabel.text=@"";
     self.statusLabel.hidden=!self.statusLabel.text.length;
     BOOL expanded=self.episodeExpanded;self.episodeDisclosureLabel.text=expanded?@"收起":@"展开";self.episodeDisclosureIcon.image=[UIImage systemImageNamed:expanded?@"chevron.up":@"chevron.down"];self.episodeDetails.hidden=!expanded;self.episodeDisclosureButton.accessibilityValue=expanded?@"已展开":@"已收起";
     CCTVEpisodeLayoutStyle epStyle=CCTVEpisodeCurrentLayoutStyle();
@@ -369,6 +383,9 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
     [self.reverseButton setTitle:self.episodeOrderReversed?@"正序排列":@"倒序排列" forState:UIControlStateNormal];self.reverseButton.accessibilityLabel=self.episodeOrderReversed?@"按正序排列分集，当前为倒序":@"按倒序排列分集，当前为正序";self.reverseButton.hidden=episodes.count<2;
     self.previousButton.hidden=pages<=1;self.nextButton.hidden=pages<=1;self.previousButton.enabled=self.page>0;self.nextButton.enabled=self.page+1<pages;[self.previousButton setTitle:@"‹ 上一组" forState:UIControlStateNormal];[self.nextButton setTitle:@"下一组 ›" forState:UIControlStateNormal];
     NSUInteger quickLimit=MIN((NSUInteger)24,episodes.count);
+    NSUInteger selectedDisplayIndex=CCTVEpisodeDisplayIndex((NSUInteger)self.selectedEpisodeIndex,episodes.count,self.episodeOrderReversed);
+    NSUInteger quickStart=selectedDisplayIndex!=NSNotFound&&selectedDisplayIndex>quickLimit/2?selectedDisplayIndex-quickLimit/2:0;
+    quickStart=MIN(quickStart,episodes.count-quickLimit);
     self.quickEpisodeScroll.hidden=episodes.count==0;
     NSArray<UIView *> *existingChips=self.quickEpisodeStack.arrangedSubviews.copy;
     NSInteger activeQuickChipIndex=-1;
@@ -379,11 +396,12 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
             chip=[UIButton buttonWithType:UIButtonTypeSystem];
             chip.layer.cornerRadius=12;
             chip.contentEdgeInsets=UIEdgeInsetsMake(6,12,6,12);
+            [chip.heightAnchor constraintGreaterThanOrEqualToConstant:44].active=YES;
             [chip addTarget:self action:@selector(selectEpisode:) forControlEvents:UIControlEventTouchUpInside];
             [self.quickEpisodeStack addArrangedSubview:chip];
         }
         chip.hidden=NO;
-        NSUInteger sourceIdx=CCTVEpisodeSourceIndex(quickIdx,episodes.count,self.episodeOrderReversed);
+        NSUInteger sourceIdx=CCTVEpisodeSourceIndex(quickStart+quickIdx,episodes.count,self.episodeOrderReversed);
         NSDictionary *ep=episodes[sourceIdx];
         NSString *epName=[ep[@"name"] isKindOfClass:NSString.class]&&[ep[@"name"] length]?ep[@"name"]:[NSString stringWithFormat:@"第 %lu 集",(unsigned long)sourceIdx+1];
         chip.tag=(NSInteger)sourceIdx;
@@ -391,6 +409,9 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
         BOOL isSelected=(NSInteger)sourceIdx==self.selectedEpisodeIndex;
         if(isSelected)activeQuickChipIndex=(NSInteger)quickIdx;
         HostStylePillButton(chip,isSelected);
+        MediaEpisodeApplyScaledPillFont(chip);
+        chip.accessibilityLabel=epName;
+        chip.accessibilityTraits=UIAccessibilityTraitButton|(isSelected?UIAccessibilityTraitSelected:0);
     }
     [self.episodeButtons removeAllObjects];
     BOOL isAccessibilitySize=UIContentSizeCategoryIsAccessibilityCategory(self.traitCollection.preferredContentSizeCategory);
@@ -440,11 +461,13 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
             NSUInteger displayIndex=start+rowIndex*columns+col;
             if(displayIndex<end){
                 button.hidden=NO;
+                button.alpha=1;
+                button.userInteractionEnabled=YES;
                 button.accessibilityElementsHidden=NO;
                 NSUInteger index=CCTVEpisodeSourceIndex(displayIndex,episodes.count,self.episodeOrderReversed);
                 NSDictionary *episode=episodes[index];
                 NSString *name=[episode[@"name"] isKindOfClass:NSString.class]?episode[@"name"]:[NSString stringWithFormat:@"第 %lu 集",(unsigned long)index+1];
-                BOOL selected=self.selectionUpdatesPlayer&&(NSInteger)index==self.selectedEpisodeIndex;
+                BOOL selected=(NSInteger)index==self.selectedEpisodeIndex;
                 NSString *displayTitle=CCTVEpisodeFormattedDisplayTitle(episode,index,epStyle,selected,NO,showEpBadge);
                 [button setTitle:displayTitle forState:UIControlStateNormal];
                 if(epStyle==CCTVEpisodeLayoutStyleList||epStyle==CCTVEpisodeLayoutStyleCard2){
@@ -459,20 +482,23 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
                 button.tag=index;
                 button.accessibilityIdentifier=[NSString stringWithFormat:@"media-episode-item-%lu",(unsigned long)index];
                 button.accessibilityLabel=[NSString stringWithFormat:@"%@，第 %lu 集",name,(unsigned long)index+1];
+                button.accessibilityTraits=UIAccessibilityTraitButton|(selected?UIAccessibilityTraitSelected:0);
                 button.backgroundColor=selected?[HostAccent() colorWithAlphaComponent:.78]:[UIColor colorWithWhite:1 alpha:.08];
                 [button setTitleColor:selected?UIColor.whiteColor:MediaSelectionMuted() forState:UIControlStateNormal];
                 button.layer.borderWidth=selected?0:.6;
                 button.layer.borderColor=[UIColor colorWithWhite:1 alpha:.09].CGColor;
                 [self.episodeButtons addObject:button];
             }else{
-                button.hidden=YES;
+                button.hidden=NO;
+                button.alpha=0;
+                button.userInteractionEnabled=NO;
                 button.accessibilityElementsHidden=YES;
             }
         }
     }
     if(!self.statusLabel.text.length)self.statusLabel.hidden=YES;
     NSString *episodeName=episodes.count?[episodes[(NSUInteger)self.selectedEpisodeIndex][@"name"] description]:@"暂无可播放分集";if(!episodeName.length)episodeName=[NSString stringWithFormat:@"第 %ld 集",(long)self.selectedEpisodeIndex+1];
-    [self.continueButton setTitle:episodes.count?[NSString stringWithFormat:@"继续播放  ·  %@",episodeName]:episodeName forState:UIControlStateNormal];self.continueButton.accessibilityValue=episodes.count?[NSString stringWithFormat:@"当前选择 %@",episodeName]:@"没有可播放分集";self.continueButton.enabled=episodes.count>0;self.continueButton.alpha=episodes.count?1:.56;
+    [self.continueButton setTitle:episodes.count?[NSString stringWithFormat:@"继续播放  ·  %@",episodeName]:episodeName forState:UIControlStateNormal];self.continueButton.accessibilityValue=episodes.count?[NSString stringWithFormat:@"当前选择 %@",episodeName]:@"没有可播放分集";self.continueButton.enabled=episodes.count>0&&!self.inFlightEpisodeSignature.length;self.continueButton.alpha=episodes.count?1:.56;
     __weak typeof(self) weakSelf=self;
     dispatch_async(dispatch_get_main_queue(),^{
         MediaEpisodeSelectionViewController *owner=weakSelf;if(!owner)return;
@@ -597,9 +623,14 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
     if(epBtn.tag<0||epBtn.tag>=(NSInteger)episodes.count)return nil;
     NSDictionary *episode=episodes[(NSUInteger)epBtn.tag];
     NSString *epName=[episode[@"name"] isKindOfClass:NSString.class]&&[episode[@"name"] length]?episode[@"name"]:[NSString stringWithFormat:@"第 %ld 集",(long)epBtn.tag+1];
+    NSInteger seasonIndex=self.selectedSeasonIndex,lineIndex=self.selectedLineIndex,episodeIndex=epBtn.tag;
     __weak typeof(self) weakSelf=self;
     return [UIContextMenuConfiguration configurationWithIdentifier:nil previewProvider:nil actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggested){
-        UIAction *playAct=[UIAction actionWithTitle:@"立即播放此集" image:[UIImage systemImageNamed:@"play.fill"] identifier:nil handler:^(__unused UIAction *a){[weakSelf selectEpisode:epBtn];}];
+        UIAction *playAct=[UIAction actionWithTitle:@"立即播放此集" image:[UIImage systemImageNamed:@"play.fill"] identifier:nil handler:^(__unused UIAction *a){MediaEpisodeSelectionViewController *owner=weakSelf;
+            if(!owner||owner.selectedSeasonIndex!=seasonIndex||owner.selectedLineIndex!=lineIndex)return;
+            NSArray *current=[owner episodesForLine:lineIndex];
+            if(episodeIndex>=current.count||![current[(NSUInteger)episodeIndex] isEqual:episode])return;
+            UIButton *selection=[UIButton new];selection.tag=episodeIndex;[owner selectEpisode:selection];}];
         UIAction *copyAct=[UIAction actionWithTitle:@"复制分集名称" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *a){UIPasteboard.generalPasteboard.string=epName;}];
         return [UIMenu menuWithTitle:epName children:@[playAct,copyAct]];
     }];
@@ -616,5 +647,6 @@ static void MediaEpisodeApplyScaledPillFont(UIButton *button) {
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
     [super traitCollectionDidChange:previousTraitCollection];
     if([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection])[self reloadThemeAppearance];
+    else if(self.isViewLoaded&&![previousTraitCollection.preferredContentSizeCategory isEqual:self.traitCollection.preferredContentSizeCategory])[self rebuildSelection];
 }
 @end
