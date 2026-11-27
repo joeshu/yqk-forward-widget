@@ -124,7 +124,7 @@ class MPVLifecycleBehaviorTests(unittest.TestCase):
         self.assertEqual(r["waited"], 0)
         self.assertGreaterEqual(r["elapsed_ms"], 150)
         self.assertLess(r["elapsed_ms"], 1000)
-        self.assertEqual(r["state"], 3)
+        self.assertEqual(r["state"], 2)  # Cleanup still owns a live consumer.
 
     def test_concurrent_destroy_single_owner(self):
         r = self.results["concurrent_destroy_single_owner"]

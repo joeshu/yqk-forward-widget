@@ -25,6 +25,8 @@
 #import "LocalServiceReadiness.h"
 #import "RuntimeDiagnostics.h"
 #import "MediaPlaybackViewController.h"
+#import "MediaPlaybackCicadaControls.h"
+#import "MediaPlaybackMPVAdapter.h"
 #import "MediaWebViewController.h"
 #import <WebKit/WebKit.h>
 #import "MediaEpisodeSelectionViewController.h"
@@ -42,6 +44,7 @@
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
 #import <AVKit/AVKit.h>
+#import <QuartzCore/CAMetalLayer.h>
 #import <objc/runtime.h>
 #import "HostLibraryStore.h"
 
@@ -51,6 +54,12 @@ extern BOOL PlaybackGestureRunSmokeChecks(void);
 extern void ImportSnapshotRunSmokeChecksAsync(void (^completion)(BOOL passed));
 extern BOOL CicadaBudgetRunSmokeChecks(void);
 extern BOOL MediaPageReviewRunSmokeChecks(void);
+extern BOOL MPVSeekRunSmokeChecks(void);
+@interface MediaPlaybackViewController (MPVFullscreenSmoke)
+- (void)mountCicadaRenderView:(UIView *)renderView inHost:(UIView *)host;
+- (void)refreshCicadaControls;
+- (void)teardownCicadaAdapter;
+@end
 @interface ResourceImportWorkflowViewController (SmokeImport)
 - (NSMutableDictionary *)candidateForData:(NSData *)data file:(NSURL *)file origin:(NSString *)origin companions:(NSDictionary *)companions hint:(NSString *)hint;
 - (void)saveSelected;
@@ -417,7 +426,10 @@ static void next(NSArray *steps, NSUInteger index) {
               ((dispatch_block_t)step[@"run"])();
           }else ((dispatch_block_t)step)();
       } @catch (NSException *e) {
-          [failures addObject:e.reason ?: e.name];
+          NSString *stack=[e.callStackSymbols componentsJoinedByString:@"\n"];
+          NSString *failure=[NSString stringWithFormat:@"smoke step %lu: %@\n%@",(unsigned long)index,e.reason?:e.name,stack];
+          [failures addObject:failure];
+          NSLog(@"[SmokeException] %@",failure);
       }
       next(steps, index + 1);
     });
@@ -452,6 +464,7 @@ static void next(NSArray *steps, NSUInteger index) {
       check(LiveCatalogRunSmokeChecks(),@"live catchup identity, disabled sources and catalog sizing");
       check(PlaybackGestureRunSmokeChecks(),@"live volume displacement is independent of gesture event frequency");
       check(CicadaBudgetRunSmokeChecks(),@"Cicada first-frame budget excludes paused time");
+      check(MPVSeekRunSmokeChecks(),@"MPV seek rejects non-finite input and preserves reentrant requests");
       check(MediaPageReviewRunSmokeChecks(),@"media page continuation, seasonal episodes and selection state");
       check([CNPlayerCrashGuard install], @"CNPlayer thumbnail exception guard installs");
       check([CNPlayer smokeCicadaLicenseOverrideCount]==0,@"SDK setup preserves the Cicada core's built-in license endpoint without a host override");
@@ -502,6 +515,9 @@ static void next(NSArray *steps, NSUInteger index) {
       __block NSArray<NSDictionary *> *(^resourceProfilesProvider)(void);
       __block MediaEpisodeSelectionViewController *mediaEpisodes;
       __block MediaPlaybackViewController *mediaPlayback;
+      __block MediaPlaybackViewController *mpvFullscreenProbe;
+      __block MediaPlaybackMPVAdapter *mpvSurfaceAdapter;
+      __block UIViewController *mpvFullscreenPreviousRoot;
       __block NSDate *stalePlaybackDeadline;
       __block ResourceImportWorkflowViewController *importProbe;
       __block TVBoxCatalogViewController *catalogSmokePage;
@@ -1530,7 +1546,59 @@ static void next(NSArray *steps, NSUInteger index) {
             CGFloat dr=0,dg=0,db=0,da=0;[darkBackground getRed:&dr green:&dg blue:&db alpha:&da];
             check(dr<0.1&&dg<0.1&&db<0.1, @"dark theme resolves a dark global page background");
             capture(self.window,@"23-global-dark-theme");
-          }}
+          }},
+          ^{
+            // Exercise the app's real MPV view and fullscreen controls without
+            // requiring the device-only renderer in the UI smoke target.
+            mpvFullscreenProbe=[MediaPlaybackViewController new];
+            mpvFullscreenPreviousRoot=self.window.rootViewController;
+            self.window.rootViewController=mpvFullscreenProbe;
+            [mpvFullscreenProbe loadViewIfNeeded];
+            [mpvFullscreenProbe setValue:@(9.0/16.0) forKey:@"videoAspectRatio"];
+            NSURL *fixtureURL=[NSURL URLWithString:@"https://fixture.test/video.mp4"];
+            mpvSurfaceAdapter=[[MediaPlaybackMPVAdapter alloc] initWithURL:fixtureURL headers:@{} networkTimeout:1];
+            [mpvFullscreenProbe setValue:mpvSurfaceAdapter forKey:@"cicadaAdapter"];
+            UIView *inlineHost=[mpvFullscreenProbe valueForKey:@"videoView"];
+            if(!inlineHost||mpvFullscreenProbe.view.window!=self.window){check(NO,@"MPV fullscreen smoke controller is mounted before reparenting its render view");return;}
+            [mpvFullscreenProbe mountCicadaRenderView:mpvSurfaceAdapter.playerView inHost:inlineHost];
+            MediaPlaybackCicadaControls *controls=[mpvFullscreenProbe valueForKey:@"cicadaControlsBuilder"];
+            [mpvFullscreenProbe refreshCicadaControls];
+            check(!controls.fullscreenButton.enabled,@"MPV fullscreen waits for the first video frame");
+            [mpvFullscreenProbe setValue:@YES forKey:@"videoFrameReady"];
+            [mpvFullscreenProbe refreshCicadaControls];
+            [controls.fullscreenButton sendActionsForControlEvents:UIControlEventTouchUpInside];
+            [controls.fullscreenButton sendActionsForControlEvents:UIControlEventTouchUpInside];
+          },
+          ^{
+            UIViewController *host=[mpvFullscreenProbe valueForKey:@"cicadaFullscreenHost"];
+            UIView *inlineHost=[mpvFullscreenProbe valueForKey:@"videoView"];
+            UIView *renderView=mpvSurfaceAdapter.playerView;
+            CAMetalLayer *metalLayer=(CAMetalLayer *)renderView.layer;
+            check(host.view.window==self.window&&renderView.superview==host.view&&inlineHost.superview==mpvFullscreenProbe.view,@"MPV fullscreen moves only the render view after both hosts are visible");
+            check([metalLayer isKindOfClass:CAMetalLayer.class]&&metalLayer.drawableSize.width>1&&metalLayer.drawableSize.height>1,@"MPV fullscreen keeps a valid Metal drawable after duplicate entry taps");
+            UIButton *close=[host valueForKey:@"closeButton"];
+            [close sendActionsForControlEvents:UIControlEventTouchUpInside];
+          },
+          ^{
+            UIView *inlineHost=[mpvFullscreenProbe valueForKey:@"videoView"];
+            check(![mpvFullscreenProbe valueForKey:@"cicadaFullscreenHost"]&&mpvSurfaceAdapter.playerView.superview==inlineHost&&[mpvFullscreenProbe valueForKey:@"cicadaAdapter"]==mpvSurfaceAdapter,@"MPV fullscreen closes back to the same inline render view and adapter");
+            [mpvFullscreenProbe setValue:@(16.0/9.0) forKey:@"videoAspectRatio"];
+            MediaPlaybackCicadaControls *controls=[mpvFullscreenProbe valueForKey:@"cicadaControlsBuilder"];
+            [controls.fullscreenButton sendActionsForControlEvents:UIControlEventTouchUpInside];
+          },
+          ^{
+            UIViewController *host=[mpvFullscreenProbe valueForKey:@"cicadaFullscreenHost"];
+            check(host&&mpvSurfaceAdapter.playerView.superview==host.view,@"MPV fullscreen can reopen after exit");
+            [mpvFullscreenProbe teardownCicadaAdapter];
+          },
+          ^{
+            check(![mpvFullscreenProbe valueForKey:@"cicadaFullscreenHost"]&&!mpvFullscreenProbe.presentedViewController&&!mpvSurfaceAdapter.playerView.superview,@"MPV teardown dismisses an active fullscreen host and removes its render view");
+            self.window.rootViewController=mpvFullscreenPreviousRoot;
+            mpvFullscreenPreviousRoot=nil;
+            [self.window makeKeyAndVisible];
+            mpvFullscreenProbe=nil;
+            mpvSurfaceAdapter=nil;
+          }
       ];
       next(steps, 0);
     });

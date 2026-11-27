@@ -29,7 +29,7 @@ class TestBatch1MPVAndRouterFixes(unittest.TestCase):
         self.assertIn("UIApplicationWillResignActiveNotification", src)
         self.assertIn("UIApplicationDidEnterBackgroundNotification", src)
         self.assertIn("UIApplicationDidBecomeActiveNotification", src)
-        self.assertIn("retainedMetalLayer", src)
+        self.assertIn("retainedMetalView = self.metalView", src)
 
     def test_mpv_adapter_thread_safety_and_header_append(self) -> None:
         src = read_source("MediaPlaybackMPVAdapter.m")
@@ -73,7 +73,8 @@ class TestBatch2PlayerCoreFixes(unittest.TestCase):
 
     def test_playback_vc_visibility_resume_and_cleanup_fixes(self) -> None:
         src = read_source("MediaPlaybackViewController.m")
-        self.assertIn("restorePortraitOrientationIfNeeded", src)
+        self.assertIn("restoreOrientationForPresenter:owner", src)
+        self.assertIn("dismissViewControllerAnimated:NO completion:didClose", src)
         self.assertIn("fabs(position-self.lastPersistedPosition)>=10.0", src)
         self.assertIn("[self.subtitleOverlay clearSubtitles];", src)
         self.assertIn("请选择分集", src)

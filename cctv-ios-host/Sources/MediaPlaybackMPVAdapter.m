@@ -31,9 +31,8 @@ static NSTimeInterval const MediaPlaybackMPVSeekPositionTolerance = 1.0;
 // 直接执行，不 dispatch_sync（否则自锁）。
 static const void *kMediaPlaybackMPVCommandQueueKey = &kMediaPlaybackMPVCommandQueueKey;
 static NSTimeInterval const MediaPlaybackMPVEventCoalesceInterval = 0.25;
-// Bounded wait for the event thread to leave mpv_wait_event before the
-// handle is released in destroy (T02/S1). The wait never blocks the
-// caller: on timeout teardown proceeds anyway and the state still closes.
+// If the consumer takes this long to exit, wake it again. The handle
+// remains alive until the background teardown confirms consumer exit.
 static int const MediaPlaybackMPVDestroyEventExitTimeoutMs = 2000;
 
 // ---- Minimal libmpv v2 C ABI declarations (loaded dynamically via dlopen RTLD_LOCAL) ----
@@ -200,20 +199,28 @@ static const CCTVMPVSymbolTable *CCTVMPVLoadSymbols(void) {
         CAMetalLayer *metalLayer = (CAMetalLayer *)self.layer;
         metalLayer.contentsScale = scale;
         metalLayer.framebufferOnly = YES;
-        metalLayer.drawableSize = CGSizeMake(ceil(initialFrame.size.width * scale), ceil(initialFrame.size.height * scale));
+        metalLayer.drawableSize = CGSizeMake(MAX(2,ceil(initialFrame.size.width * scale)), MAX(2,ceil(initialFrame.size.height * scale)));
     }
     return self;
 }
 - (void)syncMetalDrawableMetrics {
+    UIWindow *window=self.window;
+    if(!window)return;
+    // Ignore transient UIKit layout sizes. MoltenVK can still use its own
+    // 1x1 surface update to finish outstanding presentations at teardown.
+    CGSize boundsSize=self.bounds.size;
+    if(!isfinite(boundsSize.width)||!isfinite(boundsSize.height)||boundsSize.width<=1||boundsSize.height<=1)return;
     CAMetalLayer *metalLayer = (CAMetalLayer *)self.layer;
-    CGFloat scale = self.window.screen.scale > 0 ? self.window.screen.scale : UIScreen.mainScreen.scale;
-    if (scale <= 0) scale = 2.0;
-    self.contentScaleFactor = scale;
-    metalLayer.contentsScale = scale;
-    CGSize boundsSize = self.bounds.size;
-    if (boundsSize.width > 0 && boundsSize.height > 0) {
-        metalLayer.drawableSize = CGSizeMake(ceil(boundsSize.width * scale), ceil(boundsSize.height * scale));
-    }
+    CGFloat scale=window.screen.scale;
+    if(!isfinite(scale)||scale<=0)scale=2.0;
+    CGSize drawableSize=CGSizeMake(ceil(boundsSize.width*scale),ceil(boundsSize.height*scale));
+    if(self.contentScaleFactor==scale&&metalLayer.contentsScale==scale&&CGSizeEqualToSize(metalLayer.drawableSize,drawableSize))return;
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    if(self.contentScaleFactor!=scale)self.contentScaleFactor=scale;
+    if(metalLayer.contentsScale!=scale)metalLayer.contentsScale=scale;
+    if(!CGSizeEqualToSize(metalLayer.drawableSize,drawableSize))metalLayer.drawableSize=drawableSize;
+    [CATransaction commit];
 }
 - (void)didMoveToWindow {
     [super didMoveToWindow];
@@ -418,6 +425,10 @@ enum {
     if (self.destroyed || self.videoDisabledForBackground) return;
     if (!host_mpv_lifecycle_command_allowed(_lifecycle)) return;
     self.videoDisabledForBackground = YES;
+    if(self.firstFrameWatchdog){
+        self.firstFrameRemaining=MAX(0,self.firstFrameRemaining-(CACurrentMediaTime()-self.firstFrameBudgetStarted));
+        [self cancelFirstFrameWatchdog];
+    }
     // Synchronously (bounded) disable video output before returning from background notification
     // so MoltenVK/Metal does not submit GPU command buffers while backgrounded (prevents iOS SIGKILL).
     dispatch_semaphore_t sem = dispatch_semaphore_create(0);
@@ -450,19 +461,20 @@ enum {
     if (self.destroyed || !self.videoDisabledForBackground) return;
     self.videoDisabledForBackground = NO;
     if (!host_mpv_lifecycle_command_allowed(_lifecycle)) return;
-    NSString *restoreVid = self.savedVidBeforeBackground.length ? self.savedVidBeforeBackground : @"auto";
-    self.savedVidBeforeBackground = nil;
     __weak typeof(self) weakSelf = self;
     [self runOnCommandQueue:^{
         MediaPlaybackMPVAdapter *strongSelf = weakSelf;
         if (!strongSelf || !host_mpv_lifecycle_command_allowed(strongSelf->_lifecycle)) return;
         [strongSelf.mpvLock lock];
         mpv_handle *ctx = strongSelf.mpvHandle;
+        NSString *restoreVid=strongSelf.savedVidBeforeBackground?:@"auto";
+        strongSelf.savedVidBeforeBackground=nil;
         if (ctx) {
             [strongSelf mpvSetPropertyString:ctx name:"vid" value:restoreVid.UTF8String operation:@"foregroundRestore"];
         }
         [strongSelf.mpvLock unlock];
     }];
+    if(self.wantStartAfterPrepare&&self.state!=MediaPlaybackCicadaAdapterStateCompleted&&self.state!=MediaPlaybackCicadaAdapterStateFailed)[self start];
 }
 
 - (void)dealloc {
@@ -809,6 +821,7 @@ enum {
     if (self.destroyed) return;
     self.pausedByUser = NO;
     self.wantStartAfterPrepare = YES;
+    if(self.videoDisabledForBackground)return;
     // S2：暂停后恢复重新按剩余预算计时（watchdog 已存在时 arm 是 no-op；
     // prepare 尚未完成时不 arm，预算从 prepare 末尾开始计）。
     if (self.preparedNotified) [self armFirstFrameWatchdog];
@@ -918,7 +931,7 @@ enum {
     const CCTVMPVSymbolTable *syms = self.syms;
     self.mpvHandle = NULL;
     self.eventThread = nil;
-    CALayer *retainedMetalLayer = self.metalLayer;
+    UIView *retainedMetalView = self.metalView;
     [self.mpvLock unlock];
 
     if (NSThread.isMainThread) {
@@ -944,25 +957,24 @@ enum {
         syms->wakeup(ctx);
         // Release the handle only after the event consumer has left
         // wait_event, on a background queue so teardown never blocks
-        // the caller or the UI. Retain metalLayer until terminate_destroy
-        // finishes so MoltenVK swapchain teardown never UAFs the CAMetalLayer.
+        // the caller or the UI. Keep the Metal view and its backing layer
+        // alive until MoltenVK has finished destroying the swapchain.
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
             int exited = host_mpv_lifecycle_wait_event_thread_exit(lc, MediaPlaybackMPVDestroyEventExitTimeoutMs);
             if (!exited) {
                 syms->wakeup(ctx);
                 exited = host_mpv_lifecycle_wait_event_thread_exit(lc, MediaPlaybackMPVDestroyEventExitTimeoutMs);
                 if (!exited) {
-                    NSLog(@"[CCTVHost] MPV destroy event thread exit timed out after retry");
+                    NSLog(@"[CCTVHost] MPV teardown deferred until the event thread exits");
+                    exited = host_mpv_lifecycle_wait_event_thread_exit(lc, -1);
                 }
             }
-            syms->terminate_destroy(ctx);
-            host_mpv_lifecycle_finish_destroy(lc);
-            host_mpv_lifecycle_release(lc);
-            if (retainedMetalLayer) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    (void)retainedMetalLayer;
-                });
+            if (exited) {
+                syms->terminate_destroy(ctx);
+                host_mpv_lifecycle_finish_destroy(lc);
             }
+            host_mpv_lifecycle_release(lc);
+            dispatch_async(dispatch_get_main_queue(), ^{ (void)retainedMetalView; });
         });
     } else {
         host_mpv_lifecycle_finish_destroy(lc);
@@ -971,22 +983,31 @@ enum {
 }
 
 - (void)seekToTime:(NSTimeInterval)time completion:(void (^)(BOOL finished))completion {
+    if (!NSThread.isMainThread) {
+        dispatch_async(dispatch_get_main_queue(), ^{ [self seekToTime:time completion:completion]; });
+        return;
+    }
     if (self.destroyed) {
         if (completion) completion(NO);
         return;
     }
-    if (!host_mpv_lifecycle_command_allowed(_lifecycle)) {
+    if (!isfinite(time) || !host_mpv_lifecycle_command_allowed(_lifecycle)) {
         if (completion) completion(NO);
         return;
     }
     // S3：新请求取消旧请求（完成 NO，一次且仅一次）；每个请求独立 id +
     // 目标 + 3 秒 deadline，过期未落点也完成 NO，不无限等待。
+    // Reserve this request before notifying the previous caller. That callback
+    // may synchronously start a newer seek or destroy this adapter.
+    NSUInteger seekID = ++self.pendingSeekID;
     [self finishPendingSeek:NO];
+    if (self.destroyed || self.pendingSeekID != seekID || !host_mpv_lifecycle_command_allowed(_lifecycle)) {
+        if (completion) completion(NO);
+        return;
+    }
     self.pendingSeekCompletion = completion;
-    self.pendingSeekID += 1;
     self.pendingSeekTarget = MAX(0.0, time);
     self.seekEventObserved = NO;
-    NSUInteger seekID = self.pendingSeekID;
     __weak typeof(self) weakSelf = self;
     [self runOnMain:^{
         MediaPlaybackMPVAdapter *strongSelf = weakSelf;
@@ -1286,7 +1307,7 @@ enum {
 - (void)armFirstFrameWatchdog {
     // S2：只按剩余预算 arm 一次；暂停冻结后 start 按剩余重 arm，已有
     // 计时器/已报首帧/已报纯音频/已销毁/用户暂停态时是 no-op。
-    if (self.firstFrameWatchdog || self.firstFrameNotified || self.audioOnlyNotified || self.destroyed || self.pausedByUser) return;
+    if (self.firstFrameWatchdog || self.firstFrameNotified || self.audioOnlyNotified || self.destroyed || self.pausedByUser || self.videoDisabledForBackground) return;
     __weak typeof(self) weakSelf = self;
     self.firstFrameBudgetStarted = CACurrentMediaTime();
     self.firstFrameWatchdog = [NSTimer scheduledTimerWithTimeInterval:MAX(0.01, self.firstFrameRemaining)

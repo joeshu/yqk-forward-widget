@@ -10,7 +10,7 @@
  *   - prepare/destroy ownership: double prepare is rejected, destroy is
  *     single-owner and idempotent, commands after the terminal stop
  *     (destroy) are rejected;
- *   - the event-consumer exit handshake: destroy waits (bounded) for the
+ *   - the event-consumer exit handshake: background teardown waits for the
  *     mpv_wait_event consumer thread to leave before the handle may be
  *     released with mpv_terminate_destroy, so terminate_destroy can never
  *     run while the consumer is still inside wait_event or reading an
@@ -69,8 +69,7 @@ int host_mpv_lifecycle_begin_prepare(host_mpv_lifecycle_t *lc);
 int host_mpv_lifecycle_abandon_prepare(host_mpv_lifecycle_t *lc);
 /* Called by the owner right before the event thread is started. */
 void host_mpv_lifecycle_note_event_thread_started(host_mpv_lifecycle_t *lc);
-/* Called by the event thread exactly once, on every exit path, before it
- * touches the handle for the last time. */
+/* Called by the event thread on every exit path after its last handle access. */
 void host_mpv_lifecycle_note_event_thread_exited(host_mpv_lifecycle_t *lc);
 /* 1 while the event thread has exited, else 0. */
 int host_mpv_lifecycle_event_thread_exited(host_mpv_lifecycle_t *lc);
@@ -80,12 +79,12 @@ int host_mpv_lifecycle_command_allowed(host_mpv_lifecycle_t *lc);
  * DESTROYING/DESTROYED returns 0: destroy is idempotent, exactly one
  * caller owns the release. */
 int host_mpv_lifecycle_begin_destroy(host_mpv_lifecycle_t *lc);
-/* Blocks until the event thread exited or timeout_ms elapsed. Returns 1
- * if the consumer exited (or was never started), 0 on timeout. The
- * caller must still release the handle afterwards: the wait is bounded
- * and never hangs the caller, timeout just means "proceed anyway". */
+/* Blocks until the consumer exits or the timeout elapses. A negative timeout
+ * waits without a deadline and is intended for background teardown only.
+ * Returns 1 if the consumer exited or was never started. A 0 result does
+ * not grant permission to release the handle. */
 int host_mpv_lifecycle_wait_event_thread_exit(host_mpv_lifecycle_t *lc, int timeout_ms);
-/* DESTROYING -> DESTROYED. No-op from any other state. */
+/* DESTROYING -> DESTROYED after the event thread exits. */
 void host_mpv_lifecycle_finish_destroy(host_mpv_lifecycle_t *lc);
 
 #ifdef __cplusplus
