@@ -190,6 +190,14 @@ static const CCTVMPVSymbolTable *CCTVMPVLoadSymbols(void) {
 + (Class)layerClass {
     return [CAMetalLayer class];
 }
+- (id<CAAction>)actionForLayer:(CALayer *)layer forKey:(NSString *)event {
+    // MoltenVK changes CAMetalLayer swapchain properties on its render thread.
+    // This view has no implicit animations, so don't route those changes through
+    // UIView's default delegate callback, which asserts that it runs on main.
+    (void)layer;
+    (void)event;
+    return (id<CAAction>)NSNull.null;
+}
 - (instancetype)initWithFrame:(CGRect)frame {
     CGRect initialFrame = (frame.size.width > 0 && frame.size.height > 0) ? frame : CGRectMake(0, 0, 1, 1);
     if ((self = [super initWithFrame:initialFrame])) {
