@@ -8,15 +8,16 @@ class TestRound30MediaMenusSearchAndPlaybackPolish(unittest.TestCase):
     def _read(self, rel_path: str) -> str:
         return (ROOT / rel_path).read_text(encoding="utf-8")
 
-    def test_playback_options_menu_uses_native_state_and_inline_sections(self):
+    def test_playback_options_menu_uses_native_state_and_navigable_sections(self):
         src = self._read("Sources/MediaPlaybackViewController.m") + self._read("Sources/MediaPlaybackSettingsCoordinator.m")
         self.assertIn("optAct.state=[selected isEqual:option]?UIMenuElementStateOn:UIMenuElementStateOff;", src)
         self.assertIn("rateAct.state=fabs(currentRate-rate)<0.01?UIMenuElementStateOn:UIMenuElementStateOff;", src)
         self.assertIn("gravAct.state=active?UIMenuElementStateOn:UIMenuElementStateOff;", src)
         self.assertIn("decAct.state=[currentDecodeMode isEqualToString:val]?UIMenuElementStateOn:UIMenuElementStateOff;", src)
-        self.assertIn('identifier:@"media.playback.menu.av" options:UIMenuOptionsDisplayInline', src)
-        self.assertIn('identifier:@"media.playback.menu.prefs" options:UIMenuOptionsDisplayInline', src)
-        self.assertIn('identifier:@"media.playback.menu.diag" options:UIMenuOptionsDisplayInline', src)
+        self.assertIn('identifier:@"media.playback.menu.av" options:0', src)
+        self.assertIn('identifier:@"media.playback.menu.controls" options:0', src)
+        self.assertIn('identifier:@"media.playback.menu.prefs" options:0', src)
+        self.assertIn('identifier:@"media.playback.menu.diag" options:0', src)
         self.assertIn('identifier:@"media.playback.menu.episodes" options:UIMenuOptionsDisplayInline', src)
 
     def test_global_search_weak_self_and_highlight_feedback(self):

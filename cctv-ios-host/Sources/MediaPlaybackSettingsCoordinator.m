@@ -273,12 +273,16 @@
     NSMutableArray<UIMenuElement *> *avChildren=[NSMutableArray arrayWithObjects:decodeMenu,[owner externalSubtitleMenu],danmaku,nil];
     if(subtitleMenu)[avChildren insertObject:subtitleMenu atIndex:1];
     if(audioMenu)[avChildren insertObject:audioMenu atIndex:avChildren.count-1];
-    UIMenu *playbackGroup=[UIMenu menuWithTitle:@"音画与解码" image:nil identifier:@"media.playback.menu.av" options:UIMenuOptionsDisplayInline children:avChildren];
+    // Keep setting categories as real navigation levels. On compact iPhone menus,
+    // nested UIMenus inside an inline group render with disclosure indicators but
+    // do not reliably open (notably on the MPV playback surface). A normal parent
+    // menu gives UIKit a distinct submenu presentation context for each category.
+    UIMenu *playbackGroup=[UIMenu menuWithTitle:@"音画与解码" image:nil identifier:@"media.playback.menu.av" options:0 children:avChildren];
     NSMutableArray<UIMenuElement *> *controlsChildren=[NSMutableArray arrayWithObjects:gravityMenu,[owner playbackSleepTimerMenu],nil];
     if([owner activeEngineSupportsRateWriting])[controlsChildren insertObject:[self playbackRateMenu] atIndex:0];
-    UIMenu *controlsGroup=[UIMenu menuWithTitle:@"播放控制" image:nil identifier:@"media.playback.menu.controls" options:UIMenuOptionsDisplayInline children:controlsChildren];
-    UIMenu *prefsGroup=[UIMenu menuWithTitle:@"观看偏好" image:nil identifier:@"media.playback.menu.prefs" options:UIMenuOptionsDisplayInline children:@[autoNextAction,awake,skipMenu]];
-    UIMenu *diagGroup=[UIMenu menuWithTitle:@"诊断与监测" image:nil identifier:@"media.playback.menu.diag" options:UIMenuOptionsDisplayInline children:@[openMonitor,copyDiag]];
+    UIMenu *controlsGroup=[UIMenu menuWithTitle:@"播放控制" image:nil identifier:@"media.playback.menu.controls" options:0 children:controlsChildren];
+    UIMenu *prefsGroup=[UIMenu menuWithTitle:@"观看偏好" image:nil identifier:@"media.playback.menu.prefs" options:0 children:@[autoNextAction,awake,skipMenu]];
+    UIMenu *diagGroup=[UIMenu menuWithTitle:@"诊断与监测" image:nil identifier:@"media.playback.menu.diag" options:0 children:@[openMonitor,copyDiag]];
     NSMutableArray<UIMenuElement *> *topChildren=[NSMutableArray array];
     if(episodeNav.count)[topChildren addObject:[UIMenu menuWithTitle:@"" image:nil identifier:@"media.playback.menu.episodes" options:UIMenuOptionsDisplayInline children:episodeNav]];
     [topChildren addObjectsFromArray:@[playbackGroup,controlsGroup,prefsGroup,diagGroup]];

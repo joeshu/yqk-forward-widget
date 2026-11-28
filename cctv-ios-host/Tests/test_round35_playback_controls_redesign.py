@@ -27,7 +27,7 @@ class Round35PlaybackControlsRedesignTests(unittest.TestCase):
         self.assertIn("sp.preferredCornerRadius = 28.0;", more)
         self.assertNotIn("UIAlertControllerStyleActionSheet", more)
 
-    def test_02_vod_playback_menu_has_aligned_sf_symbols_live_subtitles_and_clean_groups(self):
+    def test_02_vod_playback_menu_has_aligned_sf_symbols_live_subtitles_and_navigable_groups(self):
         mp = (SOURCES / "MediaPlaybackViewController.m").read_text(encoding="utf-8") + (SOURCES / "MediaPlaybackSettingsCoordinator.m").read_text(encoding="utf-8")
         for token in (
             'UIImage *icon=[UIImage systemImageNamed:isAudio?@"waveform":@"captions.bubble"];',
@@ -36,10 +36,10 @@ class Round35PlaybackControlsRedesignTests(unittest.TestCase):
             'menuWithTitle:@"片头片尾跳过" image:[UIImage systemImageNamed:@"forward.end.alt"]',
             'menuWithTitle:@"解码模式" image:[UIImage systemImageNamed:@"cpu"]',
             'danmaku.subtitle=@"当前视频未提供弹幕轨道";',
-            'identifier:@"media.playback.menu.av" options:UIMenuOptionsDisplayInline',
-            'identifier:@"media.playback.menu.controls" options:UIMenuOptionsDisplayInline',
-            'identifier:@"media.playback.menu.prefs" options:UIMenuOptionsDisplayInline',
-            'identifier:@"media.playback.menu.diag" options:UIMenuOptionsDisplayInline',
+            'identifier:@"media.playback.menu.av" options:0',
+            'identifier:@"media.playback.menu.controls" options:0',
+            'identifier:@"media.playback.menu.prefs" options:0',
+            'identifier:@"media.playback.menu.diag" options:0',
             'autoNextAction.state=autoNext?UIMenuElementStateOn:UIMenuElementStateOff;',
             'awake.state=keepAwake?UIMenuElementStateOn:UIMenuElementStateOff;',
             'act.state=(self.mediaSleepMinutes==mins)?UIMenuElementStateOn:UIMenuElementStateOff;',
