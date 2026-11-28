@@ -91,6 +91,10 @@
     [self.view setNeedsLayout];
     [self.view layoutIfNeeded];
 }
+- (void)attachAspectFitRenderView:(UIView *)renderView aspectRatio:(CGFloat)aspectRatio discardingConstraints:(NSArray<NSLayoutConstraint *> * _Nullable)constraints {
+    [NSLayoutConstraint deactivateConstraints:constraints?:@[]];
+    [self attachAspectFitRenderView:renderView aspectRatio:aspectRatio];
+}
 - (void)updateAspectFitRenderViewAspectRatio:(CGFloat)aspectRatio {
     self.aspectFitRenderViewRatio=isfinite(aspectRatio)&&aspectRatio>0.1&&aspectRatio<10.0?aspectRatio:(16.0/9.0);
     [self.view setNeedsLayout];

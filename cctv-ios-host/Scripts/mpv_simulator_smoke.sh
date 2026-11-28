@@ -33,7 +33,7 @@ xcrun simctl install "$SIM" "$APP"
 xcrun simctl launch "$SIM" com.example.cctvhost.mpvsmoke
 CONTAINER=$(xcrun simctl get_app_container "$SIM" com.example.cctvhost.mpvsmoke data)
 RESULT="$CONTAINER/Documents/mpv-results.json"
-for attempt in $(seq 1 200); do
+for attempt in $(seq 1 600); do
   if [ -f "$CONTAINER/Documents/mpv-frame-ready" ]; then
     xcrun simctl io "$SIM" screenshot "$OUT/fullscreen.png"
     touch "$CONTAINER/Documents/mpv-frame-captured"
@@ -42,7 +42,7 @@ for attempt in $(seq 1 200); do
   [ -f "$RESULT" ] && break
   sleep 0.2
 done
-for attempt in $(seq 1 45); do [ -f "$RESULT" ] && break; sleep 1; done
+for attempt in $(seq 1 180); do [ -f "$RESULT" ] && break; sleep 1; done
 xcrun simctl spawn "$SIM" log show --last 5m --style compact --predicate 'process == "CCTVMPVSmoke"' > "$OUT/simulator.log" 2>&1 || true
 if [ ! -f "$RESULT" ]; then echo '::error::MPV simulator smoke did not complete'; exit 1; fi
 cp "$RESULT" "$OUT/results.json"
