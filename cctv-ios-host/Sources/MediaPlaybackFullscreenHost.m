@@ -9,6 +9,8 @@
 @property(nonatomic) BOOL closing;
 @property(nonatomic,weak) UIWindowScene *orientationScene;
 @property(nonatomic) UIInterfaceOrientationMask orientationToRestore;
+@property(nonatomic,weak) UIView *aspectFitRenderView;
+@property(nonatomic) CGFloat aspectFitRenderViewRatio;
 - (void)closeFullscreen;
 - (void)notifyClosed;
 @end
@@ -77,6 +79,33 @@
     [self.playPauseButton setImage:[UIImage systemImageNamed:playing?@"pause.fill":@"play.fill"] forState:UIControlStateNormal];
     self.playPauseButton.accessibilityLabel=playing?@"暂停":@"播放";
     self.playPauseButton.enabled=enabled;
+}
+- (void)attachAspectFitRenderView:(UIView *)renderView aspectRatio:(CGFloat)aspectRatio {
+    if(!renderView)return;
+    self.aspectFitRenderView=renderView;
+    [self updateAspectFitRenderViewAspectRatio:aspectRatio];
+    renderView.translatesAutoresizingMaskIntoConstraints=YES;
+    renderView.autoresizingMask=UIViewAutoresizingNone;
+    [self.view insertSubview:renderView atIndex:0];
+    [self.view setNeedsLayout];
+    [self.view layoutIfNeeded];
+}
+- (void)updateAspectFitRenderViewAspectRatio:(CGFloat)aspectRatio {
+    self.aspectFitRenderViewRatio=isfinite(aspectRatio)&&aspectRatio>0.1&&aspectRatio<10.0?aspectRatio:(16.0/9.0);
+    [self.view setNeedsLayout];
+}
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    UIView *renderView=self.aspectFitRenderView;
+    CGRect bounds=self.view.bounds;
+    if(!renderView||bounds.size.width<=1||bounds.size.height<=1)return;
+    CGFloat ratio=self.aspectFitRenderViewRatio>0?self.aspectFitRenderViewRatio:(16.0/9.0);
+    CGFloat width=bounds.size.width,height=bounds.size.height;
+    if(width/height>ratio)width=height*ratio;
+    else height=width/ratio;
+    CGRect frame=CGRectMake(CGRectGetMidX(bounds)-width/2.0,CGRectGetMidY(bounds)-height/2.0,width,height);
+    if(!CGRectEqualToRect(renderView.frame,frame))renderView.frame=frame;
+    [renderView setNeedsLayout];
 }
 - (void)requestLandscapeIfPortrait {
     UIWindowScene *scene=self.view.window.windowScene;

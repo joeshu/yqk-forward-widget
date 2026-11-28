@@ -2,6 +2,7 @@
 #import "ResourceContentInspection.h"
 #import "ServiceStore.h"
 #import "HostSecureStore.h"
+#import <JavaScriptCore/JavaScriptCore.h>
 #include <zlib.h>
 #include <arpa/inet.h>
 #import <CommonCrypto/CommonDigest.h>
@@ -12,6 +13,35 @@ static NSUInteger const PackageStandaloneScriptLimit=16*1024*1024;
 static NSUInteger const PackageTotalLimit=64*1024*1024;
 static NSUInteger const PackageCountLimit=2048;
 static BOOL PackageError(NSError **error,NSString *message){if(error)*error=[NSError errorWithDomain:@"CCTVHostPackage" code:1 userInfo:@{NSLocalizedDescriptionKey:message}];return NO;}
+// Compile for classification only. Never evaluate plugin code during import.
+static BOOL PackageSourceCompilesAsScript(NSString *source){
+    if(!source.length)return NO;
+    JSContext *context=[JSContext new];if(!context)return NO;
+    __block BOOL failed=NO;
+    context.exceptionHandler=^(JSContext *ctx,JSValue *exception){failed=YES;};
+    context[@"__cctvhostPackageSource"]=source;
+    [context evaluateScript:@"new Function(__cctvhostPackageSource);"];
+    return !failed&&context.exception==nil;
+}
+static BOOL PackageWriteNodeModuleType(NSString *path,NSDictionary *metadata,NSString *moduleType,NSError **error){
+    if(![metadata isKindOfClass:NSDictionary.class])return YES;
+    NSMutableDictionary *updated=[metadata mutableCopy];
+    updated[@"type"]=[moduleType isEqual:@"esm"]?@"module":@"commonjs";
+    if([updated[@"_cctvhostGeneratedModuleType"] isKindOfClass:NSString.class])updated[@"_cctvhostGeneratedModuleType"]=moduleType;
+    NSData *bytes=[NSJSONSerialization dataWithJSONObject:updated options:0 error:error];
+    return bytes&&[bytes writeToFile:path options:NSDataWritingAtomic error:error];
+}
+static BOOL PackageHasRecoverableGeneratedModuleType(NSDictionary *metadata){
+    if(![metadata isKindOfClass:NSDictionary.class])return NO;
+    return [metadata[@"type"] isEqual:@"module"]&&([metadata[@"_cctvhostGeneratedModuleType"] isEqual:@"esm"]||metadata.count==1);
+}
+static BOOL PackageMarkGeneratedModuleTypeVerified(NSString *path,NSDictionary *metadata){
+    if(![metadata isKindOfClass:NSDictionary.class])return NO;
+    NSMutableDictionary *updated=[metadata mutableCopy];
+    updated[@"_cctvhostGeneratedModuleType"]=@"esm-verified";
+    NSData *bytes=[NSJSONSerialization dataWithJSONObject:updated options:0 error:NULL];
+    return bytes&&[bytes writeToFile:path options:NSDataWritingAtomic error:NULL];
+}
 static NSUInteger PackageScriptReadLimit(NSString *name){return [@[@"js",@"hjs",@"mjs",@"cjs"] containsObject:name.pathExtension.lowercaseString]?PackageStandaloneScriptLimit:PackageFileLimit;}
 static NSUInteger PackageInputReadLimit(NSURL *file){NSString *extension=file.pathExtension.lowercaseString;if([extension isEqual:@"zip"])return PackageArchiveLimit;if([extension isEqual:@"idjplugin"])return 2*1024*1024;if([extension isEqual:@"json"])return 512*1024;if([@[@"js",@"hjs",@"mjs",@"cjs"] containsObject:extension])return PackageStandaloneScriptLimit;return PackageFileLimit;}
 static uint16_t U16(const uint8_t *b,NSUInteger n){return (uint16_t)b[n]|((uint16_t)b[n+1]<<8);}
@@ -239,18 +269,22 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
         NSDictionary *service=services[index];NSDictionary *manifest=service[@"manifest"];
         NSString *root=service[@"packageRoot"];
         BOOL catpaw=[service[@"protocol"] isEqual:@"catpaw-http"];
-        if([service[@"builtin"] boolValue] || (![service[@"engine"] isEqual:@"javascript"] && !catpaw) ||
+        BOOL nodeEngine=[service[@"engine"] isEqual:@"node"];
+        if([service[@"builtin"] boolValue] || (![service[@"engine"] isEqual:@"javascript"] && !nodeEngine && !catpaw) ||
            ![manifest isKindOfClass:NSDictionary.class] || ![root isKindOfClass:NSString.class] || !root.length)continue;
+        if(nodeEngine){NSString *path=[root stringByAppendingPathComponent:@"package.json"];NSData *bytes=ReadBounded([NSURL fileURLWithPath:path],65536,NULL);NSDictionary *metadata=bytes?[NSJSONSerialization JSONObjectWithData:bytes options:0 error:NULL]:nil;if(!PackageHasRecoverableGeneratedModuleType(metadata))continue;}
         NSDictionary *detected=[self inspectDirectory:root error:NULL];
         if(![detected[@"runtime"] isEqual:@"node"])continue;
-        if(catpaw && [manifest[@"moduleType"] isEqual:detected[@"moduleType"]] && [(manifest[@"configEntry"]?:@"") isEqual:(detected[@"configEntry"]?:@"")])continue;
-        NSMutableDictionary *updatedManifest=[detected mutableCopy];
-        if([detected[@"moduleType"] isEqual:@"commonjs"]){
-            NSString *path=[root stringByAppendingPathComponent:@"package.json"];
-            NSData *bytes=ReadBounded([NSURL fileURLWithPath:path],65536,NULL);
-            NSDictionary *metadata=bytes?[NSJSONSerialization JSONObjectWithData:bytes options:0 error:NULL]:nil;
-            if([metadata isKindOfClass:NSDictionary.class]&&metadata.count==1&&[metadata[@"type"] isEqual:@"module"]){NSData *corrected=[NSJSONSerialization dataWithJSONObject:@{@"type":@"commonjs"} options:0 error:NULL];if(![corrected writeToFile:path options:NSDataWritingAtomic error:NULL])continue;}
+        NSString *packagePath=[root stringByAppendingPathComponent:@"package.json"];
+        NSData *packageBytes=ReadBounded([NSURL fileURLWithPath:packagePath],65536,NULL);
+        NSDictionary *packageMetadata=packageBytes?[NSJSONSerialization JSONObjectWithData:packageBytes options:0 error:NULL]:nil;
+        if(PackageHasRecoverableGeneratedModuleType(packageMetadata)){
+            if(![detected[@"moduleType"] isEqual:@"esm"]){if(!PackageWriteNodeModuleType(packagePath,packageMetadata,@"commonjs",NULL))continue;}
+            else if(![packageMetadata[@"_cctvhostGeneratedModuleType"] isEqual:@"esm-verified"]&&!PackageMarkGeneratedModuleTypeVerified(packagePath,packageMetadata))continue;
         }
+        BOOL sameMetadata=[manifest[@"runtime"] isEqual:detected[@"runtime"]]&&[manifest[@"protocol"] isEqual:detected[@"protocol"]]&&[manifest[@"moduleType"] isEqual:detected[@"moduleType"]]&&[(manifest[@"configEntry"]?:@"") isEqual:(detected[@"configEntry"]?:@"")];
+        if(sameMetadata)continue;
+        NSMutableDictionary *updatedManifest=[detected mutableCopy];
         [updatedManifest removeObjectForKey:@"packageRoot"];
         if(manifest[@"options"] && !updatedManifest[@"options"])updatedManifest[@"options"]=manifest[@"options"];
         NSMutableDictionary *updatedService=[service mutableCopy];
@@ -367,9 +401,14 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
     if([runtime isEqual:@"python"])moduleType=@"script";
     if(!moduleType.length){
         BOOL bundledCommonJS=[text rangeOfString:@"(?:^|[;\\n}])\\s*module\\s*\\.\\s*exports\\s*=" options:NSRegularExpressionSearch].location!=NSNotFound;
-        BOOL staleGeneratedType=catpawAppBundle&&bundledCommonJS&&[(NSDictionary *)package count]==1&&[package[@"type"] isEqual:@"module"];
-        BOOL esmSource=[entry.pathExtension.lowercaseString isEqual:@"mjs"] || ([package[@"type"] isEqual:@"module"]&&!staleGeneratedType) || (catpawAppBundle && !bundledCommonJS) || [text rangeOfString:@"(?:^|[\\r\\n;}]|\\*/)\\s*(?:import\\s+(?:[A-Za-z0-9_$*\\{]|[\x27\\\"])|export\\s+(?:default|function|async|const|let|var|class|\\{|\\*))" options:NSRegularExpressionSearch].location!=NSNotFound;
-        BOOL commonJS=[entry.pathExtension.lowercaseString isEqual:@"cjs"] || [text rangeOfString:@"(?:^|[;\\n])\\s*(?:module\\s*\\.\\s*exports|exports\\s*\\.)" options:NSRegularExpressionSearch].location!=NSNotFound;
+        BOOL esmHint=[text rangeOfString:@"(?:^|[\\r\\n;}]|\\*/)\\s*(?:import\\s+(?:[A-Za-z0-9_$*\\{]|[\x27\\\"])|export\\s+(?:default|function|async|const|let|var|class|\\{|\\*))" options:NSRegularExpressionSearch].location!=NSNotFound;
+        BOOL jsEntry=[entry.pathExtension.lowercaseString isEqual:@"js"];
+        BOOL commonJSEntry=[entry.pathExtension.lowercaseString isEqual:@"cjs"];
+        BOOL generatedModuleType=PackageHasRecoverableGeneratedModuleType((NSDictionary *)package);
+        BOOL parsesAsScript=(jsEntry&&(esmHint||generatedModuleType||catpawAppBundle))?PackageSourceCompilesAsScript(text):NO;
+        BOOL staleGeneratedNodeType=generatedModuleType&&parsesAsScript;
+        BOOL esmSource=!commonJSEntry&&([entry.pathExtension.lowercaseString isEqual:@"mjs"] || ([package[@"type"] isEqual:@"module"]&&!staleGeneratedNodeType) || (catpawAppBundle && !bundledCommonJS&&!parsesAsScript) || (esmHint&&!parsesAsScript));
+        BOOL commonJS=commonJSEntry || [text rangeOfString:@"(?:^|[;\\n])\\s*(?:module\\s*\\.\\s*exports|exports\\s*\\.)" options:NSRegularExpressionSearch].location!=NSNotFound;
         moduleType=esmSource?@"esm":((commonJS||bundledCommonJS)?@"commonjs":@"script");
     }
     // Explicit Node core imports need Node.js Mobile. The JSC import registry
@@ -555,15 +594,15 @@ static BOOL ExtractZip(NSData *data,NSString *directory,NSError **error){
             }
         }
         NSString *entryExtension=[manifest[@"entry"] pathExtension].lowercaseString;
-        if([manifest[@"runtime"] isEqual:@"node"]&&[manifest[@"moduleType"] isEqual:@"commonjs"]){
+        if([manifest[@"runtime"] isEqual:@"node"]&&![manifest[@"moduleType"] isEqual:@"esm"]){
             NSString *path=[manifest[@"packageRoot"] stringByAppendingPathComponent:@"package.json"];
             NSData *bytes=ReadBounded([NSURL fileURLWithPath:path],65536,NULL);NSDictionary *metadata=bytes?[NSJSONSerialization JSONObjectWithData:bytes options:0 error:NULL]:nil;
-            if([metadata isKindOfClass:NSDictionary.class]&&metadata.count==1&&[metadata[@"type"] isEqual:@"module"]){NSData *corrected=[NSJSONSerialization dataWithJSONObject:@{@"type":@"commonjs"} options:0 error:error];if(![corrected writeToFile:path options:NSDataWritingAtomic error:error])return nil;}
+            if(PackageHasRecoverableGeneratedModuleType(metadata)&&!PackageWriteNodeModuleType(path,metadata,@"commonjs",error))return nil;
         }
         if([manifest[@"runtime"] isEqual:@"node"] && [manifest[@"moduleType"] isEqual:@"esm"] && [entryExtension isEqual:@"js"]){
             NSString *nodePackage=[manifest[@"packageRoot"] stringByAppendingPathComponent:@"package.json"];
             if(![fm fileExistsAtPath:nodePackage]){
-                NSData *modulePackage=[NSJSONSerialization dataWithJSONObject:@{@"type":@"module"} options:0 error:error];
+                NSData *modulePackage=[NSJSONSerialization dataWithJSONObject:@{@"type":@"module",@"_cctvhostGeneratedModuleType":@"esm-verified"} options:0 error:error];
                 if(!modulePackage || ![modulePackage writeToFile:nodePackage options:NSDataWritingAtomic error:error])return nil;
             }
         }
