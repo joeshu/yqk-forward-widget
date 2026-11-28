@@ -1,5 +1,6 @@
 #import "MediaPlaybackFullscreenHost.h"
 #import "RuntimeDiagnostics.h"
+#import <math.h>
 
 // The playback controller owns the session. This host only presents its render view.
 @interface MediaPlaybackFullscreenHost () <UIGestureRecognizerDelegate>
@@ -103,8 +104,9 @@
     CGFloat width=bounds.size.width,height=bounds.size.height;
     if(width/height>ratio)width=height*ratio;
     else height=width/ratio;
-    CGRect frame=CGRectMake(CGRectGetMidX(bounds)-width/2.0,CGRectGetMidY(bounds)-height/2.0,width,height);
-    if(!CGRectEqualToRect(renderView.frame,frame))renderView.frame=frame;
+    CGRect frame=CGRectMake(bounds.origin.x+(bounds.size.width-width)/2.0,bounds.origin.y+(bounds.size.height-height)/2.0,width,height);
+    CGRect previous=renderView.frame;
+    if(fabs(previous.origin.x-frame.origin.x)>0.5||fabs(previous.origin.y-frame.origin.y)>0.5||fabs(previous.size.width-frame.size.width)>0.5||fabs(previous.size.height-frame.size.height)>0.5)renderView.frame=frame;
     [renderView setNeedsLayout];
 }
 - (void)requestLandscapeIfPortrait {
