@@ -506,6 +506,8 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 @property (nonatomic, assign) BOOL nativeSafeStartupActive;
 @property (nonatomic, assign) NSTimeInterval nativeAttemptStartedAt;
 @property (nonatomic, strong) NSMutableSet<NSString *> *serviceOperations;
+@property (nonatomic, strong) NSMutableSet<NSString *> *serviceStoppingOperations;
+@property (nonatomic, strong) NSMutableDictionary<NSString *, NSMutableArray *> *serviceActivationWaiters;
 // 频道
 @property (nonatomic, strong) UITableView *table;
 @property (nonatomic, strong) UICollectionView *channelGrid;
@@ -997,6 +999,7 @@ static void CCTVApplyImmersiveScrollGeometry(UIScrollView *scroll, CGRect frame,
 - (void)toggleService:(NSDictionary *)service enabled:(BOOL)enabled;
 - (void)restartMediaService:(NSDictionary *)source completion:(void (^)(NSError *))completion;
 - (void)changeService:(NSDictionary *)service enabled:(BOOL)enabled completion:(void (^)(NSError *))completion;
+- (void)finishServiceOperationForIdentifier:(NSString *)identifier error:(NSError *)error;
 - (void)hibernateExcessBackgroundVODServicesKeepingID:(NSString *)activeServiceID;
 - (void)completeServiceStopForIdentifier:(NSString *)serviceID;
 - (void)showServiceError:(NSString *)message;

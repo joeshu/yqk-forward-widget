@@ -503,6 +503,21 @@ static NSArray *CCTVBackupServices(NSError **error) {
 - (void)toggleService:(NSDictionary *)service enabled:(BOOL)enabled {
     [self changeService:service enabled:enabled completion:^(NSError *error){if(error)[self showServiceError:error.localizedDescription];}];
 }
+- (void)finishServiceOperationForIdentifier:(NSString *)identifier error:(NSError *)error {
+    if(!identifier.length)return;
+    [self.serviceOperations removeObject:identifier];
+    BOOL wasStopping=[self.serviceStoppingOperations containsObject:identifier];
+    [self.serviceStoppingOperations removeObject:identifier];
+    NSArray *waiters=[self.serviceActivationWaiters[identifier] copy]?:@[];
+    [self.serviceActivationWaiters removeObjectForKey:identifier];
+    if(!waiters.count)return;
+    if(error){for(id callback in waiters){void (^completion)(NSError *)=callback;if(completion)completion(error);}return;}
+    if(!wasStopping){for(id callback in waiters){void (^completion)(NSError *)=callback;if(completion)completion(nil);}return;}
+    NSDictionary *current=nil;
+    for(NSDictionary *candidate in ServiceStore.services)if([candidate[@"id"] isEqual:identifier]){current=candidate;break;}
+    if(!current){NSError *missing=[NSError errorWithDomain:@"CCTVHostService" code:5 userInfo:@{NSLocalizedDescriptionKey:@"资源已移除，无法继续启动。"}];for(id callback in waiters){void (^completion)(NSError *)=callback;if(completion)completion(missing);}return;}
+    [self changeService:current enabled:YES completion:^(NSError *startError){for(id callback in waiters){void (^completion)(NSError *)=callback;if(completion)completion(startError);}}];
+}
 - (void)restartMediaService:(NSDictionary *)source completion:(void (^)(NSError *))completion {
     NSString *identifier=source[@"id"]?:@"";NSDictionary *snapshot=nil;
     for(NSDictionary *candidate in ServiceStore.services)if([candidate[@"id"] isEqual:identifier]){snapshot=candidate;break;}
@@ -525,7 +540,7 @@ static NSArray *CCTVBackupServices(NSError **error) {
             if(stopped){[owner logPluginLine:@"重启前旧服务已停止" identifier:identifier name:snapshot[@"name"]?:identifier];[PluginLogStore.shared finishRunForIdentifier:identifier status:@"重启前已停止"];}
             if(!error&&!unchanged)error=failure(@"重启期间资源配置已变更，已取消启动。请重新选择来源。 ");
             if(!error){[owner clearServiceLogHandlers:identifier];NSError *startError=nil;if(![owner startService:snapshot error:&startError])error=startError?:failure(@"重新启动请求失败，请查看服务日志。 ");}
-            [owner.serviceOperations removeObject:identifier];
+            [owner finishServiceOperationForIdentifier:identifier error:error];
             [RuntimeDiagnostics.shared recordEvent:@"service_recovery_finished" category:@"service" fields:@{@"service_id":identifier,@"phase":@"start_request_finished",@"http_health_verified":@NO,@"stop_confirmed":@(stopped),@"port_released":@(stopped&&portState==0),@"start_accepted":@(!error),@"error_domain":error.domain?:@"",@"error_code":@(error.code),@"error_message":error.localizedDescription?:@""}];
             [owner refreshConfigurationPage];if(completion)completion(error);
         });
@@ -533,7 +548,10 @@ static NSArray *CCTVBackupServices(NSError **error) {
 }
 - (void)changeService:(NSDictionary *)service enabled:(BOOL)enabled completion:(void (^)(NSError *))completion {
     NSString *serviceID=service[@"id"]?:@"";if(!self.serviceOperations)self.serviceOperations=[NSMutableSet set];
-    if([self.serviceOperations containsObject:serviceID]){[self refreshConfigurationPage];if(completion)completion([NSError errorWithDomain:@"CCTVHostService" code:4 userInfo:@{NSLocalizedDescriptionKey:@"该服务正在启停，请稍候。"}]);return;}
+    if([self.serviceOperations containsObject:serviceID]){
+        if(enabled&&completion){if(!self.serviceActivationWaiters)self.serviceActivationWaiters=[NSMutableDictionary dictionary];NSMutableArray *waiters=self.serviceActivationWaiters[serviceID];if(!waiters){waiters=[NSMutableArray array];self.serviceActivationWaiters[serviceID]=waiters;}[waiters addObject:[completion copy]];[self refreshConfigurationPage];return;}
+        [self refreshConfigurationPage];if(completion)completion([NSError errorWithDomain:@"CCTVHostService" code:4 userInfo:@{NSLocalizedDescriptionKey:@"该服务正在启停，请稍候。"}]);return;
+    }
     if(enabled && [PyHost isRunningServiceIdentifier:serviceID]){
         int port=[service[@"port"] intValue];
         if(port>0){
@@ -549,8 +567,15 @@ static NSArray *CCTVBackupServices(NSError **error) {
                 dispatch_async(dispatch_get_main_queue(),^{
                     RootViewController *owner=weakSelf;
                     if(!owner){if(completion)completion(nil);return;}
-                    [owner.serviceOperations removeObject:serviceID];
-                    if(needsRestart){[owner restartMediaService:service completion:completion];return;}
+                    if(needsRestart){
+                        [owner.serviceOperations removeObject:serviceID];
+                        [owner restartMediaService:service completion:^(NSError *restartError){
+                            if(restartError)[owner finishServiceOperationForIdentifier:serviceID error:restartError];
+                            if(completion)completion(restartError);
+                        }];
+                        return;
+                    }
+                    [owner finishServiceOperationForIdentifier:serviceID error:nil];
                     [owner refreshConfigurationPage];if(completion)completion(nil);
                 });
             });
@@ -571,6 +596,7 @@ static NSArray *CCTVBackupServices(NSError **error) {
         [self refreshConfigurationPage];if(completion)completion(error);return;
     }
     [self.serviceOperations addObject:serviceID];
+    if(!self.serviceStoppingOperations)self.serviceStoppingOperations=[NSMutableSet set];[self.serviceStoppingOperations addObject:serviceID];
     [RuntimeDiagnostics.shared recordEvent:@"service_stop_requested" category:@"service" fields:@{@"service_id":serviceID, @"service_name":service[@"name"]?:@"", @"engine":service[@"engine"]?:@"python", @"port":service[@"port"]?:@0}];
     [self log:@"正在停止服务 %@",service[@"name"]];
     __weak typeof(self) weakSelf=self;
@@ -579,8 +605,12 @@ static NSArray *CCTVBackupServices(NSError **error) {
         dispatch_async(dispatch_get_main_queue(),^{
             RootViewController *owner=weakSelf;
             if(!owner){if(completion)completion(stopped?nil:stopError);return;}
-            [owner.serviceOperations removeObject:serviceID];[RuntimeDiagnostics.shared recordEvent:stopped?@"service_stopped":@"service_stop_failed" category:@"service" fields:@{@"service_id":serviceID, @"service_name":service[@"name"]?:@"", @"engine":service[@"engine"]?:@"python", @"port":service[@"port"]?:@0, @"error_domain":stopError.domain?:@"", @"error_code":@(stopError.code), @"error_message":stopError.localizedDescription?:@""}];if(!stopped){if(completion)completion(stopError);[owner refreshConfigurationPage];return;}
-            [owner completeServiceStopForIdentifier:serviceID];[owner refreshConfigurationPage];if(completion)completion(nil);
+            [RuntimeDiagnostics.shared recordEvent:stopped?@"service_stopped":@"service_stop_failed" category:@"service" fields:@{@"service_id":serviceID, @"service_name":service[@"name"]?:@"", @"engine":service[@"engine"]?:@"python", @"port":service[@"port"]?:@0, @"error_domain":stopError.domain?:@"", @"error_code":@(stopError.code), @"error_message":stopError.localizedDescription?:@""}];
+            if(completion)completion(stopped?nil:stopError);
+            BOOL activationWaiting=[owner.serviceActivationWaiters[serviceID] count]>0;
+            if(stopped&&!activationWaiting)[owner completeServiceStopForIdentifier:serviceID];
+            [owner refreshConfigurationPage];
+            [owner finishServiceOperationForIdentifier:serviceID error:stopped?nil:stopError];
         });
     });
 }

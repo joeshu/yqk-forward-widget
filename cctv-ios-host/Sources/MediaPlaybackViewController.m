@@ -2116,7 +2116,13 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
             [owner restoreVideoFromCicadaFullscreen];
             return;
         }
-        [owner mountCicadaRenderView:renderView inHost:host.view];
+        if([owner.cicadaAdapter isKindOfClass:MediaPlaybackMPVAdapter.class]){
+            [NSLayoutConstraint deactivateConstraints:owner.cicadaRenderConstraints?:@[]];
+            owner.cicadaRenderConstraints=@[];
+            [host attachAspectFitRenderView:renderView aspectRatio:owner.videoAspectRatio];
+        }else{
+            [owner mountCicadaRenderView:renderView inHost:host.view];
+        }
         [RuntimeDiagnostics.shared recordEvent:@"playback_fullscreen_attached" category:@"playback" fields:diagnosticFields];
         UIAccessibilityPostNotification(UIAccessibilityScreenChangedNotification,host.closeButton);
         if(owner.videoAspectRatio>=1.0)[host requestLandscapeIfPortrait];
@@ -2393,7 +2399,7 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
     // 与直连路径 onVideoSizeChanged: 同款换算：旋转 90/270 时宽高对调。
     CGFloat ratio=size.width/size.height;
     if(rotation==90||rotation==270)ratio=1.0/ratio;
-    if(isfinite(ratio)&&ratio>0.1&&ratio<10){self.videoAspectRatio=ratio;[self updatePlaybackLayoutForSize:self.view.bounds.size];if(self.onVideoAspectRatioChanged)self.onVideoAspectRatioChanged(ratio);}
+    if(isfinite(ratio)&&ratio>0.1&&ratio<10){self.videoAspectRatio=ratio;if([self.cicadaAdapter isKindOfClass:MediaPlaybackMPVAdapter.class])[self.cicadaFullscreenHost updateAspectFitRenderViewAspectRatio:ratio];[self updatePlaybackLayoutForSize:self.view.bounds.size];if(self.onVideoAspectRatioChanged)self.onVideoAspectRatioChanged(ratio);}
 }
 - (void)cicadaAdapter:(id)adapter didUpdateLoading:(BOOL)loading progress:(float)progress {
     if(adapter!=self.cicadaAdapter)return;
