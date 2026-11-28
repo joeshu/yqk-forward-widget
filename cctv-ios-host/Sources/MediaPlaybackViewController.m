@@ -2117,9 +2117,8 @@ static void MediaPlaybackResolveVIPNativeStream(NSString *watchURL, NSString *vo
             return;
         }
         if([owner.cicadaAdapter isKindOfClass:MediaPlaybackMPVAdapter.class]){
-            [NSLayoutConstraint deactivateConstraints:owner.cicadaRenderConstraints?:@[]];
+            [host attachAspectFitRenderView:renderView aspectRatio:owner.videoAspectRatio discardingConstraints:owner.cicadaRenderConstraints];
             owner.cicadaRenderConstraints=@[];
-            [host attachAspectFitRenderView:renderView aspectRatio:owner.videoAspectRatio];
         }else{
             [owner mountCicadaRenderView:renderView inHost:host.view];
         }

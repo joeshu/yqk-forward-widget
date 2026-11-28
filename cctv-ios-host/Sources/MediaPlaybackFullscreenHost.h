@@ -8,6 +8,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic,strong,readonly) UIButton *closeButton;
 - (void)updatePlayingState:(BOOL)playing enabled:(BOOL)enabled;
 - (void)attachAspectFitRenderView:(UIView *)renderView aspectRatio:(CGFloat)aspectRatio;
+- (void)attachAspectFitRenderView:(UIView *)renderView aspectRatio:(CGFloat)aspectRatio discardingConstraints:(nullable NSArray<NSLayoutConstraint *> *)constraints;
 - (void)updateAspectFitRenderViewAspectRatio:(CGFloat)aspectRatio;
 - (void)requestLandscapeIfPortrait;
 - (void)restoreOrientationForPresenter:(UIViewController *)presenter;

@@ -21,7 +21,7 @@ class NativePackageTests(unittest.TestCase):
         cls.folder = Path(cls.tmp.name)
         root = Path(__file__).resolve().parents[1]
         cls.executable = cls.folder / 'package-test'
-        build = subprocess.run(['xcrun', 'clang', '-fobjc-arc', '-framework', 'Foundation', '-framework', 'Security', '-lz', '-I', str(root / 'Sources'),
+        build = subprocess.run(['xcrun', 'clang', '-fobjc-arc', '-framework', 'Foundation', '-framework', 'JavaScriptCore', '-framework', 'Security', '-lz', '-I', str(root / 'Sources'),
                                 str(root / 'Tests/native_package_tests.m'), str(root / 'Sources/MediaPackageImporter.m'),
                                 str(root / 'Sources/MediaPackageDownloader.m'), str(root / 'Sources/ResourceContentInspection.m'),
                                 str(root / 'Sources/ProfileStore.m'),
